@@ -1,0 +1,442 @@
+{
+ "clean_targets": [
+  "철수",
+  "영희",
+  "민수",
+  "Kim"
+ ],
+ "match": "\"철수 수가\" OR \"가자 자고\" OR \"했지\" OR \"초코 코우 우유 유를\" OR \"샀어\" OR \"c a m p i n g\"",
+ "ngrams": "철수 수가 어디 가자 자고 했지 ? 초코 코우 우유 유를 누가 샀어 c a m p i n g 🎉",
+ "pack_150_false": {
+  "excerpt": "[r · 2026-09-01 · 철수, 영희]\n…(앞 3개 생략)\n철수: 메시지 4 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n영희: 메시지 5 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n…(뒤 5개 생략)",
+  "spans": [
+   {
+    "observation_id": "o04",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 33,
+    "content_len": 33,
+    "complete": true,
+    "excerpt_start": 41,
+    "excerpt_end": 74
+   },
+   {
+    "observation_id": "o05",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 42,
+    "content_len": 42,
+    "complete": true,
+    "excerpt_start": 79,
+    "excerpt_end": 121
+   }
+  ],
+  "status": "partial"
+ },
+ "pack_150_true": {
+  "excerpt": "[r · 2026-09-01 · 철수]\n…(앞 2개 생략)\n철수: 메시지 4 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n철수: 메시지 6 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n…(뒤 3개 생략)",
+  "spans": [
+   {
+    "observation_id": "o04",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 33,
+    "content_len": 33,
+    "complete": true,
+    "excerpt_start": 37,
+    "excerpt_end": 70
+   },
+   {
+    "observation_id": "o06",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 51,
+    "content_len": 51,
+    "complete": true,
+    "excerpt_start": 75,
+    "excerpt_end": 126
+   }
+  ],
+  "status": "partial"
+ },
+ "pack_2000_false": {
+  "excerpt": "[r · 2026-09-01 · 영희, 철수]\n영희: 메시지 1 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n철수: 메시지 2 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n영희: 메시지 3 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n철수: 메시지 4 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n영희: 메시지 5 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n철수: 메시지 6 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n영희: 메시지 7 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n철수: 메시지 8 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n영희: 메시지 9 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n철수: 메시지 10 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 ",
+  "spans": [
+   {
+    "observation_id": "o01",
+    "role": "context",
+    "char_start": 0,
+    "char_end": 42,
+    "content_len": 42,
+    "complete": true,
+    "excerpt_start": 30,
+    "excerpt_end": 72
+   },
+   {
+    "observation_id": "o02",
+    "role": "context",
+    "char_start": 0,
+    "char_end": 51,
+    "content_len": 51,
+    "complete": true,
+    "excerpt_start": 77,
+    "excerpt_end": 128
+   },
+   {
+    "observation_id": "o03",
+    "role": "context",
+    "char_start": 0,
+    "char_end": 60,
+    "content_len": 60,
+    "complete": true,
+    "excerpt_start": 133,
+    "excerpt_end": 193
+   },
+   {
+    "observation_id": "o04",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 33,
+    "content_len": 33,
+    "complete": true,
+    "excerpt_start": 198,
+    "excerpt_end": 231
+   },
+   {
+    "observation_id": "o05",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 42,
+    "content_len": 42,
+    "complete": true,
+    "excerpt_start": 236,
+    "excerpt_end": 278
+   },
+   {
+    "observation_id": "o06",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 51,
+    "content_len": 51,
+    "complete": true,
+    "excerpt_start": 283,
+    "excerpt_end": 334
+   },
+   {
+    "observation_id": "o07",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 60,
+    "content_len": 60,
+    "complete": true,
+    "excerpt_start": 339,
+    "excerpt_end": 399
+   },
+   {
+    "observation_id": "o08",
+    "role": "context",
+    "char_start": 0,
+    "char_end": 33,
+    "content_len": 33,
+    "complete": true,
+    "excerpt_start": 404,
+    "excerpt_end": 437
+   },
+   {
+    "observation_id": "o09",
+    "role": "context",
+    "char_start": 0,
+    "char_end": 42,
+    "content_len": 42,
+    "complete": true,
+    "excerpt_start": 442,
+    "excerpt_end": 484
+   },
+   {
+    "observation_id": "o10",
+    "role": "context",
+    "char_start": 0,
+    "char_end": 52,
+    "content_len": 52,
+    "complete": true,
+    "excerpt_start": 489,
+    "excerpt_end": 541
+   }
+  ],
+  "status": "complete"
+ },
+ "pack_2000_true": {
+  "excerpt": "[r · 2026-09-01 · 영희, 철수]\n영희: 메시지 1 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n영희: 메시지 3 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n철수: 메시지 4 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n철수: 메시지 6 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n영희: 메시지 7 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n철수: 메시지 8 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n철수: 메시지 10 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 ",
+  "spans": [
+   {
+    "observation_id": "o01",
+    "role": "context",
+    "char_start": 0,
+    "char_end": 42,
+    "content_len": 42,
+    "complete": true,
+    "excerpt_start": 30,
+    "excerpt_end": 72
+   },
+   {
+    "observation_id": "o03",
+    "role": "context",
+    "char_start": 0,
+    "char_end": 60,
+    "content_len": 60,
+    "complete": true,
+    "excerpt_start": 77,
+    "excerpt_end": 137
+   },
+   {
+    "observation_id": "o04",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 33,
+    "content_len": 33,
+    "complete": true,
+    "excerpt_start": 142,
+    "excerpt_end": 175
+   },
+   {
+    "observation_id": "o06",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 51,
+    "content_len": 51,
+    "complete": true,
+    "excerpt_start": 180,
+    "excerpt_end": 231
+   },
+   {
+    "observation_id": "o07",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 60,
+    "content_len": 60,
+    "complete": true,
+    "excerpt_start": 236,
+    "excerpt_end": 296
+   },
+   {
+    "observation_id": "o08",
+    "role": "context",
+    "char_start": 0,
+    "char_end": 33,
+    "content_len": 33,
+    "complete": true,
+    "excerpt_start": 301,
+    "excerpt_end": 334
+   },
+   {
+    "observation_id": "o10",
+    "role": "context",
+    "char_start": 0,
+    "char_end": 52,
+    "content_len": 52,
+    "complete": true,
+    "excerpt_start": 339,
+    "excerpt_end": 391
+   }
+  ],
+  "status": "complete"
+ },
+ "pack_400_false": {
+  "excerpt": "[r · 2026-09-01 · 철수, 영희]\n…(앞 1개 생략)\n철수: …(앞 생략)  얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n영희: 메시지 3 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n철수: 메시지 4 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n영희: 메시지 5 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n철수: 메시지 6 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n영희: 메시지 7 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n철수: 메시지 8 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n…(뒤 2개 생략)",
+  "spans": [
+   {
+    "observation_id": "o02",
+    "role": "context",
+    "char_start": 20,
+    "char_end": 51,
+    "content_len": 51,
+    "complete": false,
+    "excerpt_start": 49,
+    "excerpt_end": 80
+   },
+   {
+    "observation_id": "o03",
+    "role": "context",
+    "char_start": 0,
+    "char_end": 60,
+    "content_len": 60,
+    "complete": true,
+    "excerpt_start": 85,
+    "excerpt_end": 145
+   },
+   {
+    "observation_id": "o04",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 33,
+    "content_len": 33,
+    "complete": true,
+    "excerpt_start": 150,
+    "excerpt_end": 183
+   },
+   {
+    "observation_id": "o05",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 42,
+    "content_len": 42,
+    "complete": true,
+    "excerpt_start": 188,
+    "excerpt_end": 230
+   },
+   {
+    "observation_id": "o06",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 51,
+    "content_len": 51,
+    "complete": true,
+    "excerpt_start": 235,
+    "excerpt_end": 286
+   },
+   {
+    "observation_id": "o07",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 60,
+    "content_len": 60,
+    "complete": true,
+    "excerpt_start": 291,
+    "excerpt_end": 351
+   },
+   {
+    "observation_id": "o08",
+    "role": "context",
+    "char_start": 0,
+    "char_end": 33,
+    "content_len": 33,
+    "complete": true,
+    "excerpt_start": 356,
+    "excerpt_end": 389
+   }
+  ],
+  "status": "complete"
+ },
+ "pack_400_true": {
+  "excerpt": "[r · 2026-09-01 · 영희, 철수]\n영희: 메시지 1 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n영희: 메시지 3 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n철수: 메시지 4 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n철수: 메시지 6 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n영희: 메시지 7 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n철수: 메시지 8 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 \n철수: 메시지 10 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 가평 캠핑 얘기 ",
+  "spans": [
+   {
+    "observation_id": "o01",
+    "role": "context",
+    "char_start": 0,
+    "char_end": 42,
+    "content_len": 42,
+    "complete": true,
+    "excerpt_start": 30,
+    "excerpt_end": 72
+   },
+   {
+    "observation_id": "o03",
+    "role": "context",
+    "char_start": 0,
+    "char_end": 60,
+    "content_len": 60,
+    "complete": true,
+    "excerpt_start": 77,
+    "excerpt_end": 137
+   },
+   {
+    "observation_id": "o04",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 33,
+    "content_len": 33,
+    "complete": true,
+    "excerpt_start": 142,
+    "excerpt_end": 175
+   },
+   {
+    "observation_id": "o06",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 51,
+    "content_len": 51,
+    "complete": true,
+    "excerpt_start": 180,
+    "excerpt_end": 231
+   },
+   {
+    "observation_id": "o07",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 60,
+    "content_len": 60,
+    "complete": true,
+    "excerpt_start": 236,
+    "excerpt_end": 296
+   },
+   {
+    "observation_id": "o08",
+    "role": "context",
+    "char_start": 0,
+    "char_end": 33,
+    "content_len": 33,
+    "complete": true,
+    "excerpt_start": 301,
+    "excerpt_end": 334
+   },
+   {
+    "observation_id": "o10",
+    "role": "context",
+    "char_start": 0,
+    "char_end": 52,
+    "content_len": 52,
+    "complete": true,
+    "excerpt_start": 339,
+    "excerpt_end": 391
+   }
+  ],
+  "status": "complete"
+ },
+ "pack_60_false": {
+  "excerpt": "[r · 2026-09-01 · 철수]\n…(앞 3개 생략)\n철수: 메시지 4 가평 캠핑  …(뒤 생략)",
+  "spans": [
+   {
+    "observation_id": "o04",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 12,
+    "content_len": 33,
+    "complete": false,
+    "excerpt_start": 37,
+    "excerpt_end": 49
+   }
+  ],
+  "status": "partial"
+ },
+ "pack_60_true": {
+  "excerpt": "[r · 2026-09-01 · 철수]\n…(앞 2개 생략)\n철수: 메시지 4 가평 캠핑  …(뒤 생략)",
+  "spans": [
+   {
+    "observation_id": "o04",
+    "role": "matched",
+    "char_start": 0,
+    "char_end": 12,
+    "content_len": 33,
+    "complete": false,
+    "excerpt_start": 37,
+    "excerpt_end": 49
+   }
+  ],
+  "status": "partial"
+ },
+ "query_words": [
+  "철수가",
+  "가자고",
+  "했지",
+  "초코우유를",
+  "샀어",
+  "camping"
+ ],
+ "token_in_text": [
+  "true",
+  "true",
+  "false",
+  "true"
+ ]
+}

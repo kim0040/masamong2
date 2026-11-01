@@ -1,0 +1,179 @@
+# Builds the release archives from scripts/release.sh, checks them and smoke-tests the installers.
+#   push a tag like v0.2.0   -> full CI, archives, checks, then a GitHub Release with the archives
+#   Run workflow (manual)    -> the same builds and checks; archives stay a short-lived Actions artifact
+# One macOS runner builds every target: the darwin builds need cgo (menu bar icon), the Linux and
+# Windows builds are pure Go.
+name: release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version stamped into the binaries (default: git describe)"
+        required: false
+        default: ""
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    runs-on: macos-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then v="$GITHUB_REF_NAME"
+          elif [ -n "$INPUT_VERSION" ]; then v="$INPUT_VERSION"
+          else v=$(git describe --tags --always --dirty); fi
+          echo "version=$v" >>"$GITHUB_OUTPUT"
+      - run: scripts/release.sh "${{ steps.version.outputs.version }}"
+      - run: scripts/verify-release.sh build/release
+      - name: darwin/arm64 binary runs and reports the version
+        run: |
+          tmp=$(mktemp -d)
+          tar -xzf build/release/masamong_darwin_arm64.tar.gz -C "$tmp"
+          "$tmp/masamong_darwin_arm64/masamong" version --output json | tee "$tmp/version.json"
+          grep -qF '"version":"${{ steps.version.outputs.version }}"' "$tmp/version.json"
+      - name: archive listing
+        run: |
+          cat build/release/SHA256SUMS
+          ls -l build/release
+      - uses: actions/upload-artifact@v7
+        with:
+          name: masamong-release-${{ steps.version.outputs.version }}
+          path: |
+            build/release/*.tar.gz
+            build/release/*.zip
+            build/release/SHA256SUMS
+          retention-days: 5
+          if-no-files-found: error
+
+  linux-smoke:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: masamong-release-${{ needs.build.outputs.version }}
+          path: release
+      - name: install from the linux/amd64 archive
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          cd release
+          grep ' masamong_linux_amd64.tar.gz$' SHA256SUMS | sha256sum -c -
+          tar -xzf masamong_linux_amd64.tar.gz
+          prefix="$RUNNER_TEMP/masamong"
+          masamong_linux_amd64/install.sh --prefix "$prefix" --no-modify-path
+          "$prefix/bin/masamong" version --output json | tee version.json
+          grep -qF "\"version\":\"$VERSION\"" version.json
+          for f in LICENSE THIRD_PARTY_NOTICES.md THIRD_PARTY_LICENSES.txt; do
+            cmp "$GITHUB_WORKSPACE/$f" "$prefix/share/doc/masamong/$f"
+          done
+      - name: start, status and stop a headless instance
+        run: |
+          m="$RUNNER_TEMP/masamong/bin/masamong --data-root $RUNNER_TEMP/data"
+          $m start --output json
+          $m status --output json | tee status.json
+          grep -q '"running":true' status.json
+          $m stop --output json
+          $m status --output json | tee status.json
+          grep -q '"running":false' status.json
+      - name: uninstall keeps the data folder
+        run: |
+          release/masamong_linux_amd64/install.sh --uninstall --prefix "$RUNNER_TEMP/masamong"
+          test ! -e "$RUNNER_TEMP/masamong/bin/masamong"
+          test ! -e "$RUNNER_TEMP/masamong/share/doc/masamong"
+          test -d "$RUNNER_TEMP/data"
+
+  windows-smoke:
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: masamong-release-${{ needs.build.outputs.version }}
+          path: release
+      - name: windows/amd64 binaries run
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          $sumLine = Get-Content release/SHA256SUMS | Where-Object { $_ -match '^([0-9a-fA-F]{64})\s+\*?masamong_windows_amd64\.zip$' } | Select-Object -First 1
+          if (-not $sumLine) { throw 'SHA256SUMS has no Windows archive checksum' }
+          $wantHash = ([regex]::Match($sumLine, '^([0-9a-fA-F]{64})')).Groups[1].Value.ToUpperInvariant()
+          $gotHash = (Get-FileHash release/masamong_windows_amd64.zip -Algorithm SHA256).Hash.ToUpperInvariant()
+          if ($wantHash -ne $gotHash) { throw 'Windows archive checksum mismatch' }
+          Expand-Archive release/masamong_windows_amd64.zip -DestinationPath win
+          $cli = (Resolve-Path win/masamong_windows_amd64/masamong.exe).Path
+          $scratch = Join-Path $env:RUNNER_TEMP 'masamong-windows-smoke'
+          $data = Join-Path $scratch 'data'
+          $env:APPDATA = Join-Path $scratch 'appdata'
+          $env:LOCALAPPDATA = Join-Path $scratch 'localappdata'
+          $env:MASAMONG_SECRET_STORE = 'file'
+          $env:MASAMONG_OFFLINE = '1'
+          $env:GOROOT = Join-Path $scratch 'no-goroot'
+          $env:ZONEINFO = Join-Path $scratch 'no-zoneinfo'
+          New-Item -ItemType Directory -Force -Path $data, $env:APPDATA, $env:LOCALAPPDATA | Out-Null
+          $oldPath = $env:Path
+          $env:Path = (($env:Path -split ';') | Where-Object {
+            [string]::IsNullOrWhiteSpace($_) -or -not (Test-Path -LiteralPath (Join-Path ([Environment]::ExpandEnvironmentVariables($_)) 'go.exe'))
+          }) -join ';'
+          try {
+            if (Get-Command go -ErrorAction SilentlyContinue) { throw 'Go is still available on PATH during the release smoke test' }
+            $version = & $cli --output json version
+            if ($LASTEXITCODE -ne 0 -or -not (($version -join '') | Select-String -SimpleMatch "`"version`":`"$env:VERSION`"")) { throw 'unexpected version' }
+            $setup = & $cli --data-root $data --output json setup --instance windows-smoke
+            if ($LASTEXITCODE -ne 0) { throw "scratch setup failed: $($setup -join ' ')" }
+            $start = & $cli --data-root $data --output json start --no-tray
+            if ($LASTEXITCODE -ne 0) { throw "start failed: $($start -join ' ')" }
+            $status = & $cli --data-root $data --output json status
+            if ($LASTEXITCODE -ne 0 -or -not (($status -join '') | Select-String -Pattern '"running"\s*:\s*true')) { throw "service did not start: $($status -join ' ')" }
+            $doctor = & $cli --data-root $data --output json doctor
+            if ($LASTEXITCODE -ne 0) { throw "timezone check failed: $($doctor -join ' ')" }
+            $doctorResult = ($doctor -join "`n") | ConvertFrom-Json
+            if ($doctorResult.output.features.timezone.status -ne 'ready') { throw 'embedded IANA timezone load did not succeed without Go or host zoneinfo' }
+            $stopped = & $cli --data-root $data --output json stop
+            if ($LASTEXITCODE -ne 0) { throw "stop failed: $($stopped -join ' ')" }
+            $status = & $cli --data-root $data --output json status
+            if ($LASTEXITCODE -ne 0 -or (($status -join '') | Select-String -Pattern '"running"\s*:\s*true')) { throw "service did not stop: $($status -join ' ')" }
+          } finally {
+            $status = & $cli --data-root $data --output json status 2>$null
+            if ($LASTEXITCODE -eq 0 -and (($status -join '') | Select-String -Pattern '"running"\s*:\s*true')) {
+              & $cli --data-root $data --output json stop | Out-Null
+            }
+            $env:Path = $oldPath
+          }
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: [ci, build, linux-smoke, windows-smoke]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: masamong-release-${{ needs.build.outputs.version }}
+          path: release
+      - run: cd release && sha256sum -c SHA256SUMS
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release/* --title "Masamong $GITHUB_REF_NAME" --generate-notes

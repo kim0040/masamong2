@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "embedding_space": "openrouter|qwen/qwen3-embedding-8b|4096|l2",
+  "mismatch_embedding_space": "openrouter|other-embed|4096|l2",
+  "segmentation_version": "leaf8-o0-lim0-prefix1-fixed",
+  "blocks": [
+    {
+      "block_id": "560977f6250f7952",
+      "platform": "discord",
+      "collection": "discord",
+      "source_room": "discord:g1:c1",
+      "label": "#c1-short",
+      "segmentation_version": "leaf8-o0-lim0-prefix1-fixed",
+      "embedding_space": "openrouter|qwen/qwen3-embedding-8b|4096|l2",
+      "status": "ready",
+      "time_semantics": "offset",
+      "leaf_count": 10
+    },
+    {
+      "block_id": "d0539ca8aa987ee6",
+      "platform": "discord",
+      "collection": "discord",
+      "source_room": "discord:g1:c2",
+      "label": "#c2-short",
+      "segmentation_version": "leaf8-o0-lim0-prefix1-fixed",
+      "embedding_space": "openrouter|qwen/qwen3-embedding-8b|4096|l2",
+      "status": "ready",
+      "time_semantics": "offset",
+      "leaf_count": 8
+    },
+    {
+      "block_id": "e5de874a7b443306",
+      "platform": "kakao",
+      "collection": "friends-archive",
+      "source_room": "kakao:friends-old",
+      "label": "kakao-room",
+      "segmentation_version": "leaf8-o0-lim0-prefix1-fixed",
+      "embedding_space": "openrouter|qwen/qwen3-embedding-8b|4096|l2",
+      "status": "ready",
+      "time_semantics": "naive",
+      "leaf_count": 12
+    },
+    {
+      "block_id": "ec8f110c2cfbe082",
+      "platform": "kakao",
+      "collection": "club-archive",
+      "source_room": "kakao:club",
+      "label": "kakao-room",
+      "segmentation_version": "leaf8-o0-lim0-prefix1-fixed",
+      "embedding_space": "openrouter|qwen/qwen3-embedding-8b|4096|l2",
+      "status": "ready",
+      "time_semantics": "naive",
+      "leaf_count": 6
+    },
+    {
+      "block_id": "ce64e0777720b7e3",
+      "platform": "kakao",
+      "collection": "friends-archive",
+      "source_room": "kakao:friends-old",
+      "label": "kakao-room-mismatch",
+      "segmentation_version": "leaf8-o0-lim0-prefix1-fixed",
+      "embedding_space": "openrouter|other-embed|4096|l2",
+      "status": "ready",
+      "time_semantics": "naive",
+      "leaf_count": 12
+    }
+  ]
+}

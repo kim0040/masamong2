@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>마사몽 테스트 샌드박스</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <a class="skip-link" href="#composer-input">대화 입력으로 건너뛰기</a>
+
+  <div class="app">
+    <header class="bar">
+      <div class="bar-left">
+        <button type="button" class="icon-btn rail-toggle" id="rail-toggle" aria-controls="rail" aria-expanded="false" aria-label="채널 목록">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" /></svg>
+        </button>
+        <span class="brand">마사몽</span>
+        <span class="pill pill-sandbox" title="제품 관리 콘솔(8787)이 아니다. 인덱스는 이 머신에만 있다.">테스트 샌드박스</span>
+        <span class="pill pill-dataset" id="dataset-badge" title="">데이터셋 …</span>
+        <span class="bar-channel" id="channel-heading">채널</span>
+      </div>
+      <dl class="meter" id="status-meter" aria-live="polite">
+        <div><dt>기억</dt><dd id="stat-windows">…</dd></div>
+        <div><dt>남은 예산</dt><dd id="stat-budget">…</dd></div>
+        <div><dt>이번 실행</dt><dd id="stat-run">0턴</dd></div>
+      </dl>
+      <div class="bar-actions">
+        <button type="button" class="ghost sm" id="open-review" aria-controls="drawer">검수</button>
+        <button type="button" class="ghost sm" id="open-settings" aria-controls="drawer">설정</button>
+        <button type="button" class="icon-btn" id="theme-toggle" aria-label="밝기 전환">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="4" /><path d="M10 1.5v2M10 16.5v2M1.5 10h2M16.5 10h2M4 4l1.4 1.4M14.6 14.6 16 16M4 16l1.4-1.4M14.6 5.4 16 4" /></svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="prepare-banner" id="prepare-banner" hidden>
+      <p class="prepare-banner__label" id="prepare-label" role="status"></p>
+      <progress id="prepare-bar" class="prepare-banner__bar" max="100" value="0"></progress>
+    </div>
+
+    <div class="layout">
+      <aside class="rail" id="rail" aria-label="채널과 대화">
+        <h2 class="rail-heading">채널</h2>
+        <ul class="list" id="channel-list"></ul>
+        <div class="rail-row">
+          <h2 class="rail-heading">이 채널 대화</h2>
+          <button type="button" class="ghost sm" id="new-chat-btn">새 대화</button>
+        </div>
+        <ul class="list" id="conversation-list"></ul>
+        <section class="run-card" aria-label="이번 실행 기록">
+          <h2 class="rail-heading">테스트 기록</h2>
+          <p class="run-stats" id="run-stats">아직 보낸 질문이 없습니다.</p>
+          <p class="run-id">
+            로그 실행 ID <code id="run-id">—</code>
+            <button type="button" class="link-btn" id="copy-run-id">복사</button>
+          </p>
+          <p class="hint">답마다 맞음·틀림을 눌러 두면 로그(<code>debug_report.py</code>)에 같이 남습니다.</p>
+        </section>
+      </aside>
+      <div class="rail-scrim" id="rail-scrim" hidden></div>
+
+      <main id="main" class="stage">
+        <p class="channel-note" id="channel-note">기억 인덱스가 있는 채널만 대화할 수 있습니다.</p>
+        <section class="thread" aria-label="대화" id="thread" tabindex="-1">
+          <div class="welcome" id="welcome">
+            <h2>무엇을 확인해 볼까요?</h2>
+            <p>아래 틀을 누르면 입력창에 들어갑니다. <b>[괄호]</b> 부분만 바꿔서 보내세요. 답마다 진단(검색 경로·시간 창·인물·점수)과 근거가 붙습니다.</p>
+            <div id="templates"></div>
+          </div>
+        </section>
+
+        <div id="live-status" class="live-status" role="status" aria-live="polite" aria-atomic="true"></div>
+        <div id="form-error" class="form-error" role="alert" hidden></div>
+
+        <form class="composer" id="composer" novalidate>
+          <div class="template-popover" id="template-popover" hidden></div>
+          <label class="sr-only" for="composer-input">메시지</label>
+          <textarea
+            id="composer-input"
+            name="message"
+            rows="1"
+            maxlength="2000"
+            required
+            autocomplete="off"
+            placeholder="질문을 입력하세요  ( / 로 바로 이동 )"
+          ></textarea>
+          <div class="composer-row">
+            <label class="compact-field">
+              <span>검색</span>
+              <select id="ranking-select" name="ranking" title="검색 버전">
+                <option value="auto">자동 (R0 → 필요하면 R2)</option>
+                <option value="hybrid">R0 · 어휘+벡터</option>
+                <option value="heuristic">R1 · 최근·인물 가산 (비교용)</option>
+                <option value="rerank">R2 · 의미 재순위</option>
+              </select>
+            </label>
+            <button type="button" class="ghost sm" id="templates-toggle" aria-controls="template-popover" aria-expanded="false">질문 틀</button>
+            <span class="composer-hint">Enter 보내기 · Shift+Enter 줄바꿈</span>
+            <button type="submit" class="send" id="send-btn">
+              <span class="send-label">보내기</span>
+              <span class="send-spinner" aria-hidden="true"></span>
+            </button>
+          </div>
+        </form>
+      </main>
+    </div>
+  </div>
+
+  <div class="drawer-scrim" id="drawer-scrim" hidden></div>
+  <aside class="drawer" id="drawer" aria-label="패널" hidden>
+    <div class="drawer-head">
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" class="tab" id="tab-review" aria-controls="panel-review" aria-selected="false">검수</button>
+        <button type="button" role="tab" class="tab" id="tab-channel" aria-controls="panel-channel" aria-selected="false">채널 설정</button>
+        <button type="button" role="tab" class="tab" id="tab-lab" aria-controls="panel-lab" aria-selected="false">실험실</button>
+      </div>
+      <button type="button" class="icon-btn" id="drawer-close" aria-label="닫기">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15" /></svg>
+      </button>
+    </div>
+
+    <section class="panel" id="panel-review" role="tabpanel" aria-labelledby="tab-review" hidden>
+      <p class="hint">자동 생성된 holdout 문항을 사람이 확인합니다. 원문 근거는 지금 켜 둔 인덱스에서만 찾습니다. 단축키: <kbd>1</kbd> 좋음 · <kbd>2</kbd> 고칠 것 · <kbd>3</kbd> 버림 · <kbd>←</kbd>/<kbd>→</kbd> 이동</p>
+      <div class="review-controls">
+        <label class="compact-field grow">
+          <span>시트</span>
+          <select id="review-set"></select>
+        </label>
+        <label class="check"><input type="checkbox" id="review-pending" checked /> 미검수만</label>
+      </div>
+      <p class="hint" id="review-status" role="status"></p>
+      <div id="review-card" class="review-card"></div>
+    </section>
+
+    <section class="panel" id="panel-channel" role="tabpanel" aria-labelledby="tab-channel" hidden>
+      <div class="field-block">
+        <label class="field" for="speaker-input">내 표시명 (봇이 보는 이름)</label>
+        <input id="speaker-input" name="speaker" type="text" maxlength="32" value="테스터" autocomplete="nickname" />
+      </div>
+      <div class="field-block">
+        <label class="field" for="respond-mode">응답 정책 (제품 <code>respond</code>와 같음)</label>
+        <select id="respond-mode">
+          <option value="always">always · 모든 메시지에 답함</option>
+          <option value="mention">mention · 이름/@ 멘션이 있을 때만</option>
+          <option value="command">command · !명령에만</option>
+          <option value="off">off · 답하지 않음</option>
+        </select>
+      </div>
+      <div class="field-block">
+        <label class="field" for="persona-text">페르소나</label>
+        <textarea id="persona-text" rows="7"></textarea>
+      </div>
+      <div class="field-block">
+        <label class="field" for="rules-text">규칙</label>
+        <textarea id="rules-text" rows="7"></textarea>
+      </div>
+      <button type="button" class="primary" id="save-persona">설정 저장</button>
+      <p class="hint" id="persona-status" role="status"></p>
+    </section>
+
+    <section class="panel lab-body" id="panel-lab" role="tabpanel" aria-labelledby="tab-lab" hidden>
+      <p class="hint">예상 비용은 대략값입니다. 원문 본문은 화면에 넣지 않습니다. 방 목록을 바꿔도 인덱스는 자동으로 다시 만들지 않습니다.</p>
+      <div class="lab-actions">
+        <button type="button" class="ghost sm" id="lab-refresh">원문 목록 새로고침</button>
+        <button type="button" class="ghost sm" id="lab-estimate-all">전체 예상</button>
+        <button type="button" class="ghost sm" id="lab-export">설정 내보내기</button>
+        <label class="ghost sm lab-import">
+          설정 가져오기
+          <input type="file" id="lab-import" accept="application/json" hidden />
+        </label>
+      </div>
+      <p class="hint" id="lab-status" role="status"></p>
+      <div id="lab-estimate" class="lab-estimate" hidden></div>
+      <div class="settings-grid">
+        <div class="field-block">
+          <label class="field" for="lab-rerank">리랭크 모델</label>
+          <input id="lab-rerank" type="text" />
+        </div>
+        <div class="field-block">
+          <label class="field" for="lab-ranking">검색 버전 기본</label>
+          <select id="lab-ranking">
+            <option value="auto">자동</option>
+            <option value="hybrid">R0</option>
+            <option value="heuristic">R1</option>
+            <option value="rerank">R2</option>
+          </select>
+        </div>
+        <div class="field-block">
+          <label class="field" for="lab-session-budget">세션 예산 USD</label>
+          <input id="lab-session-budget" type="number" min="0" step="0.1" />
+        </div>
+        <div class="field-block">
+          <label class="field" for="lab-prepare-budget">준비 예산 USD</label>
+          <input id="lab-prepare-budget" type="number" min="0" step="0.1" />
+        </div>
+        <div class="field-block">
+          <label class="field" for="lab-leaf-size">leaf 크기</label>
+          <input id="lab-leaf-size" type="number" min="2" step="1" />
+        </div>
+        <div class="field-block">
+          <label class="field" for="lab-leaf-limit">leaf 한도</label>
+          <input id="lab-leaf-limit" type="number" min="0" step="1" />
+        </div>
+      </div>
+      <label class="check">
+        <input type="checkbox" id="lab-summary" />
+        leaf 요약 생성 (준비 비용의 대부분)
+      </label>
+      <button type="button" class="ghost sm" id="lab-save-config">실험 설정 저장</button>
+      <h3 class="lab-heading">채널을 인덱스에 붙이기</h3>
+      <div class="field-block">
+        <label class="field" for="lab-collection">컬렉션</label>
+        <select id="lab-collection"></select>
+      </div>
+      <p class="hint">같은 컬렉션만 한꺼번에 붙입니다. 디스코드 채널은 서로 합치지 않습니다. 방을 저장한 뒤 prepare를 돌려야 대화할 수 있습니다.</p>
+      <div id="lab-rooms" class="lab-rooms"></div>
+      <button type="button" class="ghost sm" id="lab-save-rooms">선택한 방 저장</button>
+      <h3 class="lab-heading">채널에 기억 블록 붙이기</h3>
+      <p class="hint">블록은 방 하나입니다. 붙이거나 떼도 벡터를 다시 만들지 않습니다.</p>
+      <p class="hint" id="lab-blocks-status" role="status"></p>
+      <div id="lab-blocks" class="lab-rooms"></div>
+      <button type="button" class="ghost sm" id="lab-save-view">이 채널 묶음 저장</button>
+    </section>
+  </aside>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js" defer></script>
+  <script src="/app.js" defer></script>
+</body>
+</html>

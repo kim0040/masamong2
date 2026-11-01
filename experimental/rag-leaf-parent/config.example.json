@@ -1,0 +1,143 @@
+{
+  "experiment": "leaf_parent_summary_beta",
+  "collection": "discord",
+  "rooms": [
+    "discord:EXAMPLE_GUILD:EXAMPLE_CHANNEL"
+  ],
+  "room_merge": {},
+  "message_limit": 5000,
+  "leaf_size": 8,
+  "leaf_overlap": 0,
+  "leaf_limit": 800,
+  "baseline_window_size": 20,
+  "baseline_window_limit": 400,
+  "parent_expand_before": 12,
+  "parent_expand_after": 12,
+  "context_prefix": true,
+  "summary_enabled": true,
+  "summary_max_tokens": 120,
+  "summary_rrf_weight": 1.0,
+  "top_k": 5,
+  "retrieve_pool": 100,
+  "lexical_limit": 200,
+  "dense_limit": 150,
+  "ranking": "auto",
+  "retrieval": {
+    "person": {
+      "enabled": true,
+      "limit": 60,
+      "rrf_weight": 0.3,
+      "max_speakers_per_target": 3
+    },
+    "alias": {
+      "enabled": true,
+      "limit": 60,
+      "rrf_weight": 0.15
+    },
+    "summaries": {
+      "enabled": true
+    },
+    "soft_event": {
+      "enabled": false,
+      "version": "soft-event-v1",
+      "gap_minutes": 60,
+      "min_leaves": 1,
+      "max_leaves": 8,
+      "max_chars": 4000,
+      "event_limit": 40,
+      "max_leaf_ids_per_event": 8,
+      "rrf_weight": 0.2,
+      "partial_scope": "skip",
+      "counts_for_confidence": false,
+      "reserve_in_pool": false,
+      "pooling": "leaf_mean"
+    },
+    "multi_query": {
+      "enabled": true,
+      "max_queries": 3,
+      "semantic_rrf_weight": 1.0,
+      "key_terms_rrf_weight": 0.5
+    },
+    "candidate_pool": {
+      "default": 100,
+      "min": 40,
+      "max": 160,
+      "per_source_min": 5,
+      "reserve_max_frac": 0.2
+    },
+    "auto": {
+      "enabled": true,
+      "assess_top_n": 10,
+      "high_agreement": 0.6,
+      "high_margin": 0.15,
+      "low_agreement": 0.2,
+      "min_candidates": 3,
+      "min_target_coverage": 0.3
+    },
+    "recovery": {
+      "enabled": true,
+      "max_attempts": 1,
+      "pool_scale": 1.5,
+      "limit_scale": 1.5,
+      "time_window_scale": 2.0
+    },
+    "rerank": {
+      "enabled": true,
+      "doc_format": "summary_body",
+      "pre_dedup": false
+    }
+  },
+  "models": {
+    "response": "z-ai/glm-5.3-flash",
+    "planner": "",
+    "summary": "",
+    "embed": "qwen/qwen3-embedding-8b",
+    "rerank": "voyageai/rerank-2.5-lite"
+  },
+  "embed_query_instruction": "주어진 한국어 채팅 질문에 답하는 대화 조각을 찾아라",
+  "query_embed": {
+    "prefetch": true,
+    "hedge_after_ms": 800,
+    "cache": true,
+    "cache_entries": 512
+  },
+  "alias_expand_lexical": true,
+  "dedup_mode": "merge",
+  "rerank_min_score": {
+    "voyageai/rerank-2.5-lite": 0.5,
+    "_default": 0.5
+  },
+  "hybrid_min_cos": 0.0,
+  "recent_window_days": 30,
+  "recent_window_leaves": 200,
+  "recency_anchor": "corpus_max",
+  "leaf_split": "fixed",
+  "gap_minutes": 30,
+  "baseline_enabled": false,
+  "rrf_weights": [
+    1.0,
+    4.0
+  ],
+  "lexical": "bigram",
+  "recency_half_life_days": 40,
+  "person_aliases": {},
+  "person_alias_ignore": [],
+  "identity_terms": [],
+  "host": "127.0.0.1",
+  "port": 8765,
+  "data_dir": "",
+  "prepare_budget_usd": 1.0,
+  "session_budget_usd": 1.0,
+  "max_request_cost_usd": 0.15,
+  "turn_budget_usd": 0.45,
+  "eval_budget_usd": 1.0,
+  "eval_questions": 20,
+  "api_workers": 8,
+  "max_history_turns": 8,
+  "conversation_keep_turns": 12,
+  "conversation_summarize_chars": 4500,
+  "document_char_limit": 4000,
+  "window_size": 8,
+  "window_overlap": 0,
+  "window_limit": 800
+}

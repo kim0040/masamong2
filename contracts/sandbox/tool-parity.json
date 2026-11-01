@@ -1,0 +1,458 @@
+{
+  "schema_version": 1,
+  "purpose": "테스트 샌드박스와 Go 제품 masamong2가 같은 Action ID·!명령 별칭과 검색 정책을 공유하게 한다. 제품 memory.search는 Go 제품 검색을 실행하고, 샌드박스는 독립 로컬 인덱스로 비교·실험한다.",
+  "agent_tools": [
+    {
+      "id": "memory.search",
+      "sandbox": "live_index",
+      "product": "go_product_rag",
+      "aliases": [
+        "local_rag",
+        "memory.search"
+      ],
+      "bang": []
+    },
+    {
+      "id": "weather.query",
+      "sandbox": "live_open_meteo",
+      "product": "kma",
+      "aliases": [
+        "get_weather_forecast",
+        "weather.query"
+      ],
+      "bang": [
+        "날씨",
+        "weather",
+        "현재날씨",
+        "오늘날씨",
+        "clima",
+        "tiempo",
+        "天气",
+        "天气查询",
+        "天気",
+        "天気予報",
+        "現在の天気"
+      ]
+    },
+    {
+      "id": "disasters.query",
+      "sandbox": "unconfigured_without_kma",
+      "product": "kma",
+      "aliases": [
+        "disasters.query"
+      ],
+      "bang": [
+        "특보",
+        "지진",
+        "재난",
+        "alerts",
+        "alertas",
+        "预警",
+        "灾害",
+        "警報",
+        "地震",
+        "災害"
+      ]
+    },
+    {
+      "id": "finance.quote",
+      "sandbox": "live_yahoo_chart",
+      "product": "finnhub",
+      "aliases": [
+        "get_stock_price",
+        "finance.quote"
+      ],
+      "bang": [
+        "시세",
+        "주식",
+        "quote",
+        "stock",
+        "cotizacion",
+        "cotización",
+        "precio",
+        "行情",
+        "股价",
+        "股票",
+        "株価",
+        "株式"
+      ]
+    },
+    {
+      "id": "finance.fx",
+      "sandbox": "live_open_er_api",
+      "product": "exchangerate_api",
+      "aliases": [
+        "get_krw_exchange_rate",
+        "finance.fx"
+      ],
+      "bang": [
+        "환율",
+        "fx",
+        "cambio",
+        "divisas",
+        "汇率",
+        "為替",
+        "為替レート",
+        "レート"
+      ]
+    },
+    {
+      "id": "search.web",
+      "sandbox": "live_duckduckgo_html",
+      "product": "kakao",
+      "aliases": [
+        "web_search",
+        "search_news_rag",
+        "get_market_snapshot",
+        "search.web"
+      ],
+      "bang": [
+        "검색",
+        "search",
+        "buscar",
+        "busqueda",
+        "搜索",
+        "検索"
+      ]
+    },
+    {
+      "id": "activity.ranking",
+      "sandbox": "unconfigured_no_discord_activity",
+      "product": "activity_counts",
+      "aliases": [
+        "activity.ranking"
+      ],
+      "bang": [
+        "랭킹",
+        "수다왕",
+        "ranking",
+        "clasificacion",
+        "排名",
+        "ランキング",
+        "おしゃべり王"
+      ]
+    },
+    {
+      "id": "places.search",
+      "sandbox": "unconfigured_without_kakao",
+      "product": "kakao_map",
+      "aliases": [
+        "search_for_place",
+        "places.search"
+      ],
+      "bang": [
+        "장소",
+        "맛집",
+        "places",
+        "lugares",
+        "sitios",
+        "地点",
+        "場所",
+        "グルメ",
+        "お店"
+      ]
+    },
+    {
+      "id": "images.generate",
+      "sandbox": "skipped_no_paid_image",
+      "product": "openai_compatible_when_configured",
+      "aliases": [
+        "generate_image",
+        "images.generate"
+      ],
+      "bang": [
+        "이미지",
+        "image",
+        "img",
+        "그림",
+        "생성",
+        "imagen",
+        "dibujo",
+        "图片",
+        "画图",
+        "生成图片",
+        "画像",
+        "絵",
+        "生成画像"
+      ]
+    },
+    {
+      "id": "polls.create",
+      "sandbox": "local_json",
+      "product": "sqlite_feature",
+      "aliases": [
+        "polls.create"
+      ],
+      "bang": [
+        "투표",
+        "poll",
+        "encuesta",
+        "votacion",
+        "投票"
+      ]
+    },
+    {
+      "id": "runtime.doctor",
+      "sandbox": "index_status",
+      "product": "daemon_doctor",
+      "aliases": [
+        "runtime.doctor"
+      ],
+      "bang": [
+        "상태",
+        "status",
+        "estado",
+        "状态",
+        "状態",
+        "ステータス"
+      ]
+    },
+    {
+      "id": "help.version",
+      "sandbox": "command_list",
+      "product": "help_action",
+      "aliases": [
+        "help.version"
+      ],
+      "bang": [
+        "도움말",
+        "help",
+        "명령어",
+        "ayuda",
+        "comandos",
+        "帮助",
+        "ヘルプ",
+        "コマンド",
+        "使い方"
+      ]
+    }
+  ],
+  "ranking": {
+    "R0": "hybrid",
+    "R1": "heuristic",
+    "R2": "rerank",
+    "auto": "auto",
+    "note": "검색 버전 이름은 tools/evaluation/rag_upgrade, 샌드박스 UI, Go 제품이 공유한다. Go 제품은 `internal/memory/search`에서 실행하고 샌드박스는 독립 로컬 인덱스와 비교·실험에 사용한다. R2 ≠ R0+R1. R2 `rerank`는 벤더 중립 이름이며 모델은 config.json models.rerank 로 바꾼다(옛 이름 `cohere`는 별칭). R1 `heuristic`은 ablation 전용이다 — `auto`는 어떤 경로에서도 R1로 내려가지 않는다(2026-09-17 퇴역). `auto`(v2)는 검색 전에 모드를 고르지 않는다: R0 v2 후보 풀을 만들고 관찰한 뒤 finish / rerank / recovery 를 정한다.",
+    "auto_policy": {
+      "kind": "cascade_v2",
+      "on_high": "hybrid",
+      "on_medium": "rerank",
+      "on_low": "rerank",
+      "no_rerank": "hybrid",
+      "rerank_failed": "hybrid",
+      "min_remaining_budget_usd": 0.02,
+      "recovery_max_attempts": 1,
+      "time_scoped_pool": "time_window",
+      "thresholds": {
+        "assess_top_n": 10,
+        "high_agreement": 0.6,
+        "high_margin": 0.15,
+        "low_agreement": 0.2,
+        "min_candidates": 3,
+        "min_target_coverage": 0.3
+      },
+      "reasons": [
+        "r0_confident",
+        "rerank_uncertain",
+        "rerank_low_confidence",
+        "recovery_rerank",
+        "recovery_no_rerank",
+        "no_rerank",
+        "rerank_failed"
+      ],
+      "cases": [
+        {
+          "name": "agreement+margin → high",
+          "signals": {
+            "candidate_count": 40,
+            "agreement": 0.7,
+            "top_margin": 0.2,
+            "target_coverage": null,
+            "targets_requested": false,
+            "targets_resolved": false
+          },
+          "level": "high"
+        },
+        {
+          "name": "agreement but flat top → medium",
+          "signals": {
+            "candidate_count": 40,
+            "agreement": 0.7,
+            "top_margin": 0.05,
+            "target_coverage": null,
+            "targets_requested": false,
+            "targets_resolved": false
+          },
+          "level": "medium"
+        },
+        {
+          "name": "retrievers disagree → low",
+          "signals": {
+            "candidate_count": 40,
+            "agreement": 0.1,
+            "top_margin": 0.5,
+            "target_coverage": null,
+            "targets_requested": false,
+            "targets_resolved": false
+          },
+          "level": "low"
+        },
+        {
+          "name": "too few candidates → low",
+          "signals": {
+            "candidate_count": 2,
+            "agreement": 1.0,
+            "top_margin": 1.0,
+            "target_coverage": null,
+            "targets_requested": false,
+            "targets_resolved": false
+          },
+          "level": "low"
+        },
+        {
+          "name": "person resolved but absent from top → low",
+          "signals": {
+            "candidate_count": 40,
+            "agreement": 0.8,
+            "top_margin": 0.3,
+            "target_coverage": 0.1,
+            "targets_requested": true,
+            "targets_resolved": true
+          },
+          "level": "low"
+        },
+        {
+          "name": "person named but unresolved → medium cap",
+          "signals": {
+            "candidate_count": 40,
+            "agreement": 0.8,
+            "top_margin": 0.3,
+            "target_coverage": null,
+            "targets_requested": true,
+            "targets_resolved": false
+          },
+          "level": "medium"
+        },
+        {
+          "name": "person resolved and covered → high",
+          "signals": {
+            "candidate_count": 40,
+            "agreement": 0.8,
+            "top_margin": 0.3,
+            "target_coverage": 0.6,
+            "targets_requested": true,
+            "targets_resolved": true
+          },
+          "level": "high"
+        }
+      ],
+      "retired": {
+        "select_before_search": "2026-09-17 · v1 auto_policy(default/time_scoped/no_rerank_with_signal)는 검색 전에 R0/R1/R2 하나를 골랐다. v2는 후보 관찰 후 결정한다.",
+        "heuristic_fallback": "2026-09-17 · R1은 gold v3 n=85에서 R0 대비 −25pp(07 로그). person/recent 신호는 가산이 아니라 scope·candidate source로 옮긴다(R0 v2)."
+      }
+    },
+    "retrieval_state": [
+      "not_attempted",
+      "candidates",
+      "empty_in_allowed_scope",
+      "insufficient_authorized_candidates"
+    ],
+    "memory_requirement": [
+      "none",
+      "optional",
+      "required"
+    ],
+    "legacy_aliases": {
+      "cohere": "rerank",
+      "semantic": "rerank"
+    },
+    "evidence_note": "2026-09-17 ablation n=40 synthetic: R2 R@1 82% MRR .844, R0 70-75%, R1 68-75% (R2 vs R0 worse=0). time_scoped→R2 + recent_window pool (리랭커가 시점을 못 보므로 풀을 먼저 좁힌다). gold 유형 분해는 WP-8."
+  },
+  "data": {
+    "sandbox_index": "test-sandbox/data/",
+    "legacy_copies": [
+      "experimental/rag-leaf-parent/data/"
+    ],
+    "product_db": "masamongd --data-root (별도). 샌드박스 인덱스를 제품 DB에 넣지 않는다."
+  },
+  "models": {
+    "roles": [
+      "response",
+      "planner",
+      "summary",
+      "embed",
+      "rerank"
+    ],
+    "source": "product config.yaml `models.<role>` (models.select) · sandbox config.json `models.<role>`; secrets.env EVAL_*_MODEL 은 샌드박스 fallback",
+    "guards": [
+      "OpenRouter provider/model 형식",
+      "embed 이름에 'embed', rerank 이름에 'rerank'",
+      "embed 변경 시 prepare --force 전까지 load_index 거부",
+      "요청당·세션당 비용 상한"
+    ],
+    "legacy_aliases": {
+      "llm": "response"
+    }
+  },
+  "planner_output": {
+    "purpose": "플래너 LLM 출력 계약(v2). 샌드박스 bot_plan.parse_plan 과 제품 internal/agent.ParsePlannerOutput 이 같은 JSON을 읽는다. v2 필드(semantic_query·key_terms·time)가 없어도 v1 출력은 그대로 동작한다.",
+    "fields": [
+      "memory_requirement",
+      "time_scope",
+      "question_kind",
+      "person_targets",
+      "sensitive",
+      "tool_plan",
+      "semantic_query",
+      "key_terms",
+      "time"
+    ],
+    "memory_requirement": [
+      "none",
+      "optional",
+      "required"
+    ],
+    "time_scope": [
+      "recent",
+      "any"
+    ],
+    "question_kind": [
+      "person_intro",
+      "person_fact",
+      "event",
+      "casual",
+      "other"
+    ],
+    "tool_plan_item": {
+      "tool_name": "catalog Action ID (agent_tools[].id) 또는 별칭",
+      "parameters": "object"
+    },
+    "rules": [
+      "memory_requirement=none → 채널 기억 검색 0회",
+      "required → memory.search 강제 추가",
+      "tool_plan 은 agent_tools 에 있는 ID만; 모르는 ID는 unknown tool 로 실행 거부",
+      "person_targets 는 사람 이름만(대명사·일반명사 제외)",
+      "플래너는 검색 알고리즘(R0/R2·pool·weight·rerank 여부)을 고르지 않는다 — 의미만 구조화한다",
+      "v2 필드는 선택이며 파서는 없을 때 빈 값으로 채운다"
+    ],
+    "time_kind": [
+      "any",
+      "recent",
+      "today",
+      "yesterday",
+      "last_week",
+      "this_month",
+      "before",
+      "after",
+      "between"
+    ],
+    "time": {
+      "kind": "time_kind 중 하나 (없으면 time_scope에서 유도: recent↔recent, any↔any)",
+      "from": "ISO-8601 또는 null (before/after/between 에서만)",
+      "to": "ISO-8601 또는 null",
+      "rule": "time 은 scope(검색 universe 제한)에만 쓴다. 최근성 점수 가산에는 쓰지 않는다"
+    },
+    "semantic_query": "질문의 의미를 풀어 쓴 검색 문장(≤300자). dense 검색의 2번째 질의. 없으면 원문만 쓴다",
+    "key_terms": "핵심 명사·고유명사 ≤12개. lexical 검색의 2번째 질의. 없으면 생략"
+  }
+}

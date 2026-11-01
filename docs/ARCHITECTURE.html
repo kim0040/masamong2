@@ -1,0 +1,642 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>마사몽 시스템 지도</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: one reading column; three figures (전체 구조 → 답 한 번 → 기억) that share one color code per layer, then reference grids. Tokens follow the admin console (stone neutrals, Masamong orange). */
+:root {
+  --bg: #fafaf9;
+  --surface: #ffffff;
+  --surface-2: #f4f4f2;
+  --border: #e7e5e4;
+  --border-strong: #d6d3d1;
+  --text: #1c1917;
+  --muted: #625c57;
+  --subtle: #8a827c;
+  --accent: #f08a3c;
+  --accent-text: #b4480b;
+  --on-accent: #1c1308;
+  --line: #57534e;
+
+  --people: #78716c;   --people-soft: #f4f4f2;
+  --entry: #2563eb;    --entry-soft: #e8effd;
+  --core: #e07a2c;     --core-soft: #fdebdd;
+  --mem: #15803d;      --mem-soft: #e3f4e8;
+  --ext: #7c3aed;      --ext-soft: #f0e9fd;
+  --warn: #9a3f07;     --warn-soft: #fcefd9;
+
+  --font: 'Pretendard Variable', Pretendard, 'IBM Plex Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --t-xs: 0.75rem; --t-sm: 0.8125rem; --t-base: 0.9375rem; --t-md: 1.0625rem; --t-lg: 1.375rem; --t-xl: 2rem;
+  --r: 10px; --r-lg: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e0e10; --surface: #161618; --surface-2: #1e1e21; --border: #2a2a2f; --border-strong: #3a3a40;
+    --text: #f4f4f5; --muted: #a8a8b0; --subtle: #85858e;
+    --accent: #ff9f5a; --accent-text: #ffb27a; --on-accent: #1c1308; --line: #a8a29e;
+    --people: #a8a29e; --people-soft: #1e1e21;
+    --entry: #6ea2ff;  --entry-soft: #151f36;
+    --core: #ff9f5a;   --core-soft: #33220f;
+    --mem: #4ade80;    --mem-soft: #10281a;
+    --ext: #c4a1ff;    --ext-soft: #241a38;
+    --warn: #fbbf77;   --warn-soft: #33240f;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e0e10; --surface: #161618; --surface-2: #1e1e21; --border: #2a2a2f; --border-strong: #3a3a40;
+  --text: #f4f4f5; --muted: #a8a8b0; --subtle: #85858e;
+  --accent: #ff9f5a; --accent-text: #ffb27a; --on-accent: #1c1308; --line: #a8a29e;
+  --people: #a8a29e; --people-soft: #1e1e21;
+  --entry: #6ea2ff;  --entry-soft: #151f36;
+  --core: #ff9f5a;   --core-soft: #33220f;
+  --mem: #4ade80;    --mem-soft: #10281a;
+  --ext: #c4a1ff;    --ext-soft: #241a38;
+  --warn: #fbbf77;   --warn-soft: #33240f;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font); font-size: var(--t-base); line-height: 1.65; -webkit-font-smoothing: antialiased; }
+.wrap { max-width: 1120px; margin: 0 auto; padding-inline: 20px; padding-block: 40px 72px; display: flex; flex-direction: column; gap: 56px; }
+@media (max-width: 480px) { .wrap { padding-inline: 16px; padding-block: 24px 48px; gap: 44px; } }
+
+h1, h2, h3 { text-wrap: balance; margin: 0; line-height: 1.3; }
+h1 { font-size: var(--t-xl); font-weight: 700; letter-spacing: -0.02em; }
+h2 { font-size: var(--t-lg); font-weight: 700; letter-spacing: -0.01em; }
+h3 { font-size: var(--t-md); font-weight: 600; }
+p { margin: 0; }
+code, .mono { font-family: var(--mono); font-size: 0.86em; }
+code { background: var(--surface-2); border: 1px solid var(--border); border-radius: 5px; padding: 0.05em 0.35em; overflow-wrap: anywhere; }
+
+.eyebrow { font-family: var(--mono); font-size: var(--t-xs); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent-text); font-weight: 600; }
+.lead { color: var(--muted); max-width: 64ch; font-size: var(--t-md); }
+section { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.sec-head { display: flex; flex-direction: column; gap: 6px; max-width: 72ch; }
+.sec-head p { color: var(--muted); }
+
+/* hero */
+header.hero { display: grid; grid-template-columns: auto 1fr; gap: 20px 24px; align-items: start; }
+.mark { width: 64px; height: 64px; border-radius: 18px; background: var(--accent); display: grid; place-items: center; color: var(--on-accent); font-weight: 700; font-size: 26px; }
+.hero-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.tldr { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.tldr div { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r); padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.tldr b { font-size: var(--t-base); }
+.tldr span { color: var(--muted); font-size: var(--t-sm); }
+@media (max-width: 760px) { .tldr { grid-template-columns: 1fr; } header.hero { grid-template-columns: 1fr; } }
+
+/* legend */
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: var(--t-sm); color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 7px; }
+.legend i { width: 14px; height: 14px; border-radius: 4px; border: 1.5px solid; display: inline-block; }
+.lg-people { border-color: var(--people) !important; background: var(--people-soft); }
+.lg-entry { border-color: var(--entry) !important; background: var(--entry-soft); }
+.lg-core { border-color: var(--core) !important; background: var(--core-soft); }
+.lg-mem { border-color: var(--mem) !important; background: var(--mem-soft); }
+.lg-ext { border-color: var(--ext) !important; background: var(--ext-soft); }
+
+/* figures */
+figure { margin: 0; display: flex; flex-direction: column; gap: 12px; }
+.canvas { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 16px; overflow-x: auto; }
+.canvas svg { display: block; width: 100%; height: auto; min-width: 860px; }
+figcaption { color: var(--muted); font-size: var(--t-sm); max-width: 80ch; }
+
+/* svg parts */
+svg text { font-family: var(--font); fill: var(--text); }
+svg .t { font-size: 15px; font-weight: 600; text-anchor: middle; }
+svg .tm { font-family: var(--mono); font-size: 14px; font-weight: 600; text-anchor: middle; }
+svg .s { font-size: 12px; fill: var(--muted); text-anchor: middle; }
+svg .sm { font-family: var(--mono); font-size: 11px; fill: var(--subtle); text-anchor: middle; }
+svg .lbl { font-size: 12px; fill: var(--muted); paint-order: stroke; stroke: var(--surface); stroke-width: 5px; stroke-linejoin: round; }
+svg .lbl.m { font-family: var(--mono); font-size: 11.5px; }
+svg .lane { font-family: var(--mono); font-size: 11.5px; font-weight: 600; letter-spacing: 0.06em; fill: var(--accent-text); }
+svg .b { stroke-width: 1.5; }
+svg .b.people { fill: var(--people-soft); stroke: var(--people); }
+svg .b.entry { fill: var(--entry-soft); stroke: var(--entry); }
+svg .b.core { fill: var(--core-soft); stroke: var(--core); }
+svg .b.mem { fill: var(--mem-soft); stroke: var(--mem); }
+svg .b.ext { fill: var(--ext-soft); stroke: var(--ext); }
+svg .daemon { fill: var(--surface-2); stroke: var(--core); stroke-width: 1.5; stroke-dasharray: 7 5; fill-opacity: 0.55; }
+svg .pill { fill: var(--accent); }
+svg .pill-t { font-family: var(--mono); font-size: 13px; font-weight: 600; fill: var(--on-accent); text-anchor: middle; }
+svg .a { stroke: var(--line); stroke-width: 1.5; fill: none; }
+svg .a.dash { stroke-dasharray: 5 4; }
+svg .head { fill: var(--line); }
+svg .sep { stroke: var(--border-strong); stroke-width: 1; stroke-dasharray: 3 5; }
+
+/* turn pipeline */
+.flow { display: grid; grid-template-columns: 3fr 4fr 1.4fr; gap: 14px; align-items: stretch; }
+.phase { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 14px; display: flex; flex-direction: column; gap: 10px; min-width: 0; position: relative; }
+.phase > header { display: flex; flex-direction: column; gap: 2px; padding-bottom: 6px; border-bottom: 1px solid var(--border); }
+.phase > header b { font-size: var(--t-base); }
+.phase > header code { align-self: flex-start; font-size: 0.78em; }
+.phase.p-app > header b { color: var(--entry); }
+.phase.p-chat > header b { color: var(--accent-text); }
+.phase.p-out > header b { color: var(--mem); }
+.phase ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; counter-reset: none; }
+.step { display: grid; grid-template-columns: 26px 1fr; gap: 10px; align-items: start; padding: 10px 10px 10px 8px; border-radius: var(--r); background: var(--surface-2); min-width: 0; }
+.step .n { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-family: var(--mono); font-size: 12px; font-weight: 600; border: 1.5px solid currentColor; }
+.p-app .n { color: var(--entry); }
+.p-chat .n { color: var(--core); }
+.p-out .n { color: var(--mem); }
+.step b { display: block; font-size: var(--t-sm); font-weight: 600; line-height: 1.45; }
+.step span { display: block; font-size: var(--t-xs); color: var(--muted); line-height: 1.5; }
+.p-chat ol { display: grid; grid-template-columns: 1fr 1fr; }
+.phase:not(:last-child)::after { content: "→"; position: absolute; right: -14px; top: 50%; transform: translate(50%, -50%); width: 24px; height: 24px; border-radius: 50%; background: var(--bg); border: 1px solid var(--border-strong); color: var(--muted); display: grid; place-items: center; font-size: 13px; z-index: 1; }
+@media (max-width: 900px) {
+  .flow { grid-template-columns: 1fr; gap: 22px; }
+  .phase:not(:last-child)::after { content: "↓"; right: 50%; top: auto; bottom: -11px; transform: translate(50%, 50%); }
+}
+@media (max-width: 520px) { .p-chat ol { grid-template-columns: 1fr; } }
+
+.fallbacks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.fallbacks div { background: var(--warn-soft); border-radius: var(--r); padding: 10px 14px; font-size: var(--t-sm); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.fallbacks b { color: var(--warn); font-weight: 600; }
+.fallbacks span { color: var(--text); }
+@media (max-width: 760px) { .fallbacks { grid-template-columns: 1fr; } }
+
+/* package map */
+.pkg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+@media (max-width: 400px) { .pkg-grid { grid-template-columns: 1fr; } }
+.pkg { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 14px 16px 12px; display: flex; flex-direction: column; gap: 8px; min-width: 0; border-top: 3px solid var(--c); }
+.pkg h3 { display: flex; align-items: center; gap: 8px; font-size: var(--t-base); }
+.pkg h3 i { width: 10px; height: 10px; border-radius: 3px; background: var(--c); display: inline-block; }
+.pkg dl { margin: 0; display: grid; grid-template-columns: 1fr; gap: 0; font-size: var(--t-sm); }
+.pkg dt { font-family: var(--mono); font-size: 0.8rem; color: var(--text); overflow-wrap: anywhere; }
+.pkg dd { margin: 0 0 9px; color: var(--muted); }
+.pkg dd:last-child { margin-bottom: 0; }
+.c-people { --c: var(--people); } .c-entry { --c: var(--entry); } .c-core { --c: var(--core); } .c-mem { --c: var(--mem); } .c-ext { --c: var(--ext); }
+
+/* confusion list */
+.gotchas { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.gotchas article { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.gotchas h3 { font-size: var(--t-base); }
+.gotchas p, .gotchas li { color: var(--muted); font-size: var(--t-sm); }
+.gotchas ul { margin: 0; padding-left: 1.1em; display: flex; flex-direction: column; gap: 4px; }
+@media (max-width: 760px) { .gotchas { grid-template-columns: 1fr; } }
+
+.three { width: 100%; border-collapse: collapse; font-size: var(--t-sm); }
+.three th, .three td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.three th { font-weight: 600; color: var(--subtle); font-size: var(--t-xs); text-transform: uppercase; letter-spacing: 0.06em; }
+.three td:first-child { font-weight: 600; color: var(--text); white-space: nowrap; }
+.tbl { overflow-x: auto; }
+
+/* background jobs */
+.jobs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.jobs article { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.jobs .tick { font-family: var(--mono); font-size: var(--t-xs); color: var(--accent-text); font-weight: 600; letter-spacing: 0.04em; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips span { font-size: var(--t-xs); padding: 3px 9px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text); }
+@media (max-width: 760px) { .jobs { grid-template-columns: 1fr; } }
+
+footer { color: var(--subtle); font-size: var(--t-xs); border-top: 1px solid var(--border); padding-top: 16px; }
+a { color: var(--accent-text); }
+:focus-visible { outline: 2px solid var(--entry); outline-offset: 2px; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+<header class="hero">
+  <div class="mark" aria-hidden="true">몽</div>
+  <div class="hero-body">
+    <span class="eyebrow">masamong2 · 0.2.0-dev · 2026-10-05 기준</span>
+    <h1>마사몽 시스템 지도</h1>
+    <p class="lead">마사몽은 <b>Go 프로그램 두 개</b>로 돕니다. 데몬 <code>masamongd</code>는 늘 켜져서 Discord 대화와 관리 화면을 맡고, <code>masamong</code>은 데몬을 켜고 끄거나 명령을 실행하는 손잡이입니다. 모든 데이터는 내 컴퓨터의 SQLite 파일 하나에 들어갑니다.</p>
+  </div>
+  <div class="tldr">
+    <div><b>들어오는 길은 셋, 처리는 하나</b><span>Discord, 관리 콘솔, CLI가 모두 같은 <code>application</code> Action을 부릅니다.</span></div>
+    <div><b>답 하나 = 모델 두 번</b><span>플래너가 계획을 세우고, 도구와 기억을 거쳐 답변 모델이 말합니다.</span></div>
+    <div><b>기억은 방 단위로 잠김</b><span>이 방과 연결한 기억 블록만 찾고, 답 직전에 범위를 한 번 더 확인합니다.</span></div>
+  </div>
+</header>
+
+<!-- 1. 전체 구조 -->
+<section id="overview">
+  <div class="sec-head">
+    <span class="eyebrow">전체 구조</span>
+    <h2>누가 무엇과 이야기하나</h2>
+    <p>위는 사람, 가운데 점선 상자는 데몬 프로세스 안, 맨 아래는 돈이 드는 외부 API입니다. 색은 아래 모든 그림에서 같은 뜻으로 씁니다.</p>
+  </div>
+  <div class="legend" aria-label="색 범례">
+    <span><i class="lg-people"></i>사람 · Discord</span>
+    <span><i class="lg-entry"></i>들어오는 길</span>
+    <span><i class="lg-core"></i>핵심 처리</span>
+    <span><i class="lg-mem"></i>기억 · 저장</span>
+    <span><i class="lg-ext"></i>외부 API</span>
+  </div>
+  <figure>
+    <div class="canvas">
+      <svg viewBox="0 0 1120 850" role="img" aria-label="Discord 사용자와 운영자가 각각 Discord Gateway와 관리 콘솔·CLI를 거쳐 데몬의 application Action 계층에 닿고, 그 아래 대화 런타임·기억 엔진·백그라운드·도구가 SQLite 파일 하나와 외부 모델·도구 API를 씁니다.">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+            <path class="head" d="M0,0 L10,5 L0,10 z"/>
+          </marker>
+        </defs>
+
+        <!-- people row -->
+        <rect class="b people" x="140" y="24" width="280" height="60" rx="12"/>
+        <text class="t" x="280" y="51">Discord 방 사람들</text>
+        <text class="s" x="280" y="70">말 걸기 · !명령 · /명령 · 버튼</text>
+
+        <rect class="b people" x="700" y="24" width="280" height="60" rx="12"/>
+        <text class="t" x="840" y="51">운영자 (나)</text>
+        <text class="s" x="840" y="70">설치 · 설정 · 기억 관리</text>
+
+        <!-- second row -->
+        <rect class="b people" x="140" y="140" width="280" height="60" rx="12"/>
+        <text class="t" x="280" y="167">Discord</text>
+        <text class="s" x="280" y="186">외부 서비스 · 봇 토큰으로 접속</text>
+
+        <rect class="b entry" x="580" y="140" width="200" height="60" rx="12"/>
+        <text class="tm" x="680" y="167">masamong</text>
+        <text class="s" x="680" y="186">CLI · 런처 · 트레이 · TUI</text>
+
+        <rect class="b entry" x="830" y="140" width="220" height="60" rx="12"/>
+        <text class="t" x="940" y="167">브라우저</text>
+        <text class="s" x="940" y="186">관리 콘솔 (Svelte 5)</text>
+
+        <line class="a" x1="280" y1="84" x2="280" y2="136" marker-end="url(#ah)"/>
+        <text class="lbl" x="290" y="115">메시지 · 명령</text>
+        <line class="a" x1="790" y1="84" x2="706" y2="136" marker-end="url(#ah)"/>
+        <line class="a" x1="890" y1="84" x2="926" y2="136" marker-end="url(#ah)"/>
+
+        <!-- daemon container -->
+        <rect class="daemon" x="40" y="240" width="1040" height="460" rx="18"/>
+        <rect class="pill" x="325" y="228" width="250" height="25" rx="12.5"/>
+        <text class="pill-t" x="450" y="245">masamongd · 데몬 프로세스 하나</text>
+
+        <rect class="b entry" x="140" y="290" width="280" height="60" rx="12"/>
+        <text class="t" x="280" y="317">Discord Gateway</text>
+        <text class="sm" x="280" y="336">connectors/discord</text>
+
+        <rect class="b entry" x="820" y="290" width="240" height="60" rx="12"/>
+        <text class="t" x="940" y="317">관리 콘솔 서버</text>
+        <text class="sm" x="940" y="336">transport/web</text>
+
+        <line class="a" x1="280" y1="204" x2="280" y2="286" marker-start="url(#ah)" marker-end="url(#ah)"/>
+        <text class="lbl" x="290" y="219">받기 · 답 보내기</text>
+
+        <line class="a" x1="940" y1="200" x2="940" y2="286" marker-end="url(#ah)"/>
+        <text class="lbl m" x="950" y="222">127.0.0.1:8787</text>
+        <text class="lbl" x="950" y="272">원격은 SSH 터널</text>
+
+        <line class="a dash" x1="640" y1="200" x2="640" y2="236" marker-end="url(#ah)"/>
+        <text class="lbl m" x="632" y="216" text-anchor="end">start · stop</text>
+        <line class="a" x1="720" y1="200" x2="720" y2="396" marker-end="url(#ah)"/>
+        <text class="lbl" x="728" y="300">Action 실행</text>
+        <text class="lbl" x="728" y="316">(같은 DB 직접)</text>
+
+        <!-- application -->
+        <rect class="b core" x="70" y="400" width="980" height="60" rx="12"/>
+        <text class="tm" x="560" y="426">application.Service · Action 계층</text>
+        <text class="s" x="560" y="446">어디서 오든 같은 Action ID로 실행 · 설정 리비전 · 예산과 한도 · 동의 확인</text>
+
+        <line class="a" x1="280" y1="350" x2="280" y2="396" marker-end="url(#ah)"/>
+        <text class="lbl" x="290" y="378">답할 메시지 · 명령</text>
+        <line class="a" x1="940" y1="350" x2="940" y2="396" marker-end="url(#ah)"/>
+        <text class="lbl m" x="930" y="378" text-anchor="end">/api/action</text>
+
+        <!-- inner row -->
+        <rect class="b core" x="70" y="500" width="230" height="70" rx="12"/>
+        <text class="tm" x="185" y="528">chat.Runtime</text>
+        <text class="s" x="185" y="548">대화 한 턴</text>
+        <text class="sm" x="185" y="563">플래너→도구→기억→답</text>
+
+        <rect class="b mem" x="320" y="500" width="230" height="70" rx="12"/>
+        <text class="tm" x="435" y="528">memory 엔진</text>
+        <text class="s" x="435" y="548">가져오기 · 색인 · 검색</text>
+        <text class="sm" x="435" y="563">memory/*</text>
+
+        <rect class="b core" x="570" y="500" width="230" height="70" rx="12"/>
+        <text class="t" x="685" y="528">백그라운드</text>
+        <text class="s" x="685" y="548">1분 스케줄러 · 색인 워커</text>
+        <text class="sm" x="685" y="563">schedule.go · memory.go</text>
+
+        <rect class="b core" x="820" y="500" width="230" height="70" rx="12"/>
+        <text class="t" x="935" y="528">도구 · providers</text>
+        <text class="s" x="935" y="548">날씨 · 주가 · 환율 · 검색 · 그림</text>
+        <text class="sm" x="935" y="563">키는 keychain:/file:/env: 참조</text>
+
+        <line class="a" x1="185" y1="460" x2="185" y2="496" marker-end="url(#ah)"/>
+        <line class="a" x1="435" y1="460" x2="435" y2="496" marker-end="url(#ah)"/>
+        <line class="a" x1="685" y1="460" x2="685" y2="496" marker-end="url(#ah)"/>
+        <line class="a" x1="935" y1="460" x2="935" y2="496" marker-end="url(#ah)"/>
+
+        <!-- sqlite -->
+        <path class="b mem" d="M380,616 a210,9 0 0,1 420,0 v50 a210,9 0 0,1 -420,0 z"/>
+        <path class="b mem" d="M380,616 a210,9 0 0,0 420,0" fill="none"/>
+        <text class="tm" x="590" y="648">SQLite · masamong.db</text>
+        <text class="s" x="590" y="668">설정 · 원문 기억 · 색인 · 대화 기록 · 비용 장부</text>
+        <line class="a" x1="435" y1="570" x2="435" y2="604" marker-end="url(#ah)"/>
+        <line class="a" x1="685" y1="570" x2="685" y2="604" marker-end="url(#ah)"/>
+        <text class="lbl" x="560" y="592" text-anchor="middle">읽기 · 쓰기 · 백업</text>
+
+        <!-- external -->
+        <rect class="b ext" x="70" y="750" width="450" height="80" rx="12"/>
+        <text class="t" x="295" y="776">모델 API</text>
+        <text class="s" x="295" y="796">OpenRouter · CometAPI · OpenAI 호환 · Gemini</text>
+        <text class="sm" x="295" y="815">역할: planner · response · summary · embed · rerank · image</text>
+
+        <rect class="b ext" x="600" y="750" width="450" height="80" rx="12"/>
+        <text class="t" x="825" y="776">도구 API</text>
+        <text class="s" x="825" y="796">기상청 · Open-Meteo · Finnhub · 환율 · 카카오맵 · 웹</text>
+        <text class="sm" x="825" y="815">한국 날씨는 기상청, 장애 시 Open-Meteo</text>
+
+        <line class="a" x1="185" y1="570" x2="185" y2="746" marker-end="url(#ah)"/>
+        <text class="lbl" x="195" y="612">planner · response</text>
+        <line class="a" x1="360" y1="570" x2="330" y2="746" marker-end="url(#ah)"/>
+        <text class="lbl" x="340" y="728" text-anchor="start">embed · rerank</text>
+        <line class="a" x1="935" y1="570" x2="935" y2="746" marker-end="url(#ah)"/>
+        <text class="lbl" x="945" y="660">조회</text>
+      </svg>
+    </div>
+    <figcaption>Discord 쪽과 운영자 쪽은 입구만 다르고, 들어오면 모두 <code>application</code>의 같은 Action으로 모입니다. 콘솔 화면은 DB를 직접 열지 않고 <code>/api/action</code>만 부릅니다. CLI의 Action 명령은 데몬을 거치지 않고 같은 data root를 직접 열어 실행합니다.</figcaption>
+  </figure>
+</section>
+
+<!-- 2. 답 하나 -->
+<section id="turn">
+  <div class="sec-head">
+    <span class="eyebrow">Discord 메시지 → 답</span>
+    <h2>답 하나가 나오기까지</h2>
+    <p>차례를 기다리고 한도를 확인한 다음, <code>chat.Runtime.Answer</code>가 모델을 두 번 부릅니다. 단계 순서는 코드의 실행 순서 그대로입니다.</p>
+  </div>
+  <div class="flow">
+    <div class="phase p-app">
+      <header><b>들어오기</b><code>application · Gateway</code></header>
+      <ol>
+        <li class="step"><span class="n">1</span><div><b>방 차례 기다리기</b><span>같은 방은 한 번에 하나씩, 도착 순서대로. 실행 1개와 대기 4개를 넘으면 건너뛰고, 말을 건 사람에게 "대화가 밀리고 있어요" 한 줄(사람·방마다 5분에 한 번)</span></div></li>
+        <li class="step"><span class="n">2</span><div><b>빈 자리 기다리기</b><span>전체 동시 답변은 <code>max_concurrent_turns</code>(기본 8)까지</span></div></li>
+        <li class="step"><span class="n">3</span><div><b>한도 · 예산 확인</b><span>차례가 온 뒤에 확인하므로 몰려와도 예산을 함께 넘지 못함. 한도·예산·일시 중지로 거절되면 그 사람의 언어로 짧은 안내 한 줄(5분에 한 번), 답을 꺼 둔 방은 조용함</span></div></li>
+      </ol>
+    </div>
+    <div class="phase p-chat">
+      <header><b>생각하기</b><code>chat.Runtime.Answer</code></header>
+      <ol>
+        <li class="step"><span class="n">4</span><div><b>플래너 모델</b><span>JSON 계획: 기억이 필요한지, 어떤 도구를, 언제·누구 이야기인지</span></div></li>
+        <li class="step"><span class="n">5</span><div><b>도구 실행</b><span>실행 가능한 단계만. 값이 빠진 단계는 <code>needs_input</code>으로 남김</span></div></li>
+        <li class="step"><span class="n">6</span><div><b>기억 검색</b><span>이 방과 연결된 블록만. 결과는 범위를 한 번 더 확인</span></div></li>
+        <li class="step"><span class="n">7</span><div><b>답변 모델</b><span>페르소나 · 방 규칙 · 도구 결과 · 기억 근거로 친구처럼 답</span></div></li>
+      </ol>
+    </div>
+    <div class="phase p-out">
+      <header><b>내보내기</b><code>Gateway</code></header>
+      <ol>
+        <li class="step"><span class="n">8</span><div><b>보내고 기록</b><span>먼저 답에 봇 내부 표식(구분자 · 플래너 머리글 · 시스템 프롬프트 제목)이 없는지 글자 그대로 확인하고, 있으면 일반 안내 문구로 바꿈. 그다음 Discord로 전송(요청 컨텍스트에 묶여 서비스가 멈추면 남은 조각을 보내지 않음), 턴 기록(단계별 이유 · 비용 · 시간) 저장</span></div></li>
+      </ol>
+    </div>
+  </div>
+  <div class="fallbacks">
+    <div><b>플래너가 실패하면</b><span>기억 없이 답합니다. "전부 검색"으로 바뀌지 않습니다.</span></div>
+    <div><b>기억 검색이 실패하면</b><span>기억 없이 답하고, 기억에 없는 일은 지어내지 않습니다.</span></div>
+    <div><b>도구가 답을 못 주면</b><span>오류 카드 대신 대화로 이어 갑니다. Discord 답의 제한 시간은 180초입니다.</span></div>
+    <div><b>Discord에 닿지 못하면</b><span>첫 연결은 1초에서 30초까지 간격을 늘려 가며 스스로 다시 시도합니다(토큰 거절은 한 번에 멈춤, <code>doctor</code>가 재시도 중인지 영구 실패인지 알려 줌). 끊겼다 이어진 세션(RESUMED)에서는 예약 전송 관문을 다시 엽니다.</span></div>
+  </div>
+</section>
+
+<!-- 3. 기억 -->
+<section id="memory">
+  <div class="sec-head">
+    <span class="eyebrow">기억과 검색 (RAG)</span>
+    <h2>기억이 쌓이고 꺼내지는 길</h2>
+    <p>위 줄은 데몬이 백그라운드에서 하는 일, 아래 줄은 답할 때 하는 일입니다. 두 줄은 색인을 통해서만 만납니다.</p>
+  </div>
+  <figure>
+    <div class="canvas">
+      <svg viewBox="0 0 1120 340" role="img" aria-label="카카오톡 CSV와 Discord 원문이 원문 저장, leaf 분할을 거쳐 단어 색인과 벡터 색인으로 들어가고, 답할 때는 질문에서 허용된 방의 후보를 찾아 결합·재순위하고 원문으로 펼쳐 범위를 재확인한 뒤 답에 씁니다.">
+        <defs>
+          <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+            <path class="head" d="M0,0 L10,5 L0,10 z"/>
+          </marker>
+        </defs>
+        <text class="lane" x="20" y="22">색인할 때 · 백그라운드 색인 워커</text>
+        <line class="sep" x1="20" y1="200" x2="1100" y2="200"/>
+        <text class="lane" x="20" y="236">답할 때 · 기억 검색</text>
+
+        <rect class="b people" x="20" y="40" width="180" height="56" rx="10"/>
+        <text class="t" x="110" y="64">카카오톡 CSV</text>
+        <text class="s" x="110" y="83">기억 블록 → 가져오기</text>
+        <rect class="b people" x="20" y="112" width="180" height="56" rx="10"/>
+        <text class="t" x="110" y="136">Discord 원문</text>
+        <text class="s" x="110" y="155">실시간 + 꺼진 동안 7일</text>
+
+        <rect class="b mem" x="250" y="76" width="190" height="56" rx="10"/>
+        <text class="t" x="345" y="100">원문 저장</text>
+        <text class="s" x="345" y="119">수정 · 삭제는 revision으로</text>
+        <line class="a" x1="200" y1="72" x2="246" y2="96" marker-end="url(#ah2)"/>
+        <line class="a" x1="200" y1="136" x2="246" y2="112" marker-end="url(#ah2)"/>
+
+        <rect class="b mem" x="490" y="76" width="190" height="56" rx="10"/>
+        <text class="t" x="585" y="100">leaf로 나누기</text>
+        <text class="s" x="585" y="119">방 안에서 · 메시지 수 · 시간 간격</text>
+        <line class="a" x1="440" y1="104" x2="486" y2="104" marker-end="url(#ah2)"/>
+
+        <rect class="b mem" x="740" y="40" width="190" height="56" rx="10"/>
+        <text class="t" x="835" y="64">단어 색인</text>
+        <text class="s" x="835" y="83">언어별 토큰 · SQLite FTS5</text>
+        <rect class="b mem" x="740" y="112" width="190" height="56" rx="10"/>
+        <text class="t" x="835" y="136">벡터 색인</text>
+        <text class="s" x="835" y="155">embed 모델로 만든 벡터</text>
+        <line class="a" x1="680" y1="96" x2="736" y2="72" marker-end="url(#ah2)"/>
+        <line class="a" x1="680" y1="112" x2="736" y2="136" marker-end="url(#ah2)"/>
+
+        <rect class="b mem" x="970" y="76" width="130" height="56" rx="10" stroke-dasharray="4 3"/>
+        <text class="t" x="1035" y="100">요약 · 별칭</text>
+        <text class="s" x="1035" y="119">검색 신호일 뿐</text>
+        <line class="a dash" x1="930" y1="104" x2="966" y2="104" marker-end="url(#ah2)"/>
+
+        <polyline class="a" points="835,168 835,214 340,214 340,254" marker-end="url(#ah2)"/>
+        <text class="lbl" x="588" y="218" text-anchor="middle">색인에서 후보를 꺼냄</text>
+
+        <rect class="b core" x="20" y="258" width="180" height="56" rx="10"/>
+        <text class="t" x="110" y="282">질문 + 계획</text>
+        <text class="s" x="110" y="301">플래너의 시간 · 사람 범위</text>
+
+        <rect class="b mem" x="240" y="258" width="200" height="56" rx="10"/>
+        <text class="t" x="340" y="282">후보 찾기</text>
+        <text class="s" x="340" y="301">이 방 + 연결된 블록만</text>
+
+        <rect class="b mem" x="490" y="258" width="200" height="56" rx="10"/>
+        <text class="t" x="590" y="282">결합 · 재순위</text>
+        <text class="s" x="590" y="301">weighted RRF + rerank(선택)</text>
+
+        <rect class="b mem" x="740" y="258" width="200" height="56" rx="10"/>
+        <text class="t" x="840" y="282">원문으로 펼치기</text>
+        <text class="s" x="840" y="301">범위 · revision · 삭제 재확인</text>
+
+        <rect class="b core" x="980" y="258" width="120" height="56" rx="10"/>
+        <text class="t" x="1040" y="282">답변</text>
+        <text class="s" x="1040" y="301">근거는 원문</text>
+
+        <line class="a" x1="200" y1="286" x2="236" y2="286" marker-end="url(#ah2)"/>
+        <line class="a" x1="440" y1="286" x2="486" y2="286" marker-end="url(#ah2)"/>
+        <line class="a" x1="690" y1="286" x2="736" y2="286" marker-end="url(#ah2)"/>
+        <line class="a" x1="940" y1="286" x2="976" y2="286" marker-end="url(#ah2)"/>
+      </svg>
+    </div>
+    <figcaption>방끼리는 절대 섞지 않습니다. 채널에 기억 블록을 연결하면 검색 범위만 넓어지고 원문이 옮겨지지는 않습니다. 파생 기록은 원문 참조를 저장과 함께 기록하고, 삭제·수정·철회 정리 의도와 tombstone도 원문 변경 전에 커밋합니다. 뒤늦게 끝난 답변이 지운 내용을 되살리지 못하며, 답의 근거는 언제나 허용된 범위의 원문입니다.</figcaption>
+  </figure>
+</section>
+
+<!-- 4. 백그라운드 -->
+<section id="background">
+  <div class="sec-head">
+    <span class="eyebrow">아무도 말하지 않을 때</span>
+    <h2>데몬이 혼자 하는 일</h2>
+    <p>데몬은 시작할 때 <code>RunScheduler</code>와 <code>RunMemoryWorker</code>를 하나씩 띄웁니다. 실패한 회차는 로그에 남기고 다음 회차에 다시 돕니다. 서비스가 맡은 일(기억 워커 · 스케줄러 작업 · 먼저 말 걸기 후보 · 가격·공지 갱신 · 기억 블록 작업)은 모두 서비스 수명에 등록되어 있습니다. Discord의 <code>READY</code>·<code>RESUMED</code> 핸들러도 같은 작업 수용 잠금 아래 등록합니다. 종료하면 새 핸들러 수용을 닫고 이미 받은 이벤트와 답변·명령을 기다린 뒤 색인(은퇴 타이머 포함)과 DB 연결을 닫습니다. 열기에 실패했을 때도 같은 경로로 정리합니다.</p>
+  </div>
+  <div class="jobs">
+    <article>
+      <span class="tick">스케줄러 · 1분마다</span>
+      <h3>시간이 되면 하는 일</h3>
+      <div class="chips">
+        <span>자동 백업 · 오래된 백업 정리</span><span>예약 알림 전송</span><span>아침 운세 DM</span>
+        <span>지진 · 기상특보</span><span>학교 · 편입 공지</span><span>오래된 운영 기록 정리</span>
+        <span>업데이트 확인</span><span>운영자 알림</span>
+      </div>
+    </article>
+    <article style="grid-column: 1 / -1">
+      <span class="tick">시작할 때 · 한 번, 다른 모든 일보다 먼저</span>
+      <h3>끊긴 복원 · 초기화 · 프로그램 업데이트 마무리</h3>
+      <div class="chips">
+        <span>프로그램 설치 저널(<code>.masamong-update.json</code>) 정리</span><span>데이터 폴더 저널(<code>maintenance-operation.json</code>) 정리</span><span>끝나면 DB 열기 → 봇 · 스케줄러 · 기억 워커</span><span>못 끝내면 DB를 열지 않고 현지화된 복구 안내(loopback Host만, 쓸 수 있는 명령만 표시)</span>
+      </div>
+      <p>복원 · 초기화 · 업데이트는 같은 저널 형식과 같은 복구 엔진을 씁니다. 단계마다 기록하므로 중간에 죽어도 다음 시작이 이어 가거나 되돌립니다. 지우기를 시작한 초기화만 되돌릴 수 없습니다. 감시 프로세스도 다음 자식을 띄우기 전에 프로그램 저널을 정리합니다.</p>
+    </article>
+    <article>
+      <span class="tick">색인 워커 · memory.index_interval_min마다</span>
+      <h3>새 대화를 기억으로 만들기</h3>
+      <div class="chips">
+        <span>시작할 때 색인 불러오기</span><span>새 메시지가 생긴 방만 색인</span><span>벡터 만들기 (색인 예산 안에서)</span><span>못 끝낸 방은 다음 회차로</span>
+      </div>
+    </article>
+  </div>
+</section>
+
+<!-- 5. 패키지 지도 -->
+<section id="packages">
+  <div class="sec-head">
+    <span class="eyebrow">코드 위치</span>
+    <h2>어디를 고치면 되나</h2>
+    <p>그림의 색과 같은 묶음입니다. 경로는 저장소 루트 기준입니다.</p>
+  </div>
+  <div class="pkg-grid">
+    <article class="pkg c-entry">
+      <h3><i></i>실행 파일과 들어오는 길</h3>
+      <dl>
+        <dt>cmd/masamong</dt><dd>CLI · 런처 · SSH connect</dd>
+        <dt>cmd/masamongd</dt><dd>데몬 본체, 위 그림의 점선 상자</dd>
+        <dt>internal/connectors/discord</dt><dd>Gateway, 명령, 답 렌더링, 로컬 시뮬레이터</dd>
+        <dt>internal/transport/web</dt><dd>127.0.0.1 서버 · 세션 · <code>/api/action</code> · <code>/lite</code></dd>
+        <dt>…/web/ui</dt><dd>Svelte 콘솔 원본, 빌드 결과 <code>dist</code>도 커밋</dd>
+        <dt>internal/cli · tui · tray · launcher</dt><dd>터미널 출력, 트레이 아이콘, 자동 시작</dd>
+      </dl>
+    </article>
+    <article class="pkg c-core">
+      <h3><i></i>핵심 처리</h3>
+      <dl>
+        <dt>internal/application</dt><dd>기능 대부분이 여기. Action 실행, 알림 · 백업 · 스케줄러</dd>
+        <dt>internal/catalog · action</dt><dd>Action 목록과 CLI 문자열, 요청 · 결과 봉투</dd>
+        <dt>internal/chat</dt><dd>답 한 턴: 플래너 · 가드 · 답변 프롬프트</dd>
+        <dt>internal/tools</dt><dd>도구 켜기 · 끄기, 하루 한도, HTTP 사용자 도구</dd>
+        <dt>internal/features/*</dt><dd>동의 · 운세 · 공지 · 투표 · 알림 · 먼저 말 걸기</dd>
+        <dt>internal/config · jobs</dt><dd>설정 문서와 리비전, 작업 상태 기계</dd>
+      </dl>
+    </article>
+    <article class="pkg c-mem">
+      <h3><i></i>기억과 저장</h3>
+      <dl>
+        <dt>memory/corpus</dt><dd>카카오 CSV · Discord 원문 읽기</dd>
+        <dt>memory/leaves</dt><dd>leaf 분할</dd>
+        <dt>memory/lexical</dt><dd>언어별 토큰화 · FTS5</dd>
+        <dt>memory/search · retrieval</dt><dd>후보 결합 · 재순위 · 범위 검사 · auto 결정</dd>
+        <dt>memory/engine · store · blocks</dt><dd>가져오기 · 색인 실행, 저장 표, 기억 블록</dd>
+        <dt>internal/storage · secrets</dt><dd>SQLite · 백업 · 복원, 비밀값 참조(macOS Keychain · Windows 자격 증명 관리자 · 파일)</dd>
+        <dt>internal/fsutil · clock</dt><dd>소유자 전용 파일(Windows는 보호된 ACL) · 내구성 있는 교체, 내장 시간대 데이터(<code>time/tzdata</code>)</dd>
+      </dl>
+    </article>
+    <article class="pkg c-ext">
+      <h3><i></i>외부 API 어댑터</h3>
+      <dl>
+        <dt>providers/openai</dt><dd>OpenAI 호환 모델 · 그림 (OpenRouter, CometAPI 등)</dd>
+        <dt>providers/kma · openmeteo</dt><dd>날씨 · 특보 · 지진</dd>
+        <dt>providers/finnhub · fx</dt><dd>주가 · 환율</dd>
+        <dt>providers/kakao · websearch</dt><dd>장소 · 맛집, 웹 검색 · 링크 읽기</dd>
+        <dt>providers/practice</dt><dd>연습 모드의 오프라인 모의 모델</dd>
+      </dl>
+    </article>
+    <article class="pkg c-people">
+      <h3><i></i>말과 번역</h3>
+      <dl>
+        <dt>internal/lang/packs</dt><dd>봇이 쓰는 모든 문장 (프롬프트 포함, 5개 언어)</dd>
+        <dt>locales/</dt><dd>운영 메시지 · 콘솔 번역</dd>
+        <dt>…/ui/scripts/strings.py</dt><dd>콘솔 문구 원본. 생성된 JSON은 직접 고치지 않기</dd>
+      </dl>
+    </article>
+    <article class="pkg c-people">
+      <h3><i></i>제품 밖</h3>
+      <dl>
+        <dt>experimental/rag-leaf-parent</dt><dd>Python 검색 샌드박스 (8765), 제품 DB 안 씀</dd>
+        <dt>contracts/</dt><dd>샌드박스와 Go가 맞춰야 할 도구 · 블록 계약</dd>
+        <dt>tools/evaluation</dt><dd>오프라인 평가 · gold 생성</dd>
+        <dt>docs/ · docs/wiki</dt><dd>운영 · 개발 문서, ADR, 사후 분석</dd>
+      </dl>
+    </article>
+  </div>
+</section>
+
+<!-- 6. 헷갈리는 것 -->
+<section id="gotchas">
+  <div class="sec-head">
+    <span class="eyebrow">자주 헷갈리는 것</span>
+    <h2>작업하다 길을 잃었을 때</h2>
+  </div>
+  <div class="gotchas">
+    <article>
+      <h3>띄우는 프로그램은 세 가지, 서로 다릅니다</h3>
+      <div class="tbl">
+        <table class="three">
+          <thead><tr><th>이름</th><th>여는 법</th><th>데이터</th></tr></thead>
+          <tbody>
+            <tr><td>실제 제품</td><td><code>masamong open</code> · 8787</td><td>기본 data root</td></tr>
+            <tr><td>빠른 테스트</td><td><code>start-test.command</code> · Windows <code>start-test.ps1</code> · <code>make try</code></td><td><code>~/.masamong-try</code></td></tr>
+            <tr><td>검색 샌드박스</td><td>Python · 8765</td><td><code>test-sandbox/data/</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </article>
+    <article>
+      <h3>저장소는 SQLite 하나뿐</h3>
+      <p>TiDB 코드는 남아 있지만 <code>internal/storage/settings.go</code>의 <code>TiDBEnabled = false</code>가 막고 있습니다. 2026-09-28 결정입니다. 새로 만든 표도 SQLite DDL만 있습니다.</p>
+    </article>
+    <article>
+      <h3>기능 하나 = Action 하나</h3>
+      <ul>
+        <li>새 기능은 <code>catalog</code>에 Action을 등록하고 <code>application</code>에서 구현합니다.</li>
+        <li>콘솔, CLI, Discord 명령은 그 Action을 부르기만 합니다.</li>
+        <li>화면 코드에서 DB를 직접 열지 않습니다.</li>
+      </ul>
+    </article>
+    <article>
+      <h3>검색을 바꾸면 두 곳을 같이</h3>
+      <ul>
+        <li>Python 샌드박스에서 비교한 다음 Go <code>memory/*</code>에 옮깁니다.</li>
+        <li><code>parity_test.go</code>로 두 쪽 결과가 같은지 확인합니다.</li>
+        <li>콘솔 화면을 바꾸면 <code>npm run build</code> 결과인 <code>ui/dist</code>도 커밋합니다.</li>
+      </ul>
+    </article>
+  </div>
+</section>
+
+<footer>저장소 <code>kim0040/masamong2</code>의 코드와 <code>docs/REPO_MAP.md</code>, <code>docs/rag/</code>, 위키 「동시 처리와 성능」을 바탕으로 정리했습니다. 코드가 바뀌면 이 지도도 함께 고쳐야 합니다.</footer>
+</div>
+</body>
+</html>

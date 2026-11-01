@@ -1,0 +1,4 @@
+{"response":{"header":{"resultCode":"00","resultMsg":"NORMAL_SERVICE"},"body":{"items":{"item":[
+{"tmFc":"202609150912","tmEqk":"20260915091030","loc":"경북 경주시 남남서쪽 12km 지역","lat":"35.72","lon":"129.18","mt":"3.4","dep":"10","rem":"","msgCode":"11","tmSeq":"1","fcTp":"1"},
+{"tmFc":"202609141220","tmEqk":"202609141210","loc":"일본 규슈 구마모토현 구마모토 북북동쪽 24km 지역","lat":"32.98","lon":"130.83","mt":"5.1","dep":"12","rem":"국내영향없음","msgCode":"12","tmSeq":"1","fcTp":"2"}
+]},"totalCount":2}}}

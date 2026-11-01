@@ -1,0 +1,1375 @@
+{
+ "schema_version": 1,
+ "about": "Public university notice boards the bot reads (V1 school_notice/sources.json and transfer_notice/sources.json). Selectors are CSS; a board is read only if its robots.txt allows it. Edit or override with <data-root>/notices/catalog.json; nothing about the boards is in code.",
+ "schools": [
+  {
+   "id": "jbnu",
+   "name": "전북대학교"
+  },
+  {
+   "id": "snu",
+   "name": "서울대학교"
+  },
+  {
+   "id": "pnu",
+   "name": "부산대학교"
+  },
+  {
+   "id": "korea",
+   "name": "고려대학교"
+  },
+  {
+   "id": "jj",
+   "name": "전주대학교"
+  },
+  {
+   "id": "skku",
+   "name": "성균관대학교"
+  },
+  {
+   "id": "gachon",
+   "name": "가천대학교"
+  },
+  {
+   "id": "ssu",
+   "name": "숭실대학교"
+  },
+  {
+   "id": "jnu",
+   "name": "전남대학교"
+  },
+  {
+   "id": "scnu",
+   "name": "국립순천대학교"
+  },
+  {
+   "id": "mju",
+   "name": "명지대학교"
+  },
+  {
+   "id": "konkuk",
+   "name": "건국대학교"
+  },
+  {
+   "id": "kookmin",
+   "name": "국민대학교"
+  },
+  {
+   "id": "hanyang",
+   "name": "한양대학교"
+  }
+ ],
+ "vocabulary": {
+  "audiences": [
+   {
+    "id": "undergraduate",
+    "label": "학부생",
+    "terms": [
+     "학부생",
+     "학부 재학생",
+     "학사과정",
+     "[학부]"
+    ]
+   },
+   {
+    "id": "graduate",
+    "label": "대학원생",
+    "terms": [
+     "대학원생",
+     "대학원 재학생",
+     "석사과정",
+     "박사과정"
+    ]
+   },
+   {
+    "id": "enrolled",
+    "label": "재학생",
+    "terms": [
+     "재학생"
+    ]
+   },
+   {
+    "id": "on_leave",
+    "label": "휴학생",
+    "terms": [
+     "휴학생",
+     "휴학 중"
+    ]
+   },
+   {
+    "id": "returning",
+    "label": "복학생",
+    "terms": [
+     "복학생",
+     "복학 예정"
+    ]
+   },
+   {
+    "id": "freshman",
+    "label": "신입생",
+    "terms": [
+     "신입생",
+     "신입학"
+    ]
+   },
+   {
+    "id": "graduating",
+    "label": "졸업예정자",
+    "terms": [
+     "졸업예정자",
+     "졸업 예정자"
+    ]
+   },
+   {
+    "id": "staff",
+    "label": "교직원",
+    "terms": [
+     "교직원"
+    ]
+   },
+   {
+    "id": "international",
+    "label": "외국인학생",
+    "terms": [
+     "외국인 학생",
+     "외국인학생",
+     "유학생"
+    ]
+   },
+   {
+    "id": "transfer",
+    "label": "편입생",
+    "terms": [
+     "편입생",
+     "편입학"
+    ]
+   }
+  ],
+  "topics": [
+   {
+    "id": "scholarship",
+    "label": "장학",
+    "terms": [
+     "장학",
+     "장학생"
+    ]
+   },
+   {
+    "id": "tuition",
+    "label": "등록금",
+    "terms": [
+     "등록금",
+     "학비"
+    ]
+   },
+   {
+    "id": "courses",
+    "label": "수강",
+    "terms": [
+     "수강신청",
+     "수강변경",
+     "시간표"
+    ]
+   },
+   {
+    "id": "status",
+    "label": "학적",
+    "terms": [
+     "휴학",
+     "복학",
+     "재입학",
+     "학적"
+    ]
+   },
+   {
+    "id": "graduation",
+    "label": "졸업",
+    "terms": [
+     "졸업",
+     "학위취득"
+    ]
+   },
+   {
+    "id": "career",
+    "label": "취업",
+    "terms": [
+     "취업",
+     "진로",
+     "인턴"
+    ]
+   },
+   {
+    "id": "dormitory",
+    "label": "기숙사",
+    "terms": [
+     "생활관",
+     "기숙사"
+    ]
+   },
+   {
+    "id": "exchange",
+    "label": "국제교류",
+    "terms": [
+     "교환학생",
+     "해외파견",
+     "국제교류"
+    ]
+   },
+   {
+    "id": "contest",
+    "label": "공모전",
+    "terms": [
+     "공모전",
+     "경진대회",
+     "해커톤"
+    ]
+   },
+   {
+    "id": "military",
+    "label": "병무",
+    "terms": [
+     "예비군",
+     "군입대",
+     "병무"
+    ]
+   }
+  ],
+  "actions": [
+   {
+    "id": "apply",
+    "label": "신청",
+    "terms": [
+     "신청",
+     "접수"
+    ]
+   },
+   {
+    "id": "application",
+    "label": "지원",
+    "terms": [
+     "지원서",
+     "지원 바랍니다",
+     "지원자"
+    ]
+   },
+   {
+    "id": "submit",
+    "label": "제출",
+    "terms": [
+     "제출"
+    ]
+   },
+   {
+    "id": "register",
+    "label": "등록",
+    "terms": [
+     "등록",
+     "재등록"
+    ]
+   },
+   {
+    "id": "enroll",
+    "label": "수강신청",
+    "terms": [
+     "수강신청"
+    ]
+   },
+   {
+    "id": "pay",
+    "label": "납부",
+    "terms": [
+     "납부",
+     "등록금"
+    ]
+   },
+   {
+    "id": "report",
+    "label": "신고",
+    "terms": [
+     "신고"
+    ]
+   },
+   {
+    "id": "join",
+    "label": "참여",
+    "terms": [
+     "참여",
+     "모집"
+    ]
+   }
+  ],
+  "degree_audiences": {
+   "undergraduate": [
+    "undergraduate"
+   ],
+   "master": [
+    "graduate"
+   ],
+   "doctorate": [
+    "graduate"
+   ],
+   "integrated": [
+    "graduate"
+   ]
+  },
+  "opportunity_topics": [
+   "scholarship",
+   "contest",
+   "career",
+   "exchange"
+  ]
+ },
+ "transfer_filters": {
+  "announcement": "(?:20\\d{2}학년도|편입(?:학|생)?|모집|원서|합격|고사|등록|충원|서류|지원|경쟁률|전형|일정|결과|성적|면접|실기|환불|추가|기본계획)",
+  "mixed_include": "(?:대학\\s*)?편입(?:학|생)?",
+  "exclude": "(?:대학원|외국인|재외국민|계약학과|대학원대학)",
+  "title_trailing": "(?:\\s*(?:[|ㅣ]\\s*)?(?:(?:작성|등록)일)\\s*[:：]?\\s*20\\d{2}[.\\-/]\\d{1,2}[.\\-/]\\d{1,2}|\\s*(?:[|ㅣ]\\s*)?조회수?\\s*[:：]?\\s*[\\d,]+)+\\s*$",
+  "drop_query_keys": [
+   "page",
+   "pageno",
+   "pageindex",
+   "currpage",
+   "startpage",
+   "searchno",
+   "searchtext",
+   "keyword",
+   "skey"
+  ]
+ },
+ "detail_fallback": {
+  "containers": [
+   "main",
+   "article",
+   ".board-view",
+   ".board_view",
+   ".view-content",
+   ".view_content",
+   ".view-cont",
+   ".view_cont",
+   ".bbs-view",
+   ".bbs_view",
+   ".board-content",
+   ".board_content",
+   "#content",
+   "#contents"
+  ],
+  "drop": [
+   "script",
+   "style",
+   "noscript",
+   "nav",
+   "header",
+   "footer",
+   "aside",
+   "form",
+   ".pagination",
+   ".breadcrumb",
+   ".share",
+   ".sns"
+  ]
+ },
+ "sources": [
+  {
+   "id": "jbnu_campus",
+   "kind": "school",
+   "school": "jbnu",
+   "university": "전북대학교",
+   "board": "교내공지",
+   "list_url": "https://www.jbnu.ac.kr/web/news/notice/sub01.do",
+   "allowed_hosts": [
+    "www.jbnu.ac.kr"
+   ],
+   "list": {
+    "row_selector": "form#Form table tbody tr",
+    "link_selector": "td.td-title a.title",
+    "id_attribute": "onclick",
+    "id_regex": "pf_DetailMove\\(['\\\"]?(\\d+)['\\\"]?\\)",
+    "date_selector": "td.td-title ul.etc-list li",
+    "author_selector": "p.brd-writer",
+    "category_selector": ".tag-type-01",
+    "detail_url_template": "https://www.jbnu.ac.kr/web/Board/{id}/detailView.do",
+    "pinned_classes": [
+     "tr-noticed"
+    ]
+   },
+   "detail": {
+    "title_selectors": [
+     ".com-post-hd-01 h2.title",
+     "meta[property='og:title']"
+    ],
+    "body_selectors": [
+     ".com-post-content-01",
+     "meta[name='description']"
+    ],
+    "date_selectors": [
+     ".com-post-hd-01 ul.etc-list li:nth-of-type(2)"
+    ]
+   },
+   "min_items": 5
+  },
+  {
+   "id": "jbnu_software",
+   "kind": "school",
+   "school": "jbnu",
+   "university": "전북대학교",
+   "board": "소프트웨어공학과 공지",
+   "list_url": "https://software.jbnu.ac.kr/bbs/software/527/artclList.do",
+   "allowed_hosts": [
+    "software.jbnu.ac.kr",
+    "www.jbnu.ac.kr"
+   ],
+   "list": {
+    "row_selector": "._articleTable table tbody tr",
+    "link_selector": "td._artclTdTitle a.artclLinkView",
+    "id_attribute": "href",
+    "id_regex": "/(\\d+)/artclView",
+    "title_selector": "strong",
+    "date_selector": "td._artclTdRdate",
+    "author_selector": "td._artclTdWriter",
+    "pinned_classes": [
+     "headline"
+    ]
+   },
+   "detail": {
+    "title_selectors": [
+     ".artclViewTitle"
+    ],
+    "body_selectors": [
+     ".artclView"
+    ],
+    "date_selectors": [
+     ".artclViewHead .right dl:nth-of-type(1) dd"
+    ]
+   },
+   "tags": {
+    "department": [
+     "소프트웨어공학과"
+    ]
+   },
+   "min_items": 5
+  },
+  {
+   "id": "snu_general",
+   "kind": "school",
+   "school": "snu",
+   "university": "서울대학교",
+   "board": "일반공지",
+   "list_url": "https://www.snu.ac.kr/snunow/notice/genernal",
+   "allowed_hosts": [
+    "www.snu.ac.kr",
+    "snu.ac.kr"
+   ],
+   "list": {
+    "row_selector": ".board-list tbody tr",
+    "link_selector": "td.col-title a[href]",
+    "id_attribute": "href",
+    "id_regex": "[?&]bbsidx=(\\d+)",
+    "title_selector": ".txt",
+    "date_selector": "td.col-date"
+   },
+   "detail": {
+    "title_selectors": [
+     ".board-view header.header h3.title"
+    ],
+    "body_selectors": [
+     ".board-view .content-wrap .content"
+    ],
+    "date_selectors": [
+     ".board-view header.header p.date"
+    ]
+   },
+   "min_items": 5
+  },
+  {
+   "id": "pnu_general",
+   "kind": "school",
+   "school": "pnu",
+   "university": "부산대학교",
+   "board": "공지사항",
+   "list_url": "https://www.pusan.ac.kr/kor/CMS/Board/Board.do?mCode=MN095&mgr_seq=3",
+   "allowed_hosts": [
+    "www.pusan.ac.kr",
+    "pusan.ac.kr"
+   ],
+   "list": {
+    "row_selector": ".board-list-table tbody tr",
+    "link_selector": "td.subject a[href]",
+    "id_attribute": "href",
+    "id_regex": "[?&]board_seq=(\\d+)",
+    "date_selector": "td.date",
+    "author_selector": "td.writer",
+    "pinned_classes": [
+     "isnotice"
+    ]
+   },
+   "detail": {
+    "title_selectors": [
+     ".board-view-title h4.vtitle"
+    ],
+    "body_selectors": [
+     "#boardContents",
+     ".board-view-contents"
+    ]
+   },
+   "min_items": 5
+  },
+  {
+   "id": "korea_academic",
+   "kind": "school",
+   "school": "korea",
+   "university": "고려대학교",
+   "board": "학사공지",
+   "list_url": "https://www.korea.ac.kr/ko/567/subview.do",
+   "allowed_hosts": [
+    "www.korea.ac.kr",
+    "korea.ac.kr",
+    "portal.korea.ac.kr"
+   ],
+   "list": {
+    "row_selector": ".boardWrap table.board-table tbody tr",
+    "link_selector": "td.td-title a[onclick*='jf_view']",
+    "id_attribute": "onclick",
+    "id_regex": "jf_view\\('([^']+)'",
+    "date_selector": "td.td-date",
+    "author_selector": "td.td-write",
+    "detail_url_template": "https://www.korea.ac.kr/portalBoard/ko/2/{id}/portalBoardView.do"
+   },
+   "detail": {
+    "title_selectors": [
+     ".board-view .view .title strong"
+    ],
+    "body_selectors": [
+     ".board-view .txt"
+    ],
+    "date_selectors": [
+     ".board-view .view .title ul.detail li:nth-of-type(1)"
+    ]
+   },
+   "min_items": 3
+  },
+  {
+   "id": "korea_cs_undergrad",
+   "kind": "school",
+   "school": "korea",
+   "university": "고려대학교",
+   "board": "컴퓨터학과 학부 공지",
+   "list_url": "https://cs.korea.ac.kr/cs/board/notice_under.do",
+   "allowed_hosts": [
+    "cs.korea.ac.kr"
+   ],
+   "list": {
+    "row_selector": ".common_notice table tbody tr",
+    "link_selector": "a.article-title[href]",
+    "id_attribute": "href",
+    "id_regex": "[?&]articleNo=(\\d+)",
+    "date_selector": "td:last-of-type",
+    "author_selector": "td:nth-of-type(3)",
+    "pinned_classes": [
+     "top-notice-bg"
+    ]
+   },
+   "detail": {
+    "title_selectors": [
+     ".t_view tr:nth-of-type(1) td",
+     ".t_view caption"
+    ],
+    "body_selectors": [
+     ".t_view .article-text .fr-view",
+     ".t_view .article-text"
+    ]
+   },
+   "tags": {
+    "department": [
+     "컴퓨터학과"
+    ],
+    "degree": [
+     "undergraduate"
+    ]
+   },
+   "min_items": 5
+  },
+  {
+   "id": "jj_academic",
+   "kind": "school",
+   "school": "jj",
+   "university": "전주대학교",
+   "board": "학사공지",
+   "list_url": "https://www.jj.ac.kr/jj/community/notice02.do",
+   "allowed_hosts": [
+    "www.jj.ac.kr",
+    "jj.ac.kr"
+   ],
+   "list": {
+    "row_selector": "table.board-table tbody tr",
+    "link_selector": ".b-title-box a[data-article-no]",
+    "id_attribute": "data-article-no",
+    "id_regex": "(\\d+)",
+    "date_selector": ".b-date",
+    "author_selector": ".b-writer",
+    "pinned_classes": [
+     "b-noti-box"
+    ]
+   },
+   "detail": {
+    "title_selectors": [
+     ".b-main-box .b-title-box > span:last-child"
+    ],
+    "body_selectors": [
+     ".b-content-box .fr-view",
+     ".b-content-box"
+    ],
+    "date_selectors": [
+     ".b-date-box span:last-child"
+    ]
+   },
+   "min_items": 5
+  },
+  {
+   "id": "skku_general",
+   "kind": "school",
+   "school": "skku",
+   "university": "성균관대학교",
+   "board": "공지사항",
+   "list_url": "https://www.skku.edu/skku/campus/skk_comm/notice01.do",
+   "allowed_hosts": [
+    "www.skku.edu",
+    "skku.edu"
+   ],
+   "list": {
+    "row_selector": "ul.board-list-wrap > li",
+    "link_selector": "dt.board-list-content-title a[href*='articleNo=']",
+    "id_attribute": "href",
+    "id_regex": "[?&]articleNo=(\\d+)",
+    "date_selector": "dd.board-list-content-info li:nth-of-type(3)",
+    "author_selector": "dd.board-list-content-info li:nth-of-type(2)",
+    "category_selector": ".c-board-list-category"
+   },
+   "detail": {
+    "title_selectors": [
+     ".board_view thead em.ellipsis"
+    ],
+    "body_selectors": [
+     ".board_view .board-write-box dd"
+    ],
+    "date_selectors": [
+     ".board_view thead span.date"
+    ]
+   },
+   "min_items": 5
+  },
+  {
+   "id": "gachon_general",
+   "kind": "school",
+   "school": "gachon",
+   "university": "가천대학교",
+   "board": "공지사항",
+   "list_url": "https://www.gachon.ac.kr/kor/7986/subview.do",
+   "allowed_hosts": [
+    "www.gachon.ac.kr",
+    "gachon.ac.kr"
+   ],
+   "list": {
+    "row_selector": "table.board-table tbody tr",
+    "link_selector": "td.td-subject a[href*='jf_viewArtcl']",
+    "id_attribute": "href",
+    "id_regex": "jf_viewArtcl\\('kor',\\s*'(\\d+)'\\)",
+    "title_selector": "strong",
+    "date_selector": "td.td-date",
+    "author_selector": "td.td-write",
+    "detail_url_template": "https://www.gachon.ac.kr/commonNotice/kor/{id}/artclView.do"
+   },
+   "detail": {
+    "title_selectors": [
+     ".board-view-info .view-title"
+    ],
+    "body_selectors": [
+     ".view-con"
+    ],
+    "date_selectors": [
+     ".view-util dl.write dd"
+    ]
+   },
+   "min_items": 5
+  },
+  {
+   "id": "ssu_general",
+   "kind": "school",
+   "school": "ssu",
+   "university": "숭실대학교",
+   "board": "공지사항",
+   "list_url": "https://scatch.ssu.ac.kr/%EA%B3%B5%EC%A7%80%EC%82%AC%ED%95%AD/",
+   "allowed_hosts": [
+    "scatch.ssu.ac.kr"
+   ],
+   "list": {
+    "row_selector": "ul.notice-lists > li:not(.notice_head)",
+    "link_selector": ".notice_col3 a[href*='slug=']",
+    "id_attribute": "href",
+    "id_regex": "[?&]slug=([^&]+)",
+    "title_selector": "span.d-inline-blcok.m-pt-5",
+    "date_selector": ".notice_col1 .h2",
+    "author_selector": ".notice_col4",
+    "category_selector": ".notice_col3 span.label",
+    "pinned_classes": [
+     "start"
+    ]
+   },
+   "detail": {
+    "title_selectors": [
+     ".bg-white.p-4.mb-5 > h1"
+    ],
+    "body_selectors": [
+     ".bg-white.p-4.mb-5 > div:last-child"
+    ],
+    "date_selectors": [
+     ".bg-white.p-4.mb-5 > .clearfix .float-left:first-child"
+    ]
+   },
+   "min_items": 5
+  },
+  {
+   "id": "jnu_software",
+   "kind": "school",
+   "school": "jnu",
+   "university": "전남대학교",
+   "board": "소프트웨어공학과 공지사항",
+   "list_url": "https://sw.jnu.ac.kr/bbs/sw/1038/artclList.do",
+   "allowed_hosts": [
+    "sw.jnu.ac.kr"
+   ],
+   "list": {
+    "row_selector": "table.board-table tbody tr",
+    "link_selector": "td.td-subject a[href*='artclView.do']",
+    "id_attribute": "href",
+    "id_regex": "/(\\d+)/artclView",
+    "title_selector": "strong",
+    "date_selector": "td.td-date",
+    "author_selector": "td.td-write",
+    "category_selector": "td.td-num span",
+    "pinned_classes": [
+     "notice"
+    ]
+   },
+   "detail": {
+    "title_selectors": [
+     ".board-view-info .view-title"
+    ],
+    "body_selectors": [
+     ".view-con"
+    ],
+    "date_selectors": [
+     ".view-util dl.write dd"
+    ]
+   },
+   "tags": {
+    "department": [
+     "소프트웨어공학과"
+    ]
+   },
+   "min_items": 5
+  },
+  {
+   "id": "scnu_academic",
+   "kind": "school",
+   "school": "scnu",
+   "university": "국립순천대학교",
+   "board": "학사공지",
+   "list_url": "https://www.scnu.ac.kr/SCNU/na/ntt/selectNttList.do?mi=1132&bbsId=1041",
+   "allowed_hosts": [
+    "www.scnu.ac.kr",
+    "scnu.ac.kr"
+   ],
+   "list": {
+    "row_selector": ".BD_list table tbody tr",
+    "link_selector": "td.ta_l a[href*='nttSn=']",
+    "id_attribute": "href",
+    "id_regex": "[?&]nttSn=(\\d+)",
+    "date_selector": "td:nth-of-type(4)",
+    "author_selector": "td.BD_listUser"
+   },
+   "detail": {
+    "title_selectors": [
+     ".BD_table th.title"
+    ],
+    "body_selectors": [
+     ".BD_table td.dragable"
+    ],
+    "date_selectors": [
+     ".BD_table tbody tr:nth-of-type(2) td:nth-of-type(2)"
+    ]
+   },
+   "min_items": 5
+  },
+  {
+   "id": "mju_general",
+   "kind": "school",
+   "school": "mju",
+   "university": "명지대학교",
+   "board": "일반공지",
+   "list_url": "https://www.mju.ac.kr/bbs/mjukr/143/artclList.do",
+   "allowed_hosts": [
+    "www.mju.ac.kr",
+    "mju.ac.kr"
+   ],
+   "list": {
+    "row_selector": "._articleTable table tbody tr",
+    "link_selector": "td._artclTdTitle a.artclLinkView",
+    "id_attribute": "href",
+    "id_regex": "/(\\d+)/artclView",
+    "title_selector": "strong",
+    "date_selector": "td._artclTdRdate",
+    "author_selector": "td._artclTdWriter",
+    "pinned_classes": [
+     "headline"
+    ]
+   },
+   "detail": {
+    "title_selectors": [
+     ".artclViewTitle"
+    ],
+    "body_selectors": [
+     ".artclView"
+    ],
+    "date_selectors": [
+     ".head_info li:nth-of-type(1)"
+    ]
+   },
+   "min_items": 5
+  },
+  {
+   "id": "konkuk_academic",
+   "kind": "school",
+   "school": "konkuk",
+   "university": "건국대학교",
+   "board": "학사공지",
+   "list_url": "https://www.konkuk.ac.kr/bbs/konkuk/234/artclList.do",
+   "allowed_hosts": [
+    "www.konkuk.ac.kr",
+    "konkuk.ac.kr"
+   ],
+   "list": {
+    "row_selector": "table.board-table tbody tr",
+    "link_selector": "td.td-subject a[href*='artclView.do']",
+    "id_attribute": "href",
+    "id_regex": "/(\\d+)/artclView",
+    "title_selector": "strong",
+    "date_selector": "td.td-date",
+    "author_selector": "td.td-write",
+    "category_selector": "td.td-num span",
+    "pinned_classes": [
+     "notice"
+    ]
+   },
+   "detail": {
+    "title_selectors": [
+     ".board-view-info .view-title"
+    ],
+    "body_selectors": [
+     ".view-con"
+    ],
+    "date_selectors": [
+     ".view-util dl.write dd"
+    ]
+   },
+   "min_items": 5
+  },
+  {
+   "id": "kookmin_academic",
+   "kind": "school",
+   "school": "kookmin",
+   "university": "국민대학교",
+   "board": "학사공지",
+   "list_url": "https://www.kookmin.ac.kr/user/kmuNews/notice/4/index.do",
+   "allowed_hosts": [
+    "www.kookmin.ac.kr",
+    "kookmin.ac.kr",
+    "portal.kookmin.ac.kr",
+    "kep.kookmin.ac.kr"
+   ],
+   "list": {
+    "row_selector": ".list_type .board_list > ul > li",
+    "link_selector": "a[href*='/notice/4/'][href*='/view.do']",
+    "id_attribute": "href",
+    "id_regex": "/notice/4/(\\d+)/view\\.do",
+    "title_selector": "p.title",
+    "pinned_classes": [
+     "notice"
+    ]
+   },
+   "detail": {
+    "title_selectors": [
+     ".board_view .view_tit"
+    ],
+    "body_selectors": [
+     ".board_view .view_inner"
+    ],
+    "date_selectors": [
+     ".board_view .board_etc span:nth-of-type(1)"
+    ]
+   },
+   "min_items": 5
+  },
+  {
+   "id": "hanyang_seoul",
+   "kind": "school",
+   "school": "hanyang",
+   "university": "한양대학교",
+   "board": "서울캠퍼스 전체공지",
+   "list_url": "https://www.hanyang.ac.kr/web/www/notice_all",
+   "allowed_hosts": [
+    "www.hanyang.ac.kr",
+    "hanyang.ac.kr",
+    "site.hanyang.ac.kr"
+   ],
+   "list": {
+    "row_selector": ".noticeBoard-view .hyu-list-body-inner[role='list'] > .hyu-list-body-item",
+    "link_selector": "h4 a[href*='entryId=']",
+    "id_attribute": "href",
+    "id_regex": "[?&]_[^&]*entryId=(\\d+)",
+    "date_selector": ".hyu-list-body-item-col:last-child > span",
+    "category_selector": "p .hyu-badge[data-itemvalue]:not(.custom-bg)",
+    "include_selector": "p .hyu-badge.custom-bg[data-itemvalue]",
+    "include_regex": "^서울$",
+    "detail_url_template": "https://www.hanyang.ac.kr/notice_all?p_p_id=kr_ac_hanyang_noticeBoard_web_portlet_NoticeBoardPortlet&p_p_lifecycle=0&p_p_state=normal&p_p_mode=view&_kr_ac_hanyang_noticeBoard_web_portlet_NoticeBoardPortlet_action=view_message&_kr_ac_hanyang_noticeBoard_web_portlet_NoticeBoardPortlet_entryId={id}"
+   },
+   "detail": {
+    "title_selectors": [
+     ".noticeBoard-view-message .hyu-list-body-inner[role='article'] h4"
+    ],
+    "body_selectors": [
+     ".noticeBoard-view-message .entry-content"
+    ],
+    "date_selectors": [
+     ".noticeBoard-view-message .hyu-meta-item:nth-of-type(2) span:last-child"
+    ]
+   },
+   "tags": {
+    "campus": [
+     "서울"
+    ]
+   },
+   "min_items": 2
+  },
+  {
+   "id": "hanyang_erica",
+   "kind": "school",
+   "school": "hanyang",
+   "university": "한양대학교",
+   "board": "ERICA캠퍼스 전체공지",
+   "list_url": "https://www.hanyang.ac.kr/web/www/notice_all",
+   "allowed_hosts": [
+    "www.hanyang.ac.kr",
+    "hanyang.ac.kr",
+    "site.hanyang.ac.kr"
+   ],
+   "list": {
+    "row_selector": ".noticeBoard-view .hyu-list-body-inner[role='list'] > .hyu-list-body-item",
+    "link_selector": "h4 a[href*='entryId=']",
+    "id_attribute": "href",
+    "id_regex": "[?&]_[^&]*entryId=(\\d+)",
+    "date_selector": ".hyu-list-body-item-col:last-child > span",
+    "category_selector": "p .hyu-badge[data-itemvalue]:not(.custom-bg)",
+    "include_selector": "p .hyu-badge.custom-bg[data-itemvalue]",
+    "include_regex": "^ERICA$",
+    "detail_url_template": "https://www.hanyang.ac.kr/notice_all?p_p_id=kr_ac_hanyang_noticeBoard_web_portlet_NoticeBoardPortlet&p_p_lifecycle=0&p_p_state=normal&p_p_mode=view&_kr_ac_hanyang_noticeBoard_web_portlet_NoticeBoardPortlet_action=view_message&_kr_ac_hanyang_noticeBoard_web_portlet_NoticeBoardPortlet_entryId={id}"
+   },
+   "detail": {
+    "title_selectors": [
+     ".noticeBoard-view-message .hyu-list-body-inner[role='article'] h4"
+    ],
+    "body_selectors": [
+     ".noticeBoard-view-message .entry-content"
+    ],
+    "date_selectors": [
+     ".noticeBoard-view-message .hyu-meta-item:nth-of-type(2) span:last-child"
+    ]
+   },
+   "tags": {
+    "campus": [
+     "ERICA"
+    ]
+   },
+   "min_items": 2
+  },
+  {
+   "id": "transfer_kangwon",
+   "kind": "transfer",
+   "university": "강원대학교",
+   "board": "transfer_board",
+   "list_url": "https://admission.kangwon.ac.kr/admission/bbs/1149/list.do",
+   "official_url": "https://admission.kangwon.ac.kr/admission/bbs/1149/list.do",
+   "allowed_hosts": [
+    "admission.kangwon.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a[href]",
+    "href_regex": "/admission/bbs/1149/detail\\.do"
+   },
+   "mixed_board": false,
+   "note": "모집단위별 공인영어 반영 여부 확인"
+  },
+  {
+   "id": "transfer_gnu",
+   "kind": "transfer",
+   "university": "경상국립대학교",
+   "board": "transfer_board",
+   "list_url": "https://new.gnu.ac.kr/new/na/ntt/selectNttList.do?mi=4967&bbsId=2376",
+   "official_url": "https://new.gnu.ac.kr/new/na/ntt/selectNttList.do?mi=4967&bbsId=2376",
+   "allowed_hosts": [
+    "new.gnu.ac.kr",
+    "www.gnu.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a.nttInfoBtn[data-id]",
+    "href_regex": "selectNttInfo\\.do",
+    "url_value_attribute": "data-id",
+    "detail_url_template": "/new/na/ntt/selectNttInfo.do?mi=4967&bbsId=2376&nttSn={value}"
+   },
+   "mixed_board": false,
+   "note": "공인영어 인정 시험·학과별 반영 방식 확인"
+  },
+  {
+   "id": "transfer_knu",
+   "kind": "transfer",
+   "university": "경북대학교",
+   "board": "transfer_board",
+   "list_url": "https://ipsi1.knu.ac.kr/notice/?r=GCgVAF0VXCI4KGImIDQ",
+   "official_url": "https://ipsi1.knu.ac.kr/notice/?r=GCgVAF0VXCI4KGImIDQ",
+   "allowed_hosts": [
+    "ipsi1.knu.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a[href]",
+    "href_regex": "/notice/view\\.php"
+   },
+   "mixed_board": false,
+   "note": "TOEIC 등 공인영어 환산표와 모집단위 확인"
+  },
+  {
+   "id": "transfer_pusan",
+   "kind": "transfer",
+   "university": "부산대학교",
+   "board": "mixed_board",
+   "list_url": "https://go.pusan.ac.kr/college_2016/main/main.asp",
+   "official_url": "https://go.pusan.ac.kr/college_2016/main/main.asp",
+   "allowed_hosts": [
+    "go.pusan.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a[href]",
+    "href_regex": "/college_2016/pages/index\\.asp"
+   },
+   "mixed_board": true,
+   "note": "공인영어 제출 대상·학과별 전형요소 확인"
+  },
+  {
+   "id": "transfer_jnu",
+   "kind": "transfer",
+   "university": "전남대학교",
+   "board": "transfer_board",
+   "list_url": "https://admission.jnu.ac.kr/WebApp/web/HOM/COM/Board/board.aspx?bbsMode=list&boardID=393&cate=1569&key=1800&page=1",
+   "official_url": "https://admission.jnu.ac.kr/WebApp/web/HOM/COM/Board/board.aspx?bbsMode=list&boardID=393&cate=1569&key=1800&page=1",
+   "allowed_hosts": [
+    "admission.jnu.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a[href]",
+    "href_regex": "board\\.aspx.*bbsMode=view"
+   },
+   "mixed_board": false,
+   "note": "TOEIC 등 공인영어 반영 모집단위 확인"
+  },
+  {
+   "id": "transfer_jbnu",
+   "kind": "transfer",
+   "university": "전북대학교",
+   "board": "mixed_board",
+   "list_url": "https://enter.jbnu.ac.kr/submenu.do?menuurl=YQ5d0v6456ZAAIjeRW71OQ%3D%3D",
+   "official_url": "https://enter.jbnu.ac.kr/submenu.do?menuurl=YQ5d0v6456ZAAIjeRW71OQ%3D%3D",
+   "allowed_hosts": [
+    "enter.jbnu.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a[href]",
+    "href_regex": "(?:detail|submenu)\\.do"
+   },
+   "mixed_board": true,
+   "note": "일반대학 다수 모집단위 공인영어 반영, 예외 확인"
+  },
+  {
+   "id": "transfer_donga",
+   "kind": "transfer",
+   "university": "동아대학교",
+   "board": "transfer_board",
+   "list_url": "https://ent.donga.ac.kr/admission/html/transfer/notice.asp",
+   "official_url": "https://ent.donga.ac.kr/admission/html/transfer/notice.asp",
+   "allowed_hosts": [
+    "ent.donga.ac.kr"
+   ],
+   "list": {
+    "link_selector": "td.subject a[onclick^=\"viewData\"]",
+    "href_regex": "noticeView\\.asp",
+    "url_value_attribute": "onclick",
+    "url_value_regex": "viewData\\('([0-9]+)'\\)",
+    "detail_url_template": "/admission/html/transfer/noticeView.asp?BOARD_IDX={value}"
+   },
+   "mixed_board": false,
+   "note": "의학과 등 모집단위별 공인영어 인정 기준 확인"
+  },
+  {
+   "id": "transfer_chungbuk",
+   "kind": "transfer",
+   "university": "충북대학교",
+   "board": "mixed_board",
+   "list_url": "https://ipsi.chungbuk.ac.kr/kor.do",
+   "official_url": "https://ipsi.chungbuk.ac.kr/kor.do",
+   "allowed_hosts": [
+    "ipsi.chungbuk.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a[href]",
+    "href_regex": "BBSMSTR_000000000021"
+   },
+   "mixed_board": true,
+   "note": "공인영어 반영 학과·필기고사 병행 여부 확인"
+  },
+  {
+   "id": "transfer_duksung",
+   "kind": "transfer",
+   "university": "덕성여자대학교",
+   "board": "transfer_board",
+   "list_url": "https://www.ds.ac.kr/notice/index.php?f=&m_type=PYEONIP&s=",
+   "official_url": "https://www.ds.ac.kr/notice/index.php?f=&m_type=PYEONIP&s=",
+   "allowed_hosts": [
+    "www.ds.ac.kr",
+    "enter.duksung.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a[href*=\"view.php\"][href*=\"m_type=PYEONIP\"]",
+    "href_regex": "view\\.php.*m_type=PYEONIP"
+   },
+   "mixed_board": false,
+   "note": "연도·모집단위별 공인영어 또는 필기고사 기준 확인"
+  },
+  {
+   "id": "transfer_dongduk",
+   "kind": "transfer",
+   "university": "동덕여자대학교",
+   "board": "transfer_board",
+   "list_url": "https://ipsi.dongduk.ac.kr/ipsi/contents/transfer-notice.do",
+   "official_url": "https://ipsi.dongduk.ac.kr/ipsi/contents/transfer-notice.do",
+   "allowed_hosts": [
+    "ipsi.dongduk.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a.subTit[onclick^=\"fn_goView\"]",
+    "href_regex": "admhelper-notice\\.do",
+    "url_value_attribute": "onclick",
+    "url_value_regex": "fn_goView\\('([0-9]+)'",
+    "detail_url_template": "/ipsi/contents/admhelper-notice.do?schM=view&id={value}"
+   },
+   "mixed_board": false,
+   "note": "2027 변경 포함 공인영어·영어필답 적용 전형 확인"
+  },
+  {
+   "id": "transfer_wku",
+   "kind": "transfer",
+   "university": "원광대학교",
+   "board": "transfer_board",
+   "list_url": "https://ipsi.wku.ac.kr/submenu.do?menuurl=k%2BqZC0HTrql005wmLhNoXA%3D%3D",
+   "official_url": "https://ipsi.wku.ac.kr/submenu.do?menuurl=k%2BqZC0HTrql005wmLhNoXA%3D%3D",
+   "allowed_hosts": [
+    "ipsi.wku.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a[href^=\"javascript:pop_pass_open\"]",
+    "href_regex": "detail\\.do",
+    "url_value_attribute": "href",
+    "url_value_regex": "pop_pass_open\\('([0-9]+)'",
+    "detail_url_template": "/detail.do?board_seq={value}&categoryid=7"
+   },
+   "mixed_board": false,
+   "note": "의·치·약학 등 모집단위별 공인영어·필기 기준 확인"
+  },
+  {
+   "id": "transfer_uos",
+   "kind": "transfer",
+   "university": "서울시립대학교",
+   "board": "mixed_board",
+   "list_url": "https://admission.uos.ac.kr/admissionNew/main.do",
+   "official_url": "https://admission.uos.ac.kr/admissionNew/main.do",
+   "allowed_hosts": [
+    "admission.uos.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a[href]"
+   },
+   "mixed_board": true,
+   "note": "공인영어 인정 시험·최저 또는 환산 기준 확인"
+  },
+  {
+   "id": "transfer_cku",
+   "kind": "transfer",
+   "university": "가톨릭관동대학교",
+   "board": "mixed_board",
+   "list_url": "https://www.cku.ac.kr/iphak/index.do",
+   "official_url": "https://www.cku.ac.kr/iphak/4976/subview.do",
+   "allowed_hosts": [
+    "www.cku.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a[href]",
+    "href_regex": "/bbs/iphak/(?:1059|1060)/[0-9]+/artclView\\.do"
+   },
+   "mixed_board": true,
+   "note": "의학과·간호학과 공인영어 제출 기준 확인"
+  },
+  {
+   "id": "transfer_kmou",
+   "kind": "transfer",
+   "university": "국립한국해양대학교",
+   "board": "transfer_board",
+   "list_url": "https://www.kmou.ac.kr/ipsi/main.do?mi=3434",
+   "official_url": "https://www.kmou.ac.kr/ipsi/na/ntt/selectNttList.do?bbsId=10319&mi=3339&currPage=1&srch_aditCol1=%ED%8E%B8%EC%9E%85%ED%95%99",
+   "allowed_hosts": [
+    "www.kmou.ac.kr",
+    "www.kmaritime.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a[href]",
+    "href_regex": "selectNttInfo\\.do"
+   },
+   "mixed_board": false,
+   "note": "해사·해양계열 모집단위별 공인영어 기준 확인"
+  },
+  {
+   "id": "transfer_changwon",
+   "kind": "transfer",
+   "university": "국립창원대학교",
+   "board": "mixed_board",
+   "list_url": "https://www.changwon.ac.kr/ipsi/na/ntt/selectNttList.do?mi=4252&bbsId=1624&srch_aditCol1=%ED%8E%B8%EC%9E%85%ED%95%99",
+   "official_url": "https://www.changwon.ac.kr/ipsi/na/ntt/selectNttList.do?mi=4252&bbsId=1624",
+   "allowed_hosts": [
+    "www.changwon.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a.nttInfoBtn[data-id]",
+    "href_regex": "selectNttInfo\\.do",
+    "url_value_attribute": "data-id",
+    "detail_url_template": "/ipsi/na/ntt/selectNttInfo.do?mi=4252&bbsId=1624&nttSn={value}"
+   },
+   "mixed_board": true,
+   "note": "모집단위별 공인영어 반영 및 면접 여부 확인"
+  },
+  {
+   "id": "transfer_kongju",
+   "kind": "transfer",
+   "university": "국립공주대학교",
+   "board": "transfer_board",
+   "list_url": "https://ipsi.kongju.ac.kr/kor/article/ATCL9697ec09c",
+   "official_url": "https://ipsi.kongju.ac.kr/kor/article/ATCL9697ec09c",
+   "allowed_hosts": [
+    "ipsi.kongju.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a[onclick*=\"article.view\"]",
+    "href_regex": "ATCL9697ec09c/",
+    "url_value_attribute": "onclick",
+    "url_value_regex": "article\\.view\\('([0-9]+)'\\)",
+    "detail_url_template": "/kor/article/ATCL9697ec09c/{value}"
+   },
+   "mixed_board": false,
+   "note": "공인영어 반영 모집단위와 면접 배점 확인"
+  },
+  {
+   "id": "transfer_yonsei_mirae",
+   "kind": "transfer",
+   "university": "연세대학교 미래캠퍼스",
+   "board": "transfer_board",
+   "list_url": "https://admission.yonsei.ac.kr/mirae/admission/html/transfer/notice.asp",
+   "official_url": "https://admission.yonsei.ac.kr/mirae/admission/html/transfer/notice.asp",
+   "allowed_hosts": [
+    "admission.yonsei.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a[href*=\"noticeView.asp\"]",
+    "href_regex": "noticeView\\.asp.*BBS_NO="
+   },
+   "mixed_board": false,
+   "note": "전형별 공인어학성적 제출·서류평가 기준 확인"
+  },
+  {
+   "id": "transfer_ut",
+   "kind": "transfer",
+   "university": "국립한국교통대학교",
+   "board": "mixed_board",
+   "list_url": "https://www.ut.ac.kr/cop/bbs/BBSMSTR_000000000661/selectBoardList.do?kind=%ED%8E%B8%EC%9E%85&mno=sub05_01_01_04",
+   "official_url": "https://www.ut.ac.kr/ipsi/index.do",
+   "allowed_hosts": [
+    "www.ut.ac.kr"
+   ],
+   "list": {
+    "link_selector": "form[name=\"subForm\"]",
+    "href_regex": "BBSMSTR_000000000661.*selectBoardArticle\\.do",
+    "title_selector": "input[type=\"submit\"][value]",
+    "title_attribute": "value",
+    "url_value_selector": "input[name=\"nttId\"][value]",
+    "url_value_attribute": "value",
+    "url_value_regex": "^([0-9]+)$",
+    "detail_url_template": "/cop/bbs/BBSMSTR_000000000661/selectBoardArticle.do?bbsId=BBSMSTR_000000000661&nttId={value}"
+   },
+   "mixed_board": true,
+   "note": "공인영어 제출 대상·캠퍼스·모집단위 확인"
+  },
+  {
+   "id": "transfer_scnu",
+   "kind": "transfer",
+   "university": "국립순천대학교",
+   "board": "transfer_board",
+   "list_url": "https://www.scnu.ac.kr/iphak/na/ntt/selectNttList.do?mi=5079&bbsId=2515",
+   "official_url": "https://www.scnu.ac.kr/iphak/na/ntt/selectNttList.do?mi=5079&bbsId=2515",
+   "allowed_hosts": [
+    "www.scnu.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a[href]",
+    "href_regex": "/iphak/na/ntt/selectNttInfo\\.do"
+   },
+   "mixed_board": false,
+   "note": "약학대학 등 모집단위별 공인영어 기준 확인"
+  },
+  {
+   "id": "transfer_kunsan",
+   "kind": "transfer",
+   "university": "국립군산대학교",
+   "board": "transfer_board",
+   "list_url": "https://www.kunsan.ac.kr/iphak/index.kunsan?menuCd=DOM_000001214001000000",
+   "official_url": "https://www.kunsan.ac.kr/iphak/index.kunsan?menuCd=DOM_000001214001000000",
+   "allowed_hosts": [
+    "www.kunsan.ac.kr"
+   ],
+   "list": {
+    "link_selector": "a[href]",
+    "href_regex": "/iphak/(?:board/)?view\\.kunsan"
+   },
+   "mixed_board": false,
+   "note": "공인영어 반영 여부와 학과별 전형방식 확인"
+  },
+  {
+   "id": "transfer_pknu",
+   "kind": "transfer",
+   "university": "국립부경대학교",
+   "official_url": "https://iphak.pknu.ac.kr/pknu/board/board.htm?code=iphak_help&mode=list&ctg_cd=ta",
+   "manual": true,
+   "note": "공식 입학처 robots.txt가 전체 자동 수집을 허용하지 않아 공식 링크 직접 확인만 제공"
+  },
+  {
+   "id": "transfer_chungnam",
+   "kind": "transfer",
+   "university": "충남대학교",
+   "official_url": "https://ipsi.cnu.ac.kr/_prog/_board/?code=notice_faculty&post_dvs_cd=03&site_dvs_cd=uadm&menu_dvs_cd=0301",
+   "manual": true,
+   "note": "공식 입학처 robots.txt가 전체 자동 수집을 허용하지 않아 공식 링크 직접 확인만 제공"
+  }
+ ]
+}

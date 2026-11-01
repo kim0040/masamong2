@@ -1,0 +1,13 @@
+{
+  "name": "Masamong",
+  "short_name": "Masamong",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FAFAF9",
+  "theme_color": "#F08A3C",
+  "icons": [
+    { "src": "/brand/pwa-icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/brand/pwa-icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/brand/pwa-icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "_about": "Usage scenarios for TestLiveScenarios, weighted by what people asked the previous bot (2,912 questions in its log, 2026-01..09): mostly small talk, then weather, stocks, memory, pictures, news, places, FX. Every sentence is written for this file; none is copied from the logs. expect_tools: one of them must run on the last turn; no_tool: none may; no_memory: the channel has no memory; params: a planned parameter must contain the text; answer_any: the answer must contain one; answer_none: it must contain none.",
+  "forbid_in_every_answer": ["tool_plan", "\"parameters\"", "<기억>", "<도구결과>", "AI 언어 모델", "언어 모델로서"],
+  "scenarios": [
+    {"id": "greet", "category": "small_talk", "turns": ["안녕 마사몽 ㅎㅎ"], "no_tool": true},
+    {"id": "tired", "category": "small_talk", "turns": ["오늘 진짜 피곤하다 ㅠㅠ"], "no_tool": true},
+    {"id": "laugh", "category": "small_talk", "turns": ["ㅋㅋㅋㅋㅋ 개웃기네"], "no_tool": true},
+    {"id": "teased", "category": "small_talk", "turns": ["마사몽 바보냐"], "no_tool": true, "answer_none": ["죄송합니다", "불쾌"]},
+    {"id": "opinion", "category": "small_talk", "turns": ["민트초코 어떻게 생각해?"], "no_tool": true},
+    {"id": "advice", "category": "small_talk", "turns": ["시험 공부 하기 싫은데 어떡하지"], "no_tool": true},
+    {"id": "game", "category": "small_talk", "turns": ["롤 랭크 또 졌다 진짜"], "no_tool": true},
+    {"id": "about_bot", "category": "small_talk", "turns": ["너 몇 살이야?"], "no_tool": true},
+
+    {"id": "blackhole", "category": "knowledge", "turns": ["블랙홀이 뭐야?"], "answer_any": ["중력", "빛"]},
+    {"id": "sky_blue", "category": "knowledge", "turns": ["하늘은 왜 파래?"], "answer_any": ["산란", "빛", "파장"]},
+    {"id": "py_java", "category": "knowledge", "turns": ["파이썬이랑 자바 차이가 뭐야?"], "answer_any": ["파이썬", "Python"]},
+    {"id": "movie", "category": "knowledge", "turns": ["주말에 볼 영화 하나 추천해줘"]},
+
+    {"id": "birthday", "category": "writing", "turns": ["친구 생일 축하 메시지 짧게 써줘"], "no_tool": true, "answer_any": ["생일", "축하"]},
+    {"id": "translate", "category": "writing", "turns": ["'오늘 회의 늦어서 미안해'를 영어로 번역해줘"], "no_tool": true, "answer_any": ["sorry", "Sorry", "late"]},
+
+    {"id": "tent", "category": "memory", "turns": ["캠핑 갈 때 텐트 누가 챙기기로 했지?"], "answer_any": ["도윤"]},
+    {"id": "holiday", "category": "memory", "turns": ["5월 연휴에 우리 뭐 하기로 했었지?"], "answer_any": ["캠핑", "가평"]},
+    {"id": "seoa_role", "category": "memory", "turns": ["서아는 뭐 담당이었어?"], "answer_any": ["고기", "숙소"]},
+    {"id": "unknown_person", "category": "memory", "turns": ["민준이가 저번에 뭐 사오기로 했지?"], "answer_none": ["민준이가 사오기로 했", "민준이가 챙기기로 했"]},
+    {"id": "tent_no_memory", "category": "memory", "no_memory": true, "turns": ["캠핑 갈 때 텐트 누가 챙기기로 했지?"], "answer_none": ["챙기기로 했잖아", "챙기기로 했어", "챙기기로 했던 것 같", "맡기로 했잖아", "도윤"]},
+
+    {"id": "weather_seoul", "category": "weather", "turns": ["오늘 서울 날씨 어때?"], "expect_tools": ["weather.query"], "params": {"weather.query": {"region": "서울"}}},
+    {"id": "weather_busan_tomorrow", "category": "weather", "turns": ["내일 부산 비 와?"], "expect_tools": ["weather.query"], "params": {"weather.query": {"region": "부산", "day_offset": "1"}}},
+    {"id": "weather_tokyo", "category": "weather", "turns": ["도쿄 날씨 알려줘"], "expect_tools": ["weather.query"]},
+    {"id": "umbrella", "category": "weather", "turns": ["오늘 우산 챙겨야 돼?"], "expect_tools": ["weather.query"]},
+    {"id": "weekend_weather", "category": "weather", "turns": ["이번 주말 서울 날씨 어때?"], "expect_tools": ["weather.query"], "answer_none": ["다시 물어봐", "아직 안 떠", "예보는 아직", "아직 멀", "아직 며칠"]},
+    {"id": "next_monday", "category": "weather", "turns": ["다음 주 월요일 서울 비 와?"], "expect_tools": ["weather.query"], "answer_none": ["다시 물어봐"]},
+
+    {"id": "quake", "category": "disaster", "turns": ["요즘 지진 난 거 있어?"], "expect_tools": ["disasters.query"]},
+
+    {"id": "apple", "category": "stock", "turns": ["애플 주가 얼마야?"], "expect_tools": ["finance.quote"], "params": {"finance.quote": {"symbol": "AAPL"}}},
+    {"id": "samsung", "category": "stock", "turns": ["삼성전자 주가 알려줘"], "expect_tools": ["finance.quote", "search.web"]},
+    {"id": "kospi", "category": "stock", "turns": ["코스피 지금 몇이야?"], "expect_tools": ["finance.quote", "search.web"]},
+    {"id": "bitcoin", "category": "stock", "turns": ["비트코인 지금 얼마야?"], "expect_tools": ["finance.quote", "search.web"]},
+    {"id": "tesla_krw", "category": "stock", "turns": ["테슬라 주가 원화로 얼마야?"], "expect_tools": ["finance.quote"], "answer_any": ["원"]},
+
+    {"id": "usd", "category": "fx", "turns": ["달러 환율 얼마야?"], "expect_tools": ["finance.fx"], "answer_any": ["원"]},
+    {"id": "jpy100", "category": "fx", "turns": ["엔화 100엔에 얼마야?"], "expect_tools": ["finance.fx"], "answer_any": ["원"]},
+
+    {"id": "news_today", "category": "news", "turns": ["오늘 주요 뉴스 알려줘"], "expect_tools": ["search.web"]},
+    {"id": "iphone", "category": "news", "turns": ["최근에 나온 아이폰 소식 있어?"], "expect_tools": ["search.web"]},
+    {"id": "kbo", "category": "news", "turns": ["어제 프로야구 결과 알려줘"], "expect_tools": ["search.web"]},
+    {"id": "president", "category": "news", "turns": ["지금 한국 대통령 누구야?"], "expect_tools": ["search.web"]},
+
+    {"id": "gangnam_lunch", "category": "place", "turns": ["강남역 근처 점심 맛집 추천해줘"], "expect_tools": ["places.search"], "params": {"places.search": {"query": "강남"}}},
+    {"id": "hongdae_cafe", "category": "place", "turns": ["홍대 분위기 좋은 카페 알려줘"], "expect_tools": ["places.search"], "answer_none": ["안 나와", "안 뜨", "시원찮"]},
+    {"id": "nearby", "category": "place", "turns": ["근처 맛집 추천해줘"], "answer_any": ["어디", "동네", "위치", "지역", "근처가"], "answer_none": ["단양", "의정부", "사상"]},
+
+    {"id": "draw_cat", "category": "image", "turns": ["고양이 그림 하나 그려줘"], "expect_tools": ["images.generate"]},
+    {"id": "draw_wide", "category": "image", "turns": ["바다 노을 풍경 16:9로 그려줘"], "expect_tools": ["images.generate"], "params": {"images.generate": {"aspect_ratio": "16:9"}}},
+
+    {"id": "help", "category": "help", "turns": ["너 뭐 할 수 있어?"], "expect_tools": ["help.version"]},
+    {"id": "ranking", "category": "ranking", "turns": ["이번 주 수다왕 누구야?"], "expect_tools": ["activity.ranking"]},
+    {"id": "poll", "category": "poll", "turns": ["점심 메뉴 투표 만들어줘 짜장 짬뽕 볶음밥"], "expect_tools": ["polls.create"]},
+    {"id": "remind", "category": "remind", "turns": ["내일 아침 8시에 회의 있다고 알려줘"], "expect_tools": ["reminders.propose"]},
+    {"id": "link_off", "category": "link", "turns": ["이 기사 요약해줘 https://example.com/news/123"], "answer_any": ["링크", "읽", "열", "못"]},
+    {"id": "summary", "category": "summary", "turns": ["지금까지 대화 요약해줘"], "expect_tools": ["summaries.channel"]},
+
+    {"id": "followup_weather", "category": "followup", "turns": ["부산 날씨 어때?", "그럼 내일은?"], "expect_tools": ["weather.query"], "params": {"weather.query": {"region": "부산", "day_offset": "1"}}},
+    {"id": "followup_stock", "category": "followup", "turns": ["애플 주가 얼마야?", "그럼 엔비디아는?"], "expect_tools": ["finance.quote"], "params": {"finance.quote": {"symbol": "NVDA"}}},
+    {"id": "followup_place", "category": "followup", "turns": ["강남역 맛집 알려줘", "거기 근처 카페는?"], "expect_tools": ["places.search"], "params": {"places.search": {"query": "강남"}}},
+    {"id": "followup_kr_stock", "category": "followup", "turns": ["삼성전자 주가 알려줘", "하이닉스는?"], "expect_tools": ["finance.quote", "search.web"]}
+  ]
+}

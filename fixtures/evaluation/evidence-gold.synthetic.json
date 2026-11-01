@@ -1,0 +1,194 @@
+{
+  "schema_version": 1,
+  "dataset_id": "evidence-gold.synthetic.v1",
+  "gold_kind": "synthetic",
+  "review_status": "unreviewed",
+  "reviewer": null,
+  "review_revision": "synthetic-fixture-v1",
+  "observations": [
+    {
+      "observation_id": "obs.discord.alpha.trip-date",
+      "source_provenance_id": "prov.discord.alpha.ordinal.101",
+      "source_channel_id": "discord:channel-alpha",
+      "source_kind": "discord",
+      "source_room_id": "discord:room-alpha",
+      "source_file_id": "synthetic-discord-alpha",
+      "source_ordinal": 101,
+      "text": "토요일에 부산으로 간다고 말했다."
+    },
+    {
+      "observation_id": "obs.kakao.shared.trip-place",
+      "source_provenance_id": "prov.kakao.shared.ordinal.7",
+      "source_channel_id": "kakao:room-shared",
+      "source_kind": "kakao",
+      "source_room_id": "kakao:room-shared",
+      "source_file_id": "synthetic-kakao-shared",
+      "source_ordinal": 7,
+      "text": "목적지는 부산이라고 다시 확인했다."
+    },
+    {
+      "observation_id": "obs.discord.alpha.speaker-target",
+      "source_provenance_id": "prov.discord.alpha.ordinal.102",
+      "source_channel_id": "discord:channel-alpha",
+      "source_kind": "discord",
+      "source_room_id": "discord:room-alpha",
+      "source_file_id": "synthetic-discord-alpha",
+      "source_ordinal": 102,
+      "text": "민수는 3월 10일에 부산으로 간다.",
+      "actor_account_id": "account-minsu"
+    },
+    {
+      "observation_id": "obs.discord.alpha.same-speaker-irrelevant",
+      "source_provenance_id": "prov.discord.alpha.ordinal.103",
+      "source_channel_id": "discord:channel-alpha",
+      "source_kind": "discord",
+      "source_room_id": "discord:room-alpha",
+      "source_file_id": "synthetic-discord-alpha",
+      "source_ordinal": 103,
+      "text": "민수는 매운 라면을 좋아한다.",
+      "actor_account_id": "account-minsu"
+    },
+    {
+      "observation_id": "obs.discord.alpha.same-text",
+      "source_provenance_id": "prov.discord.alpha.ordinal.104",
+      "source_channel_id": "discord:channel-alpha",
+      "source_kind": "discord",
+      "source_room_id": "discord:room-alpha",
+      "source_file_id": "synthetic-discord-alpha",
+      "source_ordinal": 104,
+      "text": "정답은 파란 우산이다."
+    },
+    {
+      "observation_id": "obs.kakao.beta.same-text",
+      "source_provenance_id": "prov.kakao.beta.ordinal.4",
+      "source_channel_id": "kakao:room-beta",
+      "source_kind": "kakao",
+      "source_room_id": "kakao:room-beta",
+      "source_file_id": "synthetic-kakao-beta",
+      "source_ordinal": 4,
+      "text": "정답은 파란 우산이다."
+    },
+    {
+      "observation_id": "obs.discord.holdout.fact",
+      "source_provenance_id": "prov.discord.holdout.ordinal.201",
+      "source_channel_id": "discord:channel-holdout",
+      "source_kind": "discord",
+      "source_room_id": "discord:room-holdout",
+      "source_file_id": "synthetic-discord-holdout",
+      "source_ordinal": 201,
+      "text": "홀드아웃 사건의 장소는 도서관이다."
+    }
+  ],
+  "questions": [
+    {
+      "question_id": "q-multi-source-trip",
+      "prompt": "토요일 부산 여행을 뒷받침하는 근거는 무엇인가?",
+      "split": "dev",
+      "question_split_group": "episode-trip",
+      "episode_group": "episode-trip",
+      "allowed_source_channel_ids": [
+        "discord:channel-alpha",
+        "kakao:room-shared"
+      ],
+      "required_evidence_groups": [
+        {
+          "group_id": "trip-date",
+          "alternatives": ["obs.discord.alpha.trip-date"]
+        },
+        {
+          "group_id": "trip-place",
+          "alternatives": ["obs.kakao.shared.trip-place"]
+        }
+      ],
+      "forbidden_observation_ids": [],
+      "abstain_expected": false,
+      "review_status": "unreviewed",
+      "reviewer": null
+    },
+    {
+      "question_id": "q-same-speaker-relevance",
+      "prompt": "민수가 3월에 어디로 가는가?",
+      "split": "dev",
+      "question_split_group": "episode-speaker-relevance",
+      "episode_group": "episode-speaker-relevance",
+      "allowed_source_channel_ids": ["discord:channel-alpha"],
+      "required_evidence_groups": [
+        {
+          "group_id": "destination-date",
+          "alternatives": ["obs.discord.alpha.speaker-target"]
+        }
+      ],
+      "forbidden_observation_ids": [],
+      "abstain_expected": false,
+      "review_status": "unreviewed",
+      "reviewer": null
+    },
+    {
+      "question_id": "q-overlap-dedup",
+      "prompt": "겹친 두 window에서 같은 관찰을 회수했는가?",
+      "split": "dev",
+      "question_split_group": "episode-overlap",
+      "episode_group": "episode-overlap",
+      "allowed_source_channel_ids": ["discord:channel-alpha"],
+      "required_evidence_groups": [
+        {
+          "group_id": "overlap-fact",
+          "alternatives": ["obs.discord.alpha.speaker-target"]
+        }
+      ],
+      "forbidden_observation_ids": [],
+      "abstain_expected": false,
+      "review_status": "unreviewed",
+      "reviewer": null
+    },
+    {
+      "question_id": "q-out-of-scope-exact-text",
+      "prompt": "허용된 Discord 채널의 우산 답은 무엇인가?",
+      "split": "dev",
+      "question_split_group": "episode-channel-scope",
+      "episode_group": "episode-channel-scope",
+      "allowed_source_channel_ids": ["discord:channel-alpha"],
+      "required_evidence_groups": [
+        {
+          "group_id": "umbrella-answer",
+          "alternatives": ["obs.discord.alpha.same-text"]
+        }
+      ],
+      "forbidden_observation_ids": ["obs.kakao.beta.same-text"],
+      "abstain_expected": false,
+      "review_status": "unreviewed",
+      "reviewer": null
+    },
+    {
+      "question_id": "q-expected-abstain",
+      "prompt": "현재 허용 범위에서 확인되지 않은 사건을 답할 수 있는가?",
+      "split": "holdout",
+      "question_split_group": "episode-unknown",
+      "episode_group": "episode-unknown",
+      "allowed_source_channel_ids": ["discord:channel-holdout"],
+      "required_evidence_groups": [],
+      "forbidden_observation_ids": [],
+      "abstain_expected": true,
+      "review_status": "unreviewed",
+      "reviewer": null
+    },
+    {
+      "question_id": "q-holdout-fact",
+      "prompt": "홀드아웃 사건의 장소는 어디인가?",
+      "split": "holdout",
+      "question_split_group": "episode-holdout-fact",
+      "episode_group": "episode-holdout-fact",
+      "allowed_source_channel_ids": ["discord:channel-holdout"],
+      "required_evidence_groups": [
+        {
+          "group_id": "holdout-place",
+          "alternatives": ["obs.discord.holdout.fact"]
+        }
+      ],
+      "forbidden_observation_ids": [],
+      "abstain_expected": false,
+      "review_status": "unreviewed",
+      "reviewer": null
+    }
+  ]
+}

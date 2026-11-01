@@ -1,0 +1,1 @@
+import{D as e,O as t,r as n}from"./Button-BtVaTUeJ.js";var r=new Set([`$$slots`,`$$events`,`$$legacy`]);function i(i,a){let o=e(a,r),s={name:`undo-2`,size:24,node:[[`path`,{d:`M9 14 4 9l5-5`}],[`path`,{d:`M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11`}]]};n(i,t(()=>o,{get icon(){return s}}))}export{i as t};

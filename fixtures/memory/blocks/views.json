@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "views": [
+    {
+      "channel_key": "discord:g1:chanA",
+      "blocks": ["ec8f110c2cfbe082", "560977f6250f7952", "e5de874a7b443306"],
+      "revision": 1,
+      "scope_fingerprint": "ee155003962d0d9b161bde3dc5cc40fe37f1fc8a33473e178773bb3f5c8614f8",
+      "note": "A: discord c1 + two Kakao archives"
+    },
+    {
+      "channel_key": "discord:g1:chanB",
+      "blocks": ["ec8f110c2cfbe082", "d0539ca8aa987ee6"],
+      "revision": 1,
+      "scope_fingerprint": "a87a1e98408a6c76dd2c3710b0712ff68267572a1b4727e84979926ea5f15270",
+      "note": "B: discord c2 + Kakao club"
+    },
+    {
+      "channel_key": "discord:g1:chanC",
+      "blocks": ["e5de874a7b443306"],
+      "revision": 1,
+      "scope_fingerprint": "cb1a9b41b1cd6da73423736fa5b986d89db006076d203d68f0167ace74942159",
+      "note": "C: one Kakao archive"
+    }
+  ],
+  "stale_after_revision": {
+    "channel_key": "discord:g1:chanA",
+    "blocks": ["ec8f110c2cfbe082", "560977f6250f7952", "e5de874a7b443306"],
+    "revision": 2,
+    "scope_fingerprint": "ee155003962d0d9b161bde3dc5cc40fe37f1fc8a33473e178773bb3f5c8614f8",
+    "expected": "stale_scope"
+  },
+  "reject_mismatch_space": {
+    "channel_key": "discord:g1:chanA",
+    "existing_block_ids": ["560977f6250f7952"],
+    "add_block_id": "ce64e0777720b7e3",
+    "expected": "view members must share embedding_space"
+  }
+}

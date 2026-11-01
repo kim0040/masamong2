@@ -1,0 +1,1254 @@
+{
+ "version": 1,
+ "about": "Synthetic parity fixture for retrieval.message_dense. See README.md. Vectors are raw: both sides L2-normalise every row and the query (v / (|v| + 1e-9)) before use.",
+ "leaves": [
+  "L0",
+  "L1",
+  "L2",
+  "L3",
+  "L4",
+  "L5"
+ ],
+ "leaf_vectors": [
+  [
+   1,
+   0,
+   0,
+   0
+  ],
+  [
+   0.9,
+   0.1,
+   0.2,
+   0
+  ],
+  [
+   0.5,
+   0.5,
+   0.5,
+   0.5
+  ],
+  [
+   0,
+   1,
+   0,
+   0
+  ],
+  [
+   0.2,
+   0.2,
+   0.9,
+   0
+  ],
+  [
+   0,
+   0,
+   0,
+   1
+  ]
+ ],
+ "message_vectors": [
+  {
+   "leaf": "L0",
+   "vec": [
+    0,
+    1
+   ]
+  },
+  {
+   "leaf": "L0",
+   "vec": [
+    0.1,
+    1
+   ]
+  },
+  {
+   "leaf": "L1",
+   "vec": [
+    1,
+    1
+   ]
+  },
+  {
+   "leaf": "L1",
+   "vec": [
+    0,
+    1
+   ]
+  },
+  {
+   "leaf": "L2",
+   "vec": [
+    3,
+    1
+   ]
+  },
+  {
+   "leaf": "L2",
+   "vec": [
+    3,
+    1
+   ]
+  },
+  {
+   "leaf": "L3",
+   "vec": [
+    1,
+    0
+   ]
+  },
+  {
+   "leaf": "L3",
+   "vec": [
+    1,
+    0
+   ]
+  },
+  {
+   "leaf": "L4",
+   "vec": [
+    0.5,
+    1
+   ]
+  },
+  {
+   "leaf": "L4",
+   "vec": [
+    1,
+    2
+   ]
+  },
+  {
+   "leaf": "L5",
+   "vec": [
+    3,
+    1
+   ]
+  },
+  {
+   "leaf": "L5",
+   "vec": [
+    0,
+    1
+   ]
+  }
+ ],
+ "query": [
+  0.6,
+  0,
+  0.8,
+  0
+ ],
+ "message_dims": 2,
+ "cases": [
+  {
+   "name": "all leaves, limit 200, weight 1",
+   "allowed": null,
+   "limit": 200,
+   "rrf_weight": 1.0,
+   "expected": {
+    "messages_scored": 12,
+    "message_dense_ids": [
+     "L3",
+     "L2",
+     "L5",
+     "L1",
+     "L4",
+     "L0"
+    ],
+    "message_dense_scores": {
+     "L3": 1.0,
+     "L2": 0.948683,
+     "L5": 0.948683,
+     "L1": 0.707107,
+     "L4": 0.447214,
+     "L0": 0.099504
+    },
+    "leaf_dense_ids": [
+     "L4",
+     "L1",
+     "L2",
+     "L0",
+     "L3",
+     "L5"
+    ],
+    "fused_ids": [
+     "L2",
+     "L4",
+     "L3",
+     "L1",
+     "L5",
+     "L0"
+    ],
+    "fused_scores": {
+     "L2": 0.03200205,
+     "L4": 0.03177806,
+     "L3": 0.03177806,
+     "L1": 0.03175403,
+     "L5": 0.03102453,
+     "L0": 0.03077652
+    }
+   }
+  },
+  {
+   "name": "limit 3 cuts the run",
+   "allowed": null,
+   "limit": 3,
+   "rrf_weight": 1.0,
+   "expected": {
+    "messages_scored": 12,
+    "message_dense_ids": [
+     "L3",
+     "L2",
+     "L5"
+    ],
+    "message_dense_scores": {
+     "L3": 1.0,
+     "L2": 0.948683,
+     "L5": 0.948683
+    },
+    "leaf_dense_ids": [
+     "L4",
+     "L1",
+     "L2",
+     "L0",
+     "L3",
+     "L5"
+    ],
+    "fused_ids": [
+     "L2",
+     "L3",
+     "L5",
+     "L4",
+     "L1",
+     "L0"
+    ],
+    "fused_scores": {
+     "L2": 0.03200205,
+     "L3": 0.03177806,
+     "L5": 0.03102453,
+     "L4": 0.01639344,
+     "L1": 0.01612903,
+     "L0": 0.015625
+    }
+   }
+  },
+  {
+   "name": "scoped to four leaves",
+   "allowed": [
+    "L0",
+    "L1",
+    "L4",
+    "L5"
+   ],
+   "limit": 200,
+   "rrf_weight": 1.0,
+   "expected": {
+    "messages_scored": 8,
+    "message_dense_ids": [
+     "L5",
+     "L1",
+     "L4",
+     "L0"
+    ],
+    "message_dense_scores": {
+     "L5": 0.948683,
+     "L1": 0.707107,
+     "L4": 0.447214,
+     "L0": 0.099504
+    },
+    "leaf_dense_ids": [
+     "L4",
+     "L1",
+     "L0",
+     "L5"
+    ],
+    "fused_ids": [
+     "L4",
+     "L1",
+     "L5",
+     "L0"
+    ],
+    "fused_scores": {
+     "L4": 0.03226646,
+     "L1": 0.03225806,
+     "L5": 0.03201844,
+     "L0": 0.03149802
+    }
+   }
+  },
+  {
+   "name": "weight 2",
+   "allowed": null,
+   "limit": 200,
+   "rrf_weight": 2.0,
+   "expected": {
+    "messages_scored": 12,
+    "message_dense_ids": [
+     "L3",
+     "L2",
+     "L5",
+     "L1",
+     "L4",
+     "L0"
+    ],
+    "message_dense_scores": {
+     "L3": 1.0,
+     "L2": 0.948683,
+     "L5": 0.948683,
+     "L1": 0.707107,
+     "L4": 0.447214,
+     "L0": 0.099504
+    },
+    "leaf_dense_ids": [
+     "L4",
+     "L1",
+     "L2",
+     "L0",
+     "L3",
+     "L5"
+    ],
+    "fused_ids": [
+     "L3",
+     "L2",
+     "L1",
+     "L4",
+     "L5",
+     "L0"
+    ],
+    "fused_scores": {
+     "L3": 0.0481715,
+     "L2": 0.04813108,
+     "L1": 0.04737903,
+     "L4": 0.04716267,
+     "L5": 0.04689755,
+     "L0": 0.04592803
+    }
+   }
+  },
+  {
+   "name": "scoped to nothing",
+   "allowed": [],
+   "limit": 200,
+   "rrf_weight": 1.0,
+   "expected": {
+    "messages_scored": 0,
+    "message_dense_ids": [],
+    "message_dense_scores": {},
+    "leaf_dense_ids": [],
+    "fused_ids": [],
+    "fused_scores": {}
+   }
+  }
+ ],
+ "guarantee_pool": [
+  {
+   "name": "a full reserve leaves nothing for the message run",
+   "pool": 10,
+   "per_source_min": 3,
+   "reserve_max_frac": 0.2,
+   "ordered": [
+    "o00",
+    "o01",
+    "o02",
+    "o03",
+    "o04",
+    "o05",
+    "o06",
+    "o07",
+    "o08",
+    "o09",
+    "o10",
+    "o11",
+    "o12",
+    "o13",
+    "o14",
+    "o15",
+    "o16",
+    "o17",
+    "o18",
+    "o19",
+    "o20",
+    "o21",
+    "o22",
+    "o23"
+   ],
+   "runs": {
+    "leaf_dense": [
+     "o00",
+     "o08",
+     "o12"
+    ],
+    "leaf_lexical": [
+     "o01",
+     "o09",
+     "o13"
+    ],
+    "message_dense": [
+     "o20",
+     "o21",
+     "o22"
+    ]
+   },
+   "expected": {
+    "guaranteed": [
+     "o08",
+     "o09"
+    ],
+    "by_source": {
+     "leaf_dense": [
+      "o08"
+     ],
+     "leaf_lexical": [
+      "o09"
+     ]
+    }
+   }
+  },
+  {
+   "name": "it takes what is left after runs that sort after its name",
+   "pool": 10,
+   "per_source_min": 3,
+   "reserve_max_frac": 0.4,
+   "ordered": [
+    "o00",
+    "o01",
+    "o02",
+    "o03",
+    "o04",
+    "o05",
+    "o06",
+    "o07",
+    "o08",
+    "o09",
+    "o10",
+    "o11",
+    "o12",
+    "o13",
+    "o14",
+    "o15",
+    "o16",
+    "o17",
+    "o18",
+    "o19",
+    "o20",
+    "o21",
+    "o22",
+    "o23"
+   ],
+   "runs": {
+    "leaf_dense": [
+     "o00",
+     "o06"
+    ],
+    "leaf_lexical": [
+     "o01",
+     "o07"
+    ],
+    "q1_dense": [
+     "o18",
+     "o19"
+    ],
+    "message_dense": [
+     "o20",
+     "o21",
+     "o22"
+    ]
+   },
+   "expected": {
+    "guaranteed": [
+     "o18",
+     "o06",
+     "o07",
+     "o19"
+    ],
+    "by_source": {
+     "q1_dense": [
+      "o18",
+      "o19"
+     ],
+     "leaf_dense": [
+      "o06"
+     ],
+     "leaf_lexical": [
+      "o07"
+     ]
+    }
+   }
+  },
+  {
+   "name": "a reserve with room gives it the rest",
+   "pool": 10,
+   "per_source_min": 3,
+   "reserve_max_frac": 0.5,
+   "ordered": [
+    "o00",
+    "o01",
+    "o02",
+    "o03",
+    "o04",
+    "o05",
+    "o06",
+    "o07",
+    "o08",
+    "o09",
+    "o10",
+    "o11",
+    "o12",
+    "o13",
+    "o14",
+    "o15",
+    "o16",
+    "o17",
+    "o18",
+    "o19",
+    "o20",
+    "o21",
+    "o22",
+    "o23"
+   ],
+   "runs": {
+    "leaf_dense": [
+     "o00",
+     "o05"
+    ],
+    "leaf_lexical": [
+     "o01",
+     "o06"
+    ],
+    "message_dense": [
+     "o20",
+     "o21",
+     "o22"
+    ]
+   },
+   "expected": {
+    "guaranteed": [
+     "o05",
+     "o06",
+     "o20",
+     "o21",
+     "o22"
+    ],
+    "by_source": {
+     "leaf_dense": [
+      "o05"
+     ],
+     "leaf_lexical": [
+      "o06"
+     ],
+     "message_dense": [
+      "o20",
+      "o21",
+      "o22"
+     ]
+    }
+   }
+  }
+ ],
+ "eligibility": [
+  {
+   "text": "",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "text": "ㅋㅋㅋㅋㅋㅋㅋㅋ",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "text": "ㅎㅎㅠㅠㅜㅜㅇㅇ",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "text": "ㅏㅑㆎㆎ",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "text": "...!!!???~~~",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "text": "👍👍🎉🎉🔥🔥🔥",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "text": "가나다라마",
+   "meaningful_runes": 5,
+   "eligible": false
+  },
+  {
+   "text": "가나다라마바",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "text": "ㅋㅋ가나다라마바ㅋㅋ",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "text": "가나다라마!!! 👍 ㅋㅋㅋ",
+   "meaningful_runes": 5,
+   "eligible": false
+  },
+  {
+   "text": "hello",
+   "meaningful_runes": 5,
+   "eligible": false
+  },
+  {
+   "text": "hellos",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "text": "he-l-l-o!",
+   "meaningful_runes": 5,
+   "eligible": false
+  },
+  {
+   "text": "123456",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "text": "こんにちは!",
+   "meaningful_runes": 5,
+   "eligible": false
+  },
+  {
+   "text": "你好吗你好吗",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "text": "내일 몇 시에 만나?",
+   "meaningful_runes": 7,
+   "eligible": true
+  },
+  {
+   "text": "$100,000",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "text": "漢字漢字漢字",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "text": "日本語です",
+   "meaningful_runes": 5,
+   "eligible": false
+  },
+  {
+   "text": "ａｂｃｄｅｆ",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "text": "ab\tcd\nef",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "text": "ㅇㅋㅇㅋ안녕하세요요",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "text": "안녕하세요!!",
+   "meaningful_runes": 5,
+   "eligible": false
+  },
+  {
+   "codepoints": [
+    "1F468",
+    "200D",
+    "1F469",
+    "200D",
+    "1F467",
+    "200D",
+    "1F466"
+   ],
+   "note": "emoji family with zero-width joiners",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "codepoints": [
+    "2764",
+    "FE0F",
+    "2764",
+    "FE0F",
+    "2764",
+    "FE0F",
+    "2764",
+    "FE0F",
+    "2764",
+    "FE0F",
+    "2764",
+    "FE0F"
+   ],
+   "note": "red heart with variation selector-16, six times",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "codepoints": [
+    "0031",
+    "FE0F",
+    "20E3",
+    "0032",
+    "FE0F",
+    "20E3",
+    "0033",
+    "FE0F",
+    "20E3",
+    "0034",
+    "FE0F",
+    "20E3",
+    "0035",
+    "FE0F",
+    "20E3",
+    "0036",
+    "FE0F",
+    "20E3"
+   ],
+   "note": "keycap digits 1-6: the digit counts, the variation selector and U+20E3 do not",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "codepoints": [
+    "1F44D",
+    "1F3FD",
+    "1F44D",
+    "1F3FD",
+    "1F44D",
+    "1F3FD"
+   ],
+   "note": "thumbs up with a skin-tone modifier, three times",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "codepoints": [
+    "1F1F0",
+    "1F1F7",
+    "1F1F0",
+    "1F1F7",
+    "1F1F0",
+    "1F1F7"
+   ],
+   "note": "regional-indicator flags",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "codepoints": [
+    "FF11",
+    "FF12",
+    "FF13",
+    "FF14",
+    "FF15",
+    "FF16"
+   ],
+   "note": "full-width digits",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "codepoints": [
+    "FF71",
+    "FF72",
+    "FF73",
+    "FF74",
+    "FF75",
+    "FF76"
+   ],
+   "note": "half-width katakana",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "codepoints": [
+    "0061",
+    "200B",
+    "0062",
+    "200B",
+    "0063",
+    "200B",
+    "0064",
+    "200B",
+    "0065",
+    "200B",
+    "0066",
+    "200B"
+   ],
+   "note": "zero-width spaces between letters",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "codepoints": [
+    "3000",
+    "3000",
+    "3000",
+    "3000",
+    "3000",
+    "3000",
+    "3000",
+    "3000"
+   ],
+   "note": "ideographic spaces",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "codepoints": [
+    "0072",
+    "0065",
+    "0301",
+    "0073",
+    "0075",
+    "006D",
+    "0065",
+    "0301"
+   ],
+   "note": "decomposed accents: the combining marks do not count",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "codepoints": [
+    "1100",
+    "1101",
+    "1102",
+    "1103",
+    "1104",
+    "1105"
+   ],
+   "note": "conjoining Hangul jamo (U+1100 block) are letters, unlike compatibility jamo",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "codepoints": [
+    "2460",
+    "2461",
+    "2462",
+    "2463",
+    "2464",
+    "2465"
+   ],
+   "note": "circled digits (category No)",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "codepoints": [
+    "2211",
+    "222B",
+    "2202",
+    "221E",
+    "2248",
+    "2260"
+   ],
+   "note": "math symbols",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "codepoints": [
+    "0061",
+    "0062",
+    "0063",
+    "00A0",
+    "0064",
+    "0065",
+    "0066",
+    "0009"
+   ],
+   "note": "no-break space and a tab between letters",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "codepoints": [
+    "1FAE9",
+    "1FAE9",
+    "1FAE9",
+    "1FAE9",
+    "1FAE9",
+    "1FAE9"
+   ],
+   "note": "U+1FAE9 six times: assigned after Python's Unicode 15 (unassigned there) and a symbol in Go's newer tables; either way not a letter or number",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "text": "가나다라마",
+   "codepoints": [
+    "1FAE9",
+    "1FAE9"
+   ],
+   "note": "five syllables followed by two new-emoji code points: still five",
+   "meaningful_runes": 5,
+   "eligible": false
+  },
+  {
+   "codepoints": [
+    "0378",
+    "0378",
+    "0378",
+    "0378",
+    "0378",
+    "0378"
+   ],
+   "note": "an unassigned code point (Cn) never counts",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "codepoints": [
+    "E000",
+    "E000",
+    "E000",
+    "E000",
+    "E000",
+    "E000"
+   ],
+   "note": "private use (Co) never counts",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "codepoints": [
+    "00B9",
+    "00B2",
+    "00B3",
+    "2074",
+    "2075",
+    "2076"
+   ],
+   "note": "superscript digits are numbers (No)",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "codepoints": [
+    "2167",
+    "2168",
+    "2169",
+    "216A",
+    "216B",
+    "216C"
+   ],
+   "note": "roman numerals are numbers (Nl)",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "codepoints": [
+    "0065",
+    "0301",
+    "0065",
+    "0301",
+    "0065",
+    "0301",
+    "0065",
+    "0301",
+    "0065",
+    "0301",
+    "0065",
+    "0301"
+   ],
+   "note": "six decomposed e + combining acute: the marks do not count",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "codepoints": [
+    "0301",
+    "0301",
+    "0301",
+    "0301",
+    "0301",
+    "0301"
+   ],
+   "note": "combining marks alone",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "codepoints": [
+    "02B0",
+    "02B1",
+    "02B2",
+    "02B3",
+    "02B4",
+    "02B5"
+   ],
+   "note": "modifier letters (Lm) are letters",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "codepoints": [
+    "1100",
+    "1161",
+    "11A8",
+    "1100",
+    "1161",
+    "11A8"
+   ],
+   "note": "conjoining jamo (Hangul Jamo block, letters) count, unlike the compatibility jamo",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "codepoints": [
+    "3131",
+    "3134",
+    "3137",
+    "3139",
+    "3141",
+    "3142",
+    "318E"
+   ],
+   "note": "compatibility jamo U+3131..U+318E, both ends of the range",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "codepoints": [
+    "2B",
+    "3D",
+    "3C",
+    "3E",
+    "7C",
+    "7E"
+   ],
+   "note": "math and other symbols (Sm)",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "codepoints": [
+    "2028",
+    "2029",
+    "3000",
+    "00A0",
+    "2003",
+    "205F"
+   ],
+   "note": "line and paragraph separators and exotic spaces",
+   "meaningful_runes": 0,
+   "eligible": false
+  },
+  {
+   "codepoints": [
+    "0061",
+    "FE0F",
+    "0062",
+    "FE0F",
+    "0063",
+    "FE0F",
+    "0064",
+    "FE0F",
+    "0065",
+    "FE0F",
+    "0066",
+    "FE0F"
+   ],
+   "note": "letters with variation selector-16",
+   "meaningful_runes": 6,
+   "eligible": true
+  },
+  {
+   "text": "회의 3시 OK 👍👨‍👩‍👧 ㅋㅋ",
+   "note": "mixed Hangul, digit, Latin, emoji with joiners and laughter",
+   "meaningful_runes": 6,
+   "eligible": true
+  }
+ ],
+ "source_family": {
+  "message_dense": "dense",
+  "leaf_dense": "dense",
+  "q1_dense": "dense",
+  "leaf_lexical": "lexical",
+  "speaker_dense": "speaker"
+ },
+ "projection": {
+  "about": "One message vector per observation, projected onto every leaf that holds the observation. Rows are the (observation, leaf) pairs in leaf order, then message order inside the leaf; ties go to the first pair. o3 sorts after o2 by ID but comes first in P0 (ID order differs from leaf order); o1 and o3 each sit in two leaves; o9 has no vector (a short message) and P3 holds nothing else.",
+  "leaves": [
+   {
+    "name": "P0",
+    "observations": [
+     "o3",
+     "o1"
+    ]
+   },
+   {
+    "name": "P1",
+    "observations": [
+     "o1",
+     "o2"
+    ]
+   },
+   {
+    "name": "P2",
+    "observations": [
+     "o4",
+     "o9"
+    ]
+   },
+   {
+    "name": "P3",
+    "observations": [
+     "o9"
+    ]
+   },
+   {
+    "name": "P4",
+    "observations": [
+     "o5",
+     "o3"
+    ]
+   }
+  ],
+  "observation_vectors": {
+   "o1": [
+    1,
+    1
+   ],
+   "o2": [
+    3,
+    1
+   ],
+   "o3": [
+    3,
+    1
+   ],
+   "o4": [
+    0,
+    1
+   ],
+   "o5": [
+    2,
+    1
+   ]
+  },
+  "query": [
+   3,
+   0,
+   1,
+   1
+  ],
+  "message_dims": 2,
+  "expected_pairs": [
+   [
+    "o3",
+    "P0"
+   ],
+   [
+    "o1",
+    "P0"
+   ],
+   [
+    "o1",
+    "P1"
+   ],
+   [
+    "o2",
+    "P1"
+   ],
+   [
+    "o4",
+    "P2"
+   ],
+   [
+    "o5",
+    "P4"
+   ],
+   [
+    "o3",
+    "P4"
+   ]
+  ],
+  "cases": [
+   {
+    "name": "every leaf",
+    "allowed": null,
+    "limit": 200,
+    "expected": {
+     "messages_scored": 7,
+     "message_dense_ids": [
+      "P0",
+      "P1",
+      "P4",
+      "P2"
+     ],
+     "message_dense_scores": {
+      "P0": 0.9486832974342859,
+      "P1": 0.9486832974342859,
+      "P4": 0.9486832974342859,
+      "P2": 0.0
+     }
+    }
+   },
+   {
+    "name": "two leaves",
+    "allowed": [
+     "P1",
+     "P4"
+    ],
+    "limit": 200,
+    "expected": {
+     "messages_scored": 4,
+     "message_dense_ids": [
+      "P1",
+      "P4"
+     ],
+     "message_dense_scores": {
+      "P1": 0.9486832974342859,
+      "P4": 0.9486832974342859
+     }
+    }
+   },
+   {
+    "name": "limit 2",
+    "allowed": null,
+    "limit": 2,
+    "expected": {
+     "messages_scored": 7,
+     "message_dense_ids": [
+      "P0",
+      "P1"
+     ],
+     "message_dense_scores": {
+      "P0": 0.9486832974342859,
+      "P1": 0.9486832974342859
+     }
+    }
+   },
+   {
+    "name": "nothing allowed",
+    "allowed": [],
+    "limit": 200,
+    "expected": {
+     "messages_scored": 0,
+     "message_dense_ids": [],
+     "message_dense_scores": {}
+    }
+   }
+  ]
+ }
+}

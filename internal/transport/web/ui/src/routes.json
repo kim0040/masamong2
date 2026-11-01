@@ -1,0 +1,10 @@
+{
+  "routes": [
+    "/", "/turns", "/jobs",
+    "/rooms", "/tools", "/persona", "/people",
+    "/blocks", "/sources", "/index", "/lab", "/memory",
+    "/stats", "/usage",
+    "/connections", "/settings", "/logs", "/maintenance", "/display", "/admins",
+    "/setup", "/login"
+  ]
+}

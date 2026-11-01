@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "purpose": "기억 블록(source artifact)과 채널 뷰(revisioned binding). 샌드박스와 제품 CLI/GUI가 같은 ID 공식·불변식을 쓴다. 검색 실행(WO 06)과는 별개다.",
+  "block_id": {
+    "algorithm": "sha256",
+    "encoding": "utf-8",
+    "truncate_hex": 16,
+    "payload_join": "\n",
+    "fields": ["collection", "source_room", "segmentation_version", "embedding_space"]
+  },
+  "embedding_space": {
+    "payload_join": "|",
+    "fields": ["provider", "model", "dimension", "normalization"]
+  },
+  "scope_fingerprint": {
+    "algorithm": "sha256",
+    "encoding": "utf-8",
+    "truncate_hex": 0,
+    "payload": "sorted unique block_ids joined by newline, then newline, then decimal revision with no leading zeros"
+  },
+  "platform": ["discord", "kakao"],
+  "status": ["none", "preparing", "ready", "stale", "failed"],
+  "time_semantics": ["offset", "naive"],
+  "rules": [
+    "same view requires identical embedding_space",
+    "one block is one source_room; Discord guild:channel is never merged into one block",
+    "attach/detach must not rewrite block vector or summary files",
+    "evidence carries block_id, platform, source_room, and label",
+    "recency windows use per-block time anchors; never compare naive kakao times to discord offsets",
+    "stale scope_fingerprint must be rejected",
+    "person_aliases on a block are search hints, not identity merge"
+  ]
+}

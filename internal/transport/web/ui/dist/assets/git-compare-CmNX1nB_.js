@@ -1,0 +1,1 @@
+import{D as e,O as t,r as n}from"./Button-BtVaTUeJ.js";var r=new Set([`$$slots`,`$$events`,`$$legacy`]);function i(i,a){let o=e(a,r),s={name:`git-compare`,size:24,node:[[`circle`,{cx:`18`,cy:`18`,r:`3`}],[`circle`,{cx:`6`,cy:`6`,r:`3`}],[`path`,{d:`M13 6h3a2 2 0 0 1 2 2v7`}],[`path`,{d:`M11 18H8a2 2 0 0 1-2-2V9`}]]};n(i,t(()=>o,{get icon(){return s}}))}export{i as t};

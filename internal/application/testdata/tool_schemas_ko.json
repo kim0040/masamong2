@@ -1,0 +1,169 @@
+[
+ {
+  "name": "finance__quote",
+  "description": "주식 현재가. 회사 주가나 주식 시세를 물을 때 쓴다. 중고·물건 가격, 숫자만 있는 말, 환율(→ finance__fx), 회사 소식(→ search__web)에는 쓰지 않는다.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "krw": {
+     "type": "boolean",
+     "description": "원화로 바꿔 보여 줄 때 true"
+    },
+    "symbol": {
+     "type": "string",
+     "description": "티커(예: AAPL, 005930.KS). 확신하지 못하면 먼저 search__web으로 찾는다."
+    }
+   },
+   "required": [
+    "symbol"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "places__search",
+  "description": "장소·가게 찾기(카카오맵: 이름·주소·전화·지도 링크). 맛집·카페·가게·장소를 찾을 때 쓴다. 지역을 모르면 쓰지 말고 끝내라: 답장 단계가 어디인지 묻는다. 한국 밖 장소는 search__web.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "지역+종류만, 꾸밈말 없이(예: 강남역 맛집, 홍대 카페)"
+    },
+    "size": {
+     "type": "integer",
+     "description": "결과 수(보통 비움)",
+     "minimum": 1,
+     "maximum": 15
+    }
+   },
+   "required": [
+    "query"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "polls__create",
+  "description": "Discord 투표 만들기. 투표를 만들어 달라고 분명히 부탁할 때 쓴다. 의견만 물을 때는 쓰지 않는다.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "allow_multiselect": {
+     "type": "boolean",
+     "description": "여러 개 고르기를 허용할 때 true"
+    },
+    "duration_hours": {
+     "type": "integer",
+     "description": "기간(시간, 기본 24)",
+     "minimum": 1,
+     "maximum": 768
+    },
+    "options_text": {
+     "type": "string",
+     "description": "선택지, 한 줄에 하나(2–10개, 각 55자까지). 비우면 예/아니요."
+    },
+    "question": {
+     "type": "string",
+     "description": "투표 질문(최대 300자)"
+    }
+   },
+   "required": [
+    "question"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "search__web",
+  "description": "인터넷 검색(뉴스·최신 소식·사실 확인). 검색 요청, 오늘·최근 소식, 지금 그 자리에 누가 있는지, 순위·가격·경기 결과처럼 바뀌는 사실, 다른 도구가 실패했을 때 쓴다. 중고 시세·물건 값을 물을 때도 쓴다. 뉴스를 정리·요약하거나 여러 출처를 비교·조사해 달라면 depth=deep, 뉴스·시사·소식이면 topic=news를 준다. 낱말 뜻·상식·계산·번역·잡담에는 쓰지 않는다.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "depth": {
+     "type": "string",
+     "description": "검색 깊이. quick: 사실 하나(날짜·가격·누가)를 빨리 확인할 때. 보통은 비운다(standard). deep: 뉴스 정리·요약, 비교, '자세히 알아봐 줘'처럼 여러 출처를 넓게 봐야 할 때(느리고 비싸다)",
+     "enum": [
+      "quick",
+      "standard",
+      "deep"
+     ]
+    },
+    "fresh": {
+     "type": "string",
+     "description": "최근 것만 필요할 때 day, week, month",
+     "enum": [
+      "day",
+      "week",
+      "month"
+     ]
+    },
+    "query": {
+     "type": "string",
+     "description": "검색어. 핵심어만, 메시지의 언어로."
+    },
+    "size": {
+     "type": "integer",
+     "description": "결과 수(보통 비움)",
+     "minimum": 1,
+     "maximum": 10
+    },
+    "topic": {
+     "type": "string",
+     "description": "news: 뉴스·시사·소식 기사를 찾을 때(보통 fresh와 함께). 그 밖에는 비운다",
+     "enum": [
+      "general",
+      "news"
+     ]
+    }
+   },
+   "required": [
+    "query"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "weather__query",
+  "description": "날씨(전 세계 도시, 오늘부터 13일 뒤까지). 날씨나 우산·옷차림처럼 날씨에 달린 질문에 쓴다. 기후·계절 같은 상식이나 특보·지진(→ disasters__query)에는 쓰지 않는다.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "day_offset": {
+     "type": "integer",
+     "description": "0 오늘, 1 내일, 2 모레 … 13. 요일은 기준 시각의 day_offset 목록에서 읽는다. 주말이면 토·일 각각 부른다.",
+     "minimum": 0,
+     "maximum": 13
+    },
+    "region": {
+     "type": "string",
+     "description": "도시 이름(해외도 됨). 메시지나 대화에 나온 곳. 없으면 비워 둔다: 도구가 그 사람의 설정이나 기본값을 쓰고 알려 준다."
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "web__read",
+  "description": "링크(URL) 본문 읽기. 메시지에 링크가 있고 그 내용을 물을 때(요약해 줘, 이거 뭐래) 쓴다. 메시지에 링크가 없으면 쓰지 않는다.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "max_chars": {
+     "type": "integer",
+     "description": "읽을 글자 수(보통 비움)",
+     "minimum": 500,
+     "maximum": 20000
+    },
+    "url": {
+     "type": "string",
+     "description": "메시지에 나온 http 주소 그대로"
+    }
+   },
+   "required": [
+    "url"
+   ],
+   "additionalProperties": false
+  }
+ }
+]

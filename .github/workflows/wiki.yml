@@ -1,0 +1,54 @@
+# Publishes docs/wiki/ to the repository's GitHub wiki, so the wiki is reviewed and versioned like code.
+# One-time setup: Settings → General → Features → Wikis on, then create any first page in the Wiki tab
+# (GitHub creates the wiki repository only then). After that every merge to main that touches
+# docs/wiki/ updates the wiki; edits made in the wiki UI are overwritten by the next sync.
+name: wiki
+on:
+  push:
+    branches: [main]
+    paths: ["docs/wiki/**", "docs/translations.json", "tools/doccheck/**", ".github/workflows/wiki.yml"]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: wiki
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # broken links or a page changed without its translation never reach the wiki (tools/doccheck)
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: links and translations
+        run: go run ./tools/doccheck
+      - name: sync docs/wiki to the wiki repository
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          remote="https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git"
+          if ! git clone --depth 1 "$remote" "$RUNNER_TEMP/wiki" 2>/dev/null; then
+            # GitHub creates the wiki repository only when its first page is made in the Wiki tab (and a
+            # private repository needs a plan with wikis). Until then there is nothing to publish to:
+            # docs/wiki/ in this repository is the wiki, so skip with a notice instead of failing.
+            msg="No wiki repository yet, so docs/wiki was not published. To publish it: Settings → General → Features → Wikis on, create any first page in the Wiki tab, then re-run this workflow."
+            echo "::warning::$msg"
+            echo "### Wiki not published" >> "$GITHUB_STEP_SUMMARY"
+            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          cd "$RUNNER_TEMP/wiki"
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp -R "$GITHUB_WORKSPACE/docs/wiki/." .
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "wiki already up to date"
+            exit 0
+          fi
+          git commit -m "Sync from ${GITHUB_REPOSITORY}@${GITHUB_SHA::7}"
+          git push origin HEAD

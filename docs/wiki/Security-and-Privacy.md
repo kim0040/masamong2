@@ -1,0 +1,90 @@
+# Security and privacy
+
+[한국어](https://github.com/kim0040/masamong2/wiki/보안과-개인정보) | **English**
+
+## Console access
+
+- The console binds **only to the loopback interface (`127.0.0.1`)**. There is no way to open it on a network interface; remote management goes through an encrypted SSH tunnel (`masamong connect`), or through a name the admin listed in `admin.web.hosts` that `tailscale serve` on the server forwards (tailnet only). Requests for any other name are refused before the sign-in screen.
+- Sign-in uses the **one-time links** issued by `masamong open` and `masamong connect`, or the access token (`masamong admin token`, needed on a Tailscale device). There are no fixed admin accounts or passwords. Failed token attempts are limited per minute, separately for this computer and for Tailscale devices, so guessing from the tailnet cannot lock this computer out.
+- The console answers only requests whose `Host` header is this computer (`127.0.0.1`, `localhost`, `::1`) or a name listed in `admin.web.hosts`. This stops a malicious web page from pointing its own domain at 127.0.0.1 (DNS rebinding) to reach the console. Write requests check both the same origin and a CSRF token.
+- Do not share sign-in links or session cookies.
+- On remote servers, turn off SSH password login and use public-key authentication only.
+- With Tailscale, every device your tailnet's access rules let reach the server can open the sign-in screen. Limit that with Tailscale ACLs if the tailnet is shared, and never use `tailscale funnel` for the console.
+
+## Keys and credentials
+
+| Reference | Where it is kept |
+|---|---|
+| `keychain:<account>` | The system credential store: the **macOS Keychain**, or **Windows Credential Manager** (an entry named `masamong/<account>` in your own user's store). Not available on Linux and FreeBSD |
+| `file:<path>` | A file. On macOS, Linux and FreeBSD only its owner can read it (`0600`); on Windows its ACL grants access to your account, SYSTEM and Administrators only. The content is plain text: **it is not encrypted** |
+| `env:<name>` | An environment variable |
+
+Keys typed in the console go to the credential store where there is one (macOS, Windows) and to a `file:` reference under `secrets/` in the data folder where there is not (Linux, FreeBSD). Setting `MASAMONG_SECRET_STORE=file` makes every system use files. Existing `keychain:` and `file:` references keep working either way. Windows Credential Manager belongs to the Windows user running Masamong; a scheduled task or service must use that same user to read its keys. It accepts values up to 2,560 bytes. A longer value falls back to a file under `secrets/` protected by the data-folder ACL, and the console shows a warning. The program adds no encryption of its own: on Linux and FreeBSD a key file is protected by file permissions only, and on macOS and Windows by the operating system's store or ACL.
+
+Config files (`config.yaml`), logs, backups and error traces **never contain a raw API key or token, only these references**. If something like a Discord token ever reaches a log line or a message, a masking filter hides it. Results from custom HTTP tools are scrubbed the same way: a credential an API echoes back (raw, URL-encoded, base64 or JSON-escaped) is removed before the text can reach the model or the chat. That removes the exact credential in those forms; it cannot see a value the remote service alters in some other way. For APIs that return authentication or debug fields, keep the reply down to the fields you need with the tool's `http.pick` list.
+
+## Bot behavior and guardrails
+
+- The bot never sends `@everyone`, `@here`, or blanket user or role mentions.
+- The invite link asks only for what the bot uses: 4 required permissions (View Channel, Send Messages, Embed Links, Read Message History) and 3 recommended ones (Attach Files, Create Polls, Send Messages in Threads). Never Administrator.
+- **Server approval** (`access.server_approval`, on by default): whoever invites the bot to a new server, it stores and answers nothing there until the operator approves the server in the console. Unknown servers can be declined, which makes the bot leave.
+- The `/admin` slash command is visible only to members with "Manage Server", and the bot checks the permission again when it runs. Blocks made by a server's managers apply only to that server.
+- The console's change history records changes made from Discord too: who (display name and Discord ID) and in which server. It lives only in the local database; service logs never contain user IDs.
+- With `instance.expected_bot_id` set, a wrong bot token put in by mistake is refused for command registration and conversation.
+- Custom HTTP tools allow HTTPS only and cannot be redirected to other hosts through parameters (SSRF).
+- Who called a tool (user ID, channel ID) is bound inside the process and cannot be forged by outside requests.
+
+## Conversation data and privacy
+
+- **Strict room isolation**: each Discord room sees only its own conversation and the memory blocks attached to it. Conversations from other servers, rooms or DMs are never mixed in or shown.
+- **Manual merging only**: different accounts are never merged because their nicknames or display names match; an operator confirms every merge in the console.
+- **Original text untouched**: imported CSV files are only read, and records without a time never get an invented one.
+- **Collecting is opt-in per room, by the operator**: conversation is collected only where both the global switch (`memory.capture: true`) and the room's `capture: true` are on. The members of a room do not opt in one by one; "Consent per feature" below says what each person can do.
+- **Web search and link reading**: the web search tool sends search terms to the search services that have keys (Tavily, Linkup, Exa, Serper, Brave, TinyFish, Kakao); link reading sends link addresses to Jina Reader. Link reading stays off until the operator turns it on in the Tools page (with a confirmation dialog). Links that open for anyone who knows the address, such as shared document links, cannot be told apart from public ones, so do not turn it on in rooms where such links are passed around. Jina fetches the page; this computer never connects to that address itself. Internal addresses (localhost, private IPs, `.local`, `.internal`) and addresses with a username or password are never handed to any service.
+- **What goes to model providers**: indexing and searching memory send snippet text to the model providers you chose (embedding, summary, rerank). Check their data retention and training policies. Keyword search over the original messages (`messages search`) never leaves this computer.
+- **User IDs**: tool usage statistics store user IDs only as one-way hashes. Discord IDs are stored as they are only where the bot has to DM someone (consents, fortunes, notice subscriptions, personal settings). They are **not encrypted** in the database. The same goes for the birth date, time, gender and place someone registers for fortunes: ordinary database text, hidden from the console but readable by anyone who can read the data folder or a backup. Protect them with the folder permissions and disk encryption described below.
+- **Consent per feature**: once the operator has switched collecting on for a room, memory collection and chiming in are on for the people in it **until each person withdraws** (opt-out), with `/privacy` or `!개인정보 철회 기억`. Chiming in has one name, "먼저 말 걸기" (`!개인정보 철회 먼저말걸기`; `능동참여`, `끼어들기` and `참여` still work as words for it). Withdrawing memory consent deletes that person's stored conversation for good, together with their lines in the conversation context the bot keeps to carry on (also in channels that store no memory), the text of their messages in the console's turn history and participation log, and their reply ratings; a person who withdrew is not collected again. The bot's replies stay visible in Discord, so they are not removed. Fortunes, university notices and transfer notices work only after explicit consent (read the notice, press agree). When the privacy policy version changes, people consent again.
+- **Evidence the bot copied**: new evidence is stored as **references** to the original messages (message IDs and a one-way speaker reference), not as copies of the text. A deleted message or a withdrawn person is removed from live conversation context, stored messages and search immediately. Copies in turn history, lab and memory reviews, and evaluation items are cleared by a durable background job, usually within a fraction of a second (a few seconds for a very large withdrawal); if Masamong stops mid-job, it finishes at the next start. Older records may still contain copied excerpts; the job matches their surviving IDs or distinctive text. "What is still kept" below covers older rows it cannot match.
+- **Minimal admin view**: the console shows which features a person uses, but not sensitive details such as birth date and time; those stay hidden from operators too.
+- **Top talkers**: for `/ranking` the bot counts only **message numbers** per date, server, room and person, and the name last used (`activity_counts`). No message text is stored; bots, unapproved servers and people who withdrew memory consent are not counted; counts are kept for `retention.turn_days`.
+- **Deleted and edited messages**: deleting or editing a message in Discord updates the bot's conversation context, stored messages and search immediately, whether or not the channel stores memory. Copies in the console's turn history, participation log and evidence quoted in another person's record are removed by the background job described above. Each channel's conversation context is also removed after `retention.turn_detail_days`.
+- **Feedback on replies**: from reactions on the bot's replies and **Rate this reply**, only this is stored: which reply (conversation record ID), a one-way hash of who rated it, good or bad, and the reason picked. No message text and no Discord user ID. Ratings from people who withdrew memory consent or are blocked are not kept. Ratings are kept for `retention.turn_days`, and the link between a bot message and its conversation record for `retention.turn_detail_days`.
+- **A last check of room isolation**: memory that search already limited to the channel's scope is checked once more right before it goes into the answer prompt. Memory from another room is taken out and the operator is told (it should never happen).
+- **A last check of the answer**: before an answer is sent or stored, it is checked for the bot's own internal markers (the delimiters around memory, the planner header, the system and security prompt headings, in every supported language). A match is replaced by the generic "could not answer" line. This is a literal check: it catches an obvious recital of the instructions, not a paraphrase of them.
+- **Places**: the search terms ("restaurants near Gangnam station") go to Kakao's Local API.
+- **Edits, deletions and withdrawals**: every derived record stores references to its source in the same database transaction as the record. The cleanup intent and identifier-only tombstones are committed in a durable transaction before the local source changes; if that intent cannot be stored, the local change is not applied. Tombstones prevent a slow reply or another late writer from restoring deleted text. A reply that finishes after its source was deleted has the message and evidence blanked in its history record. Pending cleanup survives shutdown and resumes at the next start; native-ID-less observations are handled in bounded batches.
+
+### What is still kept
+
+- **Old records that cannot be matched.** Rows written before the bot recorded who said what, whose source message was already gone before the upgrade, and very short or common messages (under 12 characters) cannot always be tied to a person or a message. A deletion or a withdrawal does not erase these; they leave on their own after `retention.turn_detail_days`, or an operator can remove them.
+- **The bot's own answers** stay visible in Discord and in the conversation record, as described above.
+- **Source files and backups.** Import files you uploaded or keep elsewhere, unrelated instances, and backups made earlier are not rewritten. Delete them yourself if they hold a conversation someone asked to have removed.
+
+The project's full data principles are in [docs/RAW_DATA_POLICY.md](https://github.com/kim0040/masamong2/blob/main/docs/RAW_DATA_POLICY.md) (Korean).
+
+## Running it safely
+
+- **macOS, Linux, FreeBSD**: the data folder is owner-only (0700) and the conversation database, settings and key files are 0600. If a folder or database made by an older version is open to other accounts, the service narrows it at start.
+- **Windows**: the data root gets a protected owner-only ACL for your account, SYSTEM and Administrators, and passes it on to new files and folders. A completion marker is written only after the migration walk succeeds. Missing or invalid markers (including after an interrupted walk) trigger another walk; a child ACL failure keeps the migration incomplete and `doctor` attention appears again on later starts until it can be protected. This also applies to a folder you chose with `--data-root`. If the data root itself is a symbolic link or junction, Masamong protects the directory it points to (for example, a folder moved to another drive with `mklink /J`); reparse points inside that tree are skipped and never followed. Drives that do not keep ACLs cannot be made private; Masamong warns and continues unless another account can write to the data root, in which case it refuses to start. Credential Manager entries are outside this folder and belong to your Windows user.
+- None of this encrypts the files. On laptops, also turn on full-disk encryption (FileVault, BitLocker, LUKS), and treat backups, which hold conversation text, the same way.
+- For different people or different bots, use separate data folders (`--data-root`) so the instances are fully apart.
+- Before sharing logs, `doctor` output or backups, check them for conversation text or personal information.
+- Tell the people in your rooms that the bot remembers and uses their conversation.
+
+## What leaves this computer on its own
+
+- **Operator alerts** (`alerts`): the Discord DM to operators contains only the problem and the instance name, never conversation text.
+- **Server log** (`guilds.<id>.log`): a deleted message is posted with its author, channel, time and, unless `deleted_text` is off, its text and attached file names. Masamong still removes it from its own memory; the text stays only as a post in the server's log channel. A problem names the channel and a cause, never what was asked. The log is off until it is turned on; then it goes to the chosen channel (Automatic = a channel named `logs`), so keep that channel visible to the server's managers only.
+- **Update check** (`updates.check`): once a day it asks the GitHub API for the latest release. The request carries only the program name and version (User-Agent); turned off, nothing is sent.
+- **Installing an update** (Maintenance → Update now): only when the operator presses it. Files come only from this repository's GitHub release. The archive must match the release's `SHA256SUMS`, and the new program must run and report the expected version before anything is replaced. A backup is taken first. The files are not signed yet, so this proves the download is intact, not who built it ([Release checklist](https://github.com/kim0040/masamong2/wiki/Release-Checklist)).
+- **HTTP tools**: connect only to hosts the operator configured, and do not follow redirects to other hosts (so keys never reach a third party).
+- **Provider and tool addresses** are checked as parsed URLs, not as text: HTTPS is required, with plain HTTP allowed only for `localhost` and loopback addresses (`127.0.0.0/8`, `::1`) such as a local model server. Addresses with a username or password, look-alike hosts such as `localhost.example.com`, and templated host parts are refused, and a provider redirect to a different scheme, host or port is not followed.
+- **Recovery page**: if a restore, reset or program update cannot finish, the daemon serves a localized page with a human-readable explanation and only the commands valid for that state ([Troubleshooting](https://github.com/kim0040/masamong2/wiki/Troubleshooting)). `masamong open` and the tray's Open command reach it; `masamong stop` ends the maintenance daemon through an authenticated endpoint. The page answers only loopback Host names, refuses cross-origin writes and keeps raw errors (which could contain paths or settings) in the log.
+
+## Release signing
+
+Release files are not code-signed or notarized yet. `SHA256SUMS` lets you check that a file matches the release. On first launch macOS may warn about an "unidentified developer" and Windows may show SmartScreen; see [Installation](https://github.com/kim0040/masamong2/wiki/Installation) for how to get past it.
+
+## Reporting a vulnerability
+
+If you find a security problem, please do not open a public issue; report it privately through the channel in [SECURITY.md](https://github.com/kim0040/masamong2/blob/main/SECURITY.md).

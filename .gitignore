@@ -1,0 +1,68 @@
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+.cursor/
+AGENTS.md
+*.swp
+*~
+
+# Secrets and private local corpora (never commit)
+.private/
+.env
+.env.*
+!.env.example
+**/secrets.env
+**/.env.local
+**/secrets.json
+**/credentials.json
+/tools/data/raw-sources.json
+
+# Raw / derived data trees
+/data/
+**/kakao_raw/
+.masamong-scratch/
+# Test-sandbox RAG index (never the product DB).
+/test-sandbox/
+# Do not recreate or commit a second app tree under this name.
+/rag-playground/
+/experimental/rag-leaf-parent/data/
+/experimental/rag-leaf-parent/config.json
+
+# Local DBs, vectors, checkpoints
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.npy
+*.npz
+*.npzz
+*.bin
+*.faiss
+
+# Python / build
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+/bin/
+*.exe
+
+# Browser automation scratch
+.playwright-cli/
+.playwright-mcp/
+/sandbox-*.yml
+
+# Local design sources, work packages and UI evidence (never commit)
+/assets/brand/source/
+/output/
+/*.png
+
+# Historical planning and archived material kept only in the local checkout
+/docs/archive/
+
+# local builds (make build / make app)
+/build/

@@ -1,0 +1,248 @@
+# The test gate. It runs in two sizes so a push gets a quick answer:
+#   push / pull request -> the quick gate: go vet + go test (+ noweb), and the console check only when the
+#                          console or its strings changed, the license audit only when dependencies changed.
+#                          Windows and macOS verification run on every push/PR; a newer push cancels the older run.
+#   weekly, Run workflow, release -> the full gate: also the race detector, the 45 s load test, every
+#                          release platform's build and the license audit.
+# The release workflow calls this (full) before it builds archives.
+name: ci
+on:
+  # docs-only changes skip the gate: docs/wiki is checked by the wiki workflow, the rest is prose
+  push:
+    paths-ignore: ["docs/**", "**.md"]
+  pull_request:
+    paths-ignore: ["docs/**", "**.md"]
+  schedule:
+    - cron: "41 2 * * 1" # Monday 02:41 UTC: the full gate once a week
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
+env:
+  # push/PR to a branch is the quick gate; anything else (schedule, manual, release tag) is the full one
+  FULL: ${{ !((github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')) || github.event_name == 'pull_request') }}
+jobs:
+  # what the change touched (the full gate treats everything as touched)
+  changes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      full: ${{ steps.f.outputs.full }}
+      ui: ${{ steps.f.outputs.ui }}
+      deps: ${{ steps.f.outputs.deps }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 50
+      - id: f
+        env:
+          BEFORE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          echo "full=$FULL" >>"$GITHUB_OUTPUT"
+          if [ "$FULL" = true ] || [ -z "$BEFORE" ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "ui=true" >>"$GITHUB_OUTPUT"; echo "deps=true" >>"$GITHUB_OUTPUT"; exit 0
+          fi
+          files=$(git diff --name-only "$BEFORE" HEAD)
+          echo "$files"
+          echo "$files" | grep -qE '^internal/transport/web/ui/|^locales/ui/' && echo "ui=true" >>"$GITHUB_OUTPUT" || echo "ui=false" >>"$GITHUB_OUTPUT"
+          echo "$files" | grep -qE '(^|/)(go\.mod|go\.sum|package\.json|package-lock\.json)$|^scripts/license_audit\.py$' && echo "deps=true" >>"$GITHUB_OUTPUT" || echo "deps=false" >>"$GITHUB_OUTPUT"
+
+  go:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test ./... -count=1
+      - name: noweb build
+        run: |
+          go vet -tags noweb ./cmd/... ./internal/transport/web/...
+          go test -tags noweb ./... -count=1
+          go build -tags noweb -o /dev/null ./cmd/masamong
+          go build -tags noweb -o /dev/null ./cmd/masamongd
+      - name: every release platform builds
+        if: env.FULL == 'true'
+        run: |
+          for t in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 linux/arm linux/riscv64 windows/amd64 windows/arm64 freebsd/amd64 freebsd/arm64; do
+            echo "== $t"
+            CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} GOARM=7 go build -o /dev/null ./cmd/masamong ./cmd/masamongd
+          done
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      # the application package alone runs past go test's default 10 minutes on the Windows runner
+      # (23 min on 2026-10-12, over 30 on a slow runner the same day)
+      - run: go test ./... -count=1 -timeout 45m
+      - name: noweb build
+        run: |
+          go vet -tags noweb ./cmd/... ./internal/transport/web/...
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go build -tags noweb -o (Join-Path $env:RUNNER_TEMP 'masamong-noweb.exe') ./cmd/masamong
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go build -tags noweb -o (Join-Path $env:RUNNER_TEMP 'masamongd-noweb.exe') ./cmd/masamongd
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: installer helpers
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install-test.ps1
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: internal/transport/web/ui/package-lock.json
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: build the console
+        working-directory: internal/transport/web/ui
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Python retrieval suites
+        env:
+          PYTHONPATH: tools/evaluation
+        run: |
+          python -m pip install numpy
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:EVAL_SECRETS = Join-Path $env:RUNNER_TEMP 'masamong-empty-eval-secrets.env'
+          Set-Content -LiteralPath $env:EVAL_SECRETS -Value 'OPENROUTER_API_KEY=test-only-not-a-real-key' -NoNewline
+          python -m unittest discover -s experimental/rag-leaf-parent
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m unittest discover -s tools/evaluation/rag_upgrade
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  # the macOS keychain, the Unix file modes and the launcher are only built and run here
+  macos:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test ./... -count=1
+
+  race:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # under the race detector the application package runs past go test's default 10 minutes (it timed
+      # out there on 2026-10-05 and 10-12 without any race reported)
+      - run: go test -race ./... -count=1 -timeout 40m
+
+  load:
+    # 45 s of mixed traffic against the real service (fake model): fails on leaked goroutines or
+    # files, failed turns, or a damaged database. The long soak is .github/workflows/soak.yml.
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go run ./tools/loadtest -duration 45s -rate 6 -config-every 15s -strict -report load.md
+      - if: always()
+        run: test -f load.md && cat load.md >>"$GITHUB_STEP_SUMMARY" || true
+
+  # The TiDB job is off with the TiDB backend (storage.TiDBEnabled = false, 2026-09-28): the product
+  # runs on SQLite only, so there is nothing to test against a live TiDB. Uncomment it together with
+  # the constant to bring the backend back.
+  # tidb:
+  #   # The TiDB backend against a real TiDB: the live adapter and migration tests, then the load test
+  #   # with 30 ms added each way (a cluster in another region), where serialized writes once collapsed.
+  #   runs-on: ubuntu-latest
+  #   services:
+  #     tidb:
+  #       image: pingcap/tidb:v8.5.1
+  #       ports:
+  #         - 4000:4000
+  #   steps:
+  #     - uses: actions/checkout@v7
+  #     - uses: actions/setup-go@v7
+  #       with:
+  #         go-version-file: go.mod
+  #     - name: wait for TiDB
+  #       run: for i in $(seq 1 60); do (echo > /dev/tcp/127.0.0.1/4000) 2>/dev/null && break; sleep 2; done
+  #     - run: go test ./internal/storage/ ./internal/application/ ./internal/tools/ ./internal/memory/store/ -run 'TiDB|Concurrency' -v
+  #       env:
+  #         MASAMONG_TIDB_TEST_DSN: root@tcp(127.0.0.1:4000)/test
+  #     - run: go run ./tools/loadtest -tidb-dsn 'root@tcp(127.0.0.1:4000)/' -db-latency 30ms -duration 45s -rate 4 -config-every 15s -strict -report load-tidb.md
+  #     - if: always()
+  #       run: test -f load-tidb.md && cat load-tidb.md >>"$GITHUB_STEP_SUMMARY" || true
+
+  console:
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: internal/transport/web/ui
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: internal/transport/web/ui/package-lock.json
+      - run: npm ci
+      - run: npm run check -- --fail-on-warnings
+      # strings.py, the i18n check, vite and the gzip budget (postbuild.mjs fails past 150 KiB)
+      - run: npm run build
+      # gzip bytes differ between zlib builds (macOS vs Linux Node), so a .gz only has to unpack to the
+      # committed file next to it; everything else must be byte-identical.
+      - name: committed ui/dist and locales match the sources
+        working-directory: .
+        run: |
+          changes=$(git status --porcelain --untracked-files=all | grep -v '\.gz$' || true)
+          if [ -n "$changes" ]; then
+            echo "$changes"
+            echo "::error::run make ui and commit ui/dist and locales/ui"
+            exit 1
+          fi
+          git checkout -- internal/transport/web/ui/dist
+          find internal/transport/web/ui/dist -name '*.gz' | while read -r gz; do
+            gunzip -c "$gz" | cmp -s - "${gz%.gz}" || { echo "::error::$gz does not unpack to ${gz%.gz}"; exit 1; }
+          done
+
+  license:
+    needs: changes
+    if: needs.changes.outputs.deps == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: internal/transport/web/ui/package-lock.json
+      # the audit reads the Svelte, Lucide and Pretendard license texts from node_modules
+      - run: npm ci --ignore-scripts
+        working-directory: internal/transport/web/ui
+      - run: python3 scripts/license_audit.py

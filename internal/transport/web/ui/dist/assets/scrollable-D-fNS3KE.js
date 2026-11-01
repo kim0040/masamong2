@@ -1,0 +1,1 @@
+function e(e){let t=()=>{e.scrollWidth>e.clientWidth+1||e.scrollHeight>e.clientHeight+1?e.tabIndex=0:e.removeAttribute(`tabindex`)},n=new ResizeObserver(t);n.observe(e);let r=new MutationObserver(t);return r.observe(e,{childList:!0,subtree:!0,characterData:!0}),t(),{destroy(){n.disconnect(),r.disconnect()}}}export{e as t};

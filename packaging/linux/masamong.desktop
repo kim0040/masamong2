@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Masamong
+Name[ko]=마사몽
+Comment=Open the Masamong console
+Exec=masamong open
+Icon=masamong
+Terminal=false
+Categories=Network;Chat;

@@ -1,0 +1,51 @@
+# Long soak: runs the service for a long time under steady mixed load (tools/loadtest, fake model, no
+# external calls) and fails on leaks, failed turns or database damage. The report (throughput, latency,
+# goroutines, heap, database and log growth per 1,000 turns) is in the job summary and an artifact.
+name: soak
+on:
+  schedule:
+    - cron: "17 3 1 * *" # monthly, the 1st at 03:17 UTC (also run it by hand before a release)
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: "How long to send traffic (Go duration)"
+        default: "45m"
+      rate:
+        description: "Discord messages per second"
+        default: "6"
+      dims:
+        description: "Embedding dimensions (1024 = production default; 4096 = heavier stress)"
+        default: "1024"
+      seed:
+        description: "Stored history before the load (messages); a long-running instance's queries scale with it"
+        default: "20000"
+permissions:
+  contents: read
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: soak
+        env:
+          DURATION: ${{ inputs.duration || '45m' }}
+          RATE: ${{ inputs.rate || '6' }}
+          DIMS: ${{ inputs.dims || '1024' }}
+          # with an empty history every query is fast; a count that grew with messages x leaves once
+          # stopped the bot on one core at 10,000 messages (docs/postmortems/0004)
+          SEED: ${{ inputs.seed || '20000' }}
+        run: GOMAXPROCS=1 go run ./tools/loadtest -seed "$SEED" -duration "$DURATION" -rate "$RATE" -dims "$DIMS" -sample 30s -config-every 60s -strict -report soak.md
+      - if: always()
+        run: test -f soak.md && cat soak.md >>"$GITHUB_STEP_SUMMARY" || true
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: soak-report
+          path: |
+            soak.md
+            soak.json
+          if-no-files-found: ignore

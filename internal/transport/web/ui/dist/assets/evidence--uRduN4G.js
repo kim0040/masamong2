@@ -1,0 +1,1 @@
+function e(e,t){let n=e[t];if(!n)return 0;if(n.leaf_shown_in)return n.leaf_shown_in;let r=new Set(n.leaf_observation_ids??[]);if(!r.size||(n.visible_observation_ids??[]).some(e=>r.has(e)))return 0;for(let n=0;n<t;n++)if((e[n].visible_observation_ids??[]).some(e=>r.has(e)))return e[n].rank??n+1;return 0}export{e as t};

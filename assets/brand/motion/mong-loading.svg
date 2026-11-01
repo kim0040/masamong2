@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img">
+  <style>
+    .f { opacity: 0; }
+    .a { animation: wag 1s steps(1, end) infinite; }
+    .b { animation: wag 1s steps(1, end) infinite; animation-delay: -0.75s; }
+    .c { animation: wag 1s steps(1, end) infinite; animation-delay: -0.5s; }
+    .d { animation: wag 1s steps(1, end) infinite; animation-delay: -0.25s; }
+    @keyframes wag { 0% { opacity: 1; } 25%, 100% { opacity: 0; } }
+    @media (prefers-reduced-motion: reduce) {
+      .f { animation: none; opacity: 0; }
+      .b { opacity: 1; }
+    }
+  </style>
+  <image class="f a" href="mong-loading-1.png" width="512" height="512"/>
+  <image class="f b" href="mong-loading-2.png" width="512" height="512"/>
+  <image class="f c" href="mong-loading-3.png" width="512" height="512"/>
+  <image class="f d" href="mong-loading-4.png" width="512" height="512"/>
+</svg>

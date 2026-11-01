@@ -1,0 +1,7 @@
+# Vite's generated Svelte runtime can contain multiline JavaScript string literals whose lines end
+# in intentional whitespace. Source files keep Git's normal whitespace checks.
+internal/transport/web/ui/dist/assets/*.js -whitespace
+
+# Golden and fixture files are compared byte for byte (the Korean prompts must match the sandbox), so a
+# Windows checkout must not turn their line endings into CRLF.
+**/testdata/** -text

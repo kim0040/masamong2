@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "policy": "raw_only_rebuild",
+  "sources": [
+    {
+      "path": "data/kakao_raw/chat.csv",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "records": 0,
+      "collection_id": "friends-archive",
+      "source_room_id": "kakao:friends-room"
+    }
+  ]
+}

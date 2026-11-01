@@ -1,0 +1,169 @@
+[
+ {
+  "name": "finance__quote",
+  "description": "Current stock price. Use when asked for a company's share price. Not for used or product prices, bare numbers, exchange rates (use finance__fx) or company news (use search__web).",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "krw": {
+     "type": "boolean",
+     "description": "true to show it in Korean won"
+    },
+    "symbol": {
+     "type": "string",
+     "description": "Ticker (e.g. AAPL, 005930.KS). If unsure, find it with search__web first."
+    }
+   },
+   "required": [
+    "symbol"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "places__search",
+  "description": "Find places and shops on Kakao Map (name, address, phone, map link). Use to find restaurants, cafes, shops or places. If the area is unknown, do not use it and finish: the reply step asks where. Places outside Korea: search__web.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "query": {
+     "type": "string",
+     "description": "Area + kind only, no adjectives (e.g. Gangnam station lunch, Hongdae cafe)"
+    },
+    "size": {
+     "type": "integer",
+     "description": "Number of results (usually leave out)",
+     "minimum": 1,
+     "maximum": 15
+    }
+   },
+   "required": [
+    "query"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "polls__create",
+  "description": "Creates a Discord poll. Use when someone clearly asks for a poll. Not when someone only asks for opinions.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "allow_multiselect": {
+     "type": "boolean",
+     "description": "true to allow picking several"
+    },
+    "duration_hours": {
+     "type": "integer",
+     "description": "Duration in hours (default 24)",
+     "minimum": 1,
+     "maximum": 768
+    },
+    "options_text": {
+     "type": "string",
+     "description": "The choices, one per line (2–10, up to 55 characters each). Empty = Yes/No."
+    },
+    "question": {
+     "type": "string",
+     "description": "The poll question (max 300 characters)"
+    }
+   },
+   "required": [
+    "question"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "search__web",
+  "description": "Web search (news, latest information, fact checks). Use for search requests, today's or recent news, who holds a post now, facts that change (rankings, prices, results), or when another tool failed. Also for used prices and what an item costs now. For a news roundup or summary, or comparing and researching several sources, give depth=deep; for news and current affairs, topic=news. Not for word meanings, common knowledge, arithmetic, translation or small talk.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "depth": {
+     "type": "string",
+     "description": "How hard to search. quick: one fact checked fast (a date, a price, who). Usually leave out (standard). deep: a news roundup, a comparison, 'look into it properly', anything needing many sources (slower and costlier)",
+     "enum": [
+      "quick",
+      "standard",
+      "deep"
+     ]
+    },
+    "fresh": {
+     "type": "string",
+     "description": "day, week or month when only recent pages will do",
+     "enum": [
+      "day",
+      "week",
+      "month"
+     ]
+    },
+    "query": {
+     "type": "string",
+     "description": "Search words: key terms only, in the message's language."
+    },
+    "size": {
+     "type": "integer",
+     "description": "Number of results (usually leave out)",
+     "minimum": 1,
+     "maximum": 10
+    },
+    "topic": {
+     "type": "string",
+     "description": "news: when looking for news articles or current affairs (usually with fresh). Otherwise leave out",
+     "enum": [
+      "general",
+      "news"
+     ]
+    }
+   },
+   "required": [
+    "query"
+   ],
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "weather__query",
+  "description": "Weather for any city worldwide, today up to 13 days ahead. Use for the weather or questions that depend on it (umbrella, what to wear). Not for climate or seasons as general knowledge, or warnings and earthquakes (use disasters__query).",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "day_offset": {
+     "type": "integer",
+     "description": "0 today, 1 tomorrow, 2 the day after … 13. Read weekdays from the day_offset list of the reference time. For a weekend, call once for Saturday and once for Sunday.",
+     "minimum": 0,
+     "maximum": 13
+    },
+    "region": {
+     "type": "string",
+     "description": "City name, any country, from the message or the conversation. Leave it out when none is given: the tool uses the person's setting or a default and says so."
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ {
+  "name": "web__read",
+  "description": "Reads the page behind a link (URL). Use when the message has a link and asks about it (summarize this, what does it say). Not when the message has no link.",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "max_chars": {
+     "type": "integer",
+     "description": "How much to read (usually leave out)",
+     "minimum": 500,
+     "maximum": 20000
+    },
+    "url": {
+     "type": "string",
+     "description": "The http address exactly as written in the message"
+    }
+   },
+   "required": [
+    "url"
+   ],
+   "additionalProperties": false
+  }
+ }
+]

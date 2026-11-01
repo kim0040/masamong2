@@ -1,0 +1,16 @@
+[
+  {"model": "qwen3-embedding-8b", "reference": "qwen3-embedding-8b", "width": 4096},
+  {"model": "  QWEN/Qwen3-Embedding-8B:free  ", "reference": "qwen3-embedding-8b", "width": 4096},
+  {"model": "provider/path/QWEN3-EMBEDDING-4B:variant:extra", "reference": "qwen3-embedding-4b", "width": 2560},
+  {"model": "\tQwen3-Embedding-0.6B\n", "reference": "qwen3-embedding-0.6b", "width": 1024},
+  {"model": "OPENAI/Text-Embedding-3-Large:free", "reference": "text-embedding-3-large", "width": 3072},
+  {"model": "text-embedding-3-small", "reference": "text-embedding-3-small", "width": 1536},
+  {"model": "\u3000GOOGLE/GEMINI-EMBEDDING-001:variant\u00a0", "reference": "gemini-embedding-001", "width": 3072},
+  {"model": "google/GEMINI-EMBEDDING-2:variant", "reference": "gemini-embedding-2", "width": 0},
+  {"model": " custom/Unknown-Embedding:variant ", "reference": "unknown-embedding", "width": 0},
+  {"model": "qwen3-embedding-8b-extra", "reference": "qwen3-embedding-8b-extra", "width": 0},
+  {"model": "QWEN3-EMBEDD\u0130NG-8B", "reference": "qwen3-embedding-8b", "width": 4096},
+  {"model": "\u039f\u03a3", "reference": "\u03bf\u03c3", "width": 0},
+  {"model": "\u001cqwen3-embedding-8b\u001c", "reference": "\u001cqwen3-embedding-8b\u001c", "width": 0},
+  {"model": "", "reference": "", "width": 0}
+]
