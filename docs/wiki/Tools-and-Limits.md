@@ -10,8 +10,8 @@ Masamong's tools (weather, stocks and FX, web search, polls, memory search and m
 |---|---|---|---|
 | `memory.search` | automatic | — | None (embeddings use the model key) |
 | `weather.query` | yes | `!날씨`, `/weather` | Korea: KMA `MASAMONG_KMA_KEY` (falls back to Open-Meteo without it); elsewhere: no key |
-| `disasters.query` | yes | `!특보`, `/alerts` | KMA key. The automatic **disaster alerts** that post without being asked are described below |
-| `places.search` | yes | `/places` | Kakao REST key (the same one as Kakao search). Finds restaurants, cafes and shops on Kakao Map with name, address, phone and map link. "places near me" with no area makes it ask where |
+| `disasters.query` | yes | `!특보`, `/alerts` | Korea only. KMA key. The automatic **disaster alerts** that post without being asked are described below |
+| `places.search` | yes | `/places` | Korea only. Kakao REST key (the same one as Kakao search). Finds restaurants, cafes and shops on Kakao Map with name, address, phone and map link. "places near me" with no area makes it ask where |
 | `activity.ranking` (top talkers) | yes | `/ranking` | None. Who sent the most messages in this room (today, this week, this month, all time). Counts only; no message text is stored for it |
 | `finance.quote` | yes | `!시세`, `/quote` | Finnhub `MASAMONG_FINNHUB_KEY`. Korean stocks and indexes the free plan lacks are answered from a web search, which the reply says |
 | `finance.fx` | yes | `!환율`, `/fx` | Optional (`MASAMONG_EXCHANGERATE_KEY`) |
@@ -24,7 +24,7 @@ Masamong's tools (weather, stocks and FX, web search, polls, memory search and m
 | `summaries.channel` | yes | `!요약`, `/summary` | None (uses the summary model). Summarizes stored conversation incrementally. An edit, deletion or withdrawn memory consent in the channel drops the saved summary; the next request makes a new one |
 | `images.generate` | yes | `!이미지`, `/image` | Needs the `image` model role. One at a time; default daily limits 10 per person, 30 per room, 50 overall; files kept for `retention.image_days` (14 days). **A picture asked for in chat is drawn in the background**: the bot answers at once that it is drawing, and posts the picture as a reply to the request when it is done (a short line if it fails). At most 3 pictures wait, a person has one at a time, and the same request from the same person is not drawn twice but waits for the first. A picture is dropped without a word if the channel is paused, the requester was blocked or withdrew their memory consent, or the requester deleted the request message (a picture whose request is gone is never posted); a short reconnect of the bot is waited out (up to 30 seconds), a channel where the bot cannot attach files is not drawn for at all, and waiting pictures are dropped when the bot stops. Turn off "Draw in the background when asked in chat" under Tools → Image generation → Settings (default parameters; `tools.images.generate.defaults.async: false`) and the answer waits for the picture instead. The `/image` command always waits. **Content control:** a request is first checked against a list of clearly sexual or violent words in the language packs (`image_blocked_words`, every language's list applies). That list is only a **fast reject**: a request that avoids those words is not caught by it, so it is not a safety filter and not a measure of coverage. The real control is the **image provider's own content filter**, so choose an image model and provider whose safety filter is on |
 | `fortune.query`, `fortune.subscribe` | — | `!운세`, `/fortune`, `!운세등록`, `!이번달운세`, `!올해운세`, `!구독`, `/zodiac` | Uses the model key. **Needs fortune consent.** Public rooms get a three-line summary; the detailed reading goes privately (DM or a message only you see). The morning briefing is prepared ahead and sent at each person's chosen time |
-| `notices.status`, `notices.subscribe`, `transfer.recent` | — | `!공지`, `/notices`, `!공지등록`, `!편입`, `/transfer` | None (reads public university pages). **Subscribing needs consent** (just listing recent notices does not). A daily DM briefing of new notices |
+| `notices.status`, `notices.subscribe`, `transfer.recent` | — | `!공지`, `/notices`, `!공지등록`, `!편입`, `/transfer` | Korea only (Korean universities). None (reads public university pages). **Subscribing needs consent** (just listing recent notices does not). A daily DM briefing of new notices |
 
 ### Repeating reminders and conversation lines
 
@@ -36,7 +36,7 @@ Masamong's tools (weather, stocks and FX, web search, polls, memory search and m
 
 ### Disaster alerts (automatic earthquake and warning posts)
 
-Like the previous bot, it posts earthquakes and weather warnings **on its own**. It needs a KMA key and a Discord connection.
+Like the previous bot, it posts earthquakes and weather warnings **on its own**. It covers Korea only and needs a KMA key and a Discord connection. A new instance set up outside Korea starts with `disasters` and `notices` off (see [Configuration Reference](https://github.com/kim0040/masamong2/wiki/Configuration-Reference#features)).
 
 - **Earthquakes**: checked every minute. By default magnitude 4.0+ in Korea and 7.0+ abroad, and "no impact in Korea" notices are not posted. Quakes within 72 hours and 150 km count as one event; the first post is edited to update it.
 - **Warnings**: checked every 5 minutes. Land warnings nationwide, advisories only for chosen regions, marine warnings only when switched on; lifted warnings are announced too.

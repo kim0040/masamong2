@@ -13,8 +13,8 @@ En resumen:
 
 - **Habla como un amigo** — una personalidad y reglas de respuesta para cada sala
 - **Recuerda la sala** — mensajes de Discord en vivo y chats de KakaoTalk importados; cada sala busca solo en su propia memoria
-- **Consulta cosas** — tiempo, avisos y terremotos, bolsa, tipos de cambio, búsqueda web, lugares, imágenes, encuestas, resúmenes
-- **Ayudantes personales** — recordatorios, una fortuna matutina por MD, suscripciones a avisos escolares
+- **Consulta cosas** — tiempo, avisos y terremotos (Corea), bolsa, tipos de cambio, búsqueda web, lugares, imágenes, encuestas, resúmenes
+- **Ayudantes personales** — recordatorios, una fortuna matutina por MD, suscripciones a avisos escolares (universidades coreanas)
 - **Controla los costes** — un presupuesto mensual y límites por herramienta y por persona
 - **Se ejecuta en tu máquina** — instalas tu propia copia y usas tus propias claves de API; la consola se enlaza a `127.0.0.1` y el modo de práctica te deja explorar gratis
 
@@ -38,8 +38,9 @@ Todas las capturas son del **modo de práctica** (un chat de ejemplo entre cuatr
 
 - **Habla como un amigo**: cada sala recibe una personalidad (informal, formal o la tuya propia) y una regla de respuesta (cada mensaje / cuando lo llamen / solo comandos / desactivado). El coreano, el inglés, el japonés, el chino simplificado y el español vienen integrados.
 - **Recuerda la sala**: los mensajes de Discord en vivo y los chats de KakaoTalk importados (CSV) se convierten en memoria. Cada sala busca **solo en la memoria asociada a ella**; las demás salas, servidores y MD nunca se mezclan. Lo que no está en la memoria no se inventa.
-- **Herramientas**: tiempo (KMA en Corea, Open-Meteo en el resto del mundo), publicaciones automáticas de terremotos y avisos meteorológicos, cotizaciones, tipos de cambio, búsqueda web, lugares (Kakao Map), lectura de enlaces, imágenes, encuestas, resúmenes de canal, quién habló más. El bot las usa por su cuenta en la conversación, o tú usas comandos como `!clima Seúl` o `/weather`. Cuando una herramienta no tiene respuesta, el bot sigue hablando en lugar de mostrar una tarjeta de error.
+- **Herramientas**: tiempo (KMA en Corea, Open-Meteo en el resto del mundo), publicaciones automáticas de terremotos y avisos meteorológicos (Corea), cotizaciones, tipos de cambio, búsqueda web, lugares en Corea (Kakao Map), lectura de enlaces, imágenes, encuestas, resúmenes de canal, quién habló más. El bot las usa por su cuenta en la conversación, o tú usas comandos como `!clima Madrid` o `/weather`. Cuando una herramienta no tiene respuesta, el bot sigue hablando en lugar de mostrar una tarjeta de error.
 - **Ayudantes personales**: recordatorios («recuérdame mañana a las 3», confirmados antes de programarse), una fortuna matutina por MD, suscripciones a avisos escolares. Cada uno necesita su propio consentimiento, que puede retirarse y borrarse en cualquier momento.
+- **Solo para Corea**: los avisos meteorológicos y terremotos (KMA), la búsqueda de lugares (Kakao Map) y los avisos escolares solo cubren Corea. Una instancia configurada en otro idioma y zona horaria empieza con las alertas meteorológicas y los avisos escolares desactivados; actívalos en **Ajustes e historial → Interruptores de funciones**. El tiempo, la bolsa, los tipos de cambio y la búsqueda web funcionan en todas partes.
 - **Intervención** (opcional): el bot puede meterse en preguntas sin responder o en planes. Desactivada / solo registrar la decisión / hablar de verdad.
 - **Control de costes**: presupuesto mensual, límites diarios por herramienta y por persona, un registro de costes por modelo. Se detiene al alcanzar el presupuesto.
 - **Consola**: comprobaciones de estado, historial de conversaciones (por qué el bot respondió como lo hizo, paso a paso), registros, copia de seguridad y restauración, diagnósticos. Solo se enlaza a `127.0.0.1`; llega a un servidor remoto mediante un túnel SSH.
@@ -208,12 +209,12 @@ Los comandos también funcionan. Los comandos con prefijo necesitan el Message C
 
 | Prefijo | Barra | Qué hace |
 |---|---|---|
-| `!clima Busan` | `/weather` | Tiempo actual y previsión de hasta 14 días (aproximada más allá de una semana) |
+| `!clima Barcelona` | `/weather` | Tiempo actual y previsión de hasta 14 días (aproximada más allá de una semana) |
 | `!alertas` | `/alerts` | Avisos meteorológicos, terremotos |
 | `!cotizacion AAPL` | `/quote` | Cotización de acciones |
 | `!cambio USD` | `/fx` | Tipos de cambio |
 | `!buscar …` | `/search` | Búsqueda web |
-| `!lugares Seongsu cafe` | `/places` | Encontrar lugares (Kakao Map) |
+| `!lugares Seongsu cafe` | `/places` | Encontrar lugares en Corea (Kakao Map) |
 | `!imagen …` | `/image` | Dibujar una imagen |
 | `!encuesta pregunta \| opción1, opción2` | `/poll` | Encuesta de Discord |
 | `!resumen` | `/summary` | Resumir la conversación reciente |

@@ -2,11 +2,11 @@
   "note": "Translation record checked by tools/doccheck. When a file of a group changes, bring the other languages along, then run: go run ./tools/doccheck -write",
   "groups": {
     "README": {
-      "README.es.md": "c92b3cec8fbc8d35",
-      "README.ja.md": "7e61b780063f882a",
-      "README.ko.md": "ae64eb70d8e55e6d",
-      "README.md": "7a9854e02c6ff165",
-      "README.zh-Hans.md": "ce840c8c1a091d14"
+      "README.es.md": "a5b1d27efde2f96e",
+      "README.ja.md": "b2c2ca3b6a2bcfa4",
+      "README.ko.md": "5286025200958089",
+      "README.md": "ba5d850d6973d1cb",
+      "README.zh-Hans.md": "cdde581120b5d344"
     },
     "wiki/CLI-명령어": {
       "docs/wiki/CLI-Commands.md": "cb6e440750dc6a01",
@@ -17,8 +17,8 @@
       "docs/wiki/Discord-연결.md": "72a0ea70b5dced9e"
     },
     "wiki/Home": {
-      "docs/wiki/English.md": "0ed6c342e8d4f174",
-      "docs/wiki/Home.md": "f252f4e4a423859c"
+      "docs/wiki/English.md": "357a9307b7f1f507",
+      "docs/wiki/Home.md": "c67570ed654b7964"
     },
     "wiki/개발-가이드": {
       "docs/wiki/Development-Guide.md": "494fd70278767ec9",
@@ -33,8 +33,8 @@
       "docs/wiki/기억-블록.md": "ad4d0db30cb7fe77"
     },
     "wiki/도구와-한도": {
-      "docs/wiki/Tools-and-Limits.md": "edd089b562dfe53e",
-      "docs/wiki/도구와-한도.md": "cc18709a71110c5b"
+      "docs/wiki/Tools-and-Limits.md": "2de1f7ef4246b3e6",
+      "docs/wiki/도구와-한도.md": "c7d1947fed82333b"
     },
     "wiki/동시-처리와-성능": {
       "docs/wiki/Concurrency-and-Performance.md": "02d9db98c722d91b",
@@ -65,8 +65,8 @@
       "docs/wiki/빠른-시작.md": "8f97bbe7ac9959e6"
     },
     "wiki/설정-레퍼런스": {
-      "docs/wiki/Configuration-Reference.md": "3aa6e0e355aac804",
-      "docs/wiki/설정-레퍼런스.md": "5133bdda9e3a7283"
+      "docs/wiki/Configuration-Reference.md": "1f536b5ff702d525",
+      "docs/wiki/설정-레퍼런스.md": "29de06a6cc5d6466"
     },
     "wiki/설치": {
       "docs/wiki/Installation.md": "0fadd96bae14101a",

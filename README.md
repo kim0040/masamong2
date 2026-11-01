@@ -14,8 +14,8 @@ In short:
 
 - **Talks like a friend** — a persona and reply rules for each room
 - **Remembers the room** — live Discord messages and imported KakaoTalk chats; each room searches only its own memory
-- **Looks things up** — weather, warnings and earthquakes, stocks, exchange rates, web search, places, pictures, polls, summaries
-- **Personal helpers** — reminders, a morning fortune DM, school notice subscriptions
+- **Looks things up** — weather, warnings and earthquakes (Korea), stocks, exchange rates, web search, places, pictures, polls, summaries
+- **Personal helpers** — reminders, a morning fortune DM, school notice subscriptions (Korean universities)
 - **Keeps costs in check** — a monthly budget and per-tool, per-person limits
 - **Runs on your machine** — you install your own copy and use your own API keys; the console binds to `127.0.0.1`, and practice mode lets you look around for free
 
@@ -39,8 +39,9 @@ All screenshots are from **practice mode** (a sample chat between four made-up p
 
 - **Talks like a friend**: each room gets a persona (casual, polite, or your own) and a reply rule (every message / when called / commands only / off). Korean, English, Japanese, Simplified Chinese and Spanish are built in.
 - **Remembers the room**: live Discord messages and imported KakaoTalk chats (CSV) become memory. Each room searches **only the memory attached to it**; other rooms, servers and DMs never mix in. What is not in memory is not made up.
-- **Tools**: weather (KMA in Korea, Open-Meteo elsewhere), automatic earthquake and weather-warning posts, stock quotes, exchange rates, web search, places (Kakao Map), link reading, pictures, polls, channel summaries, top talkers. The bot calls them on its own in conversation, or you use commands like `!weather Seoul` or `/weather`. When a tool has no answer, the bot carries on talking instead of showing an error card.
-- **Personal helpers**: reminders ("remind me tomorrow at 3", confirmed before scheduling), a morning fortune DM, school notice subscriptions. Each needs its own consent, which can be withdrawn and deleted at any time.
+- **Tools**: weather (KMA in Korea, Open-Meteo elsewhere), automatic earthquake and weather-warning posts (Korea), stock quotes, exchange rates, web search, places in Korea (Kakao Map), link reading, pictures, polls, channel summaries, top talkers. The bot calls them on its own in conversation, or you use commands like `!weather London` or `/weather`. When a tool has no answer, the bot carries on talking instead of showing an error card.
+- **Personal helpers**: reminders ("remind me tomorrow at 3", confirmed before scheduling), a morning fortune DM, school notice subscriptions (Korean universities). Each needs its own consent, which can be withdrawn and deleted at any time.
+- **Korea-only parts**: warnings and earthquakes (KMA), place search (Kakao Map) and school notices cover Korea only. An instance set up in another language and time zone starts with warnings and school notices off; turn them on in **Settings & history → Feature switches**. Weather, stocks, exchange rates and web search work everywhere.
 - **Chiming in** (optional): the bot can step in on unanswered questions or plans. Off / log the decision only / actually speak.
 - **Cost control**: monthly budget, daily limits per tool and per person, a cost ledger per model. It stops at the budget.
 - **Console**: status checks, conversation history (why the bot answered the way it did, step by step), logs, backup and restore, diagnostics. It binds to `127.0.0.1` only; reach a remote server through an SSH tunnel.
@@ -209,12 +210,12 @@ Commands work too. Prefix commands need the Message Content Intent. The prefix w
 
 | Prefix | Slash | What it does |
 |---|---|---|
-| `!weather Busan` | `/weather` | Current weather and a forecast up to 14 days (rough beyond a week) |
+| `!weather Paris` | `/weather` | Current weather and a forecast up to 14 days (rough beyond a week) |
 | `!alerts` | `/alerts` | Weather warnings, earthquakes |
 | `!quote AAPL` | `/quote` | Stock quote |
 | `!fx USD` | `/fx` | Exchange rates |
 | `!search …` | `/search` | Web search |
-| `!places Seongsu cafe` | `/places` | Find places (Kakao Map) |
+| `!places Seongsu cafe` | `/places` | Find places in Korea (Kakao Map) |
 | `!image …` | `/image` | Draw a picture |
 | `!poll question \| a, b` | `/poll` | Discord poll |
 | `!summary` | `/summary` | Summarize recent conversation |

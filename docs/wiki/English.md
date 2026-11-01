@@ -16,8 +16,8 @@ Version `1.0.0` · License: MIT · Repository: [kim0040/masamong2](https://githu
 |---|---|
 | Chat and personas | Reply mode per room (every message / when mentioned / commands only / off), a persona and language rules per room; Korean, English, Japanese, Simplified Chinese and Spanish built in |
 | Memory and search | Stores live conversation and indexes KakaoTalk CSV; each room searches **only the memory blocks attached to it** |
-| Tools | Weather, earthquake and weather-warning posts, stock quotes, exchange rates, web search, places (Kakao Map), link reading, polls, pictures, channel summaries, top talkers — in conversation or with slash (`/`) and prefix (`!`) commands. When a tool has no answer the bot carries on talking instead of showing an error. Custom HTTP tools can be added in settings |
-| Personal helpers | Reminders ("remind me tomorrow at 3"), a morning fortune DM, school notice subscriptions. Each needs its own consent; withdraw, delete and block in **People & access** |
+| Tools | Weather, earthquake and weather-warning posts (Korea), stock quotes, exchange rates, web search, places in Korea (Kakao Map), link reading, polls, pictures, channel summaries, top talkers — in conversation or with slash (`/`) and prefix (`!`) commands. When a tool has no answer the bot carries on talking instead of showing an error. Custom HTTP tools can be added in settings |
+| Personal helpers | Reminders ("remind me tomorrow at 3"), a morning fortune DM, school notice subscriptions (Korean universities). Each needs its own consent; withdraw, delete and block in **People & access** |
 | Concurrency | Rooms are answered **in parallel**; inside one room replies keep **arrival order** |
 | Cost control | Monthly budget, daily limits per tool and per person, a cost ledger from token prices |
 | Operations | Streaming logs, diagnostics (`doctor`), backup and one-click restore, migration from the previous bot, start at login, practice mode |

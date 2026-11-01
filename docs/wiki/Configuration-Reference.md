@@ -250,6 +250,8 @@ tools:
 
 Feature group switches: `weather`, `disasters`, `finance`, `search`, `polls`, `images`, `fortune`, `notices`, `summaries`. `false` turns off every tool in the group.
 
+`disasters` (KMA) and `notices` (Korean universities) only cover Korea. A new instance whose wizard language is not Korean and whose browser time zone is not `Asia/Seoul` starts with both `false`, and on `UTC` if the browser sent no time zone. Existing instances keep their settings.
+
 ## disaster_alerts
 
 Posts earthquakes and warnings in rooms without being asked. Needs a KMA key and a Discord connection.

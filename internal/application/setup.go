@@ -82,9 +82,20 @@ func (s *Service) setup(_ context.Context, req action.Request) action.Result {
 		}
 		// the time zone of the browser the wizard runs in, when it is a real one (reminders, "today",
 		// imported chat times without a zone)
+		wizardTZ := ""
 		if tz := strVal(in, "timezone", ""); tz != "" && tz != "Local" {
 			if _, err := time.LoadLocation(tz); err == nil {
 				doc.I18n.Timezone, doc.Memory.NaiveTimezone = tz, tz
+				wizardTZ = tz
+			}
+		}
+		// Disaster alerts (KMA) and school notices (Korean universities) only work in Korea: a new
+		// instance outside it starts with them off, and without a browser time zone on UTC, not Seoul.
+		// The console's feature settings turn them on.
+		if doc.I18n.DefaultLocale != "ko" && wizardTZ != "Asia/Seoul" {
+			doc.Features["disasters"], doc.Features["notices"] = false, false
+			if wizardTZ == "" {
+				doc.I18n.Timezone, doc.Memory.NaiveTimezone = "UTC", "UTC"
 			}
 		}
 		raw, err := config.Marshal(doc)

@@ -34,7 +34,8 @@ func setupSvcLog(t *testing.T, logger func(*application.Service) *slog.Logger) *
 	if logger != nil {
 		svc.Log = logger(svc)
 	}
-	raw, _ := json.Marshal(map[string]any{"instance": "gate"})
+	// a Korean instance, as the tests were written for: Korea-only features (disasters, notices) on
+	raw, _ := json.Marshal(map[string]any{"instance": "gate", "timezone": "Asia/Seoul"})
 	res := svc.Execute(context.Background(), action.Request{Action: "setup.resume", Input: raw, Locale: "en"})
 	if !res.OK {
 		t.Fatalf("setup: %+v", res)

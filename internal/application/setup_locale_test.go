@@ -61,3 +61,38 @@ func TestSetupTakesTheBrowserTimeZoneAndTheBotLanguagesPack(t *testing.T) {
 		t.Errorf("an unknown zone keeps the default: %v", tz)
 	}
 }
+
+// Disaster alerts (KMA) and school notices (Korean universities) only work in Korea: a new instance
+// outside it starts with them off (and on UTC when the browser sent no time zone); in Korea, by
+// language or by time zone, they stay on.
+func TestSetupSwitchesTheKoreaOnlyFeaturesOffOutsideKorea(t *testing.T) {
+	for _, c := range []struct {
+		name, console string
+		in            map[string]any
+		on            bool
+		tz            string
+	}{
+		{"en + London", "en", map[string]any{"locale": "en", "timezone": "Europe/London"}, false, "Europe/London"},
+		{"en + no zone", "en", map[string]any{"locale": "en"}, false, "UTC"},
+		{"ko + no zone", "ko", map[string]any{"locale": "ko"}, true, "Asia/Seoul"},
+		{"en + Seoul", "en", map[string]any{"locale": "en", "timezone": "Asia/Seoul"}, true, "Asia/Seoul"},
+		{"ko + New York", "ko", map[string]any{"locale": "ko", "timezone": "America/New_York"}, true, "America/New_York"},
+	} {
+		doc := out(t, setupIn(t, c.console, c.in), "config.document", nil)["document"].(map[string]any)
+		feats := doc["features"].(map[string]any)
+		for _, f := range []string{"disasters", "notices"} {
+			if feats[f] != c.on {
+				t.Errorf("%s: feature %s = %v, want %v", c.name, f, feats[f], c.on)
+			}
+		}
+		if feats["weather"] != true {
+			t.Errorf("%s: weather works worldwide and stays on: %v", c.name, feats["weather"])
+		}
+		if tz := doc["i18n"].(map[string]any)["timezone"]; tz != c.tz {
+			t.Errorf("%s: timezone %v, want %s", c.name, tz, c.tz)
+		}
+		if tz := doc["memory"].(map[string]any)["naive_timezone"]; tz != c.tz {
+			t.Errorf("%s: naive_timezone %v, want %s", c.name, tz, c.tz)
+		}
+	}
+}

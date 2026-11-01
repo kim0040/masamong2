@@ -167,9 +167,9 @@ add("feature", {
     "go_memory_limit": ("Go 메모리 소프트 한도", "Go soft memory limit"),
     "host_profile": ("기기 성능 단계", "Host performance tier"),
     "memory_residency": ("기억 상주 방", "Resident memory rooms"),
-    "config": ("설정", "Config"), "disasters": ("재난·특보", "Disaster alerts"), "discord": ("Discord", "Discord"), "eval": ("평가", "Evaluation"),
+    "config": ("설정", "Config"), "disasters": ("재난·특보 (한국)", "Disaster alerts (Korea)"), "discord": ("Discord", "Discord"), "eval": ("평가", "Evaluation"),
     "finance": ("시세·환율", "Finance"), "fortune": ("운세", "Fortune"), "identity": ("인물 식별", "Identity"), "images": ("이미지 생성", "Images"),
-    "jobs": ("작업", "Jobs"), "llm": ("대화 모델", "Model"), "memory": ("기억", "Memory"), "notices": ("공지", "Notices"), "participation": ("먼저 말 걸기", "Chiming in"),
+    "jobs": ("작업", "Jobs"), "llm": ("대화 모델", "Model"), "memory": ("기억", "Memory"), "notices": ("학교 공지 (한국)", "School notices (Korea)"), "participation": ("먼저 말 걸기", "Chiming in"),
     "polls": ("투표", "Polls"), "retrieval": ("기억 검색", "Retrieval"), "search": ("웹 검색", "Web search"), "storage": ("저장소", "Storage"),
     "vision": ("이미지 인식", "Image recognition"), "weather": ("날씨", "Weather"), "web": ("관리 화면", "Console"),
 })
@@ -442,15 +442,15 @@ add("tool", {
     "notices.subscribe": ("공지 구독", "Notice subscription"), "transfer.recent": ("편입 공지", "Transfer notices"), "chat.respond": ("대화 답변", "Chat replies"), "memory.explicit": ("기억해 줘·잊어 줘", "Remember / forget requests"),
     "desc.memory.search": ("이 채널의 과거 대화에서 사람, 사건, 별명 등을 검색합니다.", "Finds people, events and nicknames in this room's past conversations."),
     "desc.weather.query": ("현재 날씨와 7일 예보를 조회합니다. 한국은 기상청, 해외는 Open-Meteo를 사용합니다.", "Current weather and a 7-day forecast: KMA in Korea, Open-Meteo everywhere else."),
-    "desc.disasters.query": ("기상 특보와 재난 문자를 확인합니다.", "Weather warnings and disaster alerts."),
+    "desc.disasters.query": ("한국의 기상 특보와 재난 문자를 확인합니다(기상청, 한국 전용).", "Weather warnings and disaster alerts in Korea (KMA, Korea only)."),
     "desc.finance.quote": ("주식 현재가를 Finnhub에서 조회합니다.", "Stock prices from Finnhub."), "desc.finance.fx": ("기준 통화의 환율 정보를 조회합니다.", "Exchange rates for a base currency."),
     "desc.search.web": ("인터넷에서 뉴스와 최신 정보를 찾습니다. 키가 있는 검색 서비스(Tavily, Linkup, Exa, Serper, 카카오)를 정해 둔 순서대로 쓰고, 실패하면 다음 서비스로 넘어갑니다. 채널의 옛 대화를 찾는 [기억 검색]과는 다릅니다.", "Finds news and current information on the web with the search services that have keys (Tavily, Linkup, Exa, Serper, Kakao), in your order, moving on when one fails. Not the same as Memory search, which looks through this room's past chat."),
     "desc.web.read": ("메시지에 있는 링크의 본문을 읽어 답변에 씁니다. 광고·메뉴를 뺀 글만 가져오며(Jina Reader), 키 없이도 분당 20회까지 됩니다. 링크가 외부 서비스로 가므로 직접 켜야 동작합니다.", "Reads the page behind a link in the message for the answer: the article without menus or ads (Jina Reader), 20 a minute without a key. Links go to an outside service, so it stays off until you turn it on."), "desc.images.generate": ("설명을 바탕으로 이미지를 생성합니다. 연결 설정의 이미지 모델을 사용하며, 순차적으로 생성합니다.", "Draws a picture from a description with the image model role, one at a time."),
     "desc.polls.create": ("채널에 투표를 생성합니다.", "Posts a poll in the room."), "desc.polls.vote": ("투표에 참여합니다.", "Casts a vote."), "desc.polls.close": ("투표를 마감합니다.", "Closes a poll."),
     "desc.polls.result": ("투표 결과를 표시합니다.", "Shows poll results."), "desc.help.version": ("봇이 제공하는 기능과 사용법을 안내합니다.", "Tells what the bot can do."),
     "desc.fortune.query": ("오늘·이번 달·올해 운세와 별자리 운세를 조회합니다. 서버 채널에는 요약만 표시되며, 상세 운세는 개인에게만 전달됩니다.", "Today's, this month's and this year's fortune, and zodiac readings. In a server only the summary shows; details are private."), "desc.fortune.subscribe": ("생일을 등록하고 매일 아침 운세를 DM으로 수신합니다. 운세 동의가 필요합니다.", "Register a birthday and get a morning fortune by DM. Needs fortune consent."),
-    "desc.notices.status": ("등록한 학교의 공지 중 설정에 맞는 최신 소식을 확인합니다.", "Shows the notices of your school that fit your profile."), "desc.notices.subscribe": ("학교 및 편입 공지를 구독하고 매일 지정된 시간에 DM으로 수신합니다. 공지 동의가 필요합니다.", "Subscribe to school or transfer notices and get a daily DM. Needs notice consent."),
-    "desc.transfer.recent": ("대학 입학처의 최근 편입 공지를 모아서 확인합니다.", "Recent transfer admission notices from university admission boards."), "summaries.channel": ("채널 요약", "Channel summary"), "reminders.propose": ("알림 예약 제안", "Remind me"), "reminders.update": ("내 알림 관리", "My reminders"), "desc.reminders.propose": ("\"내일 오후 3시에 알려줘\"처럼 요청하면 시간과 전달 위치(DM 또는 채널)를 확인한 뒤 예약합니다. \"매일 아침 8시에\"처럼 반복도 요청할 수 있고, 대화 중에도 요청할 수 있습니다.", "Ask like \"remind me tomorrow at 3pm\"; the person who asked confirms the time and where it goes (DM or the channel). It can repeat (daily, weekly, monthly, every N hours), and works in conversation too."), "desc.reminders.update": ("예정된 알림 조회, 시간 변경, 일시 정지·재개(반복 알림), 취소.", "See, reschedule, pause or resume (repeating) or cancel reminders still to come."), "desc.summaries.channel": ("이 채널의 최근 대화를 요약합니다. 새 대화만 이어서 점진적으로 반영합니다.", "Summarizes this room's recent conversation, folding in only new messages later."), "desc.chat.respond": ("채널에서 대화에 응답합니다. 한도를 설정하면 답변 횟수가 제한됩니다.", "Answers in rooms. Limits cap how many replies are sent."),
+    "desc.notices.status": ("등록한 한국 대학의 공지 중 설정에 맞는 최신 소식을 확인합니다(한국 전용).", "Shows the notices of your Korean university that fit your profile (Korea only)."), "desc.notices.subscribe": ("한국 대학의 학교 및 편입 공지를 구독하고 매일 지정된 시간에 DM으로 수신합니다(한국 전용). 공지 동의가 필요합니다.", "Subscribe to a Korean university's notices or transfer notices and get a daily DM (Korea only). Needs notice consent."),
+    "desc.transfer.recent": ("한국 대학 입학처의 최근 편입 공지를 모아서 확인합니다(한국 전용).", "Recent transfer admission notices from Korean university admission boards (Korea only)."), "summaries.channel": ("채널 요약", "Channel summary"), "reminders.propose": ("알림 예약 제안", "Remind me"), "reminders.update": ("내 알림 관리", "My reminders"), "desc.reminders.propose": ("\"내일 오후 3시에 알려줘\"처럼 요청하면 시간과 전달 위치(DM 또는 채널)를 확인한 뒤 예약합니다. \"매일 아침 8시에\"처럼 반복도 요청할 수 있고, 대화 중에도 요청할 수 있습니다.", "Ask like \"remind me tomorrow at 3pm\"; the person who asked confirms the time and where it goes (DM or the channel). It can repeat (daily, weekly, monthly, every N hours), and works in conversation too."), "desc.reminders.update": ("예정된 알림 조회, 시간 변경, 일시 정지·재개(반복 알림), 취소.", "See, reschedule, pause or resume (repeating) or cancel reminders still to come."), "desc.summaries.channel": ("이 채널의 최근 대화를 요약합니다. 새 대화만 이어서 점진적으로 반영합니다.", "Summarizes this room's recent conversation, folding in only new messages later."), "desc.chat.respond": ("채널에서 대화에 응답합니다. 한도를 설정하면 답변 횟수가 제한됩니다.", "Answers in rooms. Limits cap how many replies are sent."),
     "try": ("테스트 실행", "Try it"), "delete": ("도구 삭제", "Delete tool"), "not_found": ("없는 도구입니다", "Tool not found"),
     "not_implemented_body": ("이 도구는 아직 구현되지 않아 활성화하거나 실행할 수 없습니다.", "This tool has no working implementation yet, so it cannot be enabled or run."),
     "tab.overview": ("개요", "Overview"), "tab.settings": ("설정", "Settings"), "tab.limits": ("한도", "Limits"), "tab.rooms": ("방별", "Per room"), "tab.test": ("테스트", "Test"), "tab.ops": ("운영", "Operations"), "tab.stats": ("통계", "Stats"),
@@ -2177,7 +2177,7 @@ add("cfg", {
 
 add("tool", {
     "places.search": ("장소 검색", "Place search"),
-    "desc.places.search": ("카카오맵에서 가게·장소를 찾습니다(이름·주소·전화·지도 링크). 웹 검색 카카오 키를 같이 씁니다.", "Finds shops and places on Kakao Map (name, address, phone, map link) with the Kakao web search key."),
+    "desc.places.search": ("카카오맵에서 한국의 가게·장소를 찾습니다(이름·주소·전화·지도 링크, 한국 전용). 웹 검색 카카오 키를 같이 씁니다.", "Finds shops and places in Korea on Kakao Map (name, address, phone, map link; Korea only) with the Kakao web search key."),
 })
 
 add("tool", {
