@@ -79,23 +79,23 @@
 
 ## 4. 업데이트 패치 내기
 
-패치를 실제 설치본에 전달하는 방식은 아직 정하지 않았다([남은 일](BACKLOG.md)의 "배포·업데이트 경로").
+패치는 버전 태그를 단 GitHub Release로 낸다. 번호 규칙(수정은 세 번째, 기능은 두 번째, 큰 개편은 첫 번째 자리)은 [개발 가이드의 "버전 번호"](wiki/개발-가이드.md)를 따른다.
 
 **지금 상태**
-- 버전 문자열은 `internal/application/service.go`의 `Version`이고, 지금 값은 `0.2.0-dev`다.
-  - `-dev` 빌드는 업데이트 확인을 하지 않는다.
-  - 릴리스 빌드는 `scripts/release.sh`가 `-X`로 버전을 박는다.
-- 태그도 GitHub Release도 아직 없다.
+- 첫 공개 Release는 `v1.0.0`(2026-11-02)이다.
+- 버전 문자열은 빌드 방식마다 다르다.
+  - 릴리스 빌드: `scripts/release.sh`가 태그(`v1.0.0`)를 `-X`로 박는다. 앱 안 업데이트 확인과 **지금 업데이트**가 이 빌드에서 동작한다.
+  - 저장소에서 설치 스크립트로 만든 소스 빌드: `git describe` 값(`v1.0.0-3-gabc1234`, 고친 파일이 있으면 `-dirty`)이다. 업데이트 확인은 이것을 그 태그 이후 빌드로 보고, 더 높은 Release가 나왔을 때만 알린다. 프로그램 자동 교체는 하지 않는다.
+  - 태그 없이 `go run`으로 띄운 빌드: `internal/application/service.go`의 `Version`(`1.0.0-dev`)이다. `-dev` 빌드는 업데이트 확인을 하지 않는다.
 - 콘솔의 업데이트 확인과 **지금 업데이트**, 그리고 설치 스크립트(`install.sh`, `install.ps1`)는 모두 `github.com/kim0040/masamong2`의 **공개** Release에서 내려받는다.
-  - 첫 Release를 내기 전까지는 이 경로가 404를 받는다. 콘솔은 "확인할 수 없음"으로 표시하고, 설치 스크립트는 소스 빌드를 안내한다.
-- `release` workflow(태그 푸시)는 GitHub Actions가 필요하다.
+- `release` workflow(태그 푸시)가 빌드·검사·Release 생성을 한다. 공개 저장소라 Actions는 무료다.
 
 **Actions 없이 로컬에서 릴리스하기** (macOS)
 ```sh
-scripts/release.sh v1.0.0            # build/release/에 모든 대상 아카이브와 SHA256SUMS 생성
+scripts/release.sh v1.0.1            # build/release/에 모든 대상 아카이브와 SHA256SUMS 생성
 scripts/verify-release.sh build/release
-git tag v1.0.0 && git push origin v1.0.0     # [주의] Actions가 켜져 있으면 release workflow도 돈다
-gh release create v1.0.0 build/release/* --title "Masamong v1.0.0" --generate-notes
+git tag v1.0.1 && git push origin v1.0.1     # [주의] Actions가 켜져 있으면 release workflow도 돈다
+gh release create v1.0.1 build/release/* --title "Masamong v1.0.1" --generate-notes
 ```
 - 아카이브 이름과 `SHA256SUMS`는 앱 내 업데이트(`internal/application/selfupdate.go`)와 맺은 계약이다. 손으로 이름을 바꾸지 않는다.
 
@@ -103,7 +103,7 @@ gh release create v1.0.0 build/release/* --title "Masamong v1.0.0" --generate-no
 1. 기본값을 바꾸면 기존 설치에서 무엇이 일어나는지 적는다. 예를 들어 임베딩 폭이나 메시지 벡터 폭을 바꾸면 다시 임베딩해야 한다. 그 비용과 시간을 [기억 운영](memory-operations.md)과 릴리스 노트에 적는다.
 2. 마이그레이션은 이전 버전으로 롤백해도 안전해야 한다. 저사양 기기에서 시작을 막거나 디스크를 크게 쓰는 마이그레이션은 피한다([기억 운영 §16](memory-operations.md)).
 3. 바뀐 영역의 로컬 테스트를 돌린다. 검색을 바꿨으면 parity도 돌린다(§5).
-4. 위키 [릴리스 체크리스트](wiki/Release-Checklist.md)를 따른다.
+4. 위키 [릴리스 체크리스트](wiki/릴리스-체크리스트.md)를 따른다.
 
 ---
 

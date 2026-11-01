@@ -8,7 +8,7 @@ Localized product guides: [English](https://github.com/kim0040/masamong2/blob/ma
 
 **Masamong 2** is a personal AI bot for Discord that remembers your rooms' conversations (live Discord messages and imported KakaoTalk CSV exports) and talks with people like a friend. It comes with a **web console** that opens only on your own computer, where you manage each room's rules, memory blocks, AI models, budget, backups and logs.
 
-Version `0.2.0-dev` · License: MIT · Repository: [kim0040/masamong2](https://github.com/kim0040/masamong2)
+Version `1.0.0` · License: MIT · Repository: [kim0040/masamong2](https://github.com/kim0040/masamong2)
 
 ## What it does
 

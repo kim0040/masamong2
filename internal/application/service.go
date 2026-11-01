@@ -34,7 +34,7 @@ import (
 )
 
 // Version is stamped by the build; the default marks a local build.
-var Version = "0.2.0-dev"
+var Version = "1.0.0-dev"
 
 // DiscordInfo is what the daemon exposes about the live gateway so Actions can report on it
 // without importing the connector (02장 §2: Application Services own the DB; transports don't).

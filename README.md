@@ -6,7 +6,7 @@
 
 ![Masamong](assets/brand/deploy/readme-banner-en.png)
 
-> Masamong 2 is the successor to [Masamong](https://github.com/kim0040/masamong) (Python, 2025–2026). It carries over that bot's features and lessons, rebuilt in Go. The original Masamong stopped receiving support and updates on 2026-10-13, and its personal settings can be imported ([how](docs/STORAGE.md#이전-봇-개인-설정-가져오기-migrationapply)).
+> Masamong 2 is the successor to [Masamong](https://github.com/kim0040/masamong) (Python, 2025–2026; archived). It carries over that bot's features and lessons, rebuilt in Go. The original Masamong stopped receiving support and updates on 2026-10-13, and its personal settings can be imported ([how](docs/STORAGE.md#이전-봇-개인-설정-가져오기-migrationapply)).
 
 **Masamong is an AI bot that hangs out in your friends' Discord server.** It remembers what was said in the room and answers questions like "where did we decide to go camping?" the way a friend would, and it looks up the weather, stock prices, exchange rates, places to eat and the news in the middle of a conversation. You set it up in a web console that only opens on your own computer.
 
@@ -19,7 +19,7 @@ In short:
 - **Keeps costs in check** — a monthly budget and per-tool, per-person limits
 - **Runs on your machine** — you install your own copy and use your own API keys; the console binds to `127.0.0.1`, and practice mode lets you look around for free
 
-Version: `0.2.0-dev`
+Version: `1.0.0`
 
 **Contents**: [Screenshots](#screenshots) · [What it does](#what-it-does) · [Getting started](#getting-started) · [Install with AI](#install-with-an-ai-coding-agent) · [Using it in Discord](#4-using-it-in-discord) · [Costs and outside services](#costs-and-outside-services) · [Docs](#docs) · [Development](#development) · [Contributors](#contributors) · [License](#license) · [Disclaimer](#disclaimer)
 
@@ -48,29 +48,56 @@ All screenshots are from **practice mode** (a sample chat between four made-up p
 
 ## Getting started
 
-All you need is **Git** and **Go 1.27 or later** (the install script builds from source). Without Go, the install scripts use the archive for your OS and CPU from [Releases](https://github.com/kim0040/masamong2/releases): a release you unpacked yourself, or one the script downloads for you. **No release has been published yet**, so for now install from source with Go.
+The quickest way needs **no Git and no Go**: one command ([Quick install](#quick-install)) downloads the release for your OS and CPU. **Git** and **Go 1.27 or later** are only needed to build from source. The first public release is **v1.0.0**; every version is on the [Releases](https://github.com/kim0040/masamong2/releases) page.
 
 No administrator rights are needed. The programs go into your user folder, and uninstalling keeps your data.
 
+### Quick install
+
+macOS, Linux, FreeBSD:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kim0040/masamong2/main/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/kim0040/masamong2/main/install.ps1 | iex
+```
+
+The script downloads the release for your OS and CPU, checks it against `SHA256SUMS` and installs it into your user folder. On macOS, Linux and FreeBSD it also adds one line to your shell profile if that folder is not on PATH (`--no-modify-path` skips it; pass options like `| sh -s -- --no-modify-path`). Pin a version with `MASAMONG_VERSION=v1.0.0` (`curl -fsSL … | MASAMONG_VERSION=v1.0.0 sh`; in PowerShell run `$env:MASAMONG_VERSION = 'v1.0.0'` first). When it ends, open a new terminal and run `masamong open`, or use the full path the script prints.
+
 ### Install with an AI coding agent
 
-Using Claude Code, Codex, Cursor, Gemini CLI or another coding agent? Paste this prompt into it. It installs Masamong on that computer by following [INSTALL.md](INSTALL.md), shows each command before running it, and stops to ask before installing Git or Go.
+Using Claude Code, Codex, Cursor, Gemini CLI or another coding agent? Paste this prompt into it. It installs Masamong on that computer by following [INSTALL.md](INSTALL.md): by default the release download, which needs no Git or Go. It shows each command before running it and asks before installing anything it needs, such as Git and Go for a source build.
 
 ```text
 Install Masamong for me. First read https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md in full, then follow it step by step on this computer. Never ask me to paste a Discord token or an API key into this chat; I will type those into the Masamong console myself.
 ```
 
-The same from a terminal, in one line:
+The same from a terminal, in one line. On macOS and Linux (bash or zsh):
 
 ```bash
 claude "$(curl -fsSL https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md)"     # Codex: codex "$(curl -fsSL …)"
 ```
+
+In PowerShell, `$(curl …)` does not work, so pass the prompt text itself (this also works in bash, zsh and cmd):
+
+```powershell
+claude "Install Masamong for me. First read https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md in full, then follow it step by step on this computer. Never ask me to paste a Discord token or an API key into this chat; I will type those into the Masamong console myself."
+codex "Install Masamong for me. First read https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md in full, then follow it step by step on this computer. Never ask me to paste a Discord token or an API key into this chat; I will type those into the Masamong console myself."
+```
+
+For Gemini CLI, Cursor and other agents, paste the prompt into the agent's chat.
 
 INSTALL.md is plain-text instructions you can read before handing it over. Keys always go into the console (and from there into your OS keychain), never into the chat.
 
 Prefer to do it yourself? Follow the steps below.
 
 ### 1. Install
+
+Building from source needs Git and Go 1.27+. If you would rather not, use the [quick install](#quick-install) above.
 
 <details open>
 <summary><b>macOS</b></summary>
@@ -81,7 +108,7 @@ Prefer to do it yourself? Follow the steps below.
 git clone https://github.com/kim0040/masamong2.git
 cd masamong2
 ./install.sh --app      # also builds ~/Applications/Masamong.app (optional)
-masamong open
+~/.local/bin/masamong open     # or in a new terminal: masamong open
 ```
 
 Open and quit from the menu bar icon. To start at login: `masamong autostart on`.
@@ -119,7 +146,7 @@ Without Go (or Git), run `install.ps1` from the release `masamong_windows_amd64.
 git clone https://github.com/kim0040/masamong2.git
 cd masamong2
 ./install.sh            # installs into ~/.local/bin and adds it to PATH (open a new terminal)
-masamong open           # opens a browser on a desktop
+~/.local/bin/masamong open           # opens a browser on a desktop; or in a new terminal: masamong open
 ```
 
 On a **headless server**, start the service there and connect from your own computer over SSH:
@@ -139,6 +166,8 @@ Even on a server the console listens on `127.0.0.1` only, so no port has to be o
 
 <details>
 <summary><b>Update · uninstall</b></summary>
+
+Installed from a release: console → **Maintenance** → **Update now**, or run the quick-install command again. Built from source:
 
 ```bash
 cd masamong2 && git pull && ./install.sh   # update: a running service restarts on the new version
@@ -160,7 +189,7 @@ Install options and troubleshooting: [wiki › Installation](https://github.com/
 4. **First room** — the channel the bot answers in, and its persona.
 5. **Test chat** — see a reply without posting to the channel.
 
-To look around without keys first, press **Start practice mode** on the first screen.
+To look around without keys first, press **Try practice mode** on the first screen.
 
 ### 3. Add memory (optional)
 
@@ -211,7 +240,7 @@ Masamong itself, its database (SQLite), the console, backups, keyword search and
 | Exchange rates | ExchangeRate-API | yes | **No redistribution** of the data |
 | Link reading | Jina Reader | no | Off by default; sends the link to an outside service |
 
-A tool without its key acts as if it were off, and the bot just says that feature is not available. For services with data-sharing terms (stocks, FX), check whether posting their data in a shared room is allowed ([backlog › outside service terms](docs/BACKLOG.md#2-외부-서비스-약관-라이선스와-별개), Korean).
+A tool without its key acts as if it were off, and the bot just says that feature is not available. For services with data-sharing terms (stocks, FX), check whether posting their data in a shared room is allowed ([backlog › outside service terms](docs/BACKLOG.md#2-외부-서비스-약관), Korean).
 
 ## Supported platforms
 

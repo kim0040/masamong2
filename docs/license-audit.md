@@ -76,7 +76,7 @@ python3 scripts/license_audit.py
 - 현재 의존성에서 생성한 `THIRD_PARTY_LICENSES.txt`와 commit된 파일이 다름
 - `ui/public/fonts`와 `ui/dist/fonts`의 Pretendard OFL 전문이 upstream 파일과 다름
 
-GitHub Actions `ci` workflow의 `license` job이 모든 push·PR에서 이 검사를 실행한다. release archive의 고지 포함 여부는 `scripts/verify-release.sh`가 archive마다 확인한다.
+의존성(`go.mod`·`go.sum`·`package*.json`)이 바뀐 push·PR과 전체 검사(매주 월요일·수동·릴리스 태그)에서 GitHub Actions `ci` workflow의 `license` job이 이 검사를 실행한다. release archive의 고지 포함 여부는 `scripts/verify-release.sh`가 archive마다 확인한다.
 
 새 버전의 의존성으로 바꿀 때는 차이를 사람이 먼저 읽은 뒤 실행한다.
 

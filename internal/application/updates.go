@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -103,8 +104,19 @@ func (s *Service) checkUpdate(ctx context.Context) updateState {
 	return st
 }
 
-// newerVersion reports whether latest (1.2.3) is above current (1.2.2, 1.2.2-rc1…).
+// describeSuffix is what `git describe --tags --dirty` adds to a tag for a source build: commits after
+// the tag (-3-gabc1234) and uncommitted changes (-dirty).
+var describeSuffix = regexp.MustCompile(`(-[0-9]+-g[0-9a-f]{7,40})?(-dirty)?$`)
+
+// sourceBuild reports whether v is a source build stamped by git describe (v1.0.0-3-gabc1234,
+// v1.0.0-dirty): it holds that tag and more, so it is never older than the tag and never self-updates.
+func sourceBuild(v string) bool { return describeSuffix.FindString(v) != "" }
+
+// newerVersion reports whether latest (1.2.3) is above current (1.2.2, 1.2.2-rc1…). A source build after
+// a tag (1.2.2-3-gabc1234) counts as that tag and later, so only a higher release is newer.
 func newerVersion(latest, current string) bool {
+	after := sourceBuild(current)
+	current = strings.TrimSuffix(current, describeSuffix.FindString(current))
 	parse := func(v string) ([3]int, bool) {
 		var out [3]int
 		core, _, _ := strings.Cut(strings.TrimPrefix(v, "v"), "-")
@@ -131,7 +143,10 @@ func newerVersion(latest, current string) bool {
 			return l[i] > c[i]
 		}
 	}
-	// same numbers: a release is newer than a pre-release of it
+	// same numbers: a release is newer than a pre-release of it, but not than a build made after it
+	if after && !strings.Contains(current, "-") {
+		return false
+	}
 	return strings.Contains(current, "-") && !strings.Contains(latest, "-")
 }
 

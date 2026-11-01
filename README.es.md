@@ -5,7 +5,7 @@
 
 ![Masamong](assets/brand/deploy/readme-banner-es.png)
 
-> Masamong 2 es el sucesor de [Masamong](https://github.com/kim0040/masamong) (Python, 2025–2026). Hereda sus funciones y lo aprendido al operarlo, reescrito en Go. El Masamong original dejó de recibir soporte y actualizaciones el 2026-10-13, y su configuración personal se puede importar ([cómo](docs/STORAGE.md#이전-봇-개인-설정-가져오기-migrationapply)).
+> Masamong 2 es el sucesor de [Masamong](https://github.com/kim0040/masamong) (Python, 2025–2026; repositorio archivado). Hereda sus funciones y lo aprendido al operarlo, reescrito en Go. El Masamong original dejó de recibir soporte y actualizaciones el 2026-10-13, y su configuración personal se puede importar ([cómo](docs/STORAGE.md#이전-봇-개인-설정-가져오기-migrationapply)).
 
 **Masamong es un bot de IA que convive en el servidor de Discord de tus amigos.** Recuerda lo que se dijo en la sala y responde a preguntas como «¿dónde decidimos ir de acampada?» como lo haría un amigo, y consulta el tiempo, las cotizaciones, los tipos de cambio, los sitios donde comer y las noticias en mitad de una conversación. Se configura en una consola web que solo se abre en tu propio ordenador.
 
@@ -18,7 +18,7 @@ En resumen:
 - **Controla los costes** — un presupuesto mensual y límites por herramienta y por persona
 - **Se ejecuta en tu máquina** — instalas tu propia copia y usas tus propias claves de API; la consola se enlaza a `127.0.0.1` y el modo de práctica te deja explorar gratis
 
-Versión: `0.2.0-dev`
+Versión: `1.0.0`
 
 **Contenido**: [Capturas de pantalla](#capturas-de-pantalla) · [Qué hace](#qué-hace) · [Primeros pasos](#primeros-pasos) · [Instalar con IA](#instalar-con-un-agente-de-ia) · [Usando el bot en Discord](#4-usando-el-bot-en-discord) · [Costes y servicios externos](#costes-y-servicios-externos) · [Documentación](#documentación) · [Desarrollo](#desarrollo) · [Colaboradores](#colaboradores) · [Licencia](#licencia) · [Aviso legal](#aviso-legal)
 
@@ -47,29 +47,56 @@ Todas las capturas son del **modo de práctica** (un chat de ejemplo entre cuatr
 
 ## Primeros pasos
 
-Solo necesitas **Git** y **Go 1.27 o posterior** (el script de instalación compila desde el código fuente). Sin Go, los scripts de instalación usan el archivo de [Releases](https://github.com/kim0040/masamong2/releases) para tu sistema operativo y tu CPU: uno que hayas descomprimido tú o el que el propio script descarga. **Todavía no se ha publicado ninguna versión**, así que por ahora instala desde el código fuente con Go.
+La forma más rápida **no necesita Git ni Go**: un solo comando ([Instalación rápida](#instalación-rápida)) descarga la versión para tu sistema operativo y tu CPU. **Git** y **Go 1.27 o posterior** solo hacen falta para compilar desde el código fuente. La primera versión pública es la **v1.0.0**; todas están en la página de [Releases](https://github.com/kim0040/masamong2/releases).
 
 No se necesitan permisos de administrador. Los programas se instalan en tu carpeta de usuario, y al desinstalar se conservan tus datos.
 
+### Instalación rápida
+
+macOS, Linux, FreeBSD:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kim0040/masamong2/main/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/kim0040/masamong2/main/install.ps1 | iex
+```
+
+El script descarga la versión para tu sistema operativo y tu CPU, la comprueba con `SHA256SUMS` y la instala en tu carpeta de usuario. En macOS, Linux y FreeBSD, si esa carpeta no está en el PATH, también añade una línea a tu perfil de la shell (`--no-modify-path` lo evita; las opciones se pasan así: `| sh -s -- --no-modify-path`). Para elegir una versión usa `MASAMONG_VERSION=v1.0.0` (`curl -fsSL … | MASAMONG_VERSION=v1.0.0 sh`; en PowerShell, antes `$env:MASAMONG_VERSION = 'v1.0.0'`). Al terminar, abre una terminal nueva y ejecuta `masamong open`, o usa la ruta completa que imprime el script.
+
 ### Instalar con un agente de IA
 
-¿Usas Claude Code, Codex, Cursor, Gemini CLI u otro agente de programación? Pega este prompt. El agente instala Masamong en ese equipo siguiendo [INSTALL.md](INSTALL.md), muestra cada comando antes de ejecutarlo y pregunta antes de instalar Git o Go.
+¿Usas Claude Code, Codex, Cursor, Gemini CLI u otro agente de programación? Pega este prompt. El agente instala Masamong en ese equipo siguiendo [INSTALL.md](INSTALL.md); por defecto, con la descarga de la versión publicada, que no necesita Git ni Go. Muestra cada comando antes de ejecutarlo y pregunta antes de instalar lo que haga falta, como Git y Go para compilar desde el código fuente.
 
 ```text
 Instálame Masamong. Primero lee entero https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md y luego sigue sus pasos uno a uno en este equipo. No me pidas pegar en este chat un token de Discord ni una clave de API; las escribiré yo en la consola de Masamong.
 ```
 
-Lo mismo desde una terminal, en una línea:
+Lo mismo desde una terminal, en una línea. En macOS y Linux (bash o zsh):
 
 ```bash
 claude "$(curl -fsSL https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md)"     # Codex: codex "$(curl -fsSL …)"
 ```
+
+En PowerShell, `$(curl …)` no funciona; pasa el texto del prompt directamente (también sirve en bash, zsh y cmd):
+
+```powershell
+claude "Instálame Masamong. Primero lee entero https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md y luego sigue sus pasos uno a uno en este equipo. No me pidas pegar en este chat un token de Discord ni una clave de API; las escribiré yo en la consola de Masamong."
+codex "Instálame Masamong. Primero lee entero https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md y luego sigue sus pasos uno a uno en este equipo. No me pidas pegar en este chat un token de Discord ni una clave de API; las escribiré yo en la consola de Masamong."
+```
+
+Con Gemini CLI, Cursor u otros agentes, pega el prompt en el chat del agente.
 
 INSTALL.md son instrucciones en texto plano que puedes leer antes de dárselas. Las claves siempre van en la consola (que las guarda en el llavero del sistema), nunca en el chat.
 
 ¿Prefieres hacerlo tú? Sigue los pasos de abajo.
 
 ### 1. Instalación
+
+Compilar desde el código fuente requiere Git y Go 1.27 o posterior. Si prefieres no hacerlo, usa la [instalación rápida](#instalación-rápida) de arriba.
 
 <details open>
 <summary><b>macOS</b></summary>
@@ -80,7 +107,7 @@ INSTALL.md son instrucciones en texto plano que puedes leer antes de dárselas. 
 git clone https://github.com/kim0040/masamong2.git
 cd masamong2
 ./install.sh --app      # también crea ~/Applications/Masamong.app (opcional)
-masamong open
+~/.local/bin/masamong open     # o en una terminal nueva: masamong open
 ```
 
 Abre y cierra desde el icono de la barra de menús. Para iniciarlo al iniciar sesión: `masamong autostart on`.
@@ -118,7 +145,7 @@ Sin Go (ni Git), ejecuta `install.ps1` desde el `masamong_windows_amd64.zip` de 
 git clone https://github.com/kim0040/masamong2.git
 cd masamong2
 ./install.sh            # instala en ~/.local/bin y añade la ruta a PATH (abre una terminal nueva)
-masamong open           # abre el navegador en un escritorio
+~/.local/bin/masamong open           # abre el navegador en un escritorio; o en una terminal nueva: masamong open
 ```
 
 En un **servidor sin interfaz gráfica**, inicia allí el servicio y conéctate desde tu propio ordenador por SSH:
@@ -138,6 +165,8 @@ Incluso en un servidor, la consola escucha solo en `127.0.0.1`, así que no hay 
 
 <details>
 <summary><b>Actualizar · desinstalar</b></summary>
+
+Si instalaste una versión publicada: consola → **Mantenimiento → Actualizar ahora**, o vuelve a ejecutar el comando de instalación rápida. Si compilaste desde el código fuente:
 
 ```bash
 cd masamong2 && git pull && ./install.sh   # actualizar: el servicio en ejecución se reinicia con la nueva versión
@@ -159,7 +188,7 @@ Opciones de instalación y solución de problemas: [wiki › Instalación](https
 4. **Primera sala** — el canal en el que responde el bot y su personalidad.
 5. **Chat de prueba** — ve una respuesta sin publicarla en el canal.
 
-Para explorar primero sin claves, pulsa **Iniciar modo de práctica** en la primera pantalla.
+Para explorar primero sin claves, pulsa **Probar el modo práctica** en la primera pantalla.
 
 ### 3. Añadir memoria (opcional)
 
@@ -210,7 +239,7 @@ Masamong en sí, su base de datos (SQLite), la consola, las copias de seguridad,
 | Tipos de cambio | ExchangeRate-API | sí | **No se permite redistribuir** los datos |
 | Lectura de enlaces | Jina Reader | no | Desactivada por defecto; envía el enlace a un servicio externo |
 
-Una herramienta sin su clave se comporta como si estuviera desactivada, y el bot solo dice que esa función no está disponible. Para los servicios con condiciones sobre compartir datos (bolsa, divisas), comprueba si se permite publicar sus datos en una sala compartida ([backlog › condiciones de los servicios externos](docs/BACKLOG.md#2-외부-서비스-약관-라이선스와-별개), en coreano).
+Una herramienta sin su clave se comporta como si estuviera desactivada, y el bot solo dice que esa función no está disponible. Para los servicios con condiciones sobre compartir datos (bolsa, divisas), comprueba si se permite publicar sus datos en una sala compartida ([backlog › condiciones de los servicios externos](docs/BACKLOG.md#2-외부-서비스-약관), en coreano).
 
 ## Plataformas compatibles
 

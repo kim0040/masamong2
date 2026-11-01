@@ -1,17 +1,20 @@
 # Security policy
 
+**In English:** Please report vulnerabilities privately, not in public issues: by email to the address below, or on GitHub with **Security → Report a vulnerability**. Include the version, reproduction steps and logs with secrets removed. Never send real user data or keys. Security fixes go to the current `main` and the latest v1.x release first.
+
 ## 취약점 제보
 
 보안 또는 개인정보 문제는 공개 issue에 상세 내용을 올리지 말고 Maintainer **김현민**에게 이메일로 제보해 주세요.
 
 - Email: [mini0227kim@gmail.com](mailto:mini0227kim@gmail.com)
+- 또는 GitHub 저장소의 **Security → Report a vulnerability**로 비공개 제보할 수 있습니다.
 - 제목 예시: `[Masamong Security] 간단한 요약`
 
 가능하면 영향을 받는 버전, 재현 조건, 예상 영향, 로그에서 비밀값을 제거한 증거를 포함해 주세요. 실제 사용자 데이터, API 키, Discord token, 비밀번호, session cookie는 보내지 마세요.
 
 ## 지원 범위
 
-보안 수정은 현재 `main`과 최신 release를 우선합니다. 오래된 commit이나 개인 fork는 최신 버전에서 재현되는지 먼저 확인합니다.
+보안 수정은 현재 `main`과 최신 release(v1.x)를 우선합니다. 오래된 commit이나 개인 fork는 최신 버전에서 재현되는지 먼저 확인합니다.
 
 ## 운영 권장 사항
 

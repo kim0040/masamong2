@@ -97,7 +97,9 @@ func exeName(base string) string {
 }
 
 // releaseVersion reports whether v is a release version (1.2.3 or v1.2.3-rc1), not a source build.
-func releaseVersion(v string) bool { return newerVersion(v, "0.0.0") || v == "0.0.0" }
+func releaseVersion(v string) bool {
+	return !sourceBuild(v) && (newerVersion(v, "0.0.0") || v == "0.0.0")
+}
 
 // InstallDir is the folder the running programs really live in, links resolved: os.Executable is not
 // resolved on every platform, so an install reached through a link (/usr/local/bin/masamongd ->

@@ -385,9 +385,9 @@ When something goes wrong, operators (`access.operators`) get a Discord DM. Swit
 
 | Key | Default | Meaning |
 |---|---|---|
-| `check` | `true` | Ask GitHub once a day whether there is a new release. Only the program name and version are sent; nothing is installed automatically. Development builds (`-dev`) do not check |
+| `check` | `true` | Ask GitHub once a day whether there is a new release. Only the program name and version are sent; nothing is installed automatically. Development builds (`-dev`) do not check. A source build (version from `git describe`) checks too, but updates only by installing again |
 
-A new version shows under **Maintenance** and in the notifications (info). While the repository's releases are not public it shows "no public release to check".
+A new version shows under **Maintenance** and in the notifications (info).
 
 ## web_search
 

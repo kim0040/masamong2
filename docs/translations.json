@@ -2,11 +2,11 @@
   "note": "Translation record checked by tools/doccheck. When a file of a group changes, bring the other languages along, then run: go run ./tools/doccheck -write",
   "groups": {
     "README": {
-      "README.es.md": "a04e5cd0e5b1f201",
-      "README.ja.md": "b57a3852c9f8e567",
-      "README.ko.md": "874dace4a836bf9c",
-      "README.md": "e90e946248c4ed4b",
-      "README.zh-Hans.md": "515454c2d3f39a68"
+      "README.es.md": "c92b3cec8fbc8d35",
+      "README.ja.md": "7e61b780063f882a",
+      "README.ko.md": "ae64eb70d8e55e6d",
+      "README.md": "7a9854e02c6ff165",
+      "README.zh-Hans.md": "ce840c8c1a091d14"
     },
     "wiki/CLI-명령어": {
       "docs/wiki/CLI-Commands.md": "cb6e440750dc6a01",
@@ -14,15 +14,15 @@
     },
     "wiki/Discord-연결": {
       "docs/wiki/Connecting-Discord.md": "c50b3b8bb17626a5",
-      "docs/wiki/Discord-연결.md": "2c0e89d9777e9318"
+      "docs/wiki/Discord-연결.md": "72a0ea70b5dced9e"
     },
     "wiki/Home": {
-      "docs/wiki/English.md": "f891aa42130c374e",
-      "docs/wiki/Home.md": "79b03a4727167be6"
+      "docs/wiki/English.md": "0ed6c342e8d4f174",
+      "docs/wiki/Home.md": "f252f4e4a423859c"
     },
     "wiki/개발-가이드": {
-      "docs/wiki/Development-Guide.md": "b4b6704ff553a74c",
-      "docs/wiki/개발-가이드.md": "7c3e2027a916e63c"
+      "docs/wiki/Development-Guide.md": "494fd70278767ec9",
+      "docs/wiki/개발-가이드.md": "b7c6fc72aac08908"
     },
     "wiki/관리-콘솔": {
       "docs/wiki/Admin-Console.md": "3a44084f7bff9d77",
@@ -41,12 +41,12 @@
       "docs/wiki/동시-처리와-성능.md": "b5c651c6f5b0664c"
     },
     "wiki/릴리스-체크리스트": {
-      "docs/wiki/Release-Checklist.md": "5934276780762ae8",
-      "docs/wiki/릴리스-체크리스트.md": "051b5efaf7406a2c"
+      "docs/wiki/Release-Checklist.md": "1818255ecae42015",
+      "docs/wiki/릴리스-체크리스트.md": "baf6f5fe64397d48"
     },
     "wiki/문제-해결": {
       "docs/wiki/Troubleshooting.md": "1a329e83c538dcdf",
-      "docs/wiki/문제-해결.md": "114703c3f26ea07a"
+      "docs/wiki/문제-해결.md": "9a6b553e10d170c6"
     },
     "wiki/보류-중인-결정": {
       "docs/wiki/Pending-Decisions.md": "d4fcd126d8b2ba63",
@@ -58,19 +58,19 @@
     },
     "wiki/부하-테스트와-장기-운영": {
       "docs/wiki/Load-Testing-and-Long-Running.md": "5c947bb91af06284",
-      "docs/wiki/부하-테스트와-장기-운영.md": "49f18eda4fd01a2e"
+      "docs/wiki/부하-테스트와-장기-운영.md": "5125974eefe775a4"
     },
     "wiki/빠른-시작": {
-      "docs/wiki/Quick-Start.md": "04f30e242b6ef9ad",
-      "docs/wiki/빠른-시작.md": "69ee7b418ad77eb0"
+      "docs/wiki/Quick-Start.md": "fea97b81ad0e291b",
+      "docs/wiki/빠른-시작.md": "8f97bbe7ac9959e6"
     },
     "wiki/설정-레퍼런스": {
-      "docs/wiki/Configuration-Reference.md": "f8559fca6e3d5e1c",
-      "docs/wiki/설정-레퍼런스.md": "b0e7621cdd3822ec"
+      "docs/wiki/Configuration-Reference.md": "3aa6e0e355aac804",
+      "docs/wiki/설정-레퍼런스.md": "5133bdda9e3a7283"
     },
     "wiki/설치": {
-      "docs/wiki/Installation.md": "4912807dc636c83c",
-      "docs/wiki/설치.md": "d8a80c3e36580656"
+      "docs/wiki/Installation.md": "0fadd96bae14101a",
+      "docs/wiki/설치.md": "02512048d21a14f6"
     },
     "wiki/언어-설정": {
       "docs/wiki/Languages.md": "05ffe57f5f9c7602",

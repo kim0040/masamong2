@@ -65,7 +65,7 @@ Ask 50+ questions people would really ask in the **Answer lab** and mark each re
 
 ## 3. Tag and release
 
-1. Pick the version (`vMAJOR.MINOR.PATCH`). A change to the settings or database format bumps at least MINOR.
+1. Pick the version (`vMAJOR.MINOR.PATCH`). A change that migrates settings or data by itself bumps at least MINOR; one that needs a manual migration bumps MAJOR.
 2. `git tag vX.Y.Z && git push origin vX.Y.Z` → the `release` workflow runs the full checks, builds every target, writes `SHA256SUMS`, simulates installs and creates the GitHub Release.
 3. Write the release notes: what changed, setting changes, known problems. Releases are not signed yet, so link the first-launch warning help in [Installation](https://github.com/kim0040/masamong2/wiki/Installation).
 
@@ -82,7 +82,7 @@ The database only migrates forward at start (there is no reverse conversion). To
 | Item | Status |
 |---|---|
 | Code signing and notarization | Not done (on hold by the operator); first-launch warning help instead |
-| New version notice, update from the console | Built. Checked against a local fake release server: 0.2.0 → 0.3.0 installed, restarted and backed up (2026-10-02). While the repository's releases are private, GitHub answers 404: it shows "could not check" and the console cannot update |
+| New version notice, update from the console | Built. Checked against a local fake release server: 0.2.0 → 0.3.0 installed, restarted and backed up (2026-10-02). The first public release is v1.0.0 (2026-11-02); the real in-console update is still to be tried on the next release |
 | Human-reviewed evaluation set | The tooling exists (lab verdicts → evaluation run); no reviewed questions yet |
 | Installing on real machines | macOS by hand. Windows: `install.ps1` install and uninstall from a clone ran on Windows 10 on 2026-10-05 (including the user PATH being restored exactly), and CI smoke-tests the release ZIP; `install.ps1`'s live download from GitHub Releases and an in-console update on a real Windows machine have not been run. Linux up to CI's install simulation |
 | Discord | Running on real servers around the clock since 2026-10-13, which covers the everyday paths. Failure paths such as gateway resume and startup retry are covered only by tests with an injected session. [Backlog](https://github.com/kim0040/masamong2/blob/main/docs/BACKLOG.md) item 1 lists what to check with a test bot |

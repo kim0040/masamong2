@@ -6,7 +6,7 @@
 
 ![Masamong](assets/brand/deploy/readme-banner-ko.png)
 
-> 마사몽 2는 [마사몽](https://github.com/kim0040/masamong)(Python, 2025–2026)을 잇는 후속 버전입니다. 구 마사몽의 기능과 운영 경험을 이어받아 Go로 새로 만들었습니다. 구 마사몽은 2026-10-13부로 지원과 업데이트를 마쳤고, 구 마사몽의 개인 설정은 가져올 수 있습니다([방법](docs/STORAGE.md#이전-봇-개인-설정-가져오기-migrationapply)).
+> 마사몽 2는 [마사몽](https://github.com/kim0040/masamong)(Python, 2025–2026, 보관됨)을 잇는 후속 버전입니다. 구 마사몽의 기능과 운영 경험을 이어받아 Go로 새로 만들었습니다. 구 마사몽은 2026-10-13부로 지원과 업데이트를 마쳤고, 구 마사몽의 개인 설정은 가져올 수 있습니다([방법](docs/STORAGE.md#이전-봇-개인-설정-가져오기-migrationapply)).
 
 **마사몽은 친구들 Discord 방에서 같이 수다 떠는 AI 봇입니다.** 방에서 오간 대화를 기억해 두었다가 "저번에 캠핑 어디로 가기로 했더라?" 같은 질문에 친구처럼 답하고, 날씨·주가·환율·맛집·뉴스 검색도 대화하다가 바로 해 줍니다. 봇 설정은 내 컴퓨터에서만 열리는 웹 관리 화면에서 합니다.
 
@@ -19,7 +19,7 @@
 - **비용 관리** — 월 예산과 도구별·사람별 한도
 - **내 컴퓨터에서** — 각자 자기 컴퓨터나 서버에 설치해 자기 API 키로 돌립니다. 관리 화면은 `127.0.0.1`에만 열리고, 연습 모드로 무료로 둘러볼 수 있습니다
 
-현재 버전: `0.2.0-dev`
+현재 버전: `1.0.0`
 
 **목차**: [화면](#화면) · [할 수 있는 것](#할-수-있는-것) · [시작하기](#시작하기) · [AI로 설치](#ai-코딩-에이전트로-설치하기) · [Discord에서 쓰기](#4-discord에서-쓰기) · [비용과 외부 서비스](#비용과-외부-서비스) · [문서](#문서) · [개발](#개발) · [기여자](#기여자) · [라이선스](#라이선스) · [면책 조항](#면책-조항)
 
@@ -48,29 +48,56 @@
 
 ## 시작하기
 
-준비물은 **Git**과 **Go 1.27 이상**뿐입니다(설치 스크립트가 소스를 빌드합니다). Go가 없으면 설치 스크립트가 [Releases](https://github.com/kim0040/masamong2/releases)의 내 OS·CPU용 압축 파일을 씁니다. 직접 풀어 둔 파일이든, 스크립트가 내려받는 파일이든 됩니다. **아직 공개된 릴리스는 없으니** 지금은 Go로 소스에서 설치하세요.
+가장 빠른 방법은 **Git도 Go도 필요 없습니다**. 명령 한 줄([빠른 설치](#빠른-설치))이 내 OS·CPU용 릴리스를 내려받아 설치합니다. **Git**과 **Go 1.27 이상**은 소스에서 직접 빌드할 때만 필요합니다. 첫 공개 릴리스는 **v1.0.0**이고, 모든 버전은 [Releases](https://github.com/kim0040/masamong2/releases) 페이지에 있습니다.
 
 관리자 권한은 필요 없습니다. 프로그램은 내 사용자 폴더에 설치되고, 지워도 데이터 폴더는 남습니다.
 
+### 빠른 설치
+
+macOS, Linux, FreeBSD:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kim0040/masamong2/main/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/kim0040/masamong2/main/install.ps1 | iex
+```
+
+스크립트가 내 OS·CPU용 릴리스를 내려받아 `SHA256SUMS`로 확인한 뒤 사용자 폴더에 설치합니다. macOS·Linux·FreeBSD에서는 설치 폴더가 PATH에 없으면 셸 설정 파일에 한 줄을 추가합니다(`--no-modify-path`로 건너뛸 수 있고, 옵션은 `| sh -s -- --no-modify-path`처럼 넘깁니다). 버전을 고르려면 `MASAMONG_VERSION=v1.0.0`을 씁니다(`curl -fsSL … | MASAMONG_VERSION=v1.0.0 sh`, PowerShell은 먼저 `$env:MASAMONG_VERSION = 'v1.0.0'`). 끝나면 새 터미널을 열어 `masamong open`을 실행하거나, 스크립트가 알려 준 전체 경로로 실행하세요.
+
 ### AI 코딩 에이전트로 설치하기
 
-Claude Code, Codex, Cursor, Gemini CLI 같은 코딩 에이전트를 쓴다면 아래 프롬프트를 붙여 넣으세요. 에이전트가 [INSTALL.md](INSTALL.md)를 따라 그 컴퓨터에 설치합니다. 명령은 실행 전에 보여 주고, Git이나 Go를 설치해야 하면 먼저 묻습니다.
+Claude Code, Codex, Cursor, Gemini CLI 같은 코딩 에이전트를 쓴다면 아래 프롬프트를 붙여 넣으세요. 에이전트가 [INSTALL.md](INSTALL.md)를 따라 그 컴퓨터에 설치합니다. 기본은 Git·Go가 필요 없는 릴리스 내려받기입니다. 명령은 실행 전에 보여 주고, 소스 빌드용 Git·Go처럼 더 설치해야 하는 것이 있으면 먼저 묻습니다.
 
 ```text
 마사몽을 설치해 줘. 먼저 https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md 을 끝까지 읽고, 이 컴퓨터에서 그 단계를 차례대로 진행해 줘. Discord 토큰이나 API 키를 이 대화에 붙여 넣으라고 하지 마. 키는 내가 마사몽 관리 화면에 직접 넣을게.
 ```
 
-터미널에서 한 줄로:
+터미널에서 한 줄로. macOS·Linux(bash, zsh)에서는:
 
 ```bash
 claude "$(curl -fsSL https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md)"     # Codex: codex "$(curl -fsSL …)"
 ```
+
+PowerShell에서는 `$(curl …)`가 동작하지 않으니 프롬프트 문장을 그대로 넘기세요(bash, zsh, cmd에서도 됩니다):
+
+```powershell
+claude "마사몽을 설치해 줘. 먼저 https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md 을 끝까지 읽고, 이 컴퓨터에서 그 단계를 차례대로 진행해 줘. Discord 토큰이나 API 키를 이 대화에 붙여 넣으라고 하지 마. 키는 내가 마사몽 관리 화면에 직접 넣을게."
+codex "마사몽을 설치해 줘. 먼저 https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md 을 끝까지 읽고, 이 컴퓨터에서 그 단계를 차례대로 진행해 줘. Discord 토큰이나 API 키를 이 대화에 붙여 넣으라고 하지 마. 키는 내가 마사몽 관리 화면에 직접 넣을게."
+```
+
+Gemini CLI, Cursor 같은 다른 에이전트는 프롬프트를 에이전트 대화창에 붙여 넣으세요.
 
 INSTALL.md는 넘기기 전에 직접 읽어 볼 수 있는 평범한 안내문입니다. 키는 언제나 대화가 아니라 관리 화면에 넣습니다(관리 화면이 OS 키체인에 보관합니다).
 
 직접 설치하려면 아래 단계를 따르세요.
 
 ### 1. 설치
+
+소스에서 빌드하려면 Git과 Go 1.27 이상이 필요합니다. 그럴 필요가 없다면 위의 [빠른 설치](#빠른-설치)를 쓰세요.
 
 <details open>
 <summary><b>macOS</b></summary>
@@ -81,7 +108,7 @@ INSTALL.md는 넘기기 전에 직접 읽어 볼 수 있는 평범한 안내문�
 git clone https://github.com/kim0040/masamong2.git
 cd masamong2
 ./install.sh --app      # ~/Applications/Masamong.app 도 함께 만듦 (--app 없이도 됨)
-masamong open
+~/.local/bin/masamong open     # 또는 새 터미널에서: masamong open
 ```
 
 메뉴 막대 아이콘으로 열고 닫을 수 있습니다. 로그인할 때 자동으로 켜려면 `masamong autostart on`.
@@ -119,7 +146,7 @@ Go(와 Git)가 없다면 릴리스의 `masamong_windows_amd64.zip`(ARM 노트북
 git clone https://github.com/kim0040/masamong2.git
 cd masamong2
 ./install.sh            # ~/.local/bin 에 설치, PATH 자동 추가 (새 터미널 열기)
-masamong open           # 데스크톱이면 브라우저가 열림
+~/.local/bin/masamong open           # 데스크톱이면 브라우저가 열림; 또는 새 터미널에서: masamong open
 ```
 
 **화면 없는 서버**에서는 서비스만 켜고, 내 컴퓨터에서 SSH로 접속합니다.
@@ -139,6 +166,8 @@ masamong connect user@server
 
 <details>
 <summary><b>업데이트 · 삭제</b></summary>
+
+릴리스로 설치했다면 콘솔 **유지보수 → 지금 업데이트**를 누르거나 빠른 설치 명령을 다시 실행하세요. 소스에서 빌드했다면:
 
 ```bash
 cd masamong2 && git pull && ./install.sh        # 업데이트: 돌고 있던 서비스도 새 버전으로 다시 켜짐
@@ -211,7 +240,7 @@ cd masamong2 && git pull && ./install.sh        # 업데이트: 돌고 있던 �
 | 환율 | ExchangeRate-API | 필요 | 데이터 **재배포 금지** |
 | 링크 읽기 | Jina Reader | 불필요 | 기본 꺼짐. 링크 주소를 외부로 보냄 |
 
-키를 넣지 않은 도구는 꺼진 것처럼 동작하고, 봇은 그 기능이 지금 안 된다고만 말합니다. 주가·환율처럼 데이터 공유 조건이 있는 서비스는 여럿이 보는 방에서 써도 되는지 각 약관을 확인하세요([추후 작업 › 외부 서비스 약관](docs/BACKLOG.md#2-외부-서비스-약관-라이선스와-별개)).
+키를 넣지 않은 도구는 꺼진 것처럼 동작하고, 봇은 그 기능이 지금 안 된다고만 말합니다. 주가·환율처럼 데이터 공유 조건이 있는 서비스는 여럿이 보는 방에서 써도 되는지 각 약관을 확인하세요([추후 작업 › 외부 서비스 약관](docs/BACKLOG.md#2-외부-서비스-약관)).
 
 ## 지원 환경
 

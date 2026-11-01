@@ -42,7 +42,8 @@ class MessageDimensionTests(unittest.TestCase):
             spec = importlib.util.spec_from_file_location("detached_message_vectors", path)
             detached = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(detached)  # importing succeeds before classification is needed
-            missing = Path(tmp) / "internal/providers/openai/hosts.json"
+            # the module resolves its own path; on Windows that expands short names (RUNNER~1)
+            missing = path.resolve().parents[2] / "internal/providers/openai/hosts.json"
             self.assertFalse(missing.exists())
             with self.assertRaisesRegex(RuntimeError, "MRL 모델 판정용 카탈로그.*FileNotFoundError") as caught:
                 detached.embed_full_width("unknown-model")

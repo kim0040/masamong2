@@ -6,7 +6,7 @@
 
 ![Masamong](assets/brand/deploy/readme-banner-ja.png)
 
-> Masamong 2 は [Masamong](https://github.com/kim0040/masamong)（Python、2025–2026）の後継です。旧版の機能と運用の経験を引き継ぎ、Go で作り直しました。旧 Masamong は 2026-10-13 にサポートと更新を終了し、その個人設定は取り込めます（[方法](docs/STORAGE.md#이전-봇-개인-설정-가져오기-migrationapply)）。
+> Masamong 2 は [Masamong](https://github.com/kim0040/masamong)（Python、2025–2026、アーカイブ済み）の後継です。旧版の機能と運用の経験を引き継ぎ、Go で作り直しました。旧 Masamong は 2026-10-13 にサポートと更新を終了し、その個人設定は取り込めます（[方法](docs/STORAGE.md#이전-봇-개인-설정-가져오기-migrationapply)）。
 
 **Masamongは、友だちのDiscordサーバーで一緒に過ごすAIボットです。** 部屋で交わされた会話を覚えていて、「キャンプはどこに行くって決めたっけ？」のような質問に友だちのように答えます。会話の途中で天気・株価・為替・おいしいお店・ニュースを調べることもできます。設定は、自分のパソコンでだけ開くWebコンソールで行います。
 
@@ -19,7 +19,7 @@
 - **費用を抑える** — 月間予算と、ツールごと・人ごとの上限
 - **自分のマシンで動く** — 自分のコピーをインストールし、自分のAPIキーを使います。コンソールは`127.0.0.1`にだけバインドされ、練習モードなら無料で試せます
 
-バージョン: `0.2.0-dev`
+バージョン: `1.0.0`
 
 **目次**: [スクリーンショット](#スクリーンショット) · [できること](#できること) · [はじめかた](#はじめかた) · [AIでインストール](#aiコーディングエージェントでインストールする) · [Discordで使う](#4-discordで使う) · [費用と外部サービス](#費用と外部サービス) · [ドキュメント](#ドキュメント) · [開発](#開発) · [貢献者](#貢献者) · [ライセンス](#ライセンス) · [免責事項](#免責事項)
 
@@ -48,29 +48,56 @@
 
 ## はじめかた
 
-必要なのは**Git**と**Go 1.27以降**だけです（インストールスクリプトがソースからビルドします）。Goがない場合は、インストールスクリプトが[Releases](https://github.com/kim0040/masamong2/releases)にあるお使いのOS・CPU向けのアーカイブを使います。自分で展開したものでも、スクリプトがダウンロードするものでも構いません。**まだリリースは公開されていない**ので、今はGoでソースからインストールしてください。
+いちばん早い方法は**GitもGoも不要**です。コマンド1つ（[クイックインストール](#クイックインストール)）で、お使いのOS・CPU向けのリリースをダウンロードしてインストールします。**Git**と**Go 1.27以降**が必要なのは、ソースからビルドする場合だけです。最初の公開リリースは**v1.0.0**で、すべてのバージョンは[Releases](https://github.com/kim0040/masamong2/releases)ページにあります。
 
 管理者権限は不要です。プログラムはユーザーフォルダに入り、アンインストールしてもデータは残ります。
 
+### クイックインストール
+
+macOS、Linux、FreeBSD:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kim0040/masamong2/main/install.sh | sh
+```
+
+Windows（PowerShell）:
+
+```powershell
+irm https://raw.githubusercontent.com/kim0040/masamong2/main/install.ps1 | iex
+```
+
+スクリプトがお使いのOS・CPU向けのリリースをダウンロードし、`SHA256SUMS`で確認してからユーザーフォルダにインストールします。macOS・Linux・FreeBSDでは、インストール先がPATHになければシェルのプロファイルに1行追加します（`--no-modify-path`でスキップできます。オプションは`| sh -s -- --no-modify-path`のように渡します）。バージョンを指定するには`MASAMONG_VERSION=v1.0.0`を使います（`curl -fsSL … | MASAMONG_VERSION=v1.0.0 sh`。PowerShellでは先に`$env:MASAMONG_VERSION = 'v1.0.0'`を実行します）。終わったら新しいターミナルを開いて`masamong open`を実行するか、スクリプトが表示したフルパスで実行してください。
+
 ### AIコーディングエージェントでインストールする
 
-Claude Code、Codex、Cursor、Gemini CLIなどのコーディングエージェントを使っているなら、次のプロンプトを貼り付けてください。エージェントが[INSTALL.md](INSTALL.md)に沿ってそのコンピューターにインストールします。コマンドは実行前に表示し、GitやGoのインストールが必要なときは先に確認します。
+Claude Code、Codex、Cursor、Gemini CLIなどのコーディングエージェントを使っているなら、次のプロンプトを貼り付けてください。エージェントが[INSTALL.md](INSTALL.md)に沿ってそのコンピューターにインストールします。標準はGitもGoも不要なリリースのダウンロードです。コマンドは実行前に表示し、ソースビルド用のGitやGoなど追加で必要なものがあれば先に確認します。
 
 ```text
 Masamongをインストールして。まず https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md を最後まで読んでから、このコンピューターでその手順を順番に進めて。DiscordのトークンやAPIキーをこのチャットに貼るよう頼まないで。キーは自分でMasamongのコンソールに入力します。
 ```
 
-ターミナルから1行で:
+ターミナルから1行で。macOSとLinux（bashまたはzsh）では:
 
 ```bash
 claude "$(curl -fsSL https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md)"     # Codex: codex "$(curl -fsSL …)"
 ```
+
+PowerShellでは`$(curl …)`が使えないため、プロンプトの文章をそのまま渡します（bash、zsh、cmdでも使えます）:
+
+```powershell
+claude "Masamongをインストールして。まず https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md を最後まで読んでから、このコンピューターでその手順を順番に進めて。DiscordのトークンやAPIキーをこのチャットに貼るよう頼まないで。キーは自分でMasamongのコンソールに入力します。"
+codex "Masamongをインストールして。まず https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md を最後まで読んでから、このコンピューターでその手順を順番に進めて。DiscordのトークンやAPIキーをこのチャットに貼るよう頼まないで。キーは自分でMasamongのコンソールに入力します。"
+```
+
+Gemini CLI、Cursorなど他のエージェントでは、プロンプトをエージェントのチャットに貼り付けてください。
 
 INSTALL.mdは渡す前に自分で読めるふつうの手順書です。キーはチャットではなく、必ずコンソールに入力します（コンソールがOSのキーチェーンに保管します）。
 
 自分で進める場合は、以下の手順に従ってください。
 
 ### 1. インストール
+
+ソースからビルドするにはGitとGo 1.27以降が必要です。不要なら上の[クイックインストール](#クイックインストール)を使ってください。
 
 <details open>
 <summary><b>macOS</b></summary>
@@ -81,7 +108,7 @@ INSTALL.mdは渡す前に自分で読めるふつうの手順書です。キー�
 git clone https://github.com/kim0040/masamong2.git
 cd masamong2
 ./install.sh --app      # ~/Applications/Masamong.app もビルドします（任意）
-masamong open
+~/.local/bin/masamong open     # または新しいターミナルで: masamong open
 ```
 
 メニューバーアイコンから開いたり終了したりします。ログイン時に起動するには: `masamong autostart on`。
@@ -119,7 +146,7 @@ Go（とGit）がない場合は、リリースの`masamong_windows_amd64.zip`�
 git clone https://github.com/kim0040/masamong2.git
 cd masamong2
 ./install.sh            # ~/.local/bin にインストールしてPATHに追加（新しいターミナルを開く）
-masamong open           # デスクトップではブラウザが開きます
+~/.local/bin/masamong open           # デスクトップではブラウザが開きます; または新しいターミナルで: masamong open
 ```
 
 **ヘッドレスサーバー**では、サーバー側でサービスを起動し、自分のパソコンからSSH経由で接続します:
@@ -139,6 +166,8 @@ masamong connect user@server
 
 <details>
 <summary><b>更新 · アンインストール</b></summary>
+
+リリースからインストールした場合は、コンソールの**メンテナンス → 今すぐ更新**を押すか、クイックインストールのコマンドをもう一度実行します。ソースからビルドした場合:
 
 ```bash
 cd masamong2 && git pull && ./install.sh   # 更新: 起動中のサービスは新バージョンで再起動します
@@ -160,7 +189,7 @@ cd masamong2 && git pull && ./install.sh   # 更新: 起動中のサービスは
 4. **最初の部屋** — ボットが返信するチャンネルと、そのペルソナ。
 5. **テストチャット** — チャンネルに投稿せずに返信を確認できます。
 
-まずキーなしで試したいときは、最初の画面で**練習モードを開始**を押してください。
+まずキーなしで試したいときは、最初の画面で**練習モードを試す**を押してください。
 
 ### 3. 記憶を追加する（任意）
 
@@ -211,7 +240,7 @@ Masamong本体、データベース（SQLite）、コンソール、バックア
 | 為替レート | ExchangeRate-API | 必要 | データの**再配布は禁止** |
 | リンクの読み取り | Jina Reader | 不要 | 既定ではオフ。リンクを外部サービスに送信します |
 
-キーのないツールはオフと同じように動作し、ボットはその機能が使えないとだけ伝えます。データ共有の条件があるサービス（株価、為替）については、共有の部屋にそのデータを投稿してよいか確認してください（[backlog › 外部サービスの規約](docs/BACKLOG.md#2-외부-서비스-약관-라이선스와-별개)、韓国語）。
+キーのないツールはオフと同じように動作し、ボットはその機能が使えないとだけ伝えます。データ共有の条件があるサービス（株価、為替）については、共有の部屋にそのデータを投稿してよいか確認してください（[backlog › 外部サービスの規約](docs/BACKLOG.md#2-외부-서비스-약관)、韓国語）。
 
 ## 対応プラットフォーム
 

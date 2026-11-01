@@ -8,8 +8,17 @@
 #   ./install.sh --uninstall      stop the service, turn off start at login, remove the binaries (data stays)
 #
 # Without Go and without prebuilt binaries next to this script it downloads the matching archive from
-# the GitHub release (MASAMONG_VERSION=v0.2.0 picks one; default: latest).
+# the GitHub release (MASAMONG_VERSION=v1.0.0 picks one; default: latest) and checks it against SHA256SUMS.
+# Piped from the web (curl -fsSL …/install.sh | sh, options after `sh -s --`) it always downloads.
 set -eu
+
+# Run from a file, the script's folder may hold a release archive or a clone. Piped into a shell, $0 is the
+# shell itself: there is no folder of ours, so look for nothing next to it.
+here=""
+case "$(basename -- "$0")" in
+sh | bash | dash | ash | ksh | zsh | -sh | -bash) ;;
+*) [ -f "$0" ] && here=$(cd "$(dirname "$0")" && pwd) ;;
+esac
 
 REPO="kim0040/masamong2"
 prefix="${PREFIX:-$HOME/.local}"
@@ -23,7 +32,9 @@ while [ $# -gt 0 ]; do
 	--no-modify-path) modify_path=0 ;;
 	--app) want_app=1 ;;
 	--uninstall) uninstall=1 ;;
-	-h | --help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+	-h | --help)
+		if [ -n "$here" ]; then sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; else echo "usage: see https://github.com/kim0040/masamong2/blob/main/install.sh"; fi
+		exit 0 ;;
 	*) echo "install.sh: unknown option $1 (see --help)" >&2; exit 2 ;;
 	esac
 	shift
@@ -32,7 +43,6 @@ done
 say() { printf '%s\n' "$*"; }
 die() { printf 'install.sh: %s\n' "$*" >&2; exit 1; }
 
-here=$(cd "$(dirname "$0")" && pwd)
 bindir="$prefix/bin"
 docdir="$prefix/share/doc/masamong"
 os=$(uname -s | tr '[:upper:]' '[:lower:]')
@@ -66,11 +76,11 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 
 # 1) a release archive ships the binaries next to this script
-if [ -x "$here/masamong" ] && [ -x "$here/masamongd" ] && [ ! -f "$here/go.mod" ]; then
+if [ -n "$here" ] && [ -x "$here/masamong" ] && [ -x "$here/masamongd" ] && [ ! -f "$here/go.mod" ]; then
 	say "installing the prebuilt binaries from $here"
 	cp "$here/masamong" "$here/masamongd" "$tmp/"
 # 2) a source checkout builds with Go
-elif [ -f "$here/go.mod" ] && command -v go >/dev/null 2>&1; then
+elif [ -n "$here" ] && [ -f "$here/go.mod" ] && command -v go >/dev/null 2>&1; then
 	need=$(sed -n 's/^go \([0-9][0-9.]*\).*/\1/p' "$here/go.mod")
 	have=$(go env GOVERSION | sed 's/^go//')
 	if [ "$(printf '%s\n%s\n' "$need" "$have" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)" != "$need" ]; then
@@ -93,12 +103,27 @@ else
 	tag="${MASAMONG_VERSION:-latest}"
 	name="masamong_${os}_${arch}.tar.gz"
 	if [ "$tag" = latest ]; then
-		url="https://github.com/$REPO/releases/latest/download/$name"
+		base="https://github.com/$REPO/releases/latest/download"
 	else
-		url="https://github.com/$REPO/releases/download/$tag/$name"
+		base="https://github.com/$REPO/releases/download/$tag"
 	fi
-	say "downloading $url"
-	curl -fsSL "$url" -o "$tmp/$name" || die "download failed. Install Go $(sed -n 's/^go //p' "$here/go.mod" 2>/dev/null) and run this script from a clone, or download a release by hand."
+	say "downloading $base/$name"
+	curl -fsSL "$base/$name" -o "$tmp/$name" || die "download failed. Install Go and run this script from a clone, or download a release by hand from https://github.com/$REPO/releases"
+	# the same check install.ps1 makes: the archive must match the release's SHA256SUMS
+	curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" || die "could not download SHA256SUMS for the release"
+	want=$(awk -v n="$name" '$2 == n || $2 == "*" n { print tolower($1); exit }' "$tmp/SHA256SUMS")
+	[ -n "$want" ] || die "SHA256SUMS has no checksum for $name"
+	if command -v sha256sum >/dev/null 2>&1; then
+		got=$(sha256sum "$tmp/$name" | awk '{ print tolower($1) }')
+	elif command -v shasum >/dev/null 2>&1; then
+		got=$(shasum -a 256 "$tmp/$name" | awk '{ print tolower($1) }')
+	elif command -v sha256 >/dev/null 2>&1; then
+		got=$(sha256 -q "$tmp/$name" | tr '[:upper:]' '[:lower:]')
+	else
+		die "no SHA-256 tool (sha256sum, shasum or sha256) to check the download"
+	fi
+	[ "$got" = "$want" ] || die "checksum mismatch for $name: the download is damaged or not the published file"
+	say "checksum ok ($name)"
 	tar -xzf "$tmp/$name" -C "$tmp" || die "the archive is damaged"
 	for b in masamong masamongd; do
 		found=$(find "$tmp" -type f -name "$b" | head -1)

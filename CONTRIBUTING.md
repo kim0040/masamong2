@@ -1,5 +1,7 @@
 # Masamong에 기여하기
 
+**In English:** Issues and pull requests are welcome; replies may be slow. Run `go test ./... && go vet ./...` before you open a pull request, and `make docs` if you changed documentation. Never include real conversations, user IDs, keys or production databases. Report security problems privately as described in [SECURITY.md](SECURITY.md). The rest of this page is in Korean.
+
 Masamong에 관심을 가져 주셔서 감사합니다. Maintainer는 **김현민 (Hyunmin Kim)**이며 연락처는 [mini0227kim@gmail.com](mailto:mini0227kim@gmail.com)입니다.
 
 ## 작업 전
@@ -57,7 +59,7 @@ go test ./...
 
 ## 필수 검사
 
-변경 범위에 맞는 검사를 먼저 실행하세요. 아래 전체 gate는 GitHub Actions `ci` workflow가 pull request마다 실행합니다. CI가 돌지 않은 변경(예: fork에서 Actions가 꺼져 있을 때)은 로컬 결과(명령과 출력)를 pull request에 적습니다. 저사양 컴퓨터에서는 바뀐 패키지만 `CI=true go test -count=1 -p 1 <패키지>`로 순서대로 돌립니다([유지보수 가이드](docs/MAINTAINING.md) §1·§5).
+변경 범위에 맞는 검사를 먼저 실행하세요. 아래 검사 중 `go vet`·`go test`·콘솔 검사는 GitHub Actions `ci` workflow가 pull request마다 실행합니다(문서만 바꾼 변경은 제외). `-race`·전체 배포 대상 빌드·라이선스 감사 전체는 매주 월요일과 릴리스 태그에서 돕니다([개발 가이드](https://github.com/kim0040/masamong2/wiki/개발-가이드)). CI가 돌지 않은 변경(예: fork에서 Actions가 꺼져 있을 때)은 로컬 결과(명령과 출력)를 pull request에 적습니다. 저사양 컴퓨터에서는 바뀐 패키지만 `CI=true go test -count=1 -p 1 <패키지>`로 순서대로 돌립니다([유지보수 가이드](docs/MAINTAINING.md) §1·§5).
 
 ```bash
 go test ./... -count=1

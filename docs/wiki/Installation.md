@@ -8,22 +8,52 @@ Installing Masamong needs no administrator rights. The programs go into your use
 
 | You need | Where to get it | When |
 |---|---|---|
-| Git and Go 1.27+ | [git-scm.com](https://git-scm.com), [go.dev/dl](https://go.dev/dl) (macOS `brew install git go`, Windows `winget install Git.Git GoLang.Go`) | To install. No release has been published yet, so for now Masamong is built from source |
+| Git and Go 1.27+ | [git-scm.com](https://git-scm.com), [go.dev/dl](https://go.dev/dl) (macOS `brew install git go`, Windows `winget install Git.Git GoLang.Go`) | To build from source only. Not needed if you install from a release ([Quick install](#quick-install)) |
 | A model API key | [OpenRouter](https://openrouter.ai) is the easiest (one key covers chat, memory and pictures); CometAPI, Gemini or any OpenAI-compatible service also work | In the setup wizard. Practice mode needs none |
 | A Discord bot token | [Discord Developer Portal](https://discord.com/developers/applications) → New Application → **Bot** → Reset Token, and turn on **Message Content Intent** ([Connecting Discord](https://github.com/kim0040/masamong2/wiki/Connecting-Discord)) | In the setup wizard, or later |
 | Optional tool keys | KMA (Korean weather), Kakao (places), a web search service, Finnhub, ExchangeRate-API ([Tools and limits](https://github.com/kim0040/masamong2/wiki/Tools-and-Limits)) | Any time, under **Connections** |
 
 Keys and tokens are typed into the console only. They go into the macOS Keychain, Windows Credential Manager, or an owner-only file on Linux and FreeBSD; never paste them into a chat, an issue or a shell command.
 
+## Quick install
+
+No Git or Go needed. The script downloads the release for your OS and CPU, checks it against the release's `SHA256SUMS` and installs it into your user folder.
+
+macOS · Linux · FreeBSD:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kim0040/masamong2/main/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/kim0040/masamong2/main/install.ps1 | iex
+```
+
+- **Options** go after `sh -s --`, for example `curl -fsSL … | sh -s -- --prefix DIR` or `--no-modify-path` (see [Install options](#install-options)). In PowerShell, to pass switches such as `-Prefix`, save the script first (`irm … -OutFile install.ps1`) and run that file.
+- **A version**: `curl -fsSL … | MASAMONG_VERSION=v1.0.0 sh`, or in PowerShell `$env:MASAMONG_VERSION = 'v1.0.0'` on the line before. Without it the latest release is used.
+- **Shell profile** (macOS, Linux, FreeBSD): if `~/.local/bin` is not on your PATH, the script appends one line to your shell profile (`~/.zshrc`, `~/.bashrc` or `~/.bash_profile`, or `~/.profile`; for fish it only prints the command). `--no-modify-path` skips it.
+- **The same terminal does not see the new PATH.** Open a new terminal and run `masamong open`, or use the full path the script prints (for example `~/.local/bin/masamong open`).
+
 ## Install with an AI coding agent
 
-Paste this into Claude Code, Codex, Cursor, Gemini CLI or another coding agent. It follows [INSTALL.md](https://github.com/kim0040/masamong2/blob/main/INSTALL.md), which is written for agents: it shows each command before running it, asks before installing Git or Go, and leaves every key to you.
+Paste this into Claude Code, Codex, Cursor, Gemini CLI or another coding agent. It follows [INSTALL.md](https://github.com/kim0040/masamong2/blob/main/INSTALL.md), which is written for agents: by default it installs the release (no Git or Go needed), shows each command before running it, asks before installing Git or Go (only a source build needs them), and leaves every key to you.
 
 ```text
 Install Masamong for me. First read https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md in full, then follow it step by step on this computer. Never ask me to paste a Discord token or an API key into this chat; I will type those into the Masamong console myself.
 ```
 
-From a terminal in one line: `claude "$(curl -fsSL https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md)"` (Codex: `codex "$(curl -fsSL …)"`).
+From a terminal in one line. On macOS and Linux (bash or zsh): `claude "$(curl -fsSL https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md)"` (Codex: `codex "$(curl -fsSL …)"`).
+
+In PowerShell, `$(curl …)` does not work, so pass the prompt text itself (this also works in bash, zsh and cmd):
+
+```powershell
+claude "Install Masamong for me. First read https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md in full, then follow it step by step on this computer. Never ask me to paste a Discord token or an API key into this chat; I will type those into the Masamong console myself."
+codex "Install Masamong for me. First read https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md in full, then follow it step by step on this computer. Never ask me to paste a Discord token or an API key into this chat; I will type those into the Masamong console myself."
+```
+
+For Gemini CLI, Cursor and other agents, paste the prompt into the agent's chat.
 
 The rest of this page is the same install done by hand.
 
@@ -51,8 +81,10 @@ A release contains two programs. Every target except macOS is built without C li
 git clone https://github.com/kim0040/masamong2.git
 cd masamong2
 ./install.sh
-masamong open
+~/.local/bin/masamong open     # or in a new terminal: masamong open
 ```
+
+The script appends the PATH line to your shell profile, but the terminal you ran it in does not see it yet. That is why the example uses the full path.
 
 On Linux, distribution Go packages are often too old; install Go from [go.dev/doc/install](https://go.dev/doc/install). On macOS: `brew install go`, plus `xcode-select --install` for the menu bar icon.
 
@@ -69,7 +101,7 @@ This starts a throwaway instance (`~/.masamong-try`) separate from your real one
 
 ### Without Go
 
-Without Go, `install.sh` downloads the release archive for your OS and CPU from GitHub Releases. Pick a version with `MASAMONG_VERSION=v0.2.0 ./install.sh`. If you downloaded a release yourself, unpack it and run the `install.sh` inside. (No release has been published yet; until the first one, install Go and build from source.)
+Without Go, `install.sh` downloads the release archive for your OS and CPU from GitHub Releases and checks it against `SHA256SUMS` (the [Quick install](#quick-install) one-liner does exactly this). Pick a version with `MASAMONG_VERSION=v1.0.0 ./install.sh`. If you downloaded a release yourself, unpack it and run the `install.sh` inside.
 
 ```bash
 tar -xzf masamong_linux_arm64.tar.gz
@@ -106,13 +138,13 @@ Installing needs no administrator rights. Everything below is typed in **PowerSh
 
 1. **From the release ZIP, without Go.** Unpack `masamong_windows_amd64.zip` (`arm64` for ARM laptops) and run the script inside the unpacked folder.
 2. **From a clone, with Go** (`winget install Git.Git GoLang.Go`). The script builds both programs from source. If your Go is older than the version in `go.mod`, it stops and asks you to update Go.
-3. **From a clone, or the script alone, without Go.** With no Go and no programs next to the script, it downloads `masamong_windows_<amd64|arm64>.zip` and `SHA256SUMS` from GitHub Releases, checks the checksum and only then installs. Pick a version with `$env:MASAMONG_VERSION = 'v0.2.0'` before running it.
+3. **From a clone, or the script alone, without Go.** With no Go and no programs next to the script, it downloads `masamong_windows_<amd64|arm64>.zip` and `SHA256SUMS` from GitHub Releases, checks the checksum and only then installs. Pick a version with `$env:MASAMONG_VERSION = 'v1.0.0'` before running it.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-The installer also supports PowerShell pipeline execution (for example, downloading the script and piping it to `Invoke-Expression`); it does not depend on a script-relative folder in that case.
+The script also runs straight from the web, with no clone and no Go ([Quick install](#quick-install)): `irm https://raw.githubusercontent.com/kim0040/masamong2/main/install.ps1 | iex`. It does not depend on a script-relative folder in that case. To pass switches such as `-Prefix`, save it first (`irm … -OutFile install.ps1`) and run that file.
 
 When it ends, the script prints the next command:
 
@@ -210,7 +242,7 @@ One data folder is used by one daemon (`daemon.lock`); a second daemon on the sa
 
 ## Security warnings on first launch
 
-Release files are not code-signed yet, so the OS may warn once. Check that a file matches the published checksum with `SHA256SUMS` (`shasum -a 256 -c SHA256SUMS`; on Windows `Get-FileHash .\masamong_windows_amd64.zip`, compared with its line in `SHA256SUMS`). This detects corruption but does not prove who published the checksum. The Windows installer does this check itself when it downloads the ZIP.
+Release files are not code-signed yet, so the OS may warn once. Check that a file matches the published checksum with `SHA256SUMS` (`shasum -a 256 -c SHA256SUMS`; on Windows `Get-FileHash .\masamong_windows_amd64.zip`, compared with its line in `SHA256SUMS`). This detects corruption but does not prove who published the checksum. Both installers (`install.sh` and `install.ps1`) do this check themselves when they download an archive.
 
 - **macOS**: on an "unidentified developer" warning, press **Open Anyway** under **System Settings → Privacy & Security**, or run `xattr -dr com.apple.quarantine <folder>` once on the install folder.
 - **Windows**: in SmartScreen's "Windows protected your PC", choose **More info → Run anyway**.
@@ -230,7 +262,7 @@ A service started from the icon, `masamong open` or `masamong start` runs under 
 
   A download or validation failure leaves the installed pair untouched. Once the journaled swap starts, retry or rollback is settled before the daemon opens its database. Rollback stages and verifies each old program beside the installed one, then replaces its name atomically, so a runnable installed program remains throughout. If recovery cannot finish, the bot stays off and the recovery page shows the available commands. When the update succeeds, the console reloads on the new version.
 - **If an update is interrupted** (a crash, a power cut): the next start finishes the swap or puts the old pair back before anything else runs, and a supervisor does the same before it launches the service again. While that cannot be settled, the bot stays off and the daemon serves a localized recovery page with only the commands valid for that state ([Troubleshooting](https://github.com/kim0040/masamong2/wiki/Troubleshooting#the-console-shows-recovery-required-maintenance-mode)). `masamong open` and the tray's Open command reach the page; `doctor` and `masamongd --maintenance status` report maintenance, and `masamong stop` stops the daemon before offline recovery commands are used. On Windows, old program files that a running process still holds are removed after the new pair is confirmed.
-- **Update with the installer**: a build from source (a `git describe` version) or a program folder the service cannot write cannot update itself; the console says why. Then `git pull` and run `install.sh` (or `install.ps1`) again. On Windows, the installer keeps the old pair until PATH is updated and every previously running data root reports healthy; if any step fails, it restores the old files, manifest and exact PATH value, then restarts those roots with their own `--data-root`.
+- **Update with the installer**: a build from source (a `git describe` version) or a program folder the service cannot write cannot update itself; the console says why. Then `git pull` and run `install.sh` (or `install.ps1`) again. A release install can also be updated by running the [Quick install](#quick-install) command again. On Windows, the installer keeps the old pair until PATH is updated and every previously running data root reports healthy; if any step fails, it restores the old files, manifest and exact PATH value, then restarts those roots with their own `--data-root`.
 - **Your data stays**: both ways replace only the programs, never the data folder. The first start of a new version takes another backup. To go back to the previous version, install it again and restore that backup. The newest three backups of each kind (before an update, first start of a version) are kept.
 - **Uninstall**: `./install.sh --uninstall` or `install.ps1 -Uninstall`. On Windows, removal is limited to the manifest's recognized Masamong files (or the known-name fallback for older installs); unrelated files remain, and a shared install folder remains unless empty. The data folder is kept, so installing again carries on where you left off. Delete it yourself to remove everything (make a [backup](https://github.com/kim0040/masamong2/wiki/Storage-and-Backup) first).
 - **Start over**: to keep the programs but erase the data, use **Maintenance → Reset** in the console ([Storage and backup](https://github.com/kim0040/masamong2/wiki/Storage-and-Backup#reset)).

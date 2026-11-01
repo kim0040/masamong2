@@ -13,7 +13,7 @@ masamong open
 `masamong open` starts the background service if it is not running, then opens a **one-time sign-in link** in your browser. The console listens on the loopback address (`http://127.0.0.1:8787`) only and cannot be reached from other machines.
 
 - Where no browser can be opened, the link is printed in the terminal.
-- On Windows, if `masamong` is "not recognized" right after installing, open a new PowerShell or use the full path the installer printed ([Installation](https://github.com/kim0040/masamong2/wiki/Installation#windows)).
+- If `masamong` is "not found" right after installing, open a new terminal (Windows: a new PowerShell) or use the full path the installer printed ([Installation](https://github.com/kim0040/masamong2/wiki/Installation#windows)).
 - If the console asks you to sign in again, it shows the command for your system: for PowerShell `& "C:\...\masamong.exe" open` (and a `cmd.exe` form), otherwise the plain `masamong open`. The sign-in token itself is the file `admin/web-token` in the data folder (Windows: `%APPDATA%\Masamong\admin\web-token`; print it with `masamong admin token`).
 - For a server install, run `masamong connect user@server` on your own computer to reach it over an SSH tunnel ([Admin console](https://github.com/kim0040/masamong2/wiki/Admin-Console)).
 - Without a GUI or JavaScript, `http://127.0.0.1:8787/lite` offers status checks and restart.

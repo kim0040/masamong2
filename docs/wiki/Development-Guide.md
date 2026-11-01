@@ -80,11 +80,12 @@ Tests use synthetic fixtures and temporary folders only. Never put real conversa
 
 The `ci` workflow runs in two sizes, so a push gets a quick answer and the heavy checks run weekly.
 
-**Quick** — pushes to `main` and pull requests
+**Quick** — pushes (any branch) and pull requests
 - `go vet`, Go tests, a minimal build without the web UI (`noweb`)
 - Console checks (type check, bundle build and size budget, committed `ui/dist` and `locales/ui` up to date) only when console code or strings change
 - License audit only when dependencies change (`go.mod`, `go.sum`, `package*.json`)
 - A **Windows** job (`windows-latest`) on every push and pull request: `go vet`, the Go tests, the console build (`npm ci`, `npm run build`) and the Python retrieval suites, so a change that only breaks on Windows is caught before it merges
+- A **macOS** job (`macos-latest`) also runs on every push and pull request
 - Docs-only pushes (`docs/`, `*.md`) skip CI, and a newer push cancels the previous run
 
 **Full** — every Monday, manual runs (Run workflow) and release tags
@@ -98,21 +99,33 @@ The long load test (`soak`) runs on the 1st of each month; running it by hand be
 
 The steps before a tag (full checks, long load test, a week with a test bot, backup and rollback) are in the [Release checklist](https://github.com/kim0040/masamong2/wiki/Release-Checklist).
 
+### Version numbers
+
+Versions are `vMAJOR.MINOR.PATCH` (semantic versioning); the first public release, on 2026-11-02, is `v1.0.0`.
+
+| Bump | When | Example |
+|---|---|---|
+| PATCH (third) | Bug fixes, copy and docs touch-ups, small improvements that change no behavior | `v1.0.0` → `v1.0.1` |
+| MINOR (second) | New features or a noticeable behavior change; existing settings and data keep working | `v1.0.1` → `v1.1.0` |
+| MAJOR (first) | A large overhaul, or a change that needs settings or data migrated by hand; the release notes say how | `v1.4.2` → `v2.0.0` |
+
+Bumping a number resets the ones after it to 0. Pre-releases look like `v1.1.0-rc1`; the in-app update check treats the final release of the same number as newer than its pre-release.
+
 Pushing a version tag (`v*`) makes the `release` workflow build every archive on a macOS runner (`scripts/release.sh`), verify them (`scripts/verify-release.sh`), simulate Linux and Windows installs, and create the GitHub Release. The Windows smoke job downloads the Windows ZIP, checks it against `SHA256SUMS`, then sets up, starts, checks `status` and `doctor`, and stops an instance in a scratch folder with Go and the host's time zone files hidden, so a missing embedded time zone database fails the release.
 
 ```bash
-git tag v0.2.0 && git push origin v0.2.0
+git tag v1.0.1 && git push origin v1.0.1
 ```
 
 **Releasing without Actions** — build and check the archives on macOS, then publish them by hand. The Linux and Windows install simulations do not run, so check the Windows items of the [Release checklist](https://github.com/kim0040/masamong2/wiki/Release-Checklist) on a Windows computer. Keep the archive names and `SHA256SUMS` as they are: the in-app update expects them.
 
 ```bash
-scripts/release.sh v1.0.0 && scripts/verify-release.sh build/release
-git tag v1.0.0 && git push origin v1.0.0
-gh release create v1.0.0 build/release/* --title "Masamong v1.0.0" --generate-notes
+scripts/release.sh v1.0.1 && scripts/verify-release.sh build/release
+git tag v1.0.1 && git push origin v1.0.1
+gh release create v1.0.1 build/release/* --title "Masamong v1.0.1" --generate-notes
 ```
 
-The in-app update check and the install scripts download from the repository's public releases. Until the first release is published, the update check shows that it is not available and the install scripts build from source (or install from a release archive you unpacked yourself).
+The in-app update check and the install scripts download from the repository's public releases (the first is v1.0.0). A build from source (a `git describe` version) is not updated by the console.
 
 ## Changing the console
 
@@ -132,7 +145,7 @@ The source of this wiki is the repository's `docs/wiki/` folder. When changes re
 
 `make docs` (`go run ./tools/doccheck`) checks two things. `go test ./...` and the `wiki` workflow run the same check, and a failure keeps the wiki from being published.
 
-- **Links**: relative links and links to this repository's files and wiki pages must point at files that exist. `docs/archive/` is a record kept as written and is left out.
+- **Links**: relative links and links to this repository's files and wiki pages must point at files that exist. `docs/archive/` is a local record that is not in Git, so it is left out.
 - **Translations**: the five READMEs, and each Korean wiki page with its English page, form groups. `docs/translations.json` records a hash of every file. Editing one language alone fails the check; update the others, then record again with `make docs-record`. A new wiki page needs the language switch near the top (`**한국어** | [English](…/wiki/English-Page)`) to be paired.
 
 English pages have English file names (`Installation.md`, `Quick-Start.md`, …; the English home is `English.md`), with a language switch at the top of both versions pointing at each other. When you change one, change the other. The sidebar (`_Sidebar.md`) lists both languages.

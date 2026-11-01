@@ -6,7 +6,7 @@
 
 ![Masamong](assets/brand/deploy/readme-banner-zh-Hans.png)
 
-> Masamong 2 是 [Masamong](https://github.com/kim0040/masamong)（Python，2025–2026）的后继版本。它继承了旧版的功能和运营经验，用 Go 重新编写。旧版 Masamong 已于 2026-10-13 停止支持和更新，其个人设置可以导入（[方法](docs/STORAGE.md#이전-봇-개인-설정-가져오기-migrationapply)）。
+> Masamong 2 是 [Masamong](https://github.com/kim0040/masamong)（Python，2025–2026，已归档）的后继版本。它继承了旧版的功能和运营经验，用 Go 重新编写。旧版 Masamong 已于 2026-10-13 停止支持和更新，其个人设置可以导入（[方法](docs/STORAGE.md#이전-봇-개인-설정-가져오기-migrationapply)）。
 
 **Masamong 是一个常驻在你朋友 Discord 服务器里的 AI 机器人。** 它会记住房间里说过的话，像朋友一样回答“我们上次决定去哪里露营来着？”这样的问题，还能在聊天过程中查询天气、股价、汇率、餐厅和新闻。你可以在只在自己电脑上打开的 Web 控制台里完成设置。
 
@@ -19,7 +19,7 @@
 - **控制成本** —— 每月预算以及按工具、按人设置的限额
 - **运行在你自己的机器上** —— 你安装自己的副本并使用自己的 API 密钥；控制台只绑定 `127.0.0.1`，练习模式可以免费体验
 
-版本：`0.2.0-dev`
+版本：`1.0.0`
 
 **目录**：[截图](#截图) · [功能](#功能) · [快速开始](#快速开始) · [用 AI 安装](#用-ai-编程助手安装) · [在 Discord 中使用](#4-在-discord-中使用) · [费用与外部服务](#费用与外部服务) · [文档](#文档) · [开发](#开发) · [贡献者](#贡献者) · [许可证](#许可证) · [免责声明](#免责声明)
 
@@ -48,29 +48,56 @@
 
 ## 快速开始
 
-你只需要 **Git** 和 **Go 1.27 或更高版本**（安装脚本会从源码构建）。没有 Go 时，安装脚本会使用 [Releases](https://github.com/kim0040/masamong2/releases) 中适合你操作系统和 CPU 的压缩包：可以是你自己解压的，也可以由脚本下载。**目前还没有发布任何版本**，所以现在请用 Go 从源码安装。
+最快的方式**不需要 Git，也不需要 Go**：一条命令（[快速安装](#快速安装)）就会下载适合你操作系统和 CPU 的发布包并安装。只有从源码构建时才需要 **Git** 和 **Go 1.27 或更高版本**。首个公开版本是 **v1.0.0**，所有版本都在 [Releases](https://github.com/kim0040/masamong2/releases) 页面。
 
 不需要管理员权限。程序会安装到你的用户文件夹，卸载后数据仍会保留。
 
+### 快速安装
+
+macOS、Linux、FreeBSD：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/kim0040/masamong2/main/install.sh | sh
+```
+
+Windows（PowerShell）：
+
+```powershell
+irm https://raw.githubusercontent.com/kim0040/masamong2/main/install.ps1 | iex
+```
+
+脚本会下载适合你操作系统和 CPU 的发布包，用 `SHA256SUMS` 校验后安装到你的用户文件夹。在 macOS、Linux 和 FreeBSD 上，如果安装文件夹不在 PATH 中，它还会向你的 shell 配置文件追加一行（`--no-modify-path` 可跳过；传选项的写法如 `| sh -s -- --no-modify-path`）。用 `MASAMONG_VERSION=v1.0.0` 指定版本（`curl -fsSL … | MASAMONG_VERSION=v1.0.0 sh`；PowerShell 里先运行 `$env:MASAMONG_VERSION = 'v1.0.0'`）。结束后打开新终端运行 `masamong open`，或使用脚本打印的完整路径。
+
 ### 用 AI 编程助手安装
 
-如果你在用 Claude Code、Codex、Cursor、Gemini CLI 等编程助手，把下面的提示词粘贴进去即可。它会按照 [INSTALL.md](INSTALL.md) 在那台电脑上安装，每条命令执行前都会先给你看；需要安装 Git 或 Go 时会先问你。
+如果你在用 Claude Code、Codex、Cursor、Gemini CLI 等编程助手，把下面的提示词粘贴进去即可。它会按照 [INSTALL.md](INSTALL.md) 在那台电脑上安装，默认走不需要 Git 和 Go 的发布包下载。每条命令执行前都会先给你看；需要额外安装的东西（例如源码构建用的 Git 和 Go）会先问你。
 
 ```text
 帮我安装 Masamong。先完整读一遍 https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md ，然后在这台电脑上按步骤依次执行。不要让我把 Discord 令牌或 API 密钥粘贴到这个对话里；密钥我会自己填进 Masamong 控制台。
 ```
 
-在终端里一行搞定：
+在终端里一行搞定。macOS 和 Linux（bash 或 zsh）：
 
 ```bash
 claude "$(curl -fsSL https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md)"     # Codex: codex "$(curl -fsSL …)"
 ```
+
+PowerShell 里 `$(curl …)` 不能用，请直接传入提示词文本（bash、zsh、cmd 里也可以）：
+
+```powershell
+claude "帮我安装 Masamong。先完整读一遍 https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md ，然后在这台电脑上按步骤依次执行。不要让我把 Discord 令牌或 API 密钥粘贴到这个对话里；密钥我会自己填进 Masamong 控制台。"
+codex "帮我安装 Masamong。先完整读一遍 https://raw.githubusercontent.com/kim0040/masamong2/main/INSTALL.md ，然后在这台电脑上按步骤依次执行。不要让我把 Discord 令牌或 API 密钥粘贴到这个对话里；密钥我会自己填进 Masamong 控制台。"
+```
+
+Gemini CLI、Cursor 等其他助手，请把提示词粘贴到助手的聊天窗口。
 
 INSTALL.md 是普通的说明文本，交给助手前你可以自己先读一遍。密钥永远填在控制台里（由控制台存进系统钥匙串），不要发到对话里。
 
 想自己动手的话，按下面的步骤来。
 
 ### 1. 安装
+
+从源码构建需要 Git 和 Go 1.27 或更高版本。不想这样的话，请用上面的[快速安装](#快速安装)。
 
 <details open>
 <summary><b>macOS</b></summary>
@@ -81,7 +108,7 @@ INSTALL.md 是普通的说明文本，交给助手前你可以自己先读一遍
 git clone https://github.com/kim0040/masamong2.git
 cd masamong2
 ./install.sh --app      # 同时构建 ~/Applications/Masamong.app（可选）
-masamong open
+~/.local/bin/masamong open     # 或在新终端中运行：masamong open
 ```
 
 从菜单栏图标打开和退出。开机自启：`masamong autostart on`。
@@ -119,7 +146,7 @@ masamong open
 git clone https://github.com/kim0040/masamong2.git
 cd masamong2
 ./install.sh            # 安装到 ~/.local/bin 并添加到 PATH（打开新终端）
-masamong open           # 在桌面上打开浏览器
+~/.local/bin/masamong open           # 在桌面上打开浏览器; 或在新终端中运行：masamong open
 ```
 
 在**无图形界面的服务器**上，先在服务器上启动服务，再从自己的电脑通过 SSH 连接：
@@ -139,6 +166,8 @@ masamong connect user@server
 
 <details>
 <summary><b>更新 · 卸载</b></summary>
+
+通过发布包安装的：控制台 **维护 → 立即更新**，或再运行一次快速安装命令。从源码构建的：
 
 ```bash
 cd masamong2 && git pull && ./install.sh   # 更新：正在运行的服务会重启到新版本
@@ -160,7 +189,7 @@ cd masamong2 && git pull && ./install.sh   # 更新：正在运行的服务会�
 4. **第一个房间** — 机器人回复的频道及其人设。
 5. **测试聊天** — 不发布到频道就能预览回复。
 
-想先不填密钥体验一下，请在第一个界面点击 **开始练习模式**。
+想先不填密钥体验一下，请在第一个界面点击 **试用练习模式**。
 
 ### 3. 添加记忆（可选）
 
@@ -211,7 +240,7 @@ Masamong 本身、其数据库（SQLite）、控制台、备份、关键词搜�
 | 汇率 | ExchangeRate-API | 需要 | 数据**禁止再分发** |
 | 链接阅读 | Jina Reader | 不需要 | 默认关闭；会把链接发送到外部服务 |
 
-没有密钥的工具会像关闭一样，机器人只会说该功能目前不可用。对于有数据共享条款的服务（股票、汇率），请确认是否可以在多人房间里发布其数据（[backlog › 外部服务条款](docs/BACKLOG.md#2-외부-서비스-약관-라이선스와-별개)，韩语）。
+没有密钥的工具会像关闭一样，机器人只会说该功能目前不可用。对于有数据共享条款的服务（股票、汇率），请确认是否可以在多人房间里发布其数据（[backlog › 外部服务条款](docs/BACKLOG.md#2-외부-서비스-약관)，韩语）。
 
 ## 支持的平台
 

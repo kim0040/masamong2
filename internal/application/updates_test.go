@@ -17,6 +17,9 @@ func TestVersionsCompare(t *testing.T) {
 	}{
 		{"0.3.0", "0.2.0", true}, {"0.2.1", "0.2.0", true}, {"1.0.0", "0.9.9", true}, {"0.2.0", "0.2.0", false},
 		{"0.2.0", "0.3.0", false}, {"0.2.0", "0.2.0-rc1", true}, {"0.10.0", "0.9.0", true}, {"banana", "0.2.0", false},
+		// a source build stamped by git describe holds its tag and more
+		{"v1.0.0", "v1.0.0-3-gabc1234", false}, {"v1.0.0", "v1.0.0-dirty", false}, {"v1.0.0", "v1.0.0-3-gabc1234-dirty", false},
+		{"v1.0.1", "v1.0.0-3-gabc1234", true}, {"v0.9.9", "v1.0.0-3-gabc1234", false}, {"v1.1.0", "v1.1.0-rc1-2-gabc1234", true},
 	} {
 		if got := application.NewerVersionForTest(c.latest, c.current); got != c.newer {
 			t.Errorf("newer(%s, %s) = %v", c.latest, c.current, got)

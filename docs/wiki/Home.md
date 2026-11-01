@@ -8,7 +8,7 @@
 
 **Masamong 2**는 Discord 대화와 메신저 대화 기록(카카오톡 내보내기 CSV 등)을 하나의 인스턴스에서 기억하고, 자연스럽게 대화를 이어가는 개인용 AI 어시스턴트 봇입니다. 설치 시 로컬 전용 **웹 관리 콘솔**이 함께 제공되어 채널별 정책, 기억 블록, AI 모델, 비용 예산, 백업 및 로그를 한곳에서 직관적으로 관리할 수 있습니다.
 
-현재 버전: `0.2.0-dev` · 라이선스: MIT · 저장소: [kim0040/masamong2](https://github.com/kim0040/masamong2)
+현재 버전: `1.0.0` · 라이선스: MIT · 저장소: [kim0040/masamong2](https://github.com/kim0040/masamong2)
 
 ## 핵심 기능
 
@@ -45,6 +45,7 @@
 ## 개발자 가이드
 
 - [개발 가이드](https://github.com/kim0040/masamong2/wiki/개발-가이드) — 프로젝트 빌드, 테스트 실행, CI 파이프라인, 아키텍처 구조 및 기여 가이드
+- [보류 중인 결정](https://github.com/kim0040/masamong2/wiki/보류-중인-결정) · [릴리스 체크리스트](https://github.com/kim0040/masamong2/wiki/릴리스-체크리스트)
 
 ## 참고
 
