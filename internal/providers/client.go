@@ -346,6 +346,27 @@ func (c *Client) PostJSON(ctx context.Context, rawURL string, headers map[string
 	return c.do(ctx, http.MethodPost, rawURL, headers, body, "application/json")
 }
 
+// Post performs a POST with a body of any content type (a multipart upload).
+func (c *Client) Post(ctx context.Context, rawURL string, headers map[string]string, body []byte, contentType string) (*Response, error) {
+	return c.do(ctx, http.MethodPost, rawURL, headers, body, contentType)
+}
+
+// Delete performs a DELETE.
+func (c *Client) Delete(ctx context.Context, rawURL string, headers map[string]string) (*Response, error) {
+	return c.do(ctx, http.MethodDelete, rawURL, headers, nil, "")
+}
+
+// WithMaxBody is a copy of c that reads responses up to n bytes (batch result files are far larger than
+// a chat answer). The copy shares c's connections and gates.
+func (c *Client) WithMaxBody(n int64) *Client {
+	if n <= c.MaxBody {
+		return c
+	}
+	g := *c
+	g.MaxBody = n
+	return &g
+}
+
 func (c *Client) do(ctx context.Context, method, rawURL string, headers map[string]string, body []byte, contentType string) (*Response, error) {
 	redacted := c.Redact(rawURL)
 	if offline() && !c.InProcess && !loopbackURL(rawURL) {
