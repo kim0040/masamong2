@@ -73,7 +73,7 @@
 
   async function prepare(b: any) {
     const r = await call('memory.blocks.prepare', { source_room: b.source_room, background: true })
-    if (r.ok) toast('ok', r.output.already_running ? t('blocks.already_running') : t('blocks.prepare_started'), b.label)
+    if (r.ok) toast(r.output.batch_resumed ? 'info' : 'ok', r.output.batch_resumed ? t('blocks.batch_resumed') : r.output.already_running ? t('blocks.already_running') : r.output.mode === 'batch' ? t('blocks.batch_started') : t('blocks.prepare_started'), b.label)
     else toast('error', t('blocks.prepare_failed'), r.error?.message)
     void data.refresh()
   }
@@ -239,9 +239,13 @@
 
               {#if st === 'preparing'}
                 <div class="job">
-                  <Progress value={b.job.progress_pct ?? 0} label={t('blocks.preparing')} />
-                  <div class="row small"><span class="muted">{jobLine(b.job)}</span><span class="num">{Math.round(b.job.progress_pct ?? 0)}%{etaText(b.job) ? ` · ${t('blocks.eta', { eta: etaText(b.job) })}` : ''}</span></div>
-                  <div><Button size="sm" variant="ghost" icon={I.X} onclick={() => cancelJob(b)}>{t('common.cancel')}</Button></div>
+                  {#if b.waiting_batch}
+                    <p class="small wait" role="status"><I.Hourglass size={14} aria-hidden="true" /> {t('blocks.batch.waiting', { n: num(b.batch?.items ?? 0), when: relative(b.batch?.submitted_at) })}</p>
+                  {:else}
+                    <Progress value={b.job?.progress_pct ?? 0} label={t('blocks.preparing')} />
+                  {/if}
+                  {#if b.job}<div class="row small"><span class="muted">{jobLine(b.job)}</span><span class="num">{Math.round(b.job.progress_pct ?? 0)}%{etaText(b.job) ? ` · ${t('blocks.eta', { eta: etaText(b.job) })}` : ''}</span></div>
+                  <div><Button size="sm" variant="ghost" icon={I.X} onclick={() => cancelJob(b)}>{t('common.cancel')}</Button></div>{/if}
                 </div>
               {:else if st === 'needs_prep'}
                 <div class="next"><span class="small">{t('blocks.next.needs_prep')}</span><Button size="sm" variant="primary" icon={I.Sparkles} onclick={() => navigate(blockHref(b.source_room) + '?prepare=1')}>{t('blocks.prepare')}</Button></div>
@@ -527,6 +531,11 @@
     justify-content: space-between;
     gap: var(--s-2);
     flex-wrap: wrap;
+  }
+  .wait {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
   .ok-line {
     display: flex;

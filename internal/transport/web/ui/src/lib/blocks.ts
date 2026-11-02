@@ -10,6 +10,8 @@ export type Tone = 'ok' | 'warn' | 'danger' | 'info' | 'neutral'
 export type BlockState = 'empty' | 'needs_prep' | 'preparing' | 'partial' | 'ready' | 'failed'
 
 export function blockState(b: any): BlockState {
+  // the provider holds this room's batch: still preparing, even between two runs of the job
+  if (b?.waiting_batch) return 'preparing'
   if (b?.job && ['pending', 'leased', 'running'].includes(b.job.status)) return 'preparing'
   if (!b?.message_count) return 'empty'
   if (b.status === 'failed' && (b.embedded ?? 0) < (b.leaf_count ?? 0)) return 'failed'
@@ -53,7 +55,12 @@ export function etaText(job: any): string {
 /** A compact progress line for a running job. */
 export function jobLine(job: any): string {
   if (!job) return ''
-  const phase = job.progress_phase ? t(`blocks.phase.${job.progress_phase}`) : t('blocks.phase.queued')
+  let phase = job.progress_phase ? t(`blocks.phase.${job.progress_phase}`) : t('blocks.phase.queued')
+  // a batch's label carries the provider's state ("batch running 3/10"): say it in the console language
+  if (job.progress_phase === 'batch') {
+    const m = /^batch\s+([a-z]+)/.exec(job.progress_label ?? '')
+    if (m) phase = `${phase} · ${t(`blocks.batch.state.${m[1]}`)}`
+  }
   if (job.progress_total) return `${phase} ${num(job.progress_done)}/${num(job.progress_total)}`
   return phase
 }
@@ -91,4 +98,26 @@ export function stateLabel(code: string | undefined): string {
   if (!code) return ''
   const key = `memstate.${code}`
   return has(key) ? t(key) : code.replaceAll('_', ' ')
+}
+
+export type PrepareMode = 'live' | 'batch'
+
+/** A block's saved default mode ("" means live). */
+export function modeOf(b: any): PrepareMode {
+  return b?.mode === 'batch' ? 'batch' : 'live'
+}
+
+/** Both prices from one dry run asked with mode=batch: the live total and the batch total. Null before
+ * there is an estimate; `saves` is false when the provider cannot batch any part (the prices are equal). */
+export function batchOffer(est: any): { live: number; batch: number; saves: boolean } | null {
+  const live = est?.total_usd
+  const batch = est?.batch_usd
+  if (typeof live !== 'number' || typeof batch !== 'number') return null
+  return { live, batch, saves: batch < live - 1e-9 }
+}
+
+/** The mode to start with: batch only when the person chose it and the provider can batch something. */
+export function effectiveMode(mode: PrepareMode, est: any): PrepareMode {
+  const o = batchOffer(est)
+  return mode === 'batch' && (!o || o.saves) ? 'batch' : 'live'
 }

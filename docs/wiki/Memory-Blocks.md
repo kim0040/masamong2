@@ -53,6 +53,26 @@ masamong memory blocks list
 masamong channels view attach --guild_id <server ID> --channel_id <channel ID> --block_id <block ID>
 ```
 
+## Batch mode
+
+Instead of indexing **now**, a preparation can be handed to the provider as a **batch job**. On the block page and in the import wizard's prepare step you choose **Now** or **Batch (half price)**. One dry run shows both prices, and "Save as default" makes the block start the way you chose from then on (the same way the budget default works).
+
+- **Cost**: the parts that can be batched (embeddings and summaries) cost about half the normal price.
+- **Time**: usually minutes to a few hours, at most about 24 hours (some hosts take up to 48–96 hours). Meanwhile the block shows "Waiting for the provider's batch (n items, sent …)", and the results are collected automatically when it finishes. It continues across a restart.
+- **Providers**: OpenAI, Anthropic (chat models, such as summaries, only), Google Gemini, OpenRouter and NanoGPT (chat models only). Other OpenAI-compatible hosts (CometAPI, OpenGateway, a custom host) cannot batch and run now. Parts the provider cannot batch, and anything that failed, run live automatically after the batch.
+- **What pauses**: that channel's Discord auto-update waits while its batch is at the provider. Other blocks keep indexing.
+- **Cancel**: cancelling in **Jobs** or on the block page also cancels the provider's batch. Items that already finished are still charged and saved.
+- If a batch for the block is already at the provider, nothing new is sent; the job follows the existing one ("A batch for this block was already sent; following it").
+
+```bash
+# dry run (the batch price comes back as batch_usd)
+masamong memory blocks prepare --source_room kakao:friends --dry_run true --mode batch
+
+# start as a batch / save batch as this block's default
+masamong memory blocks prepare --source_room kakao:friends --mode batch
+masamong memory blocks update --source_room kakao:friends --mode batch
+```
+
 ## How indexing works
 
 - **Snippets (leaves)**: conversation is grouped per room and split every **8 messages or 30 minutes of silence**.

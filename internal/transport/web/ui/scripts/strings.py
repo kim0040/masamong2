@@ -1858,6 +1858,31 @@ add("blocks", {
     "est.approx": ("약 {d}", "about {d}"),
 })
 
+# 2026-11-02 batch mode for memory preparation
+add("blocks", {
+    "mode.label": ("실행 방식", "How to run"),
+    "mode.live": ("지금 실행", "Now"), "mode.batch": ("일괄 처리 (반값)", "Batch (half price)"),
+    "mode.prices": ("지금 {live} · 일괄 {batch}.", "Now {live} · batch {batch}."),
+    "mode.live_hint": ("바로 시작해 몇 분 안에 끝납니다.", "Starts at once and usually finishes in minutes."),
+    "mode.batch_hint": ("제공사에 한꺼번에 맡겨 값이 약 절반입니다. 몇 분에서 길면 하루쯤 걸립니다. 맡길 수 없는 부분과 실패한 부분은 이어서 바로 처리합니다.", "Sent to the provider as one job at about half the price. It takes minutes to about a day. Parts it cannot batch, and anything that fails, run right after."),
+    "mode.unavailable": ("이 제공사는 일괄 처리를 지원하지 않아 바로 실행합니다.", "This provider cannot batch these, so it runs now."),
+    "mode.save_default": ("이 블록 기본 방식으로 저장", "Save as default"),
+    "est.batch_time": ("몇 분~최대 하루", "Minutes to a day"),
+    "phase.batch": ("제공사 일괄 처리", "Provider batch"), "phase.messages": ("메시지 단위 벡터 생성 중", "Building message vectors"),
+    "batch.state.pending": ("접수·대기", "queued"), "batch.state.running": ("처리 중", "running"), "batch.state.done": ("완료", "done"),
+    "batch.state.failed": ("거부됨", "rejected"), "batch.state.expired": ("기한 만료", "expired"), "batch.state.cancelled": ("취소됨", "cancelled"),
+    "batch.waiting": ("제공사의 일괄 처리를 기다리는 중 ({n}건, {when} 전송)", "Waiting for the provider's batch ({n} items, sent {when})"),
+    "batch_started": ("일괄 처리를 제공사에 보냈습니다", "Batch sent to the provider"),
+    "batch_resumed": ("이 블록의 일괄 처리가 이미 전송돼 있어 그 결과를 이어서 받습니다", "A batch for this block was already sent; following it"),
+})
+add("block", {
+    "mode_saved": ("이 블록의 기본 실행 방식으로 저장했습니다", "Saved as this block's default way to run"),
+    "batch_note": ("제공사가 끝내면 결과를 자동으로 받습니다. 창을 닫거나 서비스를 다시 시작해도 이어지며, 이 채널의 Discord 자동 갱신은 그동안 멈춰 있습니다. 취소해도 이미 끝난 분량은 비용이 들고 저장됩니다.", "The results are collected automatically when the provider finishes, even after you close the window or restart. This channel's Discord auto-update pauses meanwhile. Cancelling still charges and keeps what already finished."),
+    "batch_result": ("일괄 처리", "Batch"),
+    "batch_result_v": ("일괄 {batch}건 · 실패 {failed}건 · 바로 처리 {live}건", "{batch} batched · {failed} failed · {live} run live"),
+})
+add("wizard", {"done_batch": ("일괄 처리를 보냈습니다. 제공사가 끝내면(보통 몇 시간, 길면 하루) 자동으로 반영됩니다. 진행 상황은 블록 화면과 작업 화면에서 볼 수 있습니다.", "The batch is sent. It is applied automatically when the provider finishes (usually hours, at most about a day). Follow it on the block page or Jobs.")})
+
 # 2026-09-28 UX pass: sign-in help, personas in rooms, settings controls
 add("feature", {"reminders": ("알림·약속", "Reminders"), "summaries": ("채널 요약", "Channel summaries"), "message_vectors": ("메시지 단위 검색", "Message-level search")})
 add("block", {

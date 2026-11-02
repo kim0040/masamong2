@@ -144,6 +144,16 @@ $M memory blocks prepare --source_room kakao:friends --budget_usd 0.50
 - 비용은 provider가 반환한 실제 `usage.cost`를 우선한다. 응답에 비용이 없으면 모델 단가와 토큰 수로 추정하고, 단가가 없으면 `unknown`으로 남긴다. 먼저 `--dry_run`으로 확인하고, 요약 없이(`memory.summaries: false`) 시작해도 검색은 동작한다.
 - 공급자 호출 일일 한도는 인스턴스 시간대 기준으로 `tool_usage`에 기록한다. 데몬 재시작이나 설정 변경으로 Registry를 다시 만들어도 그날 사용량과 남은 한도는 유지된다.
 
+### 일괄 처리 모드 (`mode=batch`)
+
+`memory blocks prepare`는 `--mode batch`(또는 블록 기본값 `memory blocks update --mode batch`)로 제공사의 일괄 작업에 맡길 수 있다. 값은 정가의 약 절반, 결과는 보통 몇 분~몇 시간, 길어도 약 24시간(호스트에 따라 48~96시간)이다. 일괄은 항상 백그라운드 작업으로 돈다.
+
+- **지원**: OpenAI, Anthropic(대화·요약만), Google Gemini, OpenRouter, NanoGPT(대화만). 그 밖의 OpenAI 호환 호스트(CometAPI, OpenGateway, 직접 입력)는 일괄을 못 쓰므로 바로 실행한다. 일괄로 못 보낸 부분과 실패한 항목은 일괄이 끝난 뒤 같은 작업이 바로(live) 처리한다.
+- **사전 점검**: `--dry_run true --mode batch`는 `report.estimate.total_usd`(바로)와 `batch_usd`(일괄)를 함께 준다. 둘이 같으면 호스트가 일괄을 못 받는다는 뜻이다(콘솔은 이때 선택지를 숨긴다).
+- **계획 저장**: 보낸 일괄의 계획(방, 상태, 항목 수, 제공사 batch ID)은 `memory_batch_plans` 표에 방마다 한 줄 저장한다. 재시작해도 남고, 같은 방을 다시 준비하면 새로 보내지 않고 이 계획을 이어서 기다린다(`batch_resumed: true`). 블록 목록의 `waiting_batch`·`batch{items, submitted_at}`가 이 계획에서 나온다. 계획이 있는 동안 블록 상태는 `preparing`이고 그 채널의 Discord 자동 갱신은 멈춘다.
+- **작업 진행**: 단계 `batch`, 라벨 `batch <pending|running> 완료/전체`, ETA 없음. 결과 JSON에 `mode`, `batch_items`, `batch_failed`, `live_items`, `batch_estimate_usd`가 들어간다.
+- **취소**: `$M jobs cancel --id <작업ID>`(콘솔의 작업·블록 화면 취소도 같다)가 제공사에 열린 일괄을 취소하고 계획을 지운다. 끝난 항목은 비용이 청구되고 저장되며 바로 처리로 넘어가지 않는다. 계획이 남아 있는데 작업이 없으면 같은 방을 다시 준비할 때 그 계획을 이어받는다.
+
 ## 6. 확인
 
 ```bash

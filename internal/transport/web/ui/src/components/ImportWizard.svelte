@@ -7,7 +7,7 @@
   import { cfg } from '../lib/config.svelte'
   import { motionAllowed } from '../lib/prefs.svelte'
   import { num, bytes, usd, duration } from '../lib/format'
-  import { period, roomFromFile, blockHref } from '../lib/blocks'
+  import { period, roomFromFile, blockHref, batchOffer, effectiveMode, type PrepareMode } from '../lib/blocks'
   import { toast } from '../lib/toast.svelte'
   import Dialog from './Dialog.svelte'
   import Button from './Button.svelte'
@@ -16,6 +16,7 @@
   import Select from './Select.svelte'
   import Progress from './Progress.svelte'
   import KeyValue from './KeyValue.svelte'
+  import BatchChoice from './BatchChoice.svelte'
   import * as I from '../lib/icons'
 
   // A KakaoTalk export becomes a memory block: file → check → import → prepare for RAG (background
@@ -44,8 +45,10 @@
   let estimate = $state<any>(null)
   let estimating = $state(false)
   let budget = $state('')
+  let mode = $state<PrepareMode>('live')
   let starting = $state(false)
   let jobStarted = $state(false)
+  let batchStarted = $state(false)
   let picked = $state<string[]>([])
   let connecting = $state(false)
   let err = $state('')
@@ -67,7 +70,9 @@
     imported = null
     estimate = null
     budget = cfg.doc?.memory?.index_budget_usd ?? '1.00'
+    mode = 'live'
     jobStarted = false
+    batchStarted = false
     picked = []
     err = ''
   }
@@ -159,7 +164,7 @@
   }
   async function runEstimate() {
     estimating = true
-    const r = await call('memory.blocks.prepare', { source_room: room, dry_run: true })
+    const r = await call('memory.blocks.prepare', { source_room: room, dry_run: true, mode: 'batch' }) // one dry run, both prices
     estimating = false
     if (r.ok) estimate = r.output
     else err = r.error?.message ?? ''
@@ -169,10 +174,12 @@
     const b = parseFloat(budget)
     if (Number.isNaN(b) || b < 0 || b > 1000) return void (err = t('wizard.err.budget'))
     starting = true
-    const r = await call('memory.blocks.prepare', { source_room: room, background: true, budget_usd: String(b) })
+    const r = await call('memory.blocks.prepare', { source_room: room, background: true, budget_usd: String(b), mode: chosen })
     starting = false
     if (!r.ok) return void (err = r.error?.message ?? t('common.failed'))
+    if (r.output.batch_resumed) toast('info', t('blocks.batch_resumed'), label)
     jobStarted = true
+    batchStarted = r.output.mode === 'batch'
     step = channels.length ? 3 : 4
   }
   function skipPrepare() {
@@ -200,6 +207,7 @@
     reset()
   }
   const est = $derived(estimate?.report?.estimate)
+  const chosen = $derived(effectiveMode(mode, estimate?.report?.estimate))
   const llmReady = $derived(estimate?.llm_configured !== false)
 </script>
 
@@ -260,8 +268,8 @@
         {#if est}
           <div class="pv-grid">
             <div><span class="xs muted">{t('blocks.est.pieces')}</span><strong class="num">{num(est.leaf_embeds + est.cached_leaves)}</strong></div>
-            <div><span class="xs muted">{t('blocks.est.time')}</span><strong>{est.seconds < 60 ? t('blocks.est.under_minute') : t('blocks.est.approx', { d: duration(est.seconds) })}</strong></div>
-            <div><span class="xs muted">{t('blocks.est.cost')}</span><strong class="num">{usd(est.total_usd)}</strong></div>
+            <div><span class="xs muted">{t('blocks.est.time')}</span><strong>{chosen === 'batch' ? t('blocks.est.batch_time') : est.seconds < 60 ? t('blocks.est.under_minute') : t('blocks.est.approx', { d: duration(est.seconds) })}</strong></div>
+            <div><span class="xs muted">{t('blocks.est.cost')}</span><strong class="num">{usd(chosen === 'batch' ? (batchOffer(est)?.batch ?? est.total_usd) : est.total_usd)}</strong></div>
             <div><span class="xs muted">{t('blocks.est.summaries')}</span><strong class="num">{num(est.summaries)}</strong></div>
           </div>
           <p class="xs muted">{est.price_basis === 'fallback' ? t('blocks.est.basis_fallback') : t('blocks.est.basis_prices')}</p>
@@ -269,6 +277,7 @@
         {#if !llmReady}
           <div class="callout warn"><span class="ic"><I.KeyRound size={16} /></span><span>{t('blocks.no_llm')} <a href="/connections">{t('nav.connections')}</a></span></div>
         {/if}
+        {#if est}<BatchChoice id="wz-mode" bind:mode {est} />{/if}
         <Field id="wz-budget" label={t('blocks.budget')} hint={t('blocks.budget_hint')} error={err === t('wizard.err.budget') ? err : undefined}>{#snippet children({ id, describedby, invalid })}<Input {id} aria-describedby={describedby} {invalid} bind:value={budget} inputmode="decimal" />{/snippet}</Field>
       {:else if step === 3}
         <p class="small">{jobStarted ? t('wizard.connect_lead_running') : t('wizard.connect_lead')}</p>
@@ -282,7 +291,7 @@
       {:else}
         <div class="done"><img src={brand('mascot/mong-party.webp')} alt="" width="96" height="96" /><div class="stack">
           <h3>{t('wizard.done_title')}</h3>
-          <p class="small muted">{jobStarted ? t('wizard.done_running') : t('wizard.done_later')}</p>
+          <p class="small muted">{batchStarted ? t('wizard.done_batch') : jobStarted ? t('wizard.done_running') : t('wizard.done_later')}</p>
         </div></div>
       {/if}
       {#if err && ![t('wizard.err.label'), t('wizard.err.room'), t('wizard.err.budget')].includes(err)}<p class="small err" role="alert">{err}</p>{/if}

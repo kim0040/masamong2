@@ -5,7 +5,7 @@
   import { cfg, useConfig, patchConfig } from '../lib/config.svelte'
   import { route, navigate } from '../lib/router.svelte'
   import { num, usd, relative, datetime, duration } from '../lib/format'
-  import { etaText, blockState, stateTone, period, jobLine, stopReason, isKakao } from '../lib/blocks'
+  import { etaText, blockState, stateTone, period, jobLine, stopReason, isKakao, modeOf, batchOffer, effectiveMode, type PrepareMode } from '../lib/blocks'
   import { toast } from '../lib/toast.svelte'
   import PageHeader from '../components/PageHeader.svelte'
   import Card from '../components/Card.svelte'
@@ -24,6 +24,7 @@
   import CopyButton from '../components/CopyButton.svelte'
   import ConnectDialog from '../components/ConnectDialog.svelte'
   import QuickReindex from '../components/QuickReindex.svelte'
+  import BatchChoice from '../components/BatchChoice.svelte'
   import { indexHasWork, quickWork } from '../lib/quickreindex'
   import * as I from '../lib/icons'
 
@@ -76,7 +77,8 @@
   async function runEstimate() {
     estimating = true
     estErr = ''
-    const r = await call('memory.blocks.prepare', { source_room: room, dry_run: true })
+    // mode=batch makes the one dry run carry both prices (total_usd now, batch_usd as a batch)
+    const r = await call('memory.blocks.prepare', { source_room: room, dry_run: true, mode: 'batch' })
     estimating = false
     if (r.ok) estimate = r.output
     else estErr = r.error?.message ?? ''
@@ -87,15 +89,32 @@
   $effect(() => {
     if (b && !budget) budget = b.budget_usd || cfg.doc?.memory?.index_budget_usd || '1.00'
   })
+  let mode = $state<PrepareMode>('live')
+  let modeSeen = $state('')
+  $effect(() => {
+    // follows the saved default until the person picks one
+    if (b && modeSeen !== (b.mode ?? '') + '|' + b.source_room) {
+      mode = modeOf(b)
+      modeSeen = (b.mode ?? '') + '|' + b.source_room
+    }
+  })
+  const chosen = $derived(effectiveMode(mode, estimate?.report?.estimate))
+  async function saveModeDefault() {
+    const r = await call('memory.blocks.update', { source_room: room, mode })
+    r.ok ? toast('ok', t('block.mode_saved')) : toast('error', t('common.failed'), r.error?.message)
+    void data.refresh()
+  }
   let starting = $state(false)
   async function start() {
     const v = parseFloat(budget)
     if (Number.isNaN(v) || v < 0 || v > 1000) return void (estErr = t('wizard.err.budget'))
     starting = true
-    const r = await call('memory.blocks.prepare', { source_room: room, background: true, budget_usd: String(v) })
+    const r = await call('memory.blocks.prepare', { source_room: room, background: true, budget_usd: String(v), mode: chosen })
     starting = false
     if (r.ok) {
-      toast('ok', r.output.already_running ? t('blocks.already_running') : t('blocks.prepare_started'), b.label)
+      if (r.output.batch_resumed) toast('info', t('blocks.batch_resumed'), b.label)
+      else if (r.output.already_running) toast('ok', t('blocks.already_running'), b.label)
+      else toast('ok', r.output.mode === 'batch' ? t('blocks.batch_started') : t('blocks.prepare_started'), b.label)
       estimate = null
     } else estErr = r.error?.message ?? t('common.failed')
     void data.refresh()
@@ -198,10 +217,15 @@
     <Card title={t('block.prepare_title')} description={t('block.prepare_desc')} id="prepare">
       <div class="stack">
         {#if running}
-          <Progress value={b.job.progress_pct ?? 0} label={t('blocks.preparing')} />
-          <div class="row between small"><span class="muted">{jobLine(b.job)}</span><span class="num">{Math.round(b.job.progress_pct ?? 0)}%{etaText(b.job) ? ` · ${t('blocks.eta', { eta: etaText(b.job) })}` : ''}</span></div>
-          <p class="xs muted">{t('block.running_note')}</p>
-          <div><Button variant="danger-ghost" icon={I.X} onclick={cancel}>{t('block.cancel_run')}</Button></div>
+          {#if b.waiting_batch}
+            <div class="callout" role="status"><span class="ic"><I.Hourglass size={16} /></span><span>{t('blocks.batch.waiting', { n: num(b.batch?.items ?? 0), when: relative(b.batch?.submitted_at) })}</span></div>
+            <p class="xs muted">{t('block.batch_note')}</p>
+          {:else}
+            <Progress value={b.job?.progress_pct ?? 0} label={t('blocks.preparing')} />
+            <p class="xs muted">{t('block.running_note')}</p>
+          {/if}
+          {#if b.job}<div class="row between small"><span class="muted">{jobLine(b.job)}</span><span class="num">{Math.round(b.job.progress_pct ?? 0)}%{etaText(b.job) ? ` · ${t('blocks.eta', { eta: etaText(b.job) })}` : ''}</span></div>{/if}
+          {#if b.job}<div><Button variant="danger-ghost" icon={I.X} onclick={cancel}>{t('block.cancel_run')}</Button></div>{/if}
         {:else}
           {#if st === 'ready'}<div class="callout ok"><span class="ic"><I.CircleCheck size={16} /></span><span>{t('block.ready_note')}</span></div>{/if}
           {#if st === 'failed' && b.error}<div class="callout danger"><span class="ic"><I.CircleAlert size={16} /></span><span>{stopReason(b.error)}</span></div>{/if}
@@ -214,14 +238,15 @@
             {:else}
               <div class="est">
                 <div><span class="xs muted">{t('blocks.est.pieces')}</span><strong class="num">{num(est.leaf_embeds)}</strong>{#if est.cached_leaves}<span class="xs muted">{t('blocks.est.cached', { n: num(est.cached_leaves) })}</span>{/if}</div>
-                <div><span class="xs muted">{t('blocks.est.time')}</span><strong>{est.seconds < 60 ? t('blocks.est.under_minute') : t('blocks.est.approx', { d: duration(est.seconds) })}</strong></div>
-                <div><span class="xs muted">{t('blocks.est.cost')}</span><strong class="num">{usd(est.total_usd)}</strong></div>
+                <div><span class="xs muted">{t('blocks.est.time')}</span><strong>{chosen === 'batch' ? t('blocks.est.batch_time') : est.seconds < 60 ? t('blocks.est.under_minute') : t('blocks.est.approx', { d: duration(est.seconds) })}</strong></div>
+                <div><span class="xs muted">{t('blocks.est.cost')}</span><strong class="num">{usd(chosen === 'batch' ? (batchOffer(est)?.batch ?? est.total_usd) : est.total_usd)}</strong></div>
                 <div><span class="xs muted">{t('blocks.est.summaries')}</span><strong class="num">{num(est.summaries)}</strong></div>
               </div>
               <p class="xs muted">{est.price_basis === 'fallback' ? t('blocks.est.basis_fallback') : t('blocks.est.basis_prices')}</p>
             {/if}
           {/if}
           {#if estimate && estimate.llm_configured === false}<div class="callout warn"><span class="ic"><I.KeyRound size={16} /></span><span>{t('blocks.no_llm')} <a href="/connections">{t('nav.connections')}</a></span></div>{/if}
+          {#if est && hasWork}<BatchChoice id="bl-mode" bind:mode {est} saved={modeOf(b)} onsave={saveModeDefault} />{/if}
           <Field id="bl-budget" label={t('blocks.budget')} hint={t('blocks.budget_hint')} error={estErr || undefined}>
             {#snippet children({ id, describedby, invalid })}<div class="row"><Input {id} aria-describedby={describedby} {invalid} bind:value={budget} inputmode="decimal" /><Button size="sm" variant="ghost" onclick={saveBudgetDefault}>{t('block.budget_default')}</Button></div>{/snippet}
           </Field>
@@ -240,6 +265,7 @@
               { k: t('index.r.summaries'), v: num(lastResult.summaries ?? 0) },
               { k: t('index.r.spent'), v: usd(lastResult.spent_usd ?? 0) },
               { k: t('index.r.elapsed'), v: lastResult.elapsed ?? '–' },
+              ...(lastResult.mode === 'batch' ? [{ k: t('block.batch_result'), v: t('block.batch_result_v', { batch: num(lastResult.batch_items ?? 0), failed: num(lastResult.batch_failed ?? 0), live: num(lastResult.live_items ?? 0) }) }] : []),
               ...(lastResult.stopped_by || lastResult.error ? [{ k: t('index.r.stopped'), v: stopReason(lastResult.stopped_by) || lastResult.error }] : []),
             ]} />
           </div>
