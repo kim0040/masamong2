@@ -245,6 +245,20 @@ func (a *Adapter) refSpec(ref BatchRef) (batchSpec, error) {
 
 // PollBatch reads a submitted batch's state.
 func (a *Adapter) PollBatch(ctx context.Context, ref BatchRef) (BatchStatus, error) {
+	st, err := a.pollBatch(ctx, ref)
+	// OpenRouter answers 404 for a batch it accepted a moment ago (seen live 2026-11-02: "not found"
+	// right after the 202, listed a minute later), so a batch this young is still on its way
+	var ae *APIError
+	if err != nil && errors.As(err, &ae) && ae.Status == 404 && !ref.SubmittedAt.IsZero() && now().Sub(ref.SubmittedAt) < batchVisibleWithin {
+		return BatchStatus{State: BatchPending, Total: ref.Count}, nil
+	}
+	return st, err
+}
+
+// batchVisibleWithin is how long after its submit a batch the host cannot find yet is still taken as pending.
+const batchVisibleWithin = 10 * time.Minute
+
+func (a *Adapter) pollBatch(ctx context.Context, ref BatchRef) (BatchStatus, error) {
 	s, err := a.refSpec(ref)
 	if err != nil {
 		return BatchStatus{}, err

@@ -1018,3 +1018,22 @@ func TestBatchWireNeverCarriesTheKeyInErrors(t *testing.T) {
 		t.Fatalf("error %v", err)
 	}
 }
+
+// OpenRouter answered 404 for a batch it had just accepted (live, 2026-11-02): a young batch the host
+// cannot find yet is pending, an old one that is gone is an error.
+func TestPollYoungBatchNotFoundIsPending(t *testing.T) {
+	ctx := context.Background()
+	f := newFake(t)
+	a := f.adapter(APIOpenRouter, "/api/v1")
+	f.reply("GET", "/api/v1/batches/b1", 404, `{"error":{"code":404,"message":"Batch job b1 not found."}}`)
+	young := BatchRef{ID: "b1", BaseURL: a.BaseURL, Kind: BatchChat, Model: "m", Count: 2, SubmittedAt: time.Now().Add(-30 * time.Second)}
+	st, err := a.PollBatch(ctx, young)
+	if err != nil || st.State != BatchPending || st.Total != 2 {
+		t.Fatalf("young: %+v %v", st, err)
+	}
+	old := young
+	old.SubmittedAt = time.Now().Add(-batchVisibleWithin - time.Minute)
+	if _, err := a.PollBatch(ctx, old); err == nil {
+		t.Fatal("an old batch the host lost must be an error")
+	}
+}
