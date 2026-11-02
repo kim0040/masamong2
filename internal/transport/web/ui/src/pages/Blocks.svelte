@@ -7,7 +7,7 @@
   import { route, setQuery, navigate } from '../lib/router.svelte'
   import { num, usd, relative, duration, bytes } from '../lib/format'
   import { messageVectorAsk, messageVectorAskMode, messageVectorsOn, enableMessageVectors, type MessageVectorAsk } from '../lib/messagevectors'
-  import { etaText, blockState, stateTone, period, jobLine, blockHref, stopReason, isKakao } from '../lib/blocks'
+  import { etaText, blockState, stateTone, period, jobLine, blockHref, stopReason, isKakao, batchWaitLine } from '../lib/blocks'
   import { toast } from '../lib/toast.svelte'
   import PageHeader from '../components/PageHeader.svelte'
   import Card from '../components/Card.svelte'
@@ -240,7 +240,7 @@
               {#if st === 'preparing'}
                 <div class="job">
                   {#if b.waiting_batch}
-                    <p class="small wait" role="status"><I.Hourglass size={14} aria-hidden="true" /> {t('blocks.batch.waiting', { n: num(b.batch?.items ?? 0), when: relative(b.batch?.submitted_at) })}</p>
+                    <p class="small wait" role="status"><I.Hourglass size={14} aria-hidden="true" /> {batchWaitLine(b)}</p>
                   {:else}
                     <Progress value={b.job?.progress_pct ?? 0} label={t('blocks.preparing')} />
                   {/if}

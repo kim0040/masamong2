@@ -75,7 +75,7 @@ test('a persona ID comes from the name; names without Latin letters get a code, 
 test('an empty search names its cause: a room without an attached block, never a raw code', async () => {
   const { emptyScope, stateLabel } = await load('blocks.ts', [
     ["import { t, has } from './i18n.svelte'", 'const { t, has } = globalThis.__i18n'],
-    ["import { num, duration } from './format'", 'const num = String, duration = String'],
+    ["import { num, duration, relative as relativeTime } from './format'", 'const num = String, duration = String, relativeTime = String'],
     ["import { i18n } from './i18n.svelte'", 'const { i18n } = globalThis.__i18n'],
   ])
   const attached = [{ source_room: 'a', channels: [{ guild_id: 'g', channel_id: 'c' }] }, { source_room: 'b', channels: [] }]

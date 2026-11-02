@@ -1881,6 +1881,24 @@ add("block", {
     "batch_result": ("일괄 처리", "Batch"),
     "batch_result_v": ("일괄 {batch}건 · 실패 {failed}건 · 바로 처리 {live}건", "{batch} batched · {failed} failed · {live} run live"),
 })
+add("blocks", {
+    "batch.draining": ("이미 보낸 일괄 처리를 마저 받는 중 ({n}건, {when} 전송)", "Collecting the batches already sent ({n} items, sent {when})"),
+})
+add("block", {
+    "batch_draining_note": ("취소했거나 전송이 거부되어 더 보내지 않습니다. 제공사에 남은 분량만 끝까지 받아 저장하고, 그동안 바로 처리로 넘기지 않습니다.", "Nothing more is sent after the cancel or the refused submission. What is still at the provider is collected and saved, and nothing runs live meanwhile."),
+    "batch_unknown": ("{when} 보낸 일괄 처리가 접수됐는지 제공사의 답을 받지 못했습니다. 이중 결제를 막으려고 이 블록을 멈춰 두었습니다. 제공사 콘솔의 Batch 목록에서 확인한 뒤 이 일괄 처리를 버리세요.", "The provider never confirmed whether the batch sent {when} was accepted. This block is held to avoid paying twice. Check the batch list in the provider's console, then discard this batch."),
+    "discard_batch": ("일괄 처리 버리기", "Discard batch"),
+    "discard_batch_title": ("이 블록의 일괄 처리를 버릴까요?", "Discard this block's batch?"),
+    "discard_batch_body": ("아직 열려 있는 일괄 처리는 취소를 요청하고 기록을 지웁니다. 제공사가 이미 처리한 분량은 비용이 청구될 수 있으며 결과는 저장되지 않습니다. 버린 뒤에는 다시 색인을 준비할 수 있습니다.", "Open batches are asked to cancel and the record is removed. Work the provider already did may still be charged, and its results are not saved. You can prepare the block again afterwards."),
+    "batch_discarded": ("일괄 처리를 버렸습니다", "Batch discarded"),
+})
+add("jobs", {
+    "code.BATCH_SUBMIT_UNKNOWN": ("일괄 처리 전송에 대한 답을 받지 못해 블록을 멈춰 두었습니다. 블록 화면에서 확인해 주세요.", "No answer to the batch submission; the block is held. Check it on the block page."),
+    "code.BATCH_SUBMIT_REFUSED": ("제공사가 일괄 처리 전송을 거부했습니다. 바로 처리로 넘기지 않았습니다.", "The provider refused the batch submission. Nothing was run live."),
+    "code.BATCH_PROVIDER_GONE": ("일괄 처리를 보낸 제공사 설정이 없어져 결과를 받을 수 없습니다.", "The provider the batch was sent to is no longer set up, so its results cannot be read."),
+    "code.BATCH_RESULTS_UNREADABLE": ("일괄 처리 결과를 읽지 못했습니다. 기록은 남겨 두었으니 다시 시도할 수 있습니다.", "The batch results could not be read. The record is kept, so you can retry."),
+    "code.BATCH_DRAINING": ("이전 일괄 처리를 마저 받는 중이라 새 작업을 시작하지 않았습니다.", "Still collecting an earlier batch, so no new run started."),
+})
 add("wizard", {"done_batch": ("일괄 처리를 보냈습니다. 제공사가 끝내면(보통 몇 시간, 길면 하루) 자동으로 반영됩니다. 진행 상황은 블록 화면과 작업 화면에서 볼 수 있습니다.", "The batch is sent. It is applied automatically when the provider finishes (usually hours, at most about a day). Follow it on the block page or Jobs.")})
 
 # 2026-09-28 UX pass: sign-in help, personas in rooms, settings controls

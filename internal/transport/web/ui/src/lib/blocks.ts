@@ -2,7 +2,7 @@
 // Discord channel's captured history). Helpers here turn the server's block rows into what people
 // read: a state with a next step, a period, and a reason when preparation stopped.
 import { t, has } from './i18n.svelte'
-import { num, duration } from './format'
+import { num, duration, relative as relativeTime } from './format'
 import { i18n } from './i18n.svelte'
 
 export type Tone = 'ok' | 'warn' | 'danger' | 'info' | 'neutral'
@@ -11,7 +11,7 @@ export type BlockState = 'empty' | 'needs_prep' | 'preparing' | 'partial' | 'rea
 
 export function blockState(b: any): BlockState {
   // the provider holds this room's batch: still preparing, even between two runs of the job
-  if (b?.waiting_batch) return 'preparing'
+  if (b?.waiting_batch) return b.batch?.state === 'submit_unknown' ? 'failed' : 'preparing'
   if (b?.job && ['pending', 'leased', 'running'].includes(b.job.status)) return 'preparing'
   if (!b?.message_count) return 'empty'
   if (b.status === 'failed' && (b.embedded ?? 0) < (b.leaf_count ?? 0)) return 'failed'
@@ -101,6 +101,13 @@ export function stateLabel(code: string | undefined): string {
 }
 
 export type PrepareMode = 'live' | 'batch'
+
+/** The line for a block whose work is at the provider: still waiting for results, or collecting the
+ * batches that were already sent after a cancel or a refused submission. */
+export function batchWaitLine(b: any): string {
+  const vars = { n: num(b?.batch?.items ?? 0), when: relativeTime(b?.batch?.submitted_at) }
+  return t(b?.batch?.state === 'draining' ? 'blocks.batch.draining' : 'blocks.batch.waiting', vars)
+}
 
 /** A block's saved default mode ("" means live). */
 export function modeOf(b: any): PrepareMode {

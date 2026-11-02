@@ -5,7 +5,7 @@
   import { cfg, useConfig, patchConfig } from '../lib/config.svelte'
   import { route, navigate } from '../lib/router.svelte'
   import { num, usd, relative, datetime, duration } from '../lib/format'
-  import { etaText, blockState, stateTone, period, jobLine, stopReason, isKakao, modeOf, batchOffer, effectiveMode, type PrepareMode } from '../lib/blocks'
+  import { etaText, blockState, stateTone, period, jobLine, stopReason, isKakao, modeOf, batchOffer, effectiveMode, batchWaitLine, type PrepareMode } from '../lib/blocks'
   import { toast } from '../lib/toast.svelte'
   import PageHeader from '../components/PageHeader.svelte'
   import Card from '../components/Card.svelte'
@@ -36,6 +36,8 @@
   const channels = $derived((data.data?.channels ?? []) as any[])
   const st = $derived(b ? blockState(b) : 'empty')
   const running = $derived(st === 'preparing')
+  // a batch submission that got no answer: only the operator can settle it (check the provider, then discard)
+  const unsettled = $derived(b?.batch?.state === 'submit_unknown')
 
   // name and note
   let label = $state('')
@@ -163,6 +165,13 @@
     void data.refresh()
   }
 
+  let discardOpen = $state(false)
+  async function discardBatch() {
+    const r = await call('memory.blocks.update', { source_room: room, discard_batch: true })
+    r.ok ? toast('ok', t('block.batch_discarded')) : toast('error', t('common.failed'), r.error?.message)
+    void data.refresh()
+  }
+
   let delOpen = $state(false)
   async function remove() {
     const r = await call('memory.blocks.delete', { source_room: room, confirm: b.label })
@@ -218,8 +227,8 @@
       <div class="stack">
         {#if running}
           {#if b.waiting_batch}
-            <div class="callout" role="status"><span class="ic"><I.Hourglass size={16} /></span><span>{t('blocks.batch.waiting', { n: num(b.batch?.items ?? 0), when: relative(b.batch?.submitted_at) })}</span></div>
-            <p class="xs muted">{t('block.batch_note')}</p>
+            <div class="callout" role="status"><span class="ic"><I.Hourglass size={16} /></span><span>{batchWaitLine(b)}</span></div>
+            <p class="xs muted">{t(b.batch?.state === 'draining' ? 'block.batch_draining_note' : 'block.batch_note')}</p>
           {:else}
             <Progress value={b.job?.progress_pct ?? 0} label={t('blocks.preparing')} />
             <p class="xs muted">{t('block.running_note')}</p>
@@ -228,7 +237,10 @@
           {#if b.job}<div><Button variant="danger-ghost" icon={I.X} onclick={cancel}>{t('block.cancel_run')}</Button></div>{/if}
         {:else}
           {#if st === 'ready'}<div class="callout ok"><span class="ic"><I.CircleCheck size={16} /></span><span>{t('block.ready_note')}</span></div>{/if}
-          {#if st === 'failed' && b.error}<div class="callout danger"><span class="ic"><I.CircleAlert size={16} /></span><span>{stopReason(b.error)}</span></div>{/if}
+          {#if unsettled}
+            <div class="callout danger" role="alert"><span class="ic"><I.CircleAlert size={16} /></span><span>{t('block.batch_unknown', { when: relative(b.batch?.submitted_at) })}</span></div>
+            <div><Button variant="danger-ghost" icon={I.Trash2} onclick={() => (discardOpen = true)}>{t('block.discard_batch')}</Button></div>
+          {:else if st === 'failed' && b.error}<div class="callout danger"><span class="ic"><I.CircleAlert size={16} /></span><span>{stopReason(b.error)}</span></div>{/if}
           {#if estimating}<p class="small muted">{t('wizard.estimating')}</p>{/if}
           {#if est}
             {#if quickWork(estimate?.report).failedRooms > 0}
@@ -304,6 +316,7 @@
   </div>
 
   <ConnectDialog bind:open={connectOpen} block={b} {channels} onsaved={() => void data.refresh()} />
+  <Confirm bind:open={discardOpen} danger title={t('block.discard_batch_title')} body={t('block.discard_batch_body')} confirmLabel={t('block.discard_batch')} onconfirm={discardBatch} />
   <Confirm bind:open={delOpen} danger title={t('block.delete_title', { name: b.label })} body={t('block.delete_body', { n: num(b.message_count), links: (b.channels ?? []).length })} requireText={b.label} confirmLabel={t('block.delete')} onconfirm={remove} />
 {/if}
 

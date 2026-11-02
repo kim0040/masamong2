@@ -61,7 +61,8 @@ Instead of indexing **now**, a preparation can be handed to the provider as a **
 - **Time**: usually minutes to a few hours, at most about 24 hours (some hosts take up to 48–96 hours). Meanwhile the block shows "Waiting for the provider's batch (n items, sent …)", and the results are collected automatically when it finishes. It continues across a restart.
 - **Providers**: OpenAI, Anthropic (chat models, such as summaries, only), Google Gemini, OpenRouter and NanoGPT (chat models only). Other OpenAI-compatible hosts (CometAPI, OpenGateway, a custom host) cannot batch and run now. Parts the provider cannot batch, and anything that failed, run live automatically after the batch.
 - **What pauses**: that channel's Discord auto-update waits while its batch is at the provider. Other blocks keep indexing.
-- **Cancel**: cancelling in **Jobs** or on the block page also cancels the provider's batch. Items that already finished are still charged and saved.
+- **Cancel**: cancelling in **Jobs** or on the block page also cancels the provider's batch. Items that already finished are still charged and saved. When the cancel does not end at once (OpenRouter has no cancel at all), the block shows "Collecting the batches already sent" and collects and saves what is still at the provider. The same work is not run live meanwhile.
+- **Failed submission**: when the provider refuses a batch submission, the job fails and nothing runs at the normal price (only a model that cannot batch runs live). When the answer to a submission is lost and nobody can tell whether it was accepted, the block is held to avoid paying twice. Check the batch list in the provider's console, then use **Discard batch** on the block page.
 - If a batch for the block is already at the provider, nothing new is sent; the job follows the existing one ("A batch for this block was already sent; following it").
 
 ```bash

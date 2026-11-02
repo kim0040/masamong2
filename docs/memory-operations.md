@@ -152,7 +152,11 @@ $M memory blocks prepare --source_room kakao:friends --budget_usd 0.50
 - **사전 점검**: `--dry_run true --mode batch`는 `report.estimate.total_usd`(바로)와 `batch_usd`(일괄)를 함께 준다. 둘이 같으면 호스트가 일괄을 못 받는다는 뜻이다(콘솔은 이때 선택지를 숨긴다).
 - **계획 저장**: 보낸 일괄의 계획(방, 상태, 항목 수, 제공사 batch ID)은 `memory_batch_plans` 표에 방마다 한 줄 저장한다. 재시작해도 남고, 같은 방을 다시 준비하면 새로 보내지 않고 이 계획을 이어서 기다린다(`batch_resumed: true`). 블록 목록의 `waiting_batch`·`batch{items, submitted_at}`가 이 계획에서 나온다. 계획이 있는 동안 블록 상태는 `preparing`이고 그 채널의 Discord 자동 갱신은 멈춘다.
 - **작업 진행**: 단계 `batch`, 라벨 `batch <pending|running> 완료/전체`, ETA 없음. 결과 JSON에 `mode`, `batch_items`, `batch_failed`, `live_items`, `batch_estimate_usd`가 들어간다.
-- **취소**: `$M jobs cancel --id <작업ID>`(콘솔의 작업·블록 화면 취소도 같다)가 제공사에 열린 일괄을 취소하고 계획을 지운다. 끝난 항목은 비용이 청구되고 저장되며 바로 처리로 넘어가지 않는다. 계획이 남아 있는데 작업이 없으면 같은 방을 다시 준비할 때 그 계획을 이어받는다.
+- **취소**: `$M jobs cancel --id <작업ID>`(콘솔의 작업·블록 화면 취소도 같다)가 제공사에 열린 일괄의 취소를 요청한다. 계획은 `draining` 상태로 남고(방은 계속 잡혀 있음), 모든 그룹이 제공사에서 끝날 때까지 백그라운드에서 결과를 받아 저장한 뒤 지운다. 작업 자체는 취소로 끝난다. OpenRouter는 취소 API가 없어 끝까지 처리된다. 끝난 항목은 비용이 청구되고 저장되며 바로 처리로 넘어가지 않는다.
+- **계획 세대**: 계획마다 `generation`이 있고 저장·적용·삭제는 (방, 세대) 비교 후에만 한다. 늦게 도착한 이전 실행의 적용·정리는 아무것도 바꾸지 않는다. 적용 체크포인트와 `memory_spend`는 한 트랜잭션으로 쓰므로, 적용 도중 꺼져도 비용이 두 번 잡히지 않는다.
+- **전송**: batch 생성 요청은 재시도하지 않는다. 보내기 전에 계획에 `submit: pending`과 키를 저장하고, 답이 끊기면 OpenAI는 `metadata.masamong_submit`, NanoGPT는 입력 파일로 제공사 목록에서 찾는다. 찾으면 이어서 기다리고, 접수되지 않았으면 그 그룹을 버리며, 알 수 없으면 계획이 `submit_unknown`이 되어 방을 잡아 둔다(작업 코드 `BATCH_SUBMIT_UNKNOWN`). 제공사 콘솔에서 확인한 뒤 `$M memory blocks update --source_room <방> --discard_batch true`로 정리한다. 4xx 거부는 `BATCH_SUBMIT_REFUSED`로 끝나며 바로 처리하지 않는다(`ErrBatchUnsupported`일 때만 바로 처리).
+- **제공사 바뀜**: 각 그룹은 보낸 제공사의 `provider{id, base_url, api}`(비밀값 없음)를 기억하고 그 제공사로 조회한다. 설정에서 그 제공사가 사라지면 `BATCH_PROVIDER_GONE`으로 바로 멈춘다. 결과 내려받기가 일시적으로 실패하면 최대 6시간 다시 시도하고, 계속 못 읽으면 `BATCH_RESULTS_UNREADABLE`로 멈추되 계획과 제공사 쪽 결과는 남겨 둔다.
+- **재시작**: 기다리는 중에 서비스를 정상 종료하면 다음 시작 때 같은 작업 ID로 다시 시도한다(새 작업을 만들지 않는다). `draining` 계획은 작업 없이 백그라운드에서 이어서 받는다.
 
 ## 6. 확인
 
