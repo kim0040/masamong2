@@ -186,6 +186,19 @@ func pendingMessageQuery(rooms []string, space string, recipe []string) (string,
 // connection (one for the whole process) it would make every answer and capture wait. SaveMessageVectors
 // checks each message again before storing, so a snapshot that is a moment old is safe.
 func (s *Store) PendingMessages(rooms []string, space string, limit int, recipe ...string) ([]PendingMessage, error) {
+	return s.pendingMessages(rooms, space, limit, nil, recipe)
+}
+
+// PendingMessagesAmong is PendingMessages restricted to the observations named in among, without a limit
+// (a batch preparation's workset).
+func (s *Store) PendingMessagesAmong(rooms []string, space string, among map[string]bool, recipe ...string) ([]PendingMessage, error) {
+	if among == nil {
+		among = map[string]bool{}
+	}
+	return s.pendingMessages(rooms, space, 0, among, recipe)
+}
+
+func (s *Store) pendingMessages(rooms []string, space string, limit int, among map[string]bool, recipe []string) ([]PendingMessage, error) {
 	q, args := pendingMessageQuery(rooms, space, recipe)
 	rows, err := s.DB.Reader().Query(q, args...)
 	if err != nil {
@@ -198,6 +211,9 @@ func (s *Store) PendingMessages(rooms []string, space string, limit int, recipe 
 		var label, content string
 		if err := rows.Scan(&p.ObservationID, &p.Room, &label, &content); err != nil {
 			return nil, err
+		}
+		if among != nil && !among[p.ObservationID] {
+			continue
 		}
 		if !search.MessageEligible(strings.TrimSpace(content)) {
 			continue

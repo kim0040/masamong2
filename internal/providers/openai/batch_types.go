@@ -38,6 +38,9 @@ type BatchRef struct {
 	InputFile   string    `json:"input_file,omitempty"`  // an uploaded input file to delete afterwards
 	ResultsURL  string    `json:"results_url,omitempty"` // where a host that names one puts the results
 	SubmittedAt time.Time `json:"submitted_at"`
+	// SubmitKey is the caller's stable key for this submission. A host that keeps metadata gets it with
+	// the batch, so a submission whose answer was lost can be found again (ReconcileBatch).
+	SubmitKey string `json:"submit_key,omitempty"`
 }
 
 // BatchState is a batch's lifecycle, the same words for every host.
@@ -83,3 +86,33 @@ type BatchOutcome struct {
 // ErrBatchUnsupported means the host, or the model on it, has no batch API for the kind: run the
 // items live instead.
 var ErrBatchUnsupported = errors.New("openai: batch not supported for this host or model")
+
+// ErrBatchOtherHost means a batch reference names another host than the adapter's: only an adapter for
+// the host it was submitted to can read it.
+var ErrBatchOtherHost = errors.New("openai: this batch was submitted to another host")
+
+// ErrBatchNotFinal means results were asked of a batch that is still running.
+var ErrBatchNotFinal = errors.New("openai: batch is not finished yet")
+
+// ErrBatchSubmitUnknown means a batch create call ended without a clear answer (a timeout, a connection
+// lost after the request went out, a server error, an answer without an id): the host may have accepted
+// and be running the batch, and charge for it. It is never a reason to run the items live. The error is a
+// *SubmitUnknownError, which carries what is known of the submission for ReconcileBatch.
+var ErrBatchSubmitUnknown = errors.New("openai: batch submission outcome unknown")
+
+// ErrBatchNotSubmitted is ReconcileBatch's definite answer that the host has no batch for the
+// submission: nothing of it runs or is billed there.
+var ErrBatchNotSubmitted = errors.New("openai: the host has no batch for this submission")
+
+// SubmitUnknownError is a submission whose outcome is unknown (ErrBatchSubmitUnknown). Ref names what is
+// known of it: the host, kind, model, count, key, submit time and the uploaded input file, without an id.
+type SubmitUnknownError struct {
+	Ref BatchRef
+	Err error
+}
+
+func (e *SubmitUnknownError) Error() string {
+	return "openai: batch submission outcome unknown (the host may be running it): " + e.Err.Error()
+}
+
+func (e *SubmitUnknownError) Unwrap() []error { return []error{ErrBatchSubmitUnknown, e.Err} }

@@ -29,6 +29,11 @@ type batchHost struct {
 	polls    atomic.Int32
 	cancels  atomic.Int32
 	cleanups atomic.Int32
+	// noCancel: the host cannot cancel (OpenRouter); its batches run to their end
+	noCancel bool
+	// submitErr refuses every create call; lost takes them but loses the answer (and keeps no list)
+	submitErr error
+	lost      bool
 }
 
 func newBatchHost(state openai.BatchState) *batchHost {
@@ -38,13 +43,25 @@ func newBatchHost(state openai.BatchState) *batchHost {
 func (h *batchHost) BatchSupport(kind openai.BatchKind) bool { return kind == openai.BatchEmbed }
 func (h *batchHost) BatchMaxItems(openai.BatchKind) int      { return 0 }
 
-func (h *batchHost) SubmitBatch(_ context.Context, kind openai.BatchKind, model string, items []openai.BatchItem) (openai.BatchRef, error) {
+func (h *batchHost) BatchDiscount(openai.BatchKind, string) float64 { return 0.5 }
+func (h *batchHost) BatchEmbedCost(string, int, time.Time) *float64 { return nil }
+func (h *batchHost) ReconcileBatch(_ context.Context, ref openai.BatchRef) (openai.BatchRef, error) {
+	return openai.BatchRef{}, &openai.SubmitUnknownError{Ref: ref, Err: errors.New("the host keeps no list")}
+}
+
+func (h *batchHost) SubmitBatch(_ context.Context, kind openai.BatchKind, model string, items []openai.BatchItem, key string) (openai.BatchRef, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.submitErr != nil {
+		return openai.BatchRef{}, h.submitErr
+	}
 	id := fmt.Sprintf("batch-%d", len(h.order)+1)
 	h.subs[id] = append([]openai.BatchItem(nil), items...)
 	h.order = append(h.order, id)
-	return openai.BatchRef{API: "fake", ID: id, Kind: kind, Model: model, Count: len(items), SubmittedAt: time.Now()}, nil
+	if h.lost {
+		return openai.BatchRef{}, &openai.SubmitUnknownError{Err: errors.New("connection reset after the request was sent")}
+	}
+	return openai.BatchRef{API: "fake", ID: id, Kind: kind, Model: model, Count: len(items), SubmittedAt: time.Now(), SubmitKey: key}, nil
 }
 
 func (h *batchHost) PollBatch(_ context.Context, ref openai.BatchRef) (openai.BatchStatus, error) {
@@ -80,6 +97,9 @@ func (h *batchHost) BatchResults(_ context.Context, ref openai.BatchRef) ([]open
 
 func (h *batchHost) CancelBatch(context.Context, openai.BatchRef) error {
 	h.cancels.Add(1)
+	if h.noCancel {
+		return openai.ErrBatchUnsupported
+	}
 	h.set(openai.BatchCancelled)
 	return nil
 }

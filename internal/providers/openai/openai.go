@@ -42,6 +42,9 @@ type Adapter struct {
 	ContextPrice ContextPricer
 
 	shapes sync.Map // model → shape: optional request fields that model refused (shape.go)
+	// shapeSeen marks models whose plain chat request (no tools) succeeded once, so their shape is known
+	// even when it refused nothing (ShapeLearned); model → true
+	shapeSeen sync.Map
 	// imageAPI remembers models of a compatible host that refused a chat image request and answer on
 	// /images/generations instead (NanoGPT's image models); model → true
 	imageAPI sync.Map

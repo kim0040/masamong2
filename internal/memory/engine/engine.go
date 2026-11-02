@@ -84,6 +84,10 @@ type Engine struct {
 	// EmbedBatcher and SummaryBatcher replace the embed and summary roles' batch API (batch.go) when set
 	// (tests); nil uses the role's adapter.
 	EmbedBatcher, SummaryBatcher BatchClient
+	// ResolveBatcher returns the batch client of the provider a submitted batch went to (by its config id,
+	// address and family), for its polls, results, cancel and cleanup; nil uses the role's current client
+	// when it is still that provider
+	ResolveBatcher BatchResolver
 
 	idx      atomic.Pointer[search.Index]
 	loadedAt atomic.Int64

@@ -130,6 +130,45 @@ func (s *Service) llmAdapterFor(doc config.Document, role string) (*openai.Adapt
 	return a, nil
 }
 
+// batchResolver finds the provider a memory batch was submitted to (engine.BatchProvider: its config id,
+// address and family) for the batch's polls, results, cancel and cleanup: the engine's own adapter when
+// its role still uses that provider, else one built from the config by id. A provider that was removed,
+// is not an OpenAI-compatible one any more, or now has another address or family cannot read the batch:
+// the job stops with that error instead of polling a host that does not know it.
+func (s *Service) batchResolver(doc config.Document, eng *engine.Engine) engine.BatchResolver {
+	same := func(a *openai.Adapter, p engine.BatchProvider) bool {
+		return a != nil && strings.TrimRight(a.BaseURL, "/") == strings.TrimRight(p.BaseURL, "/") && (p.API == "" || a.API == p.API)
+	}
+	return func(p engine.BatchProvider) (engine.BatchClient, error) {
+		if p.ID == eng.CallProviders.Embed && same(eng.LLM, p) {
+			return eng.LLM, nil
+		}
+		if eng.SummaryLLM != nil && p.ID == eng.CallProviders.Summary && same(eng.SummaryLLM, p) {
+			return eng.SummaryLLM, nil
+		}
+		cp, ok := doc.Providers[p.ID]
+		switch {
+		case !ok:
+			return nil, fmt.Errorf("provider %q is not configured any more", p.ID)
+		case cp.Kind != config.KindOpenAI || s.practice:
+			return nil, fmt.Errorf("provider %q is not an openai_compat provider any more", p.ID)
+		}
+		cred, err := providers.Resolve(cp.CredentialRef)
+		if err != nil {
+			return nil, fmt.Errorf("provider %q: %w", p.ID, err)
+		}
+		client := providers.NewClient(120*time.Second, s.Log)
+		client.MaxBody = 64 << 20
+		a := newLLMAdapter(client, cp, cred)
+		a.Price, a.CachedPrice, a.ContextPrice = s.pricer(p.ID), s.cachedPricer(p.ID), s.contextPricer(p.ID)
+		a.Gate = s.llmGate(p.ID)
+		if !same(a, p) {
+			return nil, fmt.Errorf("provider %q is now at %s (%s), not %s (%s)", p.ID, a.BaseURL, a.API, p.BaseURL, p.API)
+		}
+		return a, nil
+	}
+}
+
 // roleTimeout is how long one call of role may take before its fallback is asked: the model's own
 // limit, else chatDeadline's, else a minute (summaries, features).
 func roleTimeout(role string, seconds int) time.Duration {
@@ -343,6 +382,7 @@ func (s *Service) MemoryEngine() (*engine.Engine, error) {
 		callProviders.Summary = embedProvider
 	}
 	st.eng.CallProviders = callProviders
+	st.eng.ResolveBatcher = s.batchResolver(doc, st.eng)
 	st.eng.OnCall = func(ctx context.Context, c engine.CallInfo) {
 		role := c.Role
 		if role == "summary" {

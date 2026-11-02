@@ -38,6 +38,21 @@ type fakeBatch struct {
 	cancels   []string
 	cleanups  []string
 	onPoll    func() // runs on every poll (outside the lock)
+	// submit hooks: submitErr refuses the n-th create call (0-based) before the host takes it; lost
+	// accepts the n-th call and answers it with an unknown outcome (the answer lost on the way back)
+	submitErr func(n int) error
+	lost      map[int]bool
+	notTaken  map[int]bool // with lost: the host never stored the batch
+	calls     int          // create calls
+	// listed: ReconcileBatch finds accepted submissions by key; otherwise it cannot tell
+	listed     bool
+	reconciles int
+	discount   float64      // 0 = 0.5
+	resultsErr func() error // BatchResults fails with this while it returns non-nil
+	noUsage    bool         // embedding results carry neither a cost nor tokens (Gemini)
+	embedPrice float64      // live USD per token BatchEmbedCost prices at (0 = no price)
+	results    int          // BatchResults calls
+	failErr    error        // the error of a failItems item (default "item rejected")
 }
 
 type fakeSub struct {
@@ -48,7 +63,8 @@ type fakeSub struct {
 }
 
 func newFakeBatch(kinds ...openai.BatchKind) *fakeBatch {
-	f := &fakeBatch{support: map[openai.BatchKind]bool{}, state: openai.BatchRunning, drop: map[string]bool{}, failItems: map[string]bool{}}
+	f := &fakeBatch{support: map[openai.BatchKind]bool{}, state: openai.BatchRunning, drop: map[string]bool{}, failItems: map[string]bool{},
+		lost: map[int]bool{}, notTaken: map[int]bool{}}
 	for _, k := range kinds {
 		f.support[k] = true
 	}
@@ -67,16 +83,67 @@ func (f *fakeBatch) BatchMaxItems(openai.BatchKind) int {
 	return f.max
 }
 
-func (f *fakeBatch) SubmitBatch(_ context.Context, kind openai.BatchKind, model string, items []openai.BatchItem) (openai.BatchRef, error) {
+func (f *fakeBatch) BatchDiscount(openai.BatchKind, string) float64 {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.discount > 0 {
+		return f.discount
+	}
+	return 0.5
+}
+
+func (f *fakeBatch) BatchEmbedCost(_ string, tokens int, _ time.Time) *float64 {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.embedPrice <= 0 || tokens <= 0 {
+		return nil
+	}
+	d := f.discount
+	if d <= 0 {
+		d = 0.5
+	}
+	v := float64(tokens) * f.embedPrice * d
+	return &v
+}
+
+func (f *fakeBatch) SubmitBatch(_ context.Context, kind openai.BatchKind, model string, items []openai.BatchItem, key string) (openai.BatchRef, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := f.calls
+	f.calls++
 	if !f.support[kind] {
 		return openai.BatchRef{}, openai.ErrBatchUnsupported
 	}
+	if f.submitErr != nil {
+		if err := f.submitErr(n); err != nil {
+			return openai.BatchRef{}, err
+		}
+	}
+	if f.lost[n] && f.notTaken[n] {
+		return openai.BatchRef{}, &openai.SubmitUnknownError{Err: errors.New("timeout")}
+	}
 	ref := openai.BatchRef{API: "fake", BaseURL: "fake://host", ID: fmt.Sprintf("batch_%d", len(f.subs)+1), Kind: kind,
-		Model: model, Count: len(items), SubmittedAt: time.Now()}
+		Model: model, Count: len(items), SubmittedAt: time.Now(), SubmitKey: key}
 	f.subs = append(f.subs, &fakeSub{ref: ref, kind: kind, model: model, items: append([]openai.BatchItem(nil), items...)})
+	if f.lost[n] {
+		return openai.BatchRef{}, &openai.SubmitUnknownError{Err: errors.New("connection reset after the request was sent")}
+	}
 	return ref, nil
+}
+
+func (f *fakeBatch) ReconcileBatch(_ context.Context, ref openai.BatchRef) (openai.BatchRef, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reconciles++
+	if !f.listed {
+		return openai.BatchRef{}, &openai.SubmitUnknownError{Ref: ref, Err: errors.New("the host keeps no list")}
+	}
+	for _, s := range f.subs {
+		if ref.SubmitKey != "" && s.ref.SubmitKey == ref.SubmitKey {
+			return s.ref, nil
+		}
+	}
+	return openai.BatchRef{}, openai.ErrBatchNotSubmitted
 }
 
 func (f *fakeBatch) sub(id string) *fakeSub {
@@ -115,6 +182,12 @@ func (f *fakeBatch) PollBatch(_ context.Context, ref openai.BatchRef) (openai.Ba
 func (f *fakeBatch) BatchResults(_ context.Context, ref openai.BatchRef) ([]openai.BatchOutcome, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.results++
+	if f.resultsErr != nil {
+		if err := f.resultsErr(); err != nil {
+			return nil, err
+		}
+	}
 	s := f.sub(ref.ID)
 	if s == nil {
 		return nil, errors.New("no such batch")
@@ -129,10 +202,17 @@ func (f *fakeBatch) BatchResults(_ context.Context, ref openai.BatchRef) ([]open
 		case f.drop[it.ID]:
 			continue
 		case f.failItems[it.ID]:
-			out = append(out, openai.BatchOutcome{ID: it.ID, Err: errors.New("item rejected")})
+			err := f.failErr
+			if err == nil {
+				err = errors.New("item rejected")
+			}
+			out = append(out, openai.BatchOutcome{ID: it.ID, Err: err})
 		case s.kind == openai.BatchEmbed:
 			cost := 0.0000005
 			res := &openai.EmbedResult{PromptTokens: 5, CostUSD: &cost}
+			if f.noUsage {
+				res = &openai.EmbedResult{}
+			}
 			for _, in := range it.Input {
 				res.Vectors = append(res.Vectors, vecFor(in))
 			}
@@ -175,11 +255,7 @@ func (f *fakeBatch) submissions() []*fakeSub {
 // fastBatch shortens the waits for a test.
 func fastBatch(t *testing.T) {
 	t.Helper()
-	first, mx, cw, cp, rr := batchPollFirst, batchPollMax, batchCancelWait, batchCancelPoll, batchResultRetry
-	batchPollFirst, batchPollMax, batchCancelWait, batchCancelPoll, batchResultRetry = time.Millisecond, 5*time.Millisecond, 200*time.Millisecond, time.Millisecond, time.Millisecond
-	t.Cleanup(func() {
-		batchPollFirst, batchPollMax, batchCancelWait, batchCancelPoll, batchResultRetry = first, mx, cw, cp, rr
-	})
+	t.Cleanup(ShortBatchWaitsForTest())
 }
 
 const batchRoom = "kakao:batch-room"
@@ -447,8 +523,9 @@ func TestBatchFailedExpiredOrCancelledRunsTheRestLive(t *testing.T) {
 }
 
 // A host that cannot be polled any more (ErrBatchUnsupported, as after the provider changed) ends the
-// wait instead of polling forever, and its items run live.
-func TestBatchUnpollableBatchIsGivenUp(t *testing.T) {
+// wait at once with ErrBatchProviderGone instead of polling for days, and nothing runs live: the batch
+// may still be running and billed there. The plan stays, the room held.
+func TestBatchUnpollableBatchStopsWithoutLiveRedo(t *testing.T) {
 	fastBatch(t)
 	e, fp := newEngine(t, false)
 	seedBatchRoom(t, e, batchRoom, 16, 0)
@@ -459,9 +536,12 @@ func TestBatchUnpollableBatchIsGivenUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	fb.pollErr = openai.ErrBatchUnsupported
-	rep := runBatch(t, e, &plan)
-	if rep.LeafVectors != 2 || rep.BatchFailed != 2 || fp.embedCalls.Load() == 0 {
-		t.Fatalf("report %+v live calls %d", rep, fp.embedCalls.Load())
+	err = e.WaitBatch(context.Background(), &plan, nil)
+	if !errors.Is(err, ErrBatchProviderGone) || fb.polls.Load() != 1 || fp.embedCalls.Load() != 0 {
+		t.Fatalf("want ErrBatchProviderGone after one poll, nothing live: %v polls=%d live=%d", err, fb.polls.Load(), fp.embedCalls.Load())
+	}
+	if _, ok, _ := e.LoadBatchPlan(batchRoom); !ok {
+		t.Fatal("the plan stays for a restored provider or the operator's discard")
 	}
 }
 
@@ -561,9 +641,9 @@ func TestBatchCancelPlanAppliesFinishedAndDeletes(t *testing.T) {
 		t.Fatalf("a cancelled wait returns the context error: %v", err)
 	}
 	go func() { time.Sleep(20 * time.Millisecond); sum.set(openai.BatchCancelled) }() // the host takes a moment
-	applied, err := e.CancelPlan(context.Background(), &plan)
-	if err != nil || applied.Saved != 4 {
-		t.Fatalf("cancel: %v %+v", err, applied)
+	applied, done, err := e.CancelPlan(context.Background(), &plan)
+	if err != nil || applied.Saved != 4 || !done {
+		t.Fatalf("cancel: %v %+v done=%v", err, applied, done)
 	}
 	if len(sum.cancels) == 0 || len(emb.cancels) != 0 {
 		t.Fatalf("cancel only the open batch: emb=%v sum=%v", emb.cancels, sum.cancels)

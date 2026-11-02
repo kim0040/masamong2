@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"mime"
@@ -253,7 +254,7 @@ func TestBatchValidation(t *testing.T) {
 		"embed empty":  {BatchEmbed, "m", []BatchItem{{ID: "a"}}, "no inputs"},
 		"unknown kind": {BatchKind("x"), "m", []BatchItem{chatItem("a", "m")}, ""},
 	} {
-		_, err := a.SubmitBatch(ctx, tc.kind, tc.model, tc.items)
+		_, err := a.SubmitBatch(ctx, tc.kind, tc.model, tc.items, "")
 		if err == nil || (tc.want != "" && !strings.Contains(err.Error(), tc.want)) {
 			t.Errorf("%s: err %v want %q", name, err, tc.want)
 		}
@@ -266,7 +267,7 @@ func TestBatchValidation(t *testing.T) {
 	for i := range big {
 		big[i] = BatchItem{ID: string(rune('a' + i)), Input: make([]string, 20000)}
 	}
-	if _, err := a.SubmitBatch(ctx, BatchEmbed, "m", big); err == nil || !strings.Contains(err.Error(), "inputs") {
+	if _, err := a.SubmitBatch(ctx, BatchEmbed, "m", big, ""); err == nil || !strings.Contains(err.Error(), "inputs") {
 		t.Errorf("embed input cap: %v", err)
 	}
 	// more items than the host takes
@@ -274,7 +275,7 @@ func TestBatchValidation(t *testing.T) {
 	for i := range tooMany {
 		tooMany[i] = BatchItem{ID: "x", Input: []string{"a"}}
 	}
-	if _, err := a.SubmitBatch(ctx, BatchEmbed, "m", tooMany); err == nil || !strings.Contains(err.Error(), "split") {
+	if _, err := a.SubmitBatch(ctx, BatchEmbed, "m", tooMany, ""); err == nil || !strings.Contains(err.Error(), "split") {
 		t.Errorf("max items: %v", err)
 	}
 	if len(f.paths()) != 0 {
@@ -286,14 +287,14 @@ func TestBatchUnsupportedHostAndKind(t *testing.T) {
 	ctx := context.Background()
 	f := newFake(t)
 	comet := f.adapter(APICompatible, "/v1") // an unlisted compatible host
-	if _, err := comet.SubmitBatch(ctx, BatchChat, "m", []BatchItem{chatItem("a", "m")}); !errors.Is(err, ErrBatchUnsupported) {
+	if _, err := comet.SubmitBatch(ctx, BatchChat, "m", []BatchItem{chatItem("a", "m")}, ""); !errors.Is(err, ErrBatchUnsupported) {
 		t.Fatalf("unlisted host: %v", err)
 	}
 	if _, err := comet.PollBatch(ctx, BatchRef{ID: "b", BaseURL: comet.BaseURL}); !errors.Is(err, ErrBatchUnsupported) {
 		t.Fatalf("poll on unlisted host: %v", err)
 	}
 	anth := f.adapter(APIAnthropic, "/v1")
-	if _, err := anth.SubmitBatch(ctx, BatchEmbed, "m", []BatchItem{{ID: "a", Input: []string{"x"}}}); !errors.Is(err, ErrBatchUnsupported) {
+	if _, err := anth.SubmitBatch(ctx, BatchEmbed, "m", []BatchItem{{ID: "a", Input: []string{"x"}}}, ""); !errors.Is(err, ErrBatchUnsupported) {
 		t.Fatalf("anthropic embed: %v", err)
 	}
 	if len(f.paths()) != 0 {
@@ -310,7 +311,7 @@ func TestBatchGateOncePerSubmitAndAuth(t *testing.T) {
 	f.reply("POST", "/v1/batches", 200, `{"id":"batch_1","status":"validating"}`)
 	f.reply("DELETE", "/v1/files/file-in", 200, `{}`)
 	items := []BatchItem{chatItem("a", "m"), chatItem("b", "m"), chatItem("c", "m")}
-	if _, err := a.SubmitBatch(context.Background(), BatchChat, "m", items); err != nil {
+	if _, err := a.SubmitBatch(context.Background(), BatchChat, "m", items, ""); err != nil {
 		t.Fatal(err)
 	}
 	if calls != 1 {
@@ -324,14 +325,14 @@ func TestBatchGateOncePerSubmitAndAuth(t *testing.T) {
 	// a closed gate ends the submit before any request
 	a.Gate = func() error { return errors.New("daily limit") }
 	n := len(f.paths())
-	if _, err := a.SubmitBatch(context.Background(), BatchChat, "m", items); err == nil || len(f.paths()) != n {
+	if _, err := a.SubmitBatch(context.Background(), BatchChat, "m", items, ""); err == nil || len(f.paths()) != n {
 		t.Fatalf("gate error must stop the submit: %v", err)
 	}
 	// a refused key stays ErrAuth, on submit and on poll
 	f2 := newFake(t)
 	b := f2.adapter(APIOpenAI, "/v1")
 	f2.reply("POST", "/v1/files", 401, `{"error":{"message":"Incorrect API key provided","type":"invalid_request_error"}}`)
-	if _, err := b.SubmitBatch(context.Background(), BatchChat, "m", items); !errors.Is(err, ErrAuth) {
+	if _, err := b.SubmitBatch(context.Background(), BatchChat, "m", items, ""); !errors.Is(err, ErrAuth) {
 		t.Fatalf("submit auth: %v", err)
 	}
 	f2.reply("GET", "/v1/batches/x", 401, `{"error":{"message":"bad key"}}`)
@@ -367,7 +368,7 @@ func TestSubmitOpenAIWireShape(t *testing.T) {
 	req.Chat.Effort = "low"
 	temp := 0.2
 	req.Chat.Temperature = &temp
-	ref, err := a.SubmitBatch(context.Background(), BatchChat, "m", []BatchItem{req, chatItem("b-2_x", "m")})
+	ref, err := a.SubmitBatch(context.Background(), BatchChat, "m", []BatchItem{req, chatItem("b-2_x", "m")}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +419,7 @@ func TestSubmitUsesLearnedShape(t *testing.T) {
 	it.Chat.Effort = "low"
 	temp := 0.5
 	it.Chat.Temperature = &temp
-	if _, err := a.SubmitBatch(context.Background(), BatchChat, "m", []BatchItem{it}); err != nil {
+	if _, err := a.SubmitBatch(context.Background(), BatchChat, "m", []BatchItem{it}, ""); err != nil {
 		t.Fatal(err)
 	}
 	body := decodeLines(t, multipartParts(t, f.must("POST", "/v1/files"))["file"])[0]["body"].(map[string]any)
@@ -436,7 +437,7 @@ func TestSubmitOpenAIEmbeddingsAndOrphanCleanup(t *testing.T) {
 	f.reply("POST", "/v1/files", 200, `{"id":"file-in"}`)
 	f.reply("POST", "/v1/batches", 400, `{"error":{"message":"invalid model","type":"invalid_request_error"}}`)
 	f.reply("DELETE", "/v1/files/file-in", 200, `{}`)
-	if _, err := a.SubmitBatch(context.Background(), BatchEmbed, "emb", []BatchItem{{ID: "e1", Input: []string{"a", "b"}}}); err == nil {
+	if _, err := a.SubmitBatch(context.Background(), BatchEmbed, "emb", []BatchItem{{ID: "e1", Input: []string{"a", "b"}}}, ""); err == nil {
 		t.Fatal("expected the create failure")
 	}
 	row := decodeLines(t, multipartParts(t, f.must("POST", "/v1/files"))["file"])[0]
@@ -465,13 +466,13 @@ func TestSubmitNanoGPTUsesItsBatchHost(t *testing.T) {
 	ctx := context.Background()
 	noLimit := chatItem("a", "m")
 	noLimit.Chat.MaxTokens = 0
-	if _, err := a.SubmitBatch(ctx, BatchChat, "m", []BatchItem{noLimit}); err == nil || !strings.Contains(err.Error(), "output limit") {
+	if _, err := a.SubmitBatch(ctx, BatchChat, "m", []BatchItem{noLimit}, ""); err == nil || !strings.Contains(err.Error(), "output limit") {
 		t.Fatalf("missing max_tokens must be refused: %v", err)
 	}
-	if _, err := a.SubmitBatch(ctx, BatchEmbed, "m", []BatchItem{{ID: "e", Input: []string{"x"}}}); !errors.Is(err, ErrBatchUnsupported) {
+	if _, err := a.SubmitBatch(ctx, BatchEmbed, "m", []BatchItem{{ID: "e", Input: []string{"x"}}}, ""); !errors.Is(err, ErrBatchUnsupported) {
 		t.Fatalf("nanogpt has no embeddings: %v", err)
 	}
-	ref, err := a.SubmitBatch(ctx, BatchChat, "m", []BatchItem{chatItem("a", "m")})
+	ref, err := a.SubmitBatch(ctx, BatchChat, "m", []BatchItem{chatItem("a", "m")}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,7 +495,7 @@ func TestSubmitOpenRouterFieldOrderAndUnsupportedModel(t *testing.T) {
 	a := f.adapter(APIOpenRouter, "/api/v1")
 	f.reply("POST", "/api/v1/batches", 202, `{"id":"orb_1","status":"validating","request_counts":{"total":2,"completed":0,"failed":0},"results":null}`)
 	ctx := context.Background()
-	ref, err := a.SubmitBatch(ctx, BatchChat, "vendor/model", []BatchItem{chatItem("a", "vendor/model"), chatItem("b", "vendor/model")})
+	ref, err := a.SubmitBatch(ctx, BatchChat, "vendor/model", []BatchItem{chatItem("a", "vendor/model"), chatItem("b", "vendor/model")}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,7 +516,7 @@ func TestSubmitOpenRouterFieldOrderAndUnsupportedModel(t *testing.T) {
 		t.Fatalf("requests %v %v", sent, err)
 	}
 	// embeddings use the same envelope
-	if _, err := a.SubmitBatch(ctx, BatchEmbed, "emb/model", []BatchItem{{ID: "e", Input: []string{"x"}}}); err != nil {
+	if _, err := a.SubmitBatch(ctx, BatchEmbed, "emb/model", []BatchItem{{ID: "e", Input: []string{"x"}}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	reqs := f.reqs
@@ -524,7 +525,7 @@ func TestSubmitOpenRouterFieldOrderAndUnsupportedModel(t *testing.T) {
 	}
 	// a model without a batch variant answers 400: run it live
 	f.reply("POST", "/api/v1/batches", 400, `{"error":{"message":"Model does not support batch","code":400}}`)
-	if _, err := a.SubmitBatch(ctx, BatchChat, "vendor/model", []BatchItem{chatItem("a", "vendor/model")}); !errors.Is(err, ErrBatchUnsupported) {
+	if _, err := a.SubmitBatch(ctx, BatchChat, "vendor/model", []BatchItem{chatItem("a", "vendor/model")}, ""); !errors.Is(err, ErrBatchUnsupported) {
 		t.Fatalf("400 must be ErrBatchUnsupported, got %v", err)
 	}
 }
@@ -538,7 +539,7 @@ func TestSubmitAnthropicNativeTranslation(t *testing.T) {
 		{Role: "system", Content: "be brief"}, {Role: "system", Content: "in Korean"},
 		{Role: "user", Content: "hello"}, {Role: "assistant", Content: "hi"}, {Role: "user", Content: "bye"}}}}
 	high := BatchItem{ID: "b", Chat: &ChatRequest{Model: "claude-x", MaxTokens: 50, Effort: "high", Messages: []Message{{Role: "user", Content: "q"}}}}
-	ref, err := a.SubmitBatch(context.Background(), BatchChat, "claude-x", []BatchItem{it, high})
+	ref, err := a.SubmitBatch(context.Background(), BatchChat, "claude-x", []BatchItem{it, high}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -581,12 +582,12 @@ func TestSubmitAnthropicNativeTranslation(t *testing.T) {
 	ctx := context.Background()
 	bad := chatItem("c", "claude-x")
 	bad.Chat.Messages = []Message{{Role: "assistant", Content: "first"}, {Role: "user", Content: "x"}}
-	if _, err := a.SubmitBatch(ctx, BatchChat, "claude-x", []BatchItem{{ID: "c", Chat: &ChatRequest{Model: "claude-x", MaxTokens: 5, Messages: bad.Chat.Messages}}}); err == nil || !strings.Contains(err.Error(), "user message") {
+	if _, err := a.SubmitBatch(ctx, BatchChat, "claude-x", []BatchItem{{ID: "c", Chat: &ChatRequest{Model: "claude-x", MaxTokens: 5, Messages: bad.Chat.Messages}}}, ""); err == nil || !strings.Contains(err.Error(), "user message") {
 		t.Fatalf("first message must be the user's: %v", err)
 	}
 	noMax := chatItem("d", "claude-x")
 	noMax.Chat.MaxTokens = 0
-	if _, err := a.SubmitBatch(ctx, BatchChat, "claude-x", []BatchItem{noMax}); err == nil || !strings.Contains(err.Error(), "output limit") {
+	if _, err := a.SubmitBatch(ctx, BatchChat, "claude-x", []BatchItem{noMax}, ""); err == nil || !strings.Contains(err.Error(), "output limit") {
 		t.Fatalf("max_tokens is required natively: %v", err)
 	}
 }
@@ -594,29 +595,38 @@ func TestSubmitAnthropicNativeTranslation(t *testing.T) {
 func TestSubmitGeminiUsesTheNativeFilesAPI(t *testing.T) {
 	f := newFake(t)
 	a := f.adapter(APIGemini, "/v1beta/openai")
-	f.reply("POST", "/upload/v1beta/files", 200, `{"file":{"name":"files/abc123","state":"ACTIVE"}}`)
+	// the docs' resumable upload: a start request answered with the upload address, then the bytes
+	var start, upload fakeReq
+	f.on("POST", "/upload/v1beta/files", func(w http.ResponseWriter, r fakeReq) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Header.Get("X-Goog-Upload-Command") == "start" {
+			start = r
+			w.Header().Set("X-Goog-Upload-URL", f.srv.URL+"/upload/v1beta/files?upload_id=u1")
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
+		upload = r
+		_, _ = w.Write([]byte(`{"file":{"name":"files/abc123","state":"ACTIVE"}}`))
+	})
 	f.reply("POST", "/v1beta/openai/batches", 200, `{"id":"batches/xyz","status":"validating"}`)
 	it := chatItem("a", "gemini-x")
 	it.Chat.Effort = "low"
-	ref, err := a.SubmitBatch(context.Background(), BatchChat, "gemini-x", []BatchItem{it})
+	ref, err := a.SubmitBatch(context.Background(), BatchChat, "gemini-x", []BatchItem{it}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ref.ID != "batches/xyz" || ref.InputFile != "files/abc123" {
 		t.Fatalf("ref %+v", ref)
 	}
-	up := f.must("POST", "/upload/v1beta/files")
-	if up.Header.Get("X-Goog-Upload-Protocol") != "multipart" || up.Header.Get("x-goog-api-key") != "test-key" {
-		t.Fatalf("upload headers %v", up.Header)
+	if start.Header.Get("X-Goog-Upload-Protocol") != "resumable" || start.Header.Get("x-goog-api-key") != "test-key" ||
+		start.Header.Get("X-Goog-Upload-Header-Content-Type") != geminiBatchMIME || !strings.Contains(string(start.Body), `"display_name"`) ||
+		start.Header.Get("X-Goog-Upload-Header-Content-Length") != fmt.Sprint(len(upload.Body)) {
+		t.Fatalf("start request %v %s", start.Header, start.Body)
 	}
-	if mt, _, _ := mime.ParseMediaType(up.Header.Get("Content-Type")); mt != "multipart/related" {
-		t.Fatalf("content type %q", up.Header.Get("Content-Type"))
+	if upload.Query != "upload_id=u1" || upload.Header.Get("X-Goog-Upload-Command") != "upload, finalize" || upload.Header.Get("X-Goog-Upload-Offset") != "0" {
+		t.Fatalf("upload request %q %v", upload.Query, upload.Header)
 	}
-	parts := multipartParts(t, up)
-	if !strings.Contains(string(parts["application/json; charset=UTF-8"]), `"display_name"`) {
-		t.Fatalf("metadata part %q", parts)
-	}
-	rows := decodeLines(t, parts[geminiBatchMIME])
+	rows := decodeLines(t, upload.Body)
 	if len(rows) != 1 || rows[0]["url"] != "/v1/chat/completions" || rows[0]["body"].(map[string]any)["reasoning_effort"] != "low" {
 		t.Fatalf("rows %v", rows)
 	}
@@ -1013,7 +1023,7 @@ func TestBatchWireNeverCarriesTheKeyInErrors(t *testing.T) {
 	f := newFake(t)
 	a := f.adapter(APIOpenAI, "/v1")
 	f.reply("POST", "/v1/files", 500, `{"error":{"message":"server broke"}}`)
-	_, err := a.SubmitBatch(context.Background(), BatchChat, "m", []BatchItem{chatItem("a", "m")})
+	_, err := a.SubmitBatch(context.Background(), BatchChat, "m", []BatchItem{chatItem("a", "m")}, "")
 	if err == nil || strings.Contains(err.Error(), "test-key") {
 		t.Fatalf("error %v", err)
 	}

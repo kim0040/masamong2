@@ -41,8 +41,17 @@ type BatchHost struct {
 	MaxInputs int `json:"max_inputs,omitempty"`
 	// RequireMaxTokens: chat requests must carry a positive output limit (NanoGPT)
 	RequireMaxTokens bool `json:"require_max_tokens,omitempty"`
-	// Discount is the batch price as a share of the live price, for costs the host does not report
-	Discount float64 `json:"discount"`
+	// Discount is the batch price as a share of the live price, for costs the host does not report and
+	// for estimates. DiscountModels, when set, limits it to models whose name starts with one of these
+	// prefixes (case-insensitive), less those starting with one of DiscountExcept; every other model is
+	// billed at the live price in a batch (NanoGPT runs open-source rows at their normal price).
+	Discount       float64  `json:"discount"`
+	DiscountModels []string `json:"discount_models,omitempty"`
+	DiscountExcept []string `json:"discount_except,omitempty"`
+	// Reconcile is how a submission whose answer was lost is looked up again in the host's batch list:
+	// "metadata" (the create call carries the caller's key as metadata, OpenAI), "input_file" (the batch
+	// names the uploaded input file), or "" (the host offers no way: such a submission stays unknown).
+	Reconcile string `json:"reconcile,omitempty"`
 }
 
 // RerankAt reports whether the provider at baseURL of family api has a /rerank endpoint.

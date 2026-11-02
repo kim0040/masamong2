@@ -7,9 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"mime/multipart"
-	"net/textproto"
 	"net/url"
+	"strconv"
 	"strings"
+	"time"
 
 	"masamong/internal/providers/decode"
 )
@@ -22,9 +23,12 @@ import (
 // API (uploadGemini, downloadFile, deleteFile). If the compatible route proves unworkable, the other way
 // is native inline: POST /v1beta/models/{model}:batchGenerateContent, a style of its own beside these.
 
-// geminiBatchMIME is the type the input file is uploaded as (adjust here if the Files API wants another,
-// e.g. the bare "jsonl" its SDKs take).
+// geminiBatchMIME is the type the input file is uploaded as (the batch docs' upload sends
+// application/jsonl; the SDKs take the bare "jsonl").
 const geminiBatchMIME = "application/jsonl"
+
+// orphanDeleteWait bounds the removal of an input file no batch was created from.
+const orphanDeleteWait = 30 * time.Second
 
 // geminiUploadName is the display name of an uploaded input file.
 const geminiUploadName = "masamong-batch-input"
@@ -92,11 +96,12 @@ func geminiFileName(id string) string {
 	return id
 }
 
-func (a *Adapter) submitFiles(ctx context.Context, s batchSpec, kind BatchKind, model string, items []BatchItem) (id, inputFile string, err error) {
+func (a *Adapter) submitFiles(ctx context.Context, s batchSpec, kind BatchKind, model string, items []BatchItem, key string) (id, inputFile string, err error) {
 	data, err := a.batchJSONL(kind, model, items)
 	if err != nil {
 		return "", "", err
 	}
+	// the upload creates no batch and costs nothing: a retry that duplicates it leaves a file at worst
 	if s.Style == styleGeminiFiles {
 		inputFile, err = a.uploadGemini(ctx, s, data)
 	} else {
@@ -105,20 +110,25 @@ func (a *Adapter) submitFiles(ctx context.Context, s batchSpec, kind BatchKind, 
 	if err != nil {
 		return "", "", err
 	}
-	body, _ := json.Marshal(map[string]string{"input_file_id": inputFile, "endpoint": batchEndpoint(kind), "completion_window": "24h"})
-	resp, err := a.batchDo(ctx, "POST", s.base+"/batches", a.headers(), body, "application/json")
-	if err == nil {
-		var b struct {
-			ID string `json:"id"`
-		}
-		if err = json.Unmarshal(resp.Body, &b); err != nil || b.ID == "" {
-			err = fmt.Errorf("%w: batch id missing", decode.ErrUnexpected)
-		} else {
-			return b.ID, inputFile, nil
-		}
+	create := map[string]any{"input_file_id": inputFile, "endpoint": batchEndpoint(kind), "completion_window": "24h"}
+	if s.Reconcile == reconcileMetadata && key != "" {
+		create["metadata"] = map[string]string{submitKeyField: key}
 	}
-	// the batch was not created: do not leave the uploaded file behind
-	_ = a.deleteFile(ctx, s, inputFile)
+	body, _ := json.Marshal(create)
+	id, _, err = a.createBatch(ctx, s.base+"/batches", a.headers(), body, batchIDOf)
+	if err == nil {
+		return id, inputFile, nil
+	}
+	var su *SubmitUnknownError
+	if errors.As(err, &su) {
+		// the host may have created the batch from the file: it stays, and names the batch in the list
+		return "", inputFile, &SubmitUnknownError{Ref: BatchRef{InputFile: inputFile}, Err: su.Err}
+	}
+	// the batch was certainly not created: do not leave the uploaded file (the chat text) behind, also
+	// when the caller's context has ended
+	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), orphanDeleteWait)
+	defer cancel()
+	_ = a.deleteFile(dctx, s, inputFile)
 	return "", "", err
 }
 
@@ -147,29 +157,33 @@ func (a *Adapter) uploadOpenAI(ctx context.Context, s batchSpec, data []byte) (s
 	return f.ID, nil
 }
 
-// uploadGemini sends the input file to the native Files API in one multipart/related request (a metadata
-// part, then the file), and returns the file's name ("files/abc"), which is the batch's input_file_id.
-// Not verified against the live service: see the report.
+// uploadGemini sends the input file to the native Files API the way its docs do
+// (https://ai.google.dev/gemini-api/docs/batch-api, checked 2026-11-02): a resumable upload, started
+// with the file's metadata, whose answer names the upload address, then the bytes in one
+// "upload, finalize" request. It returns the file's name ("files/abc"), the batch's input_file_id. The
+// upload address must be on the API's own origin: the file is the room's chat text.
 func (a *Adapter) uploadGemini(ctx context.Context, s batchSpec, data []byte) (string, error) {
-	var buf bytes.Buffer
-	w := multipart.NewWriter(&buf)
 	meta, _ := json.Marshal(map[string]any{"file": map[string]string{"display_name": geminiUploadName}})
-	for _, part := range []struct {
-		contentType string
-		body        []byte
-	}{{"application/json; charset=UTF-8", meta}, {geminiBatchMIME, data}} {
-		pw, err := w.CreatePart(textproto.MIMEHeader{"Content-Type": {part.contentType}})
-		if err != nil {
-			return "", err
-		}
-		_, _ = pw.Write(part.body)
-	}
-	if err := w.Close(); err != nil {
+	h := a.geminiHeaders()
+	h["X-Goog-Upload-Protocol"] = "resumable"
+	h["X-Goog-Upload-Command"] = "start"
+	h["X-Goog-Upload-Header-Content-Length"] = strconv.Itoa(len(data))
+	h["X-Goog-Upload-Header-Content-Type"] = geminiBatchMIME
+	resp, err := a.batchDo(ctx, "POST", s.native+"/upload/v1beta/files", h, meta, "application/json")
+	if err != nil {
 		return "", err
 	}
-	h := a.geminiHeaders()
-	h["X-Goog-Upload-Protocol"] = "multipart"
-	resp, err := a.batchDo(ctx, "POST", s.native+"/upload/v1beta/files", h, buf.Bytes(), "multipart/related; boundary="+w.Boundary())
+	upload := ""
+	if resp.Header != nil {
+		upload = resp.Header.Get("X-Goog-Upload-URL")
+	}
+	if upload == "" || !sameOrigin(upload, s.native) {
+		return "", fmt.Errorf("%w: upload address missing or on another host", decode.ErrUnexpected)
+	}
+	h = a.geminiHeaders()
+	h["X-Goog-Upload-Offset"] = "0"
+	h["X-Goog-Upload-Command"] = "upload, finalize"
+	resp, err = a.batchDo(ctx, "POST", upload, h, data, geminiBatchMIME)
 	if err != nil {
 		return "", err
 	}
@@ -268,7 +282,7 @@ func (a *Adapter) resultsFiles(ctx context.Context, s batchSpec, ref BatchRef) (
 	if files == 0 && st.State == BatchDone && st.Total > 0 {
 		return nil, fmt.Errorf("%w: batch finished with no output file", decode.ErrUnexpected)
 	}
-	return a.rowOutcomes(ref, rows, s.discount())
+	return a.rowOutcomes(ref, rows, s.discountFor(ref.Model))
 }
 
 func (a *Adapter) downloadFile(ctx context.Context, s batchSpec, id string) ([]byte, error) {

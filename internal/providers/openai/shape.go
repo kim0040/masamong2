@@ -159,6 +159,9 @@ func (a *Adapter) postShaped(ctx context.Context, req ChatRequest, learn bool) (
 			if keep != old {
 				a.shapes.Store(shapeKey(req), keep)
 			}
+			if len(req.Tools) == 0 {
+				a.shapeSeen.Store(req.Model, true)
+			}
 			return resp, nil
 		}
 		err = mapErr(err, resp)
@@ -176,6 +179,27 @@ func (a *Adapter) postShaped(ctx context.Context, req ChatRequest, learn bool) (
 		}
 		sh = next
 	}
+}
+
+// ShapeLearned reports whether model's plain chat shape is known: a live request for it succeeded (with
+// the optional fields it refused, if any, left out from then on). A batch cannot retry a refused field the
+// way a live call does, so a chat batch for a model not learned yet is preceded by one live request.
+func (a *Adapter) ShapeLearned(model string) bool {
+	_, ok := a.shapeSeen.Load(model)
+	return ok
+}
+
+// LearnRefusal applies what a batch item's refusal says about req's optional fields (the live retry's
+// rule, refusedField) to the model's shape, so the next batch leaves the field out. It reports whether
+// the shape changed.
+func (a *Adapter) LearnRefusal(req ChatRequest, err error) bool {
+	sh := a.shapeOf(req)
+	next, ok := refusedField(a.API, err, req, sh)
+	if !ok || next == sh {
+		return false
+	}
+	a.shapes.Store(shapeKey(req), next)
+	return true
 }
 
 // refusedField decides whether err is a model refusing one optional field of req, sent to a host of

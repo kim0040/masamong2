@@ -107,15 +107,17 @@ func (a *Adapter) submitAnthropic(ctx context.Context, s batchSpec, model string
 	if len(data) > maxBatchBytes {
 		return "", "", fmt.Errorf("openai: batch is over %d MB: split it", maxBatchBytes>>20)
 	}
-	resp, err := a.batchDo(ctx, "POST", s.base+"/messages/batches", a.anthropicHeaders(), data, "application/json")
+	var b anthropicBatch
+	id, _, err = a.createBatch(ctx, s.base+"/messages/batches", a.anthropicHeaders(), data, func(body []byte) string {
+		if json.Unmarshal(body, &b) != nil {
+			return ""
+		}
+		return b.ID
+	})
 	if err != nil {
 		return "", "", err
 	}
-	var b anthropicBatch
-	if json.Unmarshal(resp.Body, &b) != nil || b.ID == "" {
-		return "", "", fmt.Errorf("%w: batch id missing", decode.ErrUnexpected)
-	}
-	return b.ID, b.resultsURL(), nil
+	return id, b.resultsURL(), nil
 }
 
 type anthropicBatch struct {
@@ -313,7 +315,7 @@ func (a *Adapter) resultsAnthropic(ctx context.Context, s batchSpec, ref BatchRe
 		if !batchIDRE.MatchString(r.CustomID) {
 			return nil, fmt.Errorf("%w: batch row without a usable custom_id", decode.ErrUnexpected)
 		}
-		out = append(out, a.anthropicOutcome(ref, r, s.discount()))
+		out = append(out, a.anthropicOutcome(ref, r, s.discountFor(ref.Model)))
 	}
 	return out, nil
 }

@@ -180,6 +180,7 @@ type Response struct {
 	URL         string // redacted
 	Attempts    int
 	Elapsed     time.Duration
+	Header      http.Header // the answer's headers (a resumable upload's address comes in one)
 }
 
 // Error classifies transport failures so features can render 'unknown' vs 'failed' honestly (05장).
@@ -189,6 +190,9 @@ type Error struct {
 	URL      string
 	Attempts int
 	Err      error
+	// NotSent: the request never left (the connection or the host's address could not be made), so the
+	// host cannot have acted on it. Unset when that is not certain.
+	NotSent bool
 }
 
 func (e *Error) Error() string {
@@ -419,7 +423,7 @@ func (c *Client) do(ctx context.Context, method, rawURL string, headers map[stri
 		if int64(len(data)) > c.MaxBody {
 			return nil, &Error{Kind: "too_large", URL: redacted, Attempts: attempt, Status: resp.StatusCode, Err: fmt.Errorf("body exceeds %d bytes", c.MaxBody)}
 		}
-		out := &Response{Status: resp.StatusCode, ContentType: resp.Header.Get("Content-Type"), Body: data, URL: redacted, Attempts: attempt, Elapsed: time.Since(start)}
+		out := &Response{Status: resp.StatusCode, ContentType: resp.Header.Get("Content-Type"), Body: data, URL: redacted, Attempts: attempt, Elapsed: time.Since(start), Header: resp.Header}
 		if resp.StatusCode == 429 || resp.StatusCode >= 500 {
 			last = &Error{Kind: "status", Status: resp.StatusCode, URL: redacted, Attempts: attempt}
 			if attempt == attempts {
@@ -559,9 +563,19 @@ func classify(err error, redacted string, attempt int) *Error {
 	}
 	var ne net.Error
 	if errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ne) && ne.Timeout()) {
-		return &Error{Kind: "timeout", URL: redacted, Attempts: attempt, Err: errors.New("timeout")}
+		return &Error{Kind: "timeout", URL: redacted, Attempts: attempt, Err: errors.New("timeout"), NotSent: notSent(err)}
 	}
-	return &Error{Kind: "connection", URL: redacted, Attempts: attempt, Err: errors.New(redactMessage(err.Error(), redacted))}
+	return &Error{Kind: "connection", URL: redacted, Attempts: attempt, Err: errors.New(redactMessage(err.Error(), redacted)), NotSent: notSent(err)}
+}
+
+// notSent reports an error from before the request could be written: the dial or the name lookup failed.
+func notSent(err error) bool {
+	var oe *net.OpError
+	if errors.As(err, &oe) && oe.Op == "dial" {
+		return true
+	}
+	var de *net.DNSError
+	return errors.As(err, &de)
 }
 
 // Redact masks secret query parameters so a URL can appear in logs and errors.

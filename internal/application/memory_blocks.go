@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -299,25 +300,51 @@ func (s *Service) prepareRoomBatch(ctx context.Context, candidate blocks.Block, 
 // runBatchPrepare submits the room's work as provider batches (or resumes the stored plan), waits for
 // the results without holding the index, applies them and runs the live remainder. A run stopped by
 // the daemon or taken by a newer run leaves the plan for the next one; a cancel from the console stops
-// the batches and keeps what finished.
+// the batches, keeps what finished and leaves the rest to drain in the background. Only work the host
+// cannot batch (ErrBatchUnsupported) runs live: a refused or unsettled submission, a provider that is
+// gone or results that cannot be read end the job with the reason, and run nothing at full price.
 func (s *Service) runBatchPrepare(ctx context.Context, eng *engine.Engine, p preparePayload, progress engine.Progress, status engine.BatchStatusFunc) (engine.IndexReport, error) {
+	// a plan still draining (an earlier cancel or a stopped submission) is collected before a new one
+	if err := s.awaitDrain(ctx, p.SourceRoom, status); err != nil {
+		return engine.IndexReport{Mode: prepareBatch}, err
+	}
+	if current, err := s.MemoryEngine(); err == nil {
+		eng = current
+	}
 	plan, rep, err := eng.PrepareBatch(ctx, p.SourceRoom, engine.BatchOptions{BudgetUSD: p.BudgetUSD, Limit: p.Limit}, progress)
 	if err != nil {
+		if len(plan.Groups) > 0 && plan.Drain {
+			s.goDrain(p.SourceRoom) // what was sent before the refusal is collected
+		}
 		return rep, err
 	}
 	if len(plan.Groups) == 0 {
 		if rep.StoppedBy != "" || len(rep.FailedRooms) > 0 {
 			return rep, nil
 		}
-		// nothing went to a batch (no paid work, or no host can batch it): the pass runs live now
+		// nothing went to a batch (no paid work, or no host can batch it): the pass runs live now, with its
+		// usual budget
 		live, err := eng.IndexRooms(ctx, engine.IndexOptions{Rooms: []string{p.SourceRoom}, BudgetUSD: p.BudgetUSD, Limit: p.Limit}, progress)
 		live.Mode, live.LiveItems = prepareBatch, rep.LiveItems
 		live.FromCache += rep.FromCache
 		live.Adapted += rep.Adapted
+		live.Summaries += plan.Summaries
+		live.SpentUSD += plan.SpentUSD
 		return live, err
 	}
+	if plan.Drain {
+		// a plan that drains (resumed after a refusal) is only collected
+		s.goDrain(p.SourceRoom)
+		return rep, fmt.Errorf("%w: %s", engine.ErrBatchDraining, plan.Reason)
+	}
 	if err := eng.WaitBatch(ctx, &plan, status); err != nil {
-		return s.stopBatch(ctx, eng, &plan, rep, err)
+		if ctx.Err() != nil {
+			return s.stopBatch(ctx, eng, &plan, rep, err)
+		}
+		if plan.Drain && len(plan.Groups) > 0 {
+			s.goDrain(p.SourceRoom)
+		}
+		return rep, err // the plan stays stored (unless nothing reached a host); the error says what to do
 	}
 	var final engine.IndexReport
 	for attempt := 0; ; attempt++ {
@@ -325,7 +352,7 @@ func (s *Service) runBatchPrepare(ctx context.Context, eng *engine.Engine, p pre
 		if current, err := s.MemoryEngine(); err == nil {
 			eng = current
 		}
-		if _, err = eng.ApplyBatch(ctx, &plan); err == nil {
+		if _, err = eng.CollectBatch(ctx, &plan); err == nil {
 			final, err = eng.FinishBatch(ctx, &plan, progress)
 		}
 		if errors.Is(err, engine.ErrRetired) && attempt < 2 {
@@ -345,7 +372,9 @@ func (s *Service) runBatchPrepare(ctx context.Context, eng *engine.Engine, p pre
 }
 
 // stopBatch ends a batch preparation whose context ended. Only the operator's cancel stops the
-// batches; the daemon stopping or a newer run taking the job leaves the plan to be resumed.
+// batches; the daemon stopping or a newer run taking the job leaves the plan to be resumed. A cancelled
+// plan drains: the hosts are asked to stop, what finished is applied, and a batch that keeps running
+// (OpenRouter cannot cancel) is collected in the background while the room stays held; nothing runs live.
 func (s *Service) stopBatch(ctx context.Context, eng *engine.Engine, plan *engine.BatchPlan, rep engine.IndexReport, err error) (engine.IndexReport, error) {
 	if ctx.Err() == nil || (s.jobCtx != nil && s.jobCtx.Err() != nil) || errors.Is(context.Cause(ctx), errJobTaken) {
 		return rep, err
@@ -355,13 +384,92 @@ func (s *Service) stopBatch(ctx context.Context, eng *engine.Engine, plan *engin
 	if current, e := s.MemoryEngine(); e == nil {
 		eng = current
 	}
-	if _, cerr := eng.CancelPlan(cctx, plan); cerr != nil {
+	_, done, cerr := eng.CancelPlan(cctx, plan)
+	if cerr != nil {
 		s.Log.Warn("memory: cancelling a batch left work behind", "room", plan.Room, "err", cerr)
+	}
+	if !done {
+		s.goDrain(plan.Room)
 	}
 	rep.StoppedBy = "cancelled"
 	rep.LeafVectors, rep.Summaries, rep.MessageVectors = plan.LeafVectors, plan.Summaries, plan.MessageVectors
 	rep.SpentUSD, rep.BatchItems, rep.BatchFailed, rep.LiveItems = plan.SpentUSD, plan.BatchItems, plan.BatchFailed, plan.LiveItems
 	return rep, nil
+}
+
+// batchDrains are the rooms whose draining plan is being collected in the background, by service and
+// room (a channel closed when the drain ends).
+var batchDrains sync.Map
+
+func drainKey(s *Service, room string) string { return fmt.Sprintf("%p|%s", s, room) }
+
+// goDrain collects the room's draining plan in the background (engine.DrainBatch): its batches run to
+// their end at the hosts, their results are applied and the plan is deleted. One drain per room; it
+// stops with the service and resumes at the next start (ResumeJobs).
+func (s *Service) goDrain(room string) {
+	ch := make(chan struct{})
+	key := drainKey(s, room)
+	if _, running := batchDrains.LoadOrStore(key, ch); running {
+		return
+	}
+	ctx, done, ok := s.beginWork(s.jobCtx)
+	if !ok {
+		batchDrains.Delete(key)
+		close(ch)
+		return
+	}
+	log := s.Log
+	go func() {
+		defer done()
+		defer func() { batchDrains.Delete(key); close(ch) }()
+		defer crash.Recover(log, "batch drain "+room)
+		for attempt := 0; attempt < 3; attempt++ {
+			eng, err := s.MemoryEngine()
+			if err != nil {
+				return
+			}
+			plan, ok, err := eng.LoadBatchPlan(room)
+			if err != nil || !ok {
+				return
+			}
+			_, err = eng.DrainBatch(ctx, &plan)
+			if errors.Is(err, engine.ErrRetired) {
+				continue // a config change: the current engine collects it
+			}
+			if err != nil && ctx.Err() == nil {
+				log.Warn("memory: a draining batch was not collected; the room stays held", "room", room, "err", err)
+			}
+			if err == nil {
+				s.emit("memory", "", map[string]any{"source_room": room, "batch_drained": true})
+			}
+			return
+		}
+	}()
+}
+
+// awaitDrain waits for the room's draining plan: a background drain if one runs, else the drain itself.
+// A plan that drains is only collected (nothing of it runs live); the caller then starts afresh.
+func (s *Service) awaitDrain(ctx context.Context, room string, status engine.BatchStatusFunc) error {
+	if v, running := batchDrains.Load(drainKey(s, room)); running {
+		if status != nil {
+			status(openai.BatchRunning, 0, 0)
+		}
+		select {
+		case <-v.(chan struct{}):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	eng, err := s.MemoryEngine()
+	if err != nil {
+		return err
+	}
+	plan, ok, err := eng.LoadBatchPlan(room)
+	if err != nil || !ok || !plan.Drain {
+		return err
+	}
+	_, err = eng.DrainBatch(ctx, &plan)
+	return err
 }
 
 // beginPrepare marks the block preparing in the catalog, with its current counts and identity.
@@ -734,6 +842,16 @@ func (s *Service) runPrepareJob(ctx context.Context, j jobs.Job, token string) {
 	case s.jobCtx != nil && s.jobCtx.Err() != nil:
 		code = "INTERRUPTED" // the service is stopping; the next start offers a retry
 		result["stopped_by"] = "interrupted"
+	case errors.Is(err, engine.ErrBatchSubmitUnknown):
+		code = "BATCH_SUBMIT_UNKNOWN" // the room stays held until the plan is settled or discarded
+	case errors.Is(err, engine.ErrBatchSubmitRefused):
+		code = "BATCH_SUBMIT_REFUSED"
+	case errors.Is(err, engine.ErrBatchProviderGone):
+		code = "BATCH_PROVIDER_GONE"
+	case errors.Is(err, engine.ErrBatchResultsUnreadable):
+		code = "BATCH_RESULTS_UNREADABLE"
+	case errors.Is(err, engine.ErrBatchDraining):
+		code = "BATCH_DRAINING"
 	case rep.StoppedBy == "budget":
 		code = "BUDGET_REACHED"
 	case rep.StoppedBy == "cancelled" || errors.Is(err, context.Canceled):
@@ -801,7 +919,10 @@ func (s *Service) finishJob(id, token string, attempt int, result map[string]any
 // ResumeJobs is called once at daemon start: jobs that were running when the process stopped are
 // marked failed (they can be retried), and queued ones start. A batch preparation is the exception: its
 // batches are submitted and paid for, so a run interrupted with its plan stored runs again at once (as a
-// new attempt) and polls the same batches, and a stored plan no job owns gets a job of its own.
+// new attempt of the same job) and polls the same batches. A stored plan no running job owns is taken up
+// by the room's latest prepare job when that one failed (a graceful stop records it INTERRUPTED; the
+// same job runs again, so a restart never adds a job), else by a new job; a draining plan is collected
+// in the background without a job.
 func (s *Service) ResumeJobs(ctx context.Context) {
 	s.jobCtx = ctx
 	if s.Store == nil {
@@ -852,15 +973,26 @@ func (s *Service) ResumeJobs(ctx context.Context) {
 			s.goJob(j.ID)
 		}
 	}
+	latest := s.latestJobs()
 	for room := range plans {
 		if owned[room] {
 			continue
 		}
-		// a plan whose job ended without finishing it (a failure after the submit): resume it, or the room
-		// would stay held
 		plan, ok, err := eng.LoadBatchPlan(room)
 		if err != nil || !ok {
 			continue
+		}
+		if plan.Drain {
+			s.goDrain(room) // only collected: nothing of it runs live, and no job is needed
+			continue
+		}
+		// a plan whose job ended without finishing it: resume it, or the room would stay held
+		if j, ok := latest[room]; ok && j.Status == jobs.Failed {
+			if again, err := jobs.Retry(j); err == nil && saveJob(s.Store, again, j.LeaseToken) == nil {
+				s.jobChanged(again)
+				s.goJob(again.ID)
+				continue
+			}
 		}
 		if _, _, err := s.startPrepareJob(preparePayload{SourceRoom: room, Mode: prepareBatch, BudgetUSD: plan.BudgetUSD, Limit: plan.Limit}); err != nil {
 			s.Log.Warn("memory: stored batch not resumed", "room", room, "err", err)
@@ -954,8 +1086,29 @@ func (s *Service) updateMemoryBlock(req action.Request, in map[string]any) actio
 		meta.Mode, metaChanged = mode, true
 		changed = append(changed, "mode")
 	}
+	if boolVal(in, "discard_batch") {
+		// the operator drops the room's batch plan (a submission that cannot be settled, a provider that is
+		// gone): open batches are cancelled and every reachable one cleaned up, best effort; the room is
+		// released and nothing of the batch runs live
+		if _, ok := batchPlanOf(eng, b.SourceRoom); !ok {
+			return action.Fail(req, errcode.InvalidInput, "generic.error", "this block has no batch to discard", nil)
+		}
+		for _, j := range s.latestJobs() {
+			var p preparePayload
+			if activeJob(j) && json.Unmarshal([]byte(j.Payload), &p) == nil && p.SourceRoom == b.SourceRoom {
+				return action.Fail(req, errcode.InvalidInput, "generic.error", "a prepare job is running for this block; cancel it first", map[string]any{"job_id": j.ID})
+			}
+		}
+		dctx, cancel := context.WithTimeout(context.Background(), batchCancelTimeout)
+		err := eng.DiscardBatch(dctx, b.SourceRoom)
+		cancel()
+		if err != nil {
+			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		}
+		changed = append(changed, "discard_batch")
+	}
 	if len(changed) == 0 {
-		return action.Fail(req, errcode.InvalidInput, "generic.error", "nothing to change (label, note, auto_update, budget_usd, mode)", nil)
+		return action.Fail(req, errcode.InvalidInput, "generic.error", "nothing to change (label, note, auto_update, budget_usd, mode, discard_batch)", nil)
 	}
 	if metaChanged {
 		if err := s.kvSet(blockMetaKey(b.SourceRoom), meta); err != nil {
@@ -1320,11 +1473,20 @@ func (s *Service) mergedBlocks() []map[string]any {
 				m["status"] = "preparing"
 			}
 		}
-		if p, ok := batches[b.SourceRoom]; ok && p.State == engine.BatchPlanWaiting {
-			// the provider has the room's work (up to its deadline, about a day): preparing, waiting on the batch
+		if p, ok := batches[b.SourceRoom]; ok && p.State != engine.BatchPlanApplied {
+			// the provider has the room's work (up to its deadline, about a day): preparing, waiting on the batch.
+			// batch.state says which wait: waiting (results outstanding), draining (cancelled or a stopped
+			// submission: collected, nothing more is sent) or submit_unknown (the operator must settle it)
 			m["status"], m["waiting_batch"] = "preparing", true
-			m["batch"] = map[string]any{"items": p.Items, "submitted_at": p.CreatedAt,
-				"note": "waiting for the provider to return the batch (usually within 24 hours)"}
+			note := "waiting for the provider to return the batch (usually within 24 hours)"
+			switch p.State {
+			case engine.BatchPlanDraining:
+				note = "collecting the batches still at the provider; nothing more is sent or run live"
+			case engine.BatchPlanSubmitUnknown:
+				m["status"], note = "failed", "a batch submission got no answer; check the provider's batch list, then discard the batch (discard_batch)"
+				m["error"] = p.Reason
+			}
+			m["batch"] = map[string]any{"items": p.Items, "submitted_at": p.CreatedAt, "note": note, "state": p.State, "reason": p.Reason}
 		}
 		out = append(out, m)
 	}

@@ -59,11 +59,28 @@ func (s batchSpec) has(kind BatchKind) bool {
 	return false
 }
 
-func (s batchSpec) discount() float64 {
-	if s.Discount > 0 && s.Discount <= 1 {
-		return s.Discount
+// discountFor is the batch price of model as a share of the live price: the host's discount for the
+// models it names (all of them when it names none), the live price (1) for every other model.
+func (s batchSpec) discountFor(model string) float64 {
+	d := s.Discount
+	if d <= 0 || d > 1 {
+		d = 0.5
 	}
-	return 0.5
+	if len(s.DiscountModels) == 0 {
+		return d
+	}
+	m := strings.ToLower(strings.TrimSpace(model))
+	for _, ex := range s.DiscountExcept {
+		if strings.HasPrefix(m, strings.ToLower(ex)) {
+			return 1
+		}
+	}
+	for _, p := range s.DiscountModels {
+		if strings.HasPrefix(m, strings.ToLower(p)) {
+			return d
+		}
+	}
+	return 1
 }
 
 // batchSpec finds the adapter's host entry: the family's own for openai/openrouter/anthropic/gemini (a
@@ -116,6 +133,17 @@ func sameOrigin(a, b string) bool {
 func (a *Adapter) BatchSupport(kind BatchKind) bool {
 	s, ok := a.batchSpec()
 	return ok && s.has(kind)
+}
+
+// BatchDiscount is what a batch of the kind for model costs on this host as a share of the live price
+// (0.5 for half price). A host or kind without batches, or a model the host bills at its normal price in
+// a batch, is 1. Estimates and the costs of outcomes the host reports no cost for both use it.
+func (a *Adapter) BatchDiscount(kind BatchKind, model string) float64 {
+	s, ok := a.batchSpec()
+	if !ok || !s.has(kind) {
+		return 1
+	}
+	return s.discountFor(model)
 }
 
 // BatchMaxItems is the most items one batch of the kind may carry on this host; callers split above it.
@@ -191,8 +219,14 @@ func validateBatchChat(s batchSpec, model string, it BatchItem) error {
 	return nil
 }
 
-// SubmitBatch sends the items as one batch for model.
-func (a *Adapter) SubmitBatch(ctx context.Context, kind BatchKind, model string, items []BatchItem) (BatchRef, error) {
+// SubmitBatch sends the items as one batch for model. key is the caller's stable key for this submission
+// (recorded before the call); a host that keeps metadata gets it with the batch (ReconcileBatch).
+//
+// The create call is sent once, never retried: a retry after a lost answer could start a second paid
+// batch. A failure is either definite (the host refused before accepting anything: a 4xx, a connection
+// never made), after which the items may run live, or a *SubmitUnknownError (ErrBatchSubmitUnknown):
+// the host may be running the batch, and the caller must reconcile, not run the items again.
+func (a *Adapter) SubmitBatch(ctx context.Context, kind BatchKind, model string, items []BatchItem, key string) (BatchRef, error) {
 	s, ok := a.batchSpec()
 	if !ok {
 		return BatchRef{}, ErrBatchUnsupported
@@ -206,24 +240,169 @@ func (a *Adapter) SubmitBatch(ctx context.Context, kind BatchKind, model string,
 	if err := a.gate(); err != nil {
 		return BatchRef{}, err
 	}
-	var id, inputFile, resultsURL string
+	ref := BatchRef{API: a.API, BaseURL: a.BaseURL, Kind: kind, Model: model, Count: len(items), SubmitKey: key,
+		SubmittedAt: time.Now().UTC()}
 	var err error
 	switch s.Style {
 	case styleOpenAIFiles, styleGeminiFiles:
-		id, inputFile, err = a.submitFiles(ctx, s, kind, model, items)
+		ref.ID, ref.InputFile, err = a.submitFiles(ctx, s, kind, model, items, key)
 	case styleInline:
-		id, err = a.submitInline(ctx, s, kind, model, items)
+		ref.ID, err = a.submitInline(ctx, s, kind, model, items)
 	case styleAnthropic:
-		id, resultsURL, err = a.submitAnthropic(ctx, s, model, items)
+		ref.ID, ref.ResultsURL, err = a.submitAnthropic(ctx, s, model, items)
 	default:
 		return BatchRef{}, fmt.Errorf("openai: batch style %q is not known", s.Style)
 	}
 	if err != nil {
+		var su *SubmitUnknownError
+		if errors.As(err, &su) {
+			su.Ref = ref // what is known of it, without an id
+			su.Ref.ID = ""
+		}
 		return BatchRef{}, err
 	}
-	return BatchRef{API: a.API, BaseURL: a.BaseURL, ID: id, Kind: kind, Model: model, Count: len(items),
-		InputFile: inputFile, ResultsURL: resultsURL, SubmittedAt: time.Now().UTC()}, nil
+	return ref, nil
 }
+
+// createBatch sends a batch create call exactly once (no client retries) and sorts its failure: definite
+// when the host refused before accepting anything, else a *SubmitUnknownError. An answer without a batch id
+// is unknown too: the host answered success.
+func (a *Adapter) createBatch(ctx context.Context, rawURL string, headers map[string]string, body []byte, id func([]byte) string) (string, *providers.Response, error) {
+	c := *a.batchClient()
+	c.MaxRetries = 0
+	resp, err := c.Post(ctx, rawURL, headers, body, "application/json")
+	if err != nil {
+		err = mapErr(err, resp)
+		if definiteRefusal(err) {
+			return "", resp, err
+		}
+		return "", resp, &SubmitUnknownError{Err: err}
+	}
+	got := id(resp.Body)
+	if got == "" {
+		return "", resp, &SubmitUnknownError{Err: fmt.Errorf("%w: batch id missing in a %d answer", decode.ErrUnexpected, resp.Status)}
+	}
+	return got, resp, nil
+}
+
+// definiteRefusal reports a failed create call the host certainly did not act on: a 4xx answer (the
+// request was refused before acceptance), a connection that was never made, or no network at all. A
+// timeout, a lost connection, a 5xx or a cancelled call may have reached a host that went on.
+func definiteRefusal(err error) bool {
+	if errors.Is(err, providers.ErrOffline) || errors.Is(err, ErrAuth) {
+		return true
+	}
+	var ae *APIError
+	if errors.As(err, &ae) && ae.Status >= 400 && ae.Status < 500 {
+		return true
+	}
+	var au *authError
+	var bk *byokError
+	if errors.As(err, &au) || errors.As(err, &bk) {
+		return true
+	}
+	var pe *providers.Error
+	if errors.As(err, &pe) {
+		switch {
+		case pe.NotSent, pe.Kind == "redirect", pe.Kind == "offline":
+			return true
+		case pe.Kind == "status" && pe.Status >= 400 && pe.Status < 500:
+			return true
+		}
+	}
+	return false
+}
+
+func batchIDOf(body []byte) string {
+	var b struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(body, &b) != nil {
+		return ""
+	}
+	return b.ID
+}
+
+// ReconcileBatch looks a submission whose outcome was unknown (ErrBatchSubmitUnknown, or a submission a
+// restart found recorded but not answered) up in the host's batch list, by the key it was sent with or
+// its uploaded input file. It returns the batch's full reference when the host has it, ErrBatchNotSubmitted
+// when the list, read to before the submission, has no such batch, and an ErrBatchSubmitUnknown error when
+// the host offers no way to tell (OpenRouter, Anthropic and Gemini batches carry no caller key) or the
+// list could not be read. ref is the submission's reference without an id.
+func (a *Adapter) ReconcileBatch(ctx context.Context, ref BatchRef) (BatchRef, error) {
+	s, ok := a.batchSpec()
+	if !ok {
+		return BatchRef{}, &SubmitUnknownError{Ref: ref, Err: ErrBatchUnsupported}
+	}
+	if strings.TrimRight(ref.BaseURL, "/") != a.BaseURL {
+		return BatchRef{}, &SubmitUnknownError{Ref: ref, Err: errors.New("openai: this submission went to another host")}
+	}
+	if !a.Configured() {
+		return BatchRef{}, &SubmitUnknownError{Ref: ref, Err: providers.ErrNoCredential}
+	}
+	byKey := s.Reconcile == reconcileMetadata && ref.SubmitKey != ""
+	byFile := (s.Reconcile == reconcileMetadata || s.Reconcile == reconcileInputFile) && ref.InputFile != ""
+	if (s.Style != styleOpenAIFiles && s.Style != styleGeminiFiles) || (!byKey && !byFile) {
+		return BatchRef{}, &SubmitUnknownError{Ref: ref, Err: errors.New("openai: this host keeps no key to find the batch by; check its batch list")}
+	}
+	cutoff := ref.SubmittedAt.Add(-reconcileSlack).Unix()
+	after := ""
+	for page := 0; page < reconcileMaxPages; page++ {
+		u := s.base + "/batches?limit=100"
+		if after != "" {
+			u += "&after=" + url.QueryEscape(after)
+		}
+		resp, err := a.batchDo(ctx, "GET", u, a.headers(), nil, "")
+		if err != nil {
+			return BatchRef{}, &SubmitUnknownError{Ref: ref, Err: err}
+		}
+		var list struct {
+			Data []struct {
+				ID          string            `json:"id"`
+				InputFileID string            `json:"input_file_id"`
+				Metadata    map[string]string `json:"metadata"`
+				CreatedAt   json.RawMessage   `json:"created_at"`
+			} `json:"data"`
+			HasMore bool   `json:"has_more"`
+			LastID  string `json:"last_id"`
+		}
+		if err := json.Unmarshal(resp.Body, &list); err != nil {
+			return BatchRef{}, &SubmitUnknownError{Ref: ref, Err: fmt.Errorf("%w: batch list", decode.ErrUnexpected)}
+		}
+		older := false
+		for _, b := range list.Data {
+			if (byKey && b.Metadata[submitKeyField] == ref.SubmitKey) || (byFile && b.InputFileID == ref.InputFile) {
+				out := ref
+				out.ID = b.ID
+				if out.InputFile == "" {
+					out.InputFile = b.InputFileID
+				}
+				return out, nil
+			}
+			if t := batchTime(b.CreatedAt); !t.IsZero() && t.Unix() < cutoff {
+				older = true // newest first: the rest of the list is from before the submission
+			}
+		}
+		if older || !list.HasMore || len(list.Data) == 0 {
+			return BatchRef{}, ErrBatchNotSubmitted
+		}
+		after = list.LastID
+		if after == "" {
+			after = list.Data[len(list.Data)-1].ID
+		}
+	}
+	return BatchRef{}, &SubmitUnknownError{Ref: ref, Err: errors.New("openai: the batch list is longer than the pages read")}
+}
+
+const (
+	reconcileMetadata  = "metadata"
+	reconcileInputFile = "input_file"
+	// submitKeyField is the metadata key a submission's key travels under
+	submitKeyField = "masamong_submit"
+	// a batch created up to this long before the recorded submit time (clock skew) is still looked at
+	reconcileSlack    = 10 * time.Minute
+	reconcileMaxPages = 20
+)
 
 // refSpec checks that ref was submitted to this adapter's host and returns the host's batch entry.
 func (a *Adapter) refSpec(ref BatchRef) (batchSpec, error) {
@@ -235,7 +414,7 @@ func (a *Adapter) refSpec(ref BatchRef) (batchSpec, error) {
 		return batchSpec{}, errors.New("openai: batch reference has no id")
 	}
 	if strings.TrimRight(ref.BaseURL, "/") != a.BaseURL {
-		return batchSpec{}, errors.New("openai: this batch was submitted to another host")
+		return batchSpec{}, ErrBatchOtherHost
 	}
 	if !a.Configured() {
 		return batchSpec{}, providers.ErrNoCredential
@@ -370,7 +549,7 @@ func isNotFound(err error) bool {
 
 // errNotFinal is returned when results are asked of a batch that is still running.
 func errNotFinal(st BatchStatus) error {
-	return fmt.Errorf("openai: batch is not finished yet (%s)", st.State)
+	return fmt.Errorf("%w (%s)", ErrBatchNotFinal, st.State)
 }
 
 func errBatchFailed(st BatchStatus) error {
@@ -544,6 +723,24 @@ func (a *Adapter) batchEmbedCost(res *EmbedResult, ref BatchRef, discount float6
 		v := *res.CostUSD * discount
 		res.CostUSD = &v
 	}
+}
+
+// BatchEmbedCost prices an embeddings batch item the host reported neither a cost nor a token count for
+// (Gemini reports no usage for embeddings): tokens, the caller's estimate of the item's inputs
+// (EstimateTokens, as a live call estimates them), at the model's catalog price at the time and the host's
+// batch discount. Nil when the model's price is unknown.
+func (a *Adapter) BatchEmbedCost(model string, tokens int, at time.Time) *float64 {
+	if tokens <= 0 {
+		return nil
+	}
+	var cost *float64
+	var estimated bool
+	a.estimateAt(&cost, &estimated, model, tokens, 0, at)
+	if cost == nil {
+		return nil
+	}
+	v := *cost * a.BatchDiscount(BatchEmbed, model)
+	return &v
 }
 
 // batchItemError is an item the host gave no result for.

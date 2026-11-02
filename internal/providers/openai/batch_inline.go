@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"masamong/internal/providers/decode"
 )
@@ -69,20 +70,32 @@ func (a *Adapter) submitInline(ctx context.Context, s batchSpec, kind BatchKind,
 	if len(data) > maxBatchBytes {
 		return "", fmt.Errorf("openai: batch is over %d MB: split it", maxBatchBytes>>20)
 	}
-	resp, err := a.batchDo(ctx, "POST", s.base+"/batches", a.headers(), data, "application/json")
+	id, _, err := a.createBatch(ctx, s.base+"/batches", a.headers(), data, batchIDOf)
 	if err != nil {
 		var ae *APIError
-		if errors.As(err, &ae) && ae.Status == 400 {
-			// "no batch variant for this model": the caller runs the items live
+		if errors.As(err, &ae) && ae.Status == 400 && noBatchVariant(ae.Message) {
+			// "no batch variant for this model": the caller runs the items live. Any other 400 (a bad
+			// field, a size) is a refusal of this batch, not of batching
 			return "", fmt.Errorf("%w: %s", ErrBatchUnsupported, ae.Message)
 		}
 		return "", err
 	}
-	var b inlineBatch
-	if json.Unmarshal(resp.Body, &b) != nil || b.ID == "" {
-		return "", fmt.Errorf("%w: batch id missing", decode.ErrUnexpected)
+	return id, nil
+}
+
+// noBatchVariant reports OpenRouter's refusal of a model it cannot batch ("model x has no batch variant",
+// "batch is not supported for model x") as opposed to a refusal of the request itself.
+func noBatchVariant(msg string) bool {
+	m := strings.ToLower(msg)
+	if !strings.Contains(m, "batch") {
+		return false
 	}
-	return b.ID, nil
+	for _, w := range []string{"variant", "not supported", "unsupported", "does not support", "not available", "no batch"} {
+		if strings.Contains(m, w) {
+			return true
+		}
+	}
+	return false
 }
 
 var inlineStates = map[string]BatchState{
@@ -132,7 +145,7 @@ func (a *Adapter) resultsInline(ctx context.Context, s batchSpec, ref BatchRef) 
 	if err := json.Unmarshal(b.Results, &rows); err != nil {
 		return nil, fmt.Errorf("%w: batch results: %v", decode.ErrUnexpected, err)
 	}
-	out, err := a.rowOutcomes(ref, rows, s.discount())
+	out, err := a.rowOutcomes(ref, rows, s.discountFor(ref.Model))
 	if err != nil {
 		return nil, err
 	}
@@ -171,11 +184,14 @@ func shareBatchCost(out []BatchOutcome, total float64) {
 			slots, weights = append(slots, slot{&o.Embed.CostUSD, &o.Embed.CostEstimated, w}), weights+w
 		}
 	}
-	if weights <= 0 || total < 0 {
+	if len(slots) == 0 || total < 0 {
 		return
 	}
 	for _, sl := range slots {
-		v := total * float64(sl.weight) / float64(weights)
+		v := total / float64(len(slots)) // no tokens reported anywhere: an even share
+		if weights > 0 {
+			v = total * float64(sl.weight) / float64(weights)
+		}
 		*sl.cost, *sl.est = &v, true
 	}
 }

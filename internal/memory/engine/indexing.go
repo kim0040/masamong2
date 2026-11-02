@@ -26,6 +26,25 @@ type IndexOptions struct {
 	// spent is what this preparation already paid before the pass (a batch's applied results): the pass
 	// stops starting paid calls once spent plus its own calls reach BudgetUSD. Live passes leave it 0.
 	spent float64
+	// workset, set by a batch preparation's live remainder, limits the pass to the leaves and messages
+	// the preparation selected (in place of Limit), so the remainder does no work the batch did not plan
+	workset *BatchWorkset
+}
+
+// pendingFor is the pass's pending leaves: the workset's, or up to Limit.
+func (e *Engine) pendingFor(opts IndexOptions, rooms []string, space string, withSummaries bool, leafDims int) ([]store.PendingLeaf, error) {
+	if w := opts.workset; w != nil {
+		return e.Store.PendingAmong(rooms, space, withSummaries, w.leafSet(), leafDims, e.Settings.Recipe.Version())
+	}
+	return e.Store.PendingAtWidth(rooms, space, withSummaries, opts.Limit, leafDims, e.Settings.Recipe.Version())
+}
+
+// pendingMessagesFor is the pass's pending messages: the workset's when it selected them, or up to Limit.
+func (e *Engine) pendingMessagesFor(opts IndexOptions, rooms []string, space string) ([]store.PendingMessage, error) {
+	if w := opts.workset; w != nil && !w.MessagesOpen {
+		return e.Store.PendingMessagesAmong(rooms, space, w.messageSet(), e.Settings.Recipe.Version())
+	}
+	return e.Store.PendingMessages(rooms, space, opts.Limit, e.Settings.Recipe.Version())
 }
 
 // IndexReport summarizes a pass. No bodies.
@@ -253,7 +272,7 @@ func (e *Engine) IndexRooms(ctx context.Context, opts IndexOptions, progress Pro
 	if err != nil {
 		return rep, err
 	}
-	pending, err := e.Store.PendingAtWidth(rooms, space, e.Settings.Summaries, opts.Limit, leafDims, e.Settings.Recipe.Version())
+	pending, err := e.pendingFor(opts, rooms, space, e.Settings.Summaries, leafDims)
 	if err != nil {
 		return rep, err
 	}
@@ -272,7 +291,7 @@ func (e *Engine) IndexRooms(ctx context.Context, opts IndexOptions, progress Pro
 			return rep, err
 		}
 		msgSpace = e.messageSpaceAt(dims)
-		if msgNeed, err = e.Store.PendingMessages(rooms, msgSpace, opts.Limit, e.Settings.Recipe.Version()); err != nil {
+		if msgNeed, err = e.pendingMessagesFor(opts, rooms, msgSpace); err != nil {
 			return rep, err
 		}
 	}
@@ -298,7 +317,7 @@ func (e *Engine) IndexRooms(ctx context.Context, opts IndexOptions, progress Pro
 			if err != nil {
 				return rep, err
 			}
-			pending, err = e.Store.PendingAtWidth(rooms, space, true, opts.Limit, leafDims, e.Settings.Recipe.Version())
+			pending, err = e.pendingFor(opts, rooms, space, true, leafDims)
 			if err != nil {
 				return rep, err
 			}
@@ -325,7 +344,7 @@ func (e *Engine) IndexRooms(ctx context.Context, opts IndexOptions, progress Pro
 			if current := e.messageSpaceAt(dims); current != msgSpace {
 				msgSpace = current
 				if msgSpace != "" {
-					msgNeed, err = e.Store.PendingMessages(rooms, msgSpace, opts.Limit, e.Settings.Recipe.Version())
+					msgNeed, err = e.pendingMessagesFor(opts, rooms, msgSpace)
 					if err != nil {
 						return rep, err
 					}

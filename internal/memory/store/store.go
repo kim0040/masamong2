@@ -1516,6 +1516,19 @@ func (s *Store) Pending(rooms []string, space string, withSummaries bool, limit 
 
 // PendingAtWidth also queues vectors unlike the target leaf width. Zero preserves usual pending rules.
 func (s *Store) PendingAtWidth(rooms []string, space string, withSummaries bool, limit, dims int, recipe ...string) ([]PendingLeaf, error) {
+	return s.pendingAtWidth(rooms, space, withSummaries, limit, dims, nil, recipe...)
+}
+
+// PendingAmong is PendingAtWidth restricted to the leaves named in among, without a limit: the pending
+// work of a set chosen earlier (a batch preparation's workset). Other leaves are skipped as they are read.
+func (s *Store) PendingAmong(rooms []string, space string, withSummaries bool, among map[string]bool, dims int, recipe ...string) ([]PendingLeaf, error) {
+	if among == nil {
+		among = map[string]bool{}
+	}
+	return s.pendingAtWidth(rooms, space, withSummaries, 0, dims, among, recipe...)
+}
+
+func (s *Store) pendingAtWidth(rooms []string, space string, withSummaries bool, limit, dims int, among map[string]bool, recipe ...string) ([]PendingLeaf, error) {
 	if len(rooms) == 0 {
 		return nil, nil
 	}
@@ -1563,6 +1576,9 @@ func (s *Store) PendingAtWidth(rooms []string, space string, withSummaries bool,
 		var needLeaf, needSumVec bool
 		if err := rows.Scan(&p.LeafID, &p.Body, &p.Summary, &needLeaf, &p.RefreshLeaf, &needSumVec); err != nil {
 			return nil, err
+		}
+		if among != nil && !among[p.LeafID] {
+			continue
 		}
 		p.NeedLeaf = needLeaf
 		p.NeedSumm = withSummaries && p.Summary == ""

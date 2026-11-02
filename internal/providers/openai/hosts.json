@@ -26,7 +26,7 @@
       "base_url": "https://api.openai.com/v1",
       "key_env": "MASAMONG_OPENAI_KEY",
       "key_url": "https://platform.openai.com/api-keys",
-      "batch": {"style": "openai_files", "kinds": ["chat", "embed"], "max_items": 50000, "max_inputs": 50000, "discount": 0.5}
+      "batch": {"style": "openai_files", "kinds": ["chat", "embed"], "max_items": 50000, "max_inputs": 50000, "discount": 0.5, "reconcile": "metadata"}
     },
     {
       "api": "anthropic",
@@ -54,7 +54,9 @@
       "key_env": "MASAMONG_NANOGPT_KEY",
       "key_url": "https://nano-gpt.com/api",
       "rerank": false,
-      "batch": {"style": "openai_files", "base_url": "https://api.nano-gpt.com/api/v1", "kinds": ["chat"], "max_items": 10000, "require_max_tokens": true, "discount": 0.5}
+      "batch": {"style": "openai_files", "base_url": "https://api.nano-gpt.com/api/v1", "kinds": ["chat"], "max_items": 10000, "require_max_tokens": true, "reconcile": "input_file",
+        "_about": "https://docs.nano-gpt.com/api-reference/endpoint/batches (checked 2026-11-02): OpenAI, Claude and Gemini rows are billed at half the live price; open-source rows (gpt-oss included) run through normal routing at the normal price or less, so they are counted at the live price.",
+        "discount": 0.5, "discount_models": ["gpt-", "openai/", "o1", "o3", "o4", "chatgpt-", "claude-", "anthropic/", "gemini-", "google/gemini-"], "discount_except": ["gpt-oss", "openai/gpt-oss"]}
     },
     {
       "api": "compatible",

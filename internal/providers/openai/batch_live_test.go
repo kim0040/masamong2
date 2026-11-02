@@ -74,7 +74,7 @@ func (a *Adapter) liveStyle() string {
 func liveRun(t *testing.T, a *Adapter, kind BatchKind, model string, items []BatchItem, wait time.Duration) {
 	t.Helper()
 	ctx := context.Background()
-	ref, err := a.SubmitBatch(ctx, kind, model, items)
+	ref, err := a.SubmitBatch(ctx, kind, model, items, "")
 	if err != nil {
 		t.Fatalf("%s submit: %v", kind, err)
 	}
