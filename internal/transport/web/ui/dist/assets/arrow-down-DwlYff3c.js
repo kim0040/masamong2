@@ -1,0 +1,1 @@
+import{D as e,O as t,r as n}from"./Button-DifkwHxT.js";var r=new Set([`$$slots`,`$$events`,`$$legacy`]);function i(i,a){let o=e(a,r),s={name:`arrow-down`,size:24,node:[[`path`,{d:`M12 5v14`}],[`path`,{d:`m19 12-7 7-7-7`}]]};n(i,t(()=>o,{get icon(){return s}}))}export{i as t};
