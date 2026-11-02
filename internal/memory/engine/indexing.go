@@ -23,6 +23,9 @@ type IndexOptions struct {
 	BudgetUSD float64  // stop starting new paid calls once spent (cache hits are free)
 	DryRun    bool     // sync leaves and count work, but make no paid calls
 	Limit     int      // max leaves to process this pass (0 = all pending)
+	// spent is what this preparation already paid before the pass (a batch's applied results): the pass
+	// stops starting paid calls once spent plus its own calls reach BudgetUSD. Live passes leave it 0.
+	spent float64
 }
 
 // IndexReport summarizes a pass. No bodies.
@@ -45,6 +48,18 @@ type IndexReport struct {
 	Elapsed  string            `json:"elapsed"`
 	// MessageVectors are the message vectors embedded this pass (memory.message_vectors).
 	MessageVectors int `json:"message_vectors,omitempty"`
+	// Mode is "batch" for a preparation that sent its work as provider batches (batch.go); empty for a
+	// live pass. BatchItems are the leaves and messages sent in batches (leaf vectors, summaries and
+	// message vectors each count once), BatchFailed those of them that came back failed, expired or
+	// missing and were left to the live remainder, and LiveItems those planned live from the start
+	// because the role's host cannot batch them. Counts only.
+	Mode        string `json:"mode,omitempty"`
+	BatchItems  int    `json:"batch_items,omitempty"`
+	BatchFailed int    `json:"batch_failed,omitempty"`
+	LiveItems   int    `json:"live_items,omitempty"`
+	// BatchWaiting are rooms the pass left alone because their batch is still at the provider (their
+	// pending leaves are paid for there); they are indexed once the batch is applied.
+	BatchWaiting []string `json:"batch_waiting_rooms,omitempty"`
 }
 
 // Estimate previews a pass before it spends anything. Costs use the models' prices (config or the
@@ -69,6 +84,13 @@ type Estimate struct {
 	// space, a cleared cache). summarize embeds each one alone, so they are part of EmbedUSD, TotalUSD and
 	// Seconds too; before they were counted nowhere and such a pass was estimated at 0 s and $0.
 	SummaryVectors int `json:"summary_vectors,omitempty"`
+	// BatchUSD is TotalUSD at batch prices (BatchEstimate): the parts a role's host can batch at its
+	// discount, the rest (summary vectors, a host without batches) at the live price. Set only for a
+	// batch-mode estimate.
+	BatchUSD *float64 `json:"batch_usd,omitempty"`
+	// the parts of TotalUSD a batch can carry: leaf and message embeddings (embed role) and summary
+	// chats (summary role); BatchEstimate prices them
+	leafEmbedUSD, messageEmbedUSD, summaryChatUSD float64
 }
 
 // Rates are measured call latencies (exponential moving averages) used for time estimates.
@@ -206,54 +228,18 @@ func (e *Engine) IndexRooms(ctx context.Context, opts IndexOptions, progress Pro
 	if err != nil {
 		return rep, err
 	}
-	roomTZ := map[string]*time.Location{}
-	roomTZErr := map[string]error{}
-	if rs, err := e.Store.Rooms(); err == nil {
-		for _, r := range rs {
-			if r.NaiveTimezone != "" {
-				if loc, err := time.LoadLocation(r.NaiveTimezone); err == nil {
-					roomTZ[r.Room.Room] = loc
-				} else {
-					roomTZErr[r.Room.Room] = err
-				}
-			}
-		}
+	// checked under indexMu: a batch submitted while this pass waited for the lock holds its room by now
+	if rooms, rep.BatchWaiting, err = e.withoutWaitingRooms(rooms); err != nil {
+		return rep, err
 	}
-	var readyRooms []string
-	for i, room := range rooms {
-		if e.retired.Load() {
-			return rep, errRetired
-		}
-		tz := roomTZ[room]
-		if err := roomTZErr[room]; err != nil {
-			// the room keeps being indexed: its messages are read in the instance's zone until the stored
-			// zone is corrected, and the report says so
-			msg := "unknown room timezone, using the instance timezone: " + err.Error()
-			if rep.Warnings == nil {
-				rep.Warnings = map[string]string{}
-			}
-			rep.Warnings[room] = msg
-			if _, warned := warnedRoomZones.LoadOrStore(room+"|"+err.Error(), true); !warned {
-				slog.Warn("memory: "+msg, "room", room)
-			}
-		}
-		if tz == nil {
-			tz = e.Settings.NaiveTZ
-		}
-		st, err := e.Store.SyncLeaves(room, e.Settings.Recipe, time.Now(), tz)
-		if err != nil {
-			// one room's failure (a dropped connection, a damaged row) must not hold every other room back
-			if rep.FailedRooms == nil {
-				rep.FailedRooms = map[string]string{}
-			}
-			rep.FailedRooms[room] = err.Error()
-			continue
-		}
-		rep.Rooms = append(rep.Rooms, st)
-		readyRooms = append(readyRooms, room)
-		progress("sync", i+1, len(rooms))
+	if len(rooms) == 0 && len(rep.BatchWaiting) > 0 {
+		// every room asked for is held; an empty list must not reach the message query, where it means all
+		rep.Elapsed = time.Since(start).Round(time.Millisecond).String()
+		return rep, nil
 	}
-	rooms = readyRooms
+	if rooms, err = e.syncRooms(rooms, &rep, progress); err != nil {
+		return rep, err
+	}
 	space := e.EmbedSpace()
 	if rep.Adapted, err = e.adaptSpace(); err != nil {
 		return rep, err
@@ -267,31 +253,9 @@ func (e *Engine) IndexRooms(ctx context.Context, opts IndexOptions, progress Pro
 		return rep, err
 	}
 	rep.Pending = len(pending)
-	// reuse pass (free): a leaf of the same text already embedded in this space (with its summary),
-	// or a vector kept in the embedding cache
-	var needEmbed []store.PendingLeaf
-	for _, p := range pending {
-		if !p.NeedLeaf {
-			continue
-		}
-		if l, ok := e.Store.LeafWithBody(p.Body, space, p.LeafID); ok && !p.RefreshLeaf && reusableLeafWidth(l.LeafVec, leafDims) {
-			if err := e.Store.SaveLeafVector(p.LeafID, space, l.LeafVec, p.Body); err != nil {
-				return rep, err
-			}
-			if l.Summary != "" && len(l.SummaryVec) == len(l.LeafVec) {
-				if err := e.Store.SaveSummary(p.LeafID, l.Summary, l.SummaryVec, p.Body); err != nil {
-					return rep, err
-				}
-			}
-			rep.FromCache++
-		} else if v, ok := e.cachedDocument(p.Body); ok && !p.RefreshLeaf && reusableLeafWidth(v, leafDims) {
-			if err := e.Store.SaveLeafVector(p.LeafID, space, v, p.Body); err != nil {
-				return rep, err
-			}
-			rep.FromCache++
-		} else {
-			needEmbed = append(needEmbed, p)
-		}
+	needEmbed, err := e.reuseLeaves(pending, space, leafDims, &rep)
+	if err != nil {
+		return rep, err
 	}
 	// message vectors (memory.message_vectors, on unless set to false): the messages of closed leaves that have no vector in the message
 	// space yet, or whose vector was made with another speaker label
@@ -318,7 +282,7 @@ func (e *Engine) IndexRooms(ctx context.Context, opts IndexOptions, progress Pro
 			rep.StoppedBy = "provider_not_configured"
 		}
 	} else {
-		b := &budget{limit: opts.BudgetUSD}
+		b := &budget{limit: opts.BudgetUSD, spent: opts.spent}
 		n, stop := e.embedLeaves(ctx, needEmbed, space, b, progress)
 		rep.LeafVectors = n
 		if stop != "" {
@@ -370,7 +334,7 @@ func (e *Engine) IndexRooms(ctx context.Context, opts IndexOptions, progress Pro
 				rep.StoppedBy = stop
 			}
 		}
-		rep.SpentUSD = b.spent
+		rep.SpentUSD = b.spent - opts.spent
 	}
 	if !e.Models.EmbedTruncatable && rep.StoppedBy == "" {
 		lo, hi, err := e.Store.LeafVectorWidths(space, e.Settings.Recipe.Version())
@@ -393,6 +357,109 @@ func (e *Engine) IndexRooms(ctx context.Context, opts IndexOptions, progress Pro
 	}
 	rep.Elapsed = time.Since(start).Round(time.Millisecond).String()
 	return rep, nil
+}
+
+// withoutWaitingRooms leaves out the rooms whose batch is still at the provider (BatchWaitingRooms): a
+// live pass over them would pay again for leaves the batch is already paid to embed.
+func (e *Engine) withoutWaitingRooms(rooms []string) ([]string, []string, error) {
+	held, err := e.BatchWaitingRooms()
+	if err != nil || len(held) == 0 {
+		return rooms, nil, err
+	}
+	kept := make([]string, 0, len(rooms))
+	var waiting []string
+	for _, r := range rooms {
+		if held[r] {
+			waiting = append(waiting, r)
+		} else {
+			kept = append(kept, r)
+		}
+	}
+	return kept, waiting, nil
+}
+
+// syncRooms resyncs the leaves of each room and returns the rooms that synced; a room that could not be
+// read or written is recorded in rep.FailedRooms and left out, so it does not hold the others back.
+func (e *Engine) syncRooms(rooms []string, rep *IndexReport, progress Progress) ([]string, error) {
+	roomTZ := map[string]*time.Location{}
+	roomTZErr := map[string]error{}
+	if rs, err := e.Store.Rooms(); err == nil {
+		for _, r := range rs {
+			if r.NaiveTimezone != "" {
+				if loc, err := time.LoadLocation(r.NaiveTimezone); err == nil {
+					roomTZ[r.Room.Room] = loc
+				} else {
+					roomTZErr[r.Room.Room] = err
+				}
+			}
+		}
+	}
+	var readyRooms []string
+	for i, room := range rooms {
+		if e.retired.Load() {
+			return readyRooms, errRetired
+		}
+		tz := roomTZ[room]
+		if err := roomTZErr[room]; err != nil {
+			// the room keeps being indexed: its messages are read in the instance's zone until the stored
+			// zone is corrected, and the report says so
+			msg := "unknown room timezone, using the instance timezone: " + err.Error()
+			if rep.Warnings == nil {
+				rep.Warnings = map[string]string{}
+			}
+			rep.Warnings[room] = msg
+			if _, warned := warnedRoomZones.LoadOrStore(room+"|"+err.Error(), true); !warned {
+				slog.Warn("memory: "+msg, "room", room)
+			}
+		}
+		if tz == nil {
+			tz = e.Settings.NaiveTZ
+		}
+		st, err := e.Store.SyncLeaves(room, e.Settings.Recipe, time.Now(), tz)
+		if err != nil {
+			// one room's failure (a dropped connection, a damaged row) must not hold every other room back
+			if rep.FailedRooms == nil {
+				rep.FailedRooms = map[string]string{}
+			}
+			rep.FailedRooms[room] = err.Error()
+			continue
+		}
+		rep.Rooms = append(rep.Rooms, st)
+		readyRooms = append(readyRooms, room)
+		progress("sync", i+1, len(rooms))
+	}
+	return readyRooms, nil
+}
+
+// reuseLeaves is the free reuse pass: a pending leaf whose text is already embedded in this space on
+// another leaf (with its summary), or kept in the embedding cache, takes that vector. It returns the
+// leaves that still need a paid embedding.
+func (e *Engine) reuseLeaves(pending []store.PendingLeaf, space string, leafDims int, rep *IndexReport) ([]store.PendingLeaf, error) {
+	var needEmbed []store.PendingLeaf
+	for _, p := range pending {
+		if !p.NeedLeaf {
+			continue
+		}
+		if l, ok := e.Store.LeafWithBody(p.Body, space, p.LeafID); ok && !p.RefreshLeaf && reusableLeafWidth(l.LeafVec, leafDims) {
+			if err := e.Store.SaveLeafVector(p.LeafID, space, l.LeafVec, p.Body); err != nil {
+				return needEmbed, err
+			}
+			if l.Summary != "" && len(l.SummaryVec) == len(l.LeafVec) {
+				if err := e.Store.SaveSummary(p.LeafID, l.Summary, l.SummaryVec, p.Body); err != nil {
+					return needEmbed, err
+				}
+			}
+			rep.FromCache++
+		} else if v, ok := e.cachedDocument(p.Body); ok && !p.RefreshLeaf && reusableLeafWidth(v, leafDims) {
+			if err := e.Store.SaveLeafVector(p.LeafID, space, v, p.Body); err != nil {
+				return needEmbed, err
+			}
+			rep.FromCache++
+		} else {
+			needEmbed = append(needEmbed, p)
+		}
+	}
+	return needEmbed, nil
 }
 
 // pendingLeafDims repairs non-MRL widths against a leaf result, or the most common stored width
@@ -491,12 +558,14 @@ func (e *Engine) estimate(needEmbed, pending []store.PendingLeaf, msgs []store.P
 	}
 	// a summary vector embeds the stored summary, about summaryOutputTokens long
 	est.EmbedUSD = float64(tokens+msgTokens+sumVecs*summaryOutputTokens) * embIn
+	est.leafEmbedUSD, est.messageEmbedUSD = float64(tokens)*embIn, float64(msgTokens)*embIn
 	if sums > 0 {
 		if in, out, ok := e.price(e.Models.Summary); ok {
 			est.SummaryUSD = float64(sumPrompt)*in + float64(sums*summaryOutputTokens)*out
 		} else {
 			est.SummaryUSD, est.PriceBasis = float64(sums)*fallbackSummaryCall, "fallback"
 		}
+		est.summaryChatUSD = est.SummaryUSD
 		est.SummaryUSD += float64(sums*summaryOutputTokens) * embIn // the summary's own vector
 	}
 	est.TotalUSD = est.EmbedUSD + est.SummaryUSD
@@ -545,10 +614,7 @@ func (e *Engine) embedLeaves(ctx context.Context, items []store.PendingLeaf, spa
 					failed.Store(true)
 				}
 			}()
-			texts := make([]string, len(bt))
-			for i, p := range bt {
-				texts[i] = p.Body
-			}
+			texts := leafInputs(bt)
 			t0 := time.Now()
 			res, err := e.embedDocs(ctx, texts, 0.00002*float64(len(texts)))
 			if err != nil {
@@ -586,6 +652,16 @@ func (e *Engine) embedLeaves(ctx context.Context, items []store.PendingLeaf, spa
 		stop = "store_error"
 	}
 	return done, stop
+}
+
+// leafInputs are the embedding inputs of a group of leaves, live (embedLeaves) and in a batch alike:
+// each leaf's body as it is.
+func leafInputs(bt []store.PendingLeaf) []string {
+	texts := make([]string, len(bt))
+	for i, p := range bt {
+		texts[i] = p.Body
+	}
+	return texts
 }
 
 func (e *Engine) embedDocs(ctx context.Context, texts []string, fallback float64) (openai.EmbedResult, error) {
@@ -628,6 +704,25 @@ func normalizeSummary(text, body string) string {
 	return s
 }
 
+// summaryRequest is the chat request that summarizes one leaf. The live pass (summarize) and a batch
+// (batch.go) send exactly this request, so the prompt bytes and parameters are the same either way.
+func (e *Engine) summaryRequest(body string) openai.ChatRequest {
+	r := []rune(body)
+	temp := 0.1
+	return openai.ChatRequest{Model: e.Models.Summary, MaxTokens: 120, Temperature: &temp,
+		Effort:   "none", // a one-line summary needs no thinking, which would eat the 120 tokens
+		Messages: []openai.Message{{Role: "user", Content: lang.Fill(e.Settings.SummaryPrompt, "body", string(r[:min(summaryBodyRuneLimit, len(r))]))}}}
+}
+
+// cachedSummaryText is a summary already written for this text by the summary model (kept when its
+// leaf was re-cut), so it is not paid for again; a stored fallback (the body's opening) does not count.
+func (e *Engine) cachedSummaryText(body string) (string, bool) {
+	if v, ok := e.Store.CachedVector(store.CacheKey(e.Models.Summary, "summary-text", body)); ok && string(v) != normalizeSummary("", body) {
+		return string(v), true
+	}
+	return "", false
+}
+
 func (e *Engine) summarize(ctx context.Context, items []store.PendingLeaf, b *budget, progress Progress) (int, int, string) {
 	var todo []store.PendingLeaf
 	for _, p := range items {
@@ -645,7 +740,6 @@ func (e *Engine) summarize(ctx context.Context, items []store.PendingLeaf, b *bu
 	summaryVecs := map[string][]byte{}
 	sem := make(chan struct{}, e.Settings.Workers)
 	var wg sync.WaitGroup
-	temp := 0.1
 	for i, p := range todo {
 		if !b.ok() {
 			stop = "budget"
@@ -670,19 +764,16 @@ func (e *Engine) summarize(ctx context.Context, items []store.PendingLeaf, b *bu
 			}()
 			summary := p.Summary
 			if summary == "" {
-				if v, ok := e.Store.CachedVector(store.CacheKey(e.Models.Summary, "summary-text", p.Body)); ok && string(v) != normalizeSummary("", p.Body) {
-					summary = string(v)
+				if cached, ok := e.cachedSummaryText(p.Body); ok {
+					summary = cached
 				} else {
-					body := []rune(p.Body)
 					a := e.summaryLLM()
 					if a == nil {
 						failed.Store(true)
 						return
 					}
 					began := time.Now()
-					res, err := a.Chat(ctx, openai.ChatRequest{Model: e.Models.Summary, MaxTokens: 120, Temperature: &temp,
-						Effort:   "none", // a one-line summary needs no thinking, which would eat the 120 tokens
-						Messages: []openai.Message{{Role: "user", Content: lang.Fill(e.Settings.SummaryPrompt, "body", string(body[:min(2800, len(body))]))}}})
+					res, err := a.Chat(ctx, e.summaryRequest(p.Body))
 					latency := res.Elapsed
 					if latency <= 0 {
 						latency = time.Since(began)

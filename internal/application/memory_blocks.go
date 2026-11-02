@@ -23,6 +23,7 @@ import (
 	"masamong/internal/memory/engine"
 	"masamong/internal/memory/store"
 	"masamong/internal/observability"
+	"masamong/internal/providers/openai"
 )
 
 // A memory block is one source room: an imported KakaoTalk chat or one Discord channel's captured
@@ -36,6 +37,8 @@ type blockMeta struct {
 	// AutoUpdate indexes new captured messages in the background (Discord rooms; default on).
 	AutoUpdate *bool  `json:"auto_update,omitempty"`
 	BudgetUSD  string `json:"budget_usd,omitempty"`
+	// Mode is the block's default prepare mode ("" or live, batch), the way BudgetUSD is its default budget.
+	Mode string `json:"mode,omitempty"`
 }
 
 func (m blockMeta) autoUpdate() bool { return m.AutoUpdate == nil || *m.AutoUpdate }
@@ -58,7 +61,17 @@ const (
 	// a run renews its lease every quarter of it, so a prepare longer than the lease still records its end
 	jobLeaseTTL    = 24 * time.Hour
 	jobWatchPeriod = time.Second
+
+	// prepare modes (memory.blocks.prepare mode): live calls, or provider batch jobs at about half the
+	// price with results within about a day (engine/batch.go)
+	prepareLive  = "live"
+	prepareBatch = "batch"
+	// a cancelled batch preparation asks the hosts to stop and applies what finished within this time
+	batchCancelTimeout = 3 * time.Minute
+	batchModeNote      = "batch mode: the provider returns the results within about 24 hours (at most its own deadline) at about half the price; the job waits for them, then anything the host could not batch runs live"
 )
+
+func validPrepareMode(m string) bool { return m == prepareLive || m == prepareBatch }
 
 func (s *Service) memoryBlocks(ctx context.Context, req action.Request) action.Result {
 	in := inputMap(req)
@@ -126,6 +139,28 @@ type preparePayload struct {
 	SourceRoom string  `json:"source_room"`
 	BudgetUSD  float64 `json:"budget_usd"`
 	Limit      int     `json:"limit,omitempty"`
+	Mode       string  `json:"mode,omitempty"` // "" = live
+}
+
+func (p preparePayload) mode() string {
+	if p.Mode == "" {
+		return prepareLive
+	}
+	return p.Mode
+}
+
+// batchPlanOf is the room's stored batch plan, if it has one (a waiting or applied, unfinished batch).
+func batchPlanOf(eng *engine.Engine, room string) (engine.BatchPlanInfo, bool) {
+	plans, err := eng.BatchPlans()
+	if err != nil {
+		return engine.BatchPlanInfo{}, false
+	}
+	for _, p := range plans {
+		if p.Room == room {
+			return p, true
+		}
+	}
+	return engine.BatchPlanInfo{}, false
 }
 
 func (s *Service) prepareMemoryBlock(ctx context.Context, req action.Request, in map[string]any) action.Result {
@@ -153,27 +188,59 @@ func (s *Service) prepareMemoryBlock(ctx context.Context, req action.Request, in
 	if limit < 0 {
 		return action.Fail(req, errcode.InvalidInput, "generic.error", "limit must be 0 (all) or more", nil)
 	}
+	mode := strings.TrimSpace(strVal(in, "mode", meta.Mode))
+	if mode == "" {
+		mode = prepareLive
+	}
+	if !validPrepareMode(mode) {
+		return action.Fail(req, errcode.InvalidInput, "generic.error", "mode must be live or batch", nil)
+	}
 	if boolVal(in, "dry_run") {
 		report, err := eng.IndexRooms(ctx, engine.IndexOptions{Rooms: []string{candidate.SourceRoom}, DryRun: true, Limit: limit}, nil)
 		if err != nil {
 			return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
 		}
+		if mode == prepareBatch && report.Estimate != nil {
+			est := eng.BatchEstimate(*report.Estimate)
+			report.Estimate, report.Mode = &est, prepareBatch
+		}
 		prepared := candidate
 		prepared.ID = blocks.BlockID(candidate.Collection, candidate.SourceRoom, eng.Settings.Recipe.Version(), eng.EmbedSpace())
-		return action.OK(req, map[string]any{"dry_run": true, "would_prepare": true, "block": prepared, "report": report,
-			"budget_usd": budget, "cost_usd": 0, "llm_configured": eng.LLM != nil && eng.LLM.Configured()})
+		out := map[string]any{"dry_run": true, "would_prepare": true, "block": prepared, "report": report,
+			"budget_usd": budget, "cost_usd": 0, "llm_configured": eng.LLM != nil && eng.LLM.Configured(), "mode": mode}
+		if mode == prepareBatch {
+			out["note"] = batchModeNote
+		}
+		return action.OK(req, out)
+	}
+	// a batch already in flight for the room is resumed, never paid again live: the job waits for it
+	resumed := false
+	if _, ok := batchPlanOf(eng, candidate.SourceRoom); ok && mode == prepareLive {
+		mode, resumed = prepareBatch, true
 	}
 	if eng.LLM == nil || !eng.LLM.Configured() {
 		return action.Fail(req, errcode.ProviderUnconfigured, "provider.unconfigured", s.msg(req, "provider.unconfigured", "provider", s.Doc().Models["embed"].Provider),
 			map[string]any{"source_room": candidate.SourceRoom})
 	}
-	payload := preparePayload{SourceRoom: candidate.SourceRoom, BudgetUSD: budget, Limit: limit}
-	if boolVal(in, "background") {
+	payload := preparePayload{SourceRoom: candidate.SourceRoom, BudgetUSD: budget, Limit: limit, Mode: mode}
+	// a batch waits up to a day for its results: it always runs as a background job
+	if boolVal(in, "background") || mode == prepareBatch {
 		j, reused, err := s.startPrepareJob(payload)
 		if err != nil {
 			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
 		}
-		res := action.OK(req, map[string]any{"job": jobJSON(j), "already_running": reused, "source_room": candidate.SourceRoom})
+		var running preparePayload
+		if json.Unmarshal([]byte(j.Payload), &running) == nil && running.SourceRoom != "" {
+			mode = running.mode() // a job already running keeps its own mode
+		}
+		out := map[string]any{"job": jobJSON(j), "already_running": reused, "source_room": candidate.SourceRoom, "mode": mode, "background": true}
+		if mode == prepareBatch {
+			out["note"] = batchModeNote
+		}
+		if resumed {
+			out["batch_resumed"] = true
+		}
+		res := action.OK(req, out)
 		res.JobID = j.ID
 		return res
 	}
@@ -208,13 +275,104 @@ func (s *Service) roomMessages(eng *engine.Engine, room string) int {
 // taken by a newer run) writes no block status, so it cannot overwrite the newer run's. It is asked
 // right before the write, not left to the cancel watcher's one-second tick.
 func (s *Service) prepareRoom(ctx context.Context, candidate blocks.Block, p preparePayload, progress engine.Progress, owned func() bool) (blocks.Block, engine.IndexReport, error) {
+	eng, prepared, err := s.beginPrepare(candidate)
+	if err != nil {
+		return prepared, engine.IndexReport{}, err
+	}
+	report, runErr := eng.IndexRooms(ctx, engine.IndexOptions{Rooms: []string{prepared.SourceRoom}, BudgetUSD: p.BudgetUSD, Limit: p.Limit}, progress)
+	return s.endPrepare(ctx, eng, prepared, report, runErr, owned)
+}
+
+// prepareRoomBatch is prepareRoom in batch mode: the same block bookkeeping around runBatchPrepare.
+func (s *Service) prepareRoomBatch(ctx context.Context, candidate blocks.Block, p preparePayload, progress engine.Progress, status engine.BatchStatusFunc, owned func() bool) (blocks.Block, engine.IndexReport, error) {
+	eng, prepared, err := s.beginPrepare(candidate)
+	if err != nil {
+		return prepared, engine.IndexReport{}, err
+	}
+	report, runErr := s.runBatchPrepare(ctx, eng, p, progress, status)
+	if current, err := s.MemoryEngine(); err == nil {
+		eng = current // the batch may have outlasted the engine it started on
+	}
+	return s.endPrepare(ctx, eng, prepared, report, runErr, owned)
+}
+
+// runBatchPrepare submits the room's work as provider batches (or resumes the stored plan), waits for
+// the results without holding the index, applies them and runs the live remainder. A run stopped by
+// the daemon or taken by a newer run leaves the plan for the next one; a cancel from the console stops
+// the batches and keeps what finished.
+func (s *Service) runBatchPrepare(ctx context.Context, eng *engine.Engine, p preparePayload, progress engine.Progress, status engine.BatchStatusFunc) (engine.IndexReport, error) {
+	plan, rep, err := eng.PrepareBatch(ctx, p.SourceRoom, engine.BatchOptions{BudgetUSD: p.BudgetUSD, Limit: p.Limit}, progress)
+	if err != nil {
+		return rep, err
+	}
+	if len(plan.Groups) == 0 {
+		if rep.StoppedBy != "" || len(rep.FailedRooms) > 0 {
+			return rep, nil
+		}
+		// nothing went to a batch (no paid work, or no host can batch it): the pass runs live now
+		live, err := eng.IndexRooms(ctx, engine.IndexOptions{Rooms: []string{p.SourceRoom}, BudgetUSD: p.BudgetUSD, Limit: p.Limit}, progress)
+		live.Mode, live.LiveItems = prepareBatch, rep.LiveItems
+		live.FromCache += rep.FromCache
+		live.Adapted += rep.Adapted
+		return live, err
+	}
+	if err := eng.WaitBatch(ctx, &plan, status); err != nil {
+		return s.stopBatch(ctx, eng, &plan, rep, err)
+	}
+	var final engine.IndexReport
+	for attempt := 0; ; attempt++ {
+		// a config change during the wait made a new engine: the results go to the current one
+		if current, err := s.MemoryEngine(); err == nil {
+			eng = current
+		}
+		if _, err = eng.ApplyBatch(ctx, &plan); err == nil {
+			final, err = eng.FinishBatch(ctx, &plan, progress)
+		}
+		if errors.Is(err, engine.ErrRetired) && attempt < 2 {
+			continue
+		}
+		break
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			return s.stopBatch(ctx, eng, &plan, rep, err)
+		}
+		return rep, err // the plan stays stored; a retry or the next start finishes it
+	}
+	final.FromCache += rep.FromCache
+	final.Adapted += rep.Adapted
+	return final, nil
+}
+
+// stopBatch ends a batch preparation whose context ended. Only the operator's cancel stops the
+// batches; the daemon stopping or a newer run taking the job leaves the plan to be resumed.
+func (s *Service) stopBatch(ctx context.Context, eng *engine.Engine, plan *engine.BatchPlan, rep engine.IndexReport, err error) (engine.IndexReport, error) {
+	if ctx.Err() == nil || (s.jobCtx != nil && s.jobCtx.Err() != nil) || errors.Is(context.Cause(ctx), errJobTaken) {
+		return rep, err
+	}
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), batchCancelTimeout)
+	defer cancel()
+	if current, e := s.MemoryEngine(); e == nil {
+		eng = current
+	}
+	if _, cerr := eng.CancelPlan(cctx, plan); cerr != nil {
+		s.Log.Warn("memory: cancelling a batch left work behind", "room", plan.Room, "err", cerr)
+	}
+	rep.StoppedBy = "cancelled"
+	rep.LeafVectors, rep.Summaries, rep.MessageVectors = plan.LeafVectors, plan.Summaries, plan.MessageVectors
+	rep.SpentUSD, rep.BatchItems, rep.BatchFailed, rep.LiveItems = plan.SpentUSD, plan.BatchItems, plan.BatchFailed, plan.LiveItems
+	return rep, nil
+}
+
+// beginPrepare marks the block preparing in the catalog, with its current counts and identity.
+func (s *Service) beginPrepare(candidate blocks.Block) (*engine.Engine, blocks.Block, error) {
 	eng, err := s.MemoryEngine()
 	if err != nil {
-		return candidate, engine.IndexReport{}, err
+		return nil, candidate, err
 	}
 	rooms, err := eng.Store.Rooms()
 	if err != nil {
-		return candidate, engine.IndexReport{}, err
+		return nil, candidate, err
 	}
 	prepared := candidate
 	for _, room := range rooms {
@@ -237,9 +395,13 @@ func (s *Service) prepareRoom(ctx context.Context, candidate blocks.Block, p pre
 	prepared.EmbeddingSpace = eng.EmbedSpace()
 	prepared.Status, prepared.Error = "preparing", ""
 	if err := s.savePreparedBlock(prepared); err != nil {
-		return prepared, engine.IndexReport{}, err
+		return nil, prepared, err
 	}
-	report, runErr := eng.IndexRooms(ctx, engine.IndexOptions{Rooms: []string{prepared.SourceRoom}, BudgetUSD: p.BudgetUSD, Limit: p.Limit}, progress)
+	return eng, prepared, nil
+}
+
+// endPrepare records a preparation's outcome in the catalog.
+func (s *Service) endPrepare(ctx context.Context, eng *engine.Engine, prepared blocks.Block, report engine.IndexReport, runErr error, owned func() bool) (blocks.Block, engine.IndexReport, error) {
 	s.saveIndexRates(eng)
 	prepared.PreparedAt = s.Clock.Now().UTC().Format(time.RFC3339)
 	prepared.CostUSD = report.SpentUSD
@@ -483,6 +645,13 @@ func (s *Service) runPrepareJob(ctx context.Context, j jobs.Job, token string) {
 		s.finishJob(j.ID, token, j.Attempt, nil, errors.New("block not found"), errcode.InvalidInput)
 		return
 	}
+	// a batch for the room already in flight is resumed in batch mode whatever the job asked for
+	if eng, err := s.MemoryEngine(); err == nil && p.mode() == prepareLive {
+		if _, ok := batchPlanOf(eng, p.SourceRoom); ok {
+			p.Mode = prepareBatch
+		}
+	}
+	batch := p.mode() == prepareBatch
 	started := time.Now()
 	var last time.Time
 	phaseSpan := map[string][2]float64{"sync": {0, 5}, "embed": {5, 70}, "summaries": {70, 100}}
@@ -496,7 +665,11 @@ func (s *Service) runPrepareJob(ctx context.Context, j jobs.Job, token string) {
 			phaseSpan["messages"] = [2]float64{40, 100}
 		}
 	}
-	progress := func(phase string, done, total int) {
+	if batch {
+		// waiting for the provider is most of a batch preparation; the live remainder is the tail
+		phaseSpan = map[string][2]float64{"sync": {0, 5}, "batch": {5, 85}, "embed": {85, 90}, "summaries": {90, 95}, "messages": {95, 100}}
+	}
+	publish := func(phase, label string, done, total int, eta bool) {
 		now := time.Now()
 		if now.Sub(last) < jobProgressPeriod && done < total {
 			return
@@ -513,24 +686,47 @@ func (s *Service) runPrepareJob(ctx context.Context, j jobs.Job, token string) {
 		overall := span[0] + (span[1]-span[0])*pct
 		elapsed := now.Sub(started).Seconds()
 		pr := jobs.Progress{Phase: phase, Done: done, Total: total, Remaining: max(0, total-done), PhasePct: math.Round(pct*1000) / 10,
-			OverallPct: math.Round(overall*10) / 10, ElapsedS: int(elapsed), Label: fmt.Sprintf("%s %d/%d", phase, done, total)}
-		if overall > 1 && overall < 100 {
+			OverallPct: math.Round(overall*10) / 10, ElapsedS: int(elapsed), Label: label}
+		if eta && overall > 1 && overall < 100 {
 			eta := elapsed * (100 - overall) / overall
 			e := int(eta)
 			pr.ETAS, pr.ETALabel = &e, jobs.FormatETA(eta)
 		}
 		_, _ = s.setRunProgress(j.ID, token, j.Attempt, pr)
 	}
+	progress := func(phase string, done, total int) {
+		publish(phase, fmt.Sprintf("%s %d/%d", phase, done, total), done, total, true)
+	}
+	// the provider decides when a batch is done (within its deadline): no ETA, and the state in the label
+	// (the console localizes the phase)
+	status := func(state openai.BatchState, done, total int) {
+		publish("batch", fmt.Sprintf("batch %s %d/%d", state, done, total), done, total, false)
+	}
 	owned := func() bool { return s.runOwnsJob(j.ID, token, j.Attempt) }
-	prepared, report, err := s.prepareRoom(ctx, candidate, p, progress, owned)
+	var prepared blocks.Block
+	var rep engine.IndexReport
+	var err error
+	if batch {
+		prepared, rep, err = s.prepareRoomBatch(ctx, candidate, p, progress, status, owned)
+	} else {
+		prepared, rep, err = s.prepareRoom(ctx, candidate, p, progress, owned)
+	}
 	if errors.Is(err, errJobTaken) || errors.Is(context.Cause(ctx), errJobTaken) {
 		return // the job is a newer run's now: its outcome, not this one, is recorded
 	}
 	result := map[string]any{"source_room": p.SourceRoom, "block_id": prepared.ID, "status": prepared.Status,
-		"leaf_vectors": report.LeafVectors, "from_cache": report.FromCache, "summaries": report.Summaries,
-		"spent_usd": report.SpentUSD, "stopped_by": report.StoppedBy, "elapsed": report.Elapsed}
+		"leaf_vectors": rep.LeafVectors, "from_cache": rep.FromCache, "summaries": rep.Summaries,
+		"spent_usd": rep.SpentUSD, "stopped_by": rep.StoppedBy, "elapsed": rep.Elapsed, "mode": p.mode()}
 	if s.Doc().Memory.MessageVectorsOn() {
-		result["message_vectors"] = report.MessageVectors
+		result["message_vectors"] = rep.MessageVectors
+	}
+	if batch {
+		// counts only: leaves and messages sent in batches, those of them left to the live remainder
+		// (failed, expired, missing), and those planned live because the host cannot batch them
+		result["batch_items"], result["batch_failed"], result["live_items"] = rep.BatchItems, rep.BatchFailed, rep.LiveItems
+		if rep.Estimate != nil && rep.Estimate.BatchUSD != nil {
+			result["batch_estimate_usd"] = *rep.Estimate.BatchUSD
+		}
 	}
 	code := ""
 	switch {
@@ -538,14 +734,14 @@ func (s *Service) runPrepareJob(ctx context.Context, j jobs.Job, token string) {
 	case s.jobCtx != nil && s.jobCtx.Err() != nil:
 		code = "INTERRUPTED" // the service is stopping; the next start offers a retry
 		result["stopped_by"] = "interrupted"
-	case report.StoppedBy == "budget":
+	case rep.StoppedBy == "budget":
 		code = "BUDGET_REACHED"
-	case report.StoppedBy == "cancelled" || errors.Is(err, context.Canceled):
+	case rep.StoppedBy == "cancelled" || errors.Is(err, context.Canceled):
 		code = "CANCELLED"
 		result["stopped_by"] = "cancelled"
 	case errors.Is(err, errProviderMissing):
 		code = errcode.ProviderUnconfigured
-	case report.StoppedBy == "provider_error":
+	case rep.StoppedBy == "provider_error":
 		code = errcode.ProviderUnavailable
 	default:
 		code = "PREPARE_FAILED"
@@ -603,7 +799,9 @@ func (s *Service) finishJob(id, token string, attempt int, result map[string]any
 }
 
 // ResumeJobs is called once at daemon start: jobs that were running when the process stopped are
-// marked failed (they can be retried), and queued ones start.
+// marked failed (they can be retried), and queued ones start. A batch preparation is the exception: its
+// batches are submitted and paid for, so a run interrupted with its plan stored runs again at once (as a
+// new attempt) and polls the same batches, and a stored plan no job owns gets a job of its own.
 func (s *Service) ResumeJobs(ctx context.Context) {
 	s.jobCtx = ctx
 	if s.Store == nil {
@@ -613,20 +811,59 @@ func (s *Service) ResumeJobs(ctx context.Context) {
 	if err != nil {
 		return
 	}
+	plans := map[string]bool{}
+	eng, err := s.MemoryEngine()
+	if err == nil {
+		if stored, err := eng.BatchPlans(); err == nil {
+			for _, p := range stored {
+				plans[p.Room] = true
+			}
+		} else {
+			s.Log.Warn("memory: stored batch plans not read", "err", err)
+		}
+	}
+	owned := map[string]bool{}
 	for _, j := range list {
 		if j.Type != jobPrepare {
 			continue
 		}
+		var p preparePayload
+		_ = json.Unmarshal([]byte(j.Payload), &p)
+		planned := plans[p.SourceRoom]
 		switch j.Status {
 		case jobs.Leased, jobs.Running:
 			prev := j.LeaseToken
 			j.Status, j.ErrorCode, j.LeaseToken = jobs.Failed, "INTERRUPTED", ""
 			j.Result = `{"stopped_by":"interrupted"}`
+			if planned {
+				// a new attempt: the dead run's lease is gone, and the batches are polled, not sent again
+				if again, err := jobs.Retry(j); err == nil && saveJob(s.Store, again, prev) == nil {
+					owned[p.SourceRoom] = true
+					s.jobChanged(again)
+					s.goJob(again.ID)
+				}
+				continue
+			}
 			if saveJob(s.Store, j, prev) == nil {
 				s.jobChanged(j)
 			}
 		case jobs.Pending:
+			owned[p.SourceRoom] = true // its run resumes the room's plan (runPrepareJob)
 			s.goJob(j.ID)
+		}
+	}
+	for room := range plans {
+		if owned[room] {
+			continue
+		}
+		// a plan whose job ended without finishing it (a failure after the submit): resume it, or the room
+		// would stay held
+		plan, ok, err := eng.LoadBatchPlan(room)
+		if err != nil || !ok {
+			continue
+		}
+		if _, _, err := s.startPrepareJob(preparePayload{SourceRoom: room, Mode: prepareBatch, BudgetUSD: plan.BudgetUSD, Limit: plan.Limit}); err != nil {
+			s.Log.Warn("memory: stored batch not resumed", "room", room, "err", err)
 		}
 	}
 }
@@ -709,8 +946,16 @@ func (s *Service) updateMemoryBlock(req action.Request, in map[string]any) actio
 		meta.BudgetUSD, metaChanged = raw, true
 		changed = append(changed, "budget_usd")
 	}
+	if _, set := in["mode"]; set {
+		mode := strings.TrimSpace(strVal(in, "mode", ""))
+		if mode != "" && !validPrepareMode(mode) {
+			return action.Fail(req, errcode.InvalidInput, "generic.error", "mode must be live or batch (empty = live)", nil)
+		}
+		meta.Mode, metaChanged = mode, true
+		changed = append(changed, "mode")
+	}
 	if len(changed) == 0 {
-		return action.Fail(req, errcode.InvalidInput, "generic.error", "nothing to change (label, note, auto_update, budget_usd)", nil)
+		return action.Fail(req, errcode.InvalidInput, "generic.error", "nothing to change (label, note, auto_update, budget_usd, mode)", nil)
 	}
 	if metaChanged {
 		if err := s.kvSet(blockMetaKey(b.SourceRoom), meta); err != nil {
@@ -769,6 +1014,15 @@ func (s *Service) deleteMemoryBlock(req action.Request, in map[string]any) actio
 				}
 			}
 		}
+	}
+	// a batch still at the provider is cancelled and its files removed before the room goes (DeleteRoom
+	// drops the plan row with the rest)
+	if _, ok := batchPlanOf(eng, b.SourceRoom); ok {
+		dctx, cancel := context.WithTimeout(context.Background(), batchCancelTimeout)
+		if err := eng.DiscardBatch(dctx, b.SourceRoom); err != nil {
+			s.Log.Warn("memory: batch of a deleted block not discarded", "room", b.SourceRoom, "err", err)
+		}
+		cancel()
 	}
 	removed, err := eng.Store.DeleteRoom(b.SourceRoom)
 	if err != nil && !errors.Is(err, store.ErrNoRoom) {
@@ -971,7 +1225,13 @@ func (s *Service) mergedBlocks() []map[string]any {
 	spans := map[string]store.RoomSpan{}
 	var estimate func(messages int) int64 // nil while the engine is unavailable
 	resident := map[string]bool{}
+	batches := map[string]engine.BatchPlanInfo{}
 	if eng, err := s.MemoryEngine(); err == nil {
+		if plans, err := eng.BatchPlans(); err == nil {
+			for _, p := range plans {
+				batches[p.Room] = p
+			}
+		}
 		estimate = eng.EstimateRoomBytes
 		if ix := eng.Index(); ix != nil { // none before the first load
 			for _, room := range ix.Rooms() {
@@ -1039,7 +1299,7 @@ func (s *Service) mergedBlocks() []map[string]any {
 			"status": status, "time_semantics": b.TimeSemantics, "message_count": st.Messages, "leaf_count": st.Leaves,
 			"embedded": st.Embedded, "pending_leaves": max(0, st.Leaves-st.Open-st.Embedded), "open_leaves": st.Open, "prepared_at": b.PreparedAt,
 			"cost_usd": b.CostUSD, "error": b.Error, "hints": b.Hints, "note": meta.Note, "auto_update": meta.autoUpdate(),
-			"budget_usd": meta.BudgetUSD, "channels": append([]map[string]any{}, usedBy[b.SourceRoom]...),
+			"budget_usd": meta.BudgetUSD, "mode": meta.Mode, "channels": append([]map[string]any{}, usedBy[b.SourceRoom]...),
 		}
 		if sp, ok := spans[b.SourceRoom]; ok {
 			m["first"], m["last"], m["speakers"] = sp.First, sp.Last, sp.Speakers
@@ -1059,6 +1319,12 @@ func (s *Service) mergedBlocks() []map[string]any {
 			if activeJob(j) {
 				m["status"] = "preparing"
 			}
+		}
+		if p, ok := batches[b.SourceRoom]; ok && p.State == engine.BatchPlanWaiting {
+			// the provider has the room's work (up to its deadline, about a day): preparing, waiting on the batch
+			m["status"], m["waiting_batch"] = "preparing", true
+			m["batch"] = map[string]any{"items": p.Items, "submitted_at": p.CreatedAt,
+				"note": "waiting for the provider to return the batch (usually within 24 hours)"}
 		}
 		out = append(out, m)
 	}

@@ -81,6 +81,9 @@ type Engine struct {
 	// receives one body-free record for each provider request; cache hits never reach it.
 	CallProviders CallProviders
 	OnCall        func(ctx context.Context, c CallInfo)
+	// EmbedBatcher and SummaryBatcher replace the embed and summary roles' batch API (batch.go) when set
+	// (tests); nil uses the role's adapter.
+	EmbedBatcher, SummaryBatcher BatchClient
 
 	idx      atomic.Pointer[search.Index]
 	loadedAt atomic.Int64

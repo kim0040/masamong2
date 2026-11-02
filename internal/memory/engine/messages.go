@@ -191,10 +191,7 @@ queue:
 					failed.Store(true)
 				}
 			}()
-			texts := make([]string, len(bt))
-			for i, p := range bt {
-				texts[i] = p.Text
-			}
+			texts := messageInputs(bt)
 			t0 := time.Now()
 			res, err := e.embedDocs(ctx, texts, 0.00002*float64(len(texts)))
 			if err != nil || len(res.Vectors) != len(texts) {
@@ -241,6 +238,16 @@ queue:
 		stop = "store_error"
 	}
 	return done, stop
+}
+
+// messageInputs are the embedding inputs of a group of messages, live (embedMessages) and in a batch
+// alike: each message's stored text (speaker label and content).
+func messageInputs(bt []store.PendingMessage) []string {
+	texts := make([]string, len(bt))
+	for i, p := range bt {
+		texts[i] = p.Text
+	}
+	return texts
 }
 
 type loadedMessageVectors struct {
