@@ -21,6 +21,28 @@ type Host struct {
 	// Rerank false: the host has no /rerank although its family may (CometAPI and NanoGPT list no
 	// reranker); nil follows the family
 	Rerank *bool `json:"rerank,omitempty"`
+	// Batch describes the host's batch API; nil means it has none (batch.go)
+	Batch *BatchHost `json:"batch,omitempty"`
+}
+
+// BatchHost is what hosts.json knows about one host's batch API.
+type BatchHost struct {
+	// Style is the wire format: openai_files (upload a JSONL file, create a batch from it), inline (the
+	// requests travel in the create call), anthropic (native Message Batches) or gemini_files (the
+	// OpenAI-style batch with the native Files API for the JSONL)
+	Style string `json:"style"`
+	// BaseURL, when set, is where batch calls go instead of the host's base_url (NanoGPT's dedicated
+	// batch host)
+	BaseURL string   `json:"base_url,omitempty"`
+	Kinds   []string `json:"kinds"` // "chat" and/or "embed"
+	// MaxItems is the most requests one batch holds; MaxInputs the most embedding inputs in all of them
+	// (0: no limit of its own)
+	MaxItems  int `json:"max_items"`
+	MaxInputs int `json:"max_inputs,omitempty"`
+	// RequireMaxTokens: chat requests must carry a positive output limit (NanoGPT)
+	RequireMaxTokens bool `json:"require_max_tokens,omitempty"`
+	// Discount is the batch price as a share of the live price, for costs the host does not report
+	Discount float64 `json:"discount"`
 }
 
 // RerankAt reports whether the provider at baseURL of family api has a /rerank endpoint.

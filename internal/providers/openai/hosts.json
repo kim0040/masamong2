@@ -7,7 +7,8 @@
       "name": "OpenRouter",
       "base_url": "https://openrouter.ai/api/v1",
       "key_env": "MASAMONG_OPENROUTER_KEY",
-      "key_url": "https://openrouter.ai/settings/keys"
+      "key_url": "https://openrouter.ai/settings/keys",
+      "batch": {"style": "inline", "kinds": ["chat", "embed"], "max_items": 10000, "discount": 0.5}
     },
     {
       "api": "gemini",
@@ -15,7 +16,8 @@
       "name": "Google Gemini",
       "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
       "key_env": "MASAMONG_GEMINI_KEY",
-      "key_url": "https://aistudio.google.com/apikey"
+      "key_url": "https://aistudio.google.com/apikey",
+      "batch": {"style": "gemini_files", "kinds": ["chat", "embed"], "max_items": 10000, "discount": 0.5}
     },
     {
       "api": "openai",
@@ -23,7 +25,8 @@
       "name": "OpenAI",
       "base_url": "https://api.openai.com/v1",
       "key_env": "MASAMONG_OPENAI_KEY",
-      "key_url": "https://platform.openai.com/api-keys"
+      "key_url": "https://platform.openai.com/api-keys",
+      "batch": {"style": "openai_files", "kinds": ["chat", "embed"], "max_items": 50000, "max_inputs": 50000, "discount": 0.5}
     },
     {
       "api": "anthropic",
@@ -31,7 +34,8 @@
       "name": "Anthropic",
       "base_url": "https://api.anthropic.com/v1",
       "key_env": "MASAMONG_ANTHROPIC_KEY",
-      "key_url": "https://platform.claude.com/settings/keys"
+      "key_url": "https://platform.claude.com/settings/keys",
+      "batch": {"style": "anthropic", "kinds": ["chat"], "max_items": 100000, "discount": 0.5}
     },
     {
       "api": "compatible",
@@ -49,7 +53,8 @@
       "base_url": "https://nano-gpt.com/api/v1",
       "key_env": "MASAMONG_NANOGPT_KEY",
       "key_url": "https://nano-gpt.com/api",
-      "rerank": false
+      "rerank": false,
+      "batch": {"style": "openai_files", "base_url": "https://api.nano-gpt.com/api/v1", "kinds": ["chat"], "max_items": 10000, "require_max_tokens": true, "discount": 0.5}
     },
     {
       "api": "compatible",
