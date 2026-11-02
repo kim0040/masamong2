@@ -1,8 +1,6 @@
 package application
 
 import (
-	"os"
-	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -67,7 +65,8 @@ func TestPendingEventWorkerBacksOffWakesOnEnqueueAndStopsOnShutdown(t *testing.T
 		t.Fatalf("a pass ran inside the backed-off wait")
 	}
 	started := time.Now()
-	if _, err := s.Store.EnqueueEvent("source-change", "not a replayable job"); err != nil {
+	id, err := s.Store.EnqueueEvent("source-change", "not a replayable job")
+	if err != nil {
 		t.Fatal(err)
 	}
 	waitFor("the pass the enqueue wakes", 3*time.Second, func() bool { return count() > n })
@@ -77,10 +76,10 @@ func TestPendingEventWorkerBacksOffWakesOnEnqueueAndStopsOnShutdown(t *testing.T
 	// the event cannot be replayed: it stays pending, so the worker polls at the short interval
 	n = count()
 	waitFor("short polls while an event is pending", 5*time.Second, func() bool { return count() >= n+3 })
-	dir := filepath.Join(filepath.Dir(s.Store.Path()), "pending-events", "source-change")
-	entries, _ := os.ReadDir(dir)
-	for _, e := range entries {
-		_ = os.Remove(filepath.Join(dir, e.Name()))
+	// drop it through the store, under its file lock: a bare os.Remove racing the worker's read of the
+	// same file fails on Windows (sharing violation), the event stays and the worker never backs off
+	if err := s.Store.AcknowledgeEvent("source-change", id); err != nil {
+		t.Fatalf("drop the pending event: %v", err)
 	}
 
 	// shutdown while it waits: it ends promptly
