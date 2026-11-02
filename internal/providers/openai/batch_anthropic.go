@@ -76,7 +76,7 @@ func (a *Adapter) anthropicParamsOf(it BatchItem) (anthropicParams, error) {
 	}
 	p.System = strings.Join(system, "\n\n")
 	// the live payload decides the optional fields, learned shape included
-	live := a.payload(req, a.shapeOf(req))
+	live := a.payload(req, a.batchShapeOf(req))
 	for _, k := range []string{"max_tokens", "max_completion_tokens"} {
 		if n, ok := live[k].(int); ok {
 			p.MaxTokens = n

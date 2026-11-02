@@ -176,24 +176,26 @@ func leafSnapshotCurrent(tx *sql.Tx, id string, expected []string) (bool, error)
 }
 
 func (s *Store) PutSummaryText(key, leaf, body, summary string) error {
-	return s.DB.WithWriter(func(tx *sql.Tx) error {
-		ok, err := leafSnapshotCurrent(tx, leaf, []string{body})
-		if err != nil || !ok {
-			return err
-		}
-		var ids string
-		if err := tx.QueryRow(`SELECT observation_ids FROM memory_leaves WHERE leaf_id=?`, leaf).Scan(&ids); err != nil {
-			return err
-		}
-		// a newer summary of the same body replaces the old one (an earlier release cached the body's opening
-		// when the model answered nothing)
-		if _, err := tx.Exec(`INSERT INTO memory_embed_cache(cache_key,vec,created_at,kind) VALUES(?,?,?,'summary_text')
-			ON CONFLICT(cache_key) DO UPDATE SET vec=excluded.vec, created_at=excluded.created_at WHERE memory_embed_cache.kind='summary_text'`, key, []byte(summary), now()); err != nil {
-			return err
-		}
-		_, err = tx.Exec(`INSERT OR IGNORE INTO evidence_refs(source_id,holder_kind,holder_id) SELECT value,'cache',? FROM json_each(?) UNION SELECT ?,'cache',?`, key, ids, leaf, key)
+	return s.DB.WithWriter(func(tx *sql.Tx) error { return putSummaryTextTx(tx, key, leaf, body, summary) })
+}
+
+func putSummaryTextTx(tx *sql.Tx, key, leaf, body, summary string) error {
+	ok, err := leafSnapshotCurrent(tx, leaf, []string{body})
+	if err != nil || !ok {
 		return err
-	})
+	}
+	var ids string
+	if err := tx.QueryRow(`SELECT observation_ids FROM memory_leaves WHERE leaf_id=?`, leaf).Scan(&ids); err != nil {
+		return err
+	}
+	// a newer summary of the same body replaces the old one (an earlier release cached the body's opening
+	// when the model answered nothing)
+	if _, err := tx.Exec(`INSERT INTO memory_embed_cache(cache_key,vec,created_at,kind) VALUES(?,?,?,'summary_text')
+		ON CONFLICT(cache_key) DO UPDATE SET vec=excluded.vec, created_at=excluded.created_at WHERE memory_embed_cache.kind='summary_text'`, key, []byte(summary), now()); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT OR IGNORE INTO evidence_refs(source_id,holder_kind,holder_id) SELECT value,'cache',? FROM json_each(?) UNION SELECT ?,'cache',?`, key, ids, leaf, key)
+	return err
 }
 
 func Tombstone(tx *sql.Tx, kind, id, at string) error {

@@ -1593,42 +1593,50 @@ func (s *Store) pendingAtWidth(rooms []string, space string, withSummaries bool,
 // leaf's summary vector, which belongs to the old space, is dropped so the next pass re-embeds it.
 func (s *Store) SaveLeafVector(id, space string, vec []byte, expectedBody ...string) error {
 	return s.DB.WithWriter(func(tx *sql.Tx) error {
-		if len(expectedBody) > 0 {
-			ok, err := leafSnapshotCurrent(tx, id, expectedBody)
-			if err != nil || !ok {
-				return err
-			}
-		}
-		var old, body, summary string
-		var oldVec, oldSum []byte
-		q := `SELECT embed_space, body, summary, leaf_vec, summary_vec FROM memory_leaves WHERE leaf_id=?`
-		if s.tidb() {
-			q += ` FOR UPDATE`
-		}
-		err := tx.QueryRow(q, id).
-			Scan(&old, &body, &summary, &oldVec, &oldSum)
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if old != space {
-			archive := map[string][]byte{}
-			if old != "" && len(oldVec) > 0 {
-				archive[CacheKey(old, "document", body)] = oldVec
-			}
-			if old != "" && summary != "" && len(oldSum) > 0 {
-				archive[CacheKey(old, "document", summary)] = oldSum
-			}
-			if err := s.putCachedTx(tx, archive, ""); err != nil {
-				return err
-			}
-			oldSum = nil
-		}
-		_, err = tx.Exec(`UPDATE memory_leaves SET leaf_vec=?, summary_vec=?, embed_space=?, updated_at=? WHERE leaf_id=?`, vec, oldSum, space, now(), id)
+		_, err := s.saveLeafVectorTx(tx, id, space, vec, expectedBody)
 		return err
 	})
+}
+
+// saveLeafVectorTx is SaveLeafVector in tx; written is false when the leaf is gone or its text changed.
+func (s *Store) saveLeafVectorTx(tx *sql.Tx, id, space string, vec []byte, expectedBody []string) (written bool, err error) {
+	if len(expectedBody) > 0 {
+		ok, err := leafSnapshotCurrent(tx, id, expectedBody)
+		if err != nil || !ok {
+			return false, err
+		}
+	}
+	var old, body, summary string
+	var oldVec, oldSum []byte
+	q := `SELECT embed_space, body, summary, leaf_vec, summary_vec FROM memory_leaves WHERE leaf_id=?`
+	if s.tidb() {
+		q += ` FOR UPDATE`
+	}
+	err = tx.QueryRow(q, id).
+		Scan(&old, &body, &summary, &oldVec, &oldSum)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if old != space {
+		archive := map[string][]byte{}
+		if old != "" && len(oldVec) > 0 {
+			archive[CacheKey(old, "document", body)] = oldVec
+		}
+		if old != "" && summary != "" && len(oldSum) > 0 {
+			archive[CacheKey(old, "document", summary)] = oldSum
+		}
+		if err := s.putCachedTx(tx, archive, ""); err != nil {
+			return false, err
+		}
+		oldSum = nil
+	}
+	if _, err = tx.Exec(`UPDATE memory_leaves SET leaf_vec=?, summary_vec=?, embed_space=?, updated_at=? WHERE leaf_id=?`, vec, oldSum, space, now(), id); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // SharedLeaf is another leaf with the same text that already has vectors in the space.
@@ -1724,13 +1732,21 @@ func (s *Store) Spaces() ([]string, error) {
 // SaveSummary stores a summary and (optionally) its vector.
 func (s *Store) SaveSummary(id, summary string, vec []byte, expectedBody ...string) error {
 	return s.DB.WithWriter(func(tx *sql.Tx) error {
-		ok, err := leafSnapshotCurrent(tx, id, expectedBody)
-		if err != nil || !ok {
-			return err
-		}
-		_, err = tx.Exec(`UPDATE memory_leaves SET summary=?, summary_vec=?, updated_at=? WHERE leaf_id=?`, summary, vec, now(), id)
+		_, err := saveSummaryTx(tx, id, summary, vec, expectedBody)
 		return err
 	})
+}
+
+// saveSummaryTx is SaveSummary in tx; written is false when the leaf is gone or its text changed.
+func saveSummaryTx(tx *sql.Tx, id, summary string, vec []byte, expectedBody []string) (written bool, err error) {
+	ok, err := leafSnapshotCurrent(tx, id, expectedBody)
+	if err != nil || !ok {
+		return false, err
+	}
+	if _, err = tx.Exec(`UPDATE memory_leaves SET summary=?, summary_vec=?, updated_at=? WHERE leaf_id=?`, summary, vec, now(), id); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // LoadLeaves returns every leaf of the rooms that has a vector in the space (the searchable set).

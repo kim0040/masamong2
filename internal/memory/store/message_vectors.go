@@ -289,43 +289,49 @@ func (s *Store) MessageVectorCounts(space string) (total, inSpace int, err error
 func (s *Store) SaveMessageVectors(items []MessageVector) (int, error) {
 	saved := 0
 	err := s.DB.WithWriter(func(tx *sql.Tx) error {
-		saved = 0
-		for _, it := range items {
-			var room, label, content, deleted string
-			err := tx.QueryRow(`SELECT room, actor_label, content, deleted_at FROM memory_observations WHERE observation_id=?`, it.ObservationID).
-				Scan(&room, &label, &content, &deleted)
-			if errors.Is(err, sql.ErrNoRows) {
-				continue
-			}
-			if err != nil {
-				return err
-			}
-			if deleted != "" || MessageTextHash(MessageText(label, content)) != it.TextHash {
-				continue
-			}
-			if !s.tidb() {
-				current, err := ObservationCurrent(tx, it.ObservationID)
-				if err != nil {
-					return err
-				}
-				if !current {
-					continue
-				}
-			}
-			q := `INSERT INTO memory_message_vectors(observation_id, room, embed_space, text_hash, label, fmt, vec, updated_at) VALUES(?,?,?,?,?,?,?,?)
-				ON CONFLICT(observation_id) DO UPDATE SET room=excluded.room, embed_space=excluded.embed_space, text_hash=excluded.text_hash, label=excluded.label, fmt=excluded.fmt, vec=excluded.vec, updated_at=excluded.updated_at`
-			if s.tidb() {
-				q = `INSERT INTO memory_message_vectors(observation_id, room, embed_space, text_hash, label, fmt, vec, updated_at) VALUES(?,?,?,?,?,?,?,?)
-					ON DUPLICATE KEY UPDATE room=VALUES(room), embed_space=VALUES(embed_space), text_hash=VALUES(text_hash), label=VALUES(label), fmt=VALUES(fmt), vec=VALUES(vec), updated_at=VALUES(updated_at)`
-			}
-			if _, err := tx.Exec(q, it.ObservationID, room, it.Space, it.TextHash, label, MessageFormatInt8, it.Vec, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
-				return err
-			}
-			saved++
-		}
-		return nil
+		var err error
+		saved, err = s.saveMessageVectorsTx(tx, items)
+		return err
 	})
 	return saved, err
+}
+
+func (s *Store) saveMessageVectorsTx(tx *sql.Tx, items []MessageVector) (int, error) {
+	saved := 0
+	for _, it := range items {
+		var room, label, content, deleted string
+		err := tx.QueryRow(`SELECT room, actor_label, content, deleted_at FROM memory_observations WHERE observation_id=?`, it.ObservationID).
+			Scan(&room, &label, &content, &deleted)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		if deleted != "" || MessageTextHash(MessageText(label, content)) != it.TextHash {
+			continue
+		}
+		if !s.tidb() {
+			current, err := ObservationCurrent(tx, it.ObservationID)
+			if err != nil {
+				return 0, err
+			}
+			if !current {
+				continue
+			}
+		}
+		q := `INSERT INTO memory_message_vectors(observation_id, room, embed_space, text_hash, label, fmt, vec, updated_at) VALUES(?,?,?,?,?,?,?,?)
+			ON CONFLICT(observation_id) DO UPDATE SET room=excluded.room, embed_space=excluded.embed_space, text_hash=excluded.text_hash, label=excluded.label, fmt=excluded.fmt, vec=excluded.vec, updated_at=excluded.updated_at`
+		if s.tidb() {
+			q = `INSERT INTO memory_message_vectors(observation_id, room, embed_space, text_hash, label, fmt, vec, updated_at) VALUES(?,?,?,?,?,?,?,?)
+				ON DUPLICATE KEY UPDATE room=VALUES(room), embed_space=VALUES(embed_space), text_hash=VALUES(text_hash), label=VALUES(label), fmt=VALUES(fmt), vec=VALUES(vec), updated_at=VALUES(updated_at)`
+		}
+		if _, err := tx.Exec(q, it.ObservationID, room, it.Space, it.TextHash, label, MessageFormatInt8, it.Vec, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+			return 0, err
+		}
+		saved++
+	}
+	return saved, nil
 }
 
 // ScanMessageVectors calls fn for every stored message vector of the rooms in the space, ordered by

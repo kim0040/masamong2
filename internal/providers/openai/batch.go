@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -121,11 +122,11 @@ func sameAuthority(a, b string) bool {
 	return errA == nil && errB == nil && ua.Host != "" && strings.EqualFold(ua.Host, ub.Host)
 }
 
-// sameOrigin is sameAuthority with the same scheme.
+// sameOrigin is sameAuthority with the same scheme (and no user name in a).
 func sameOrigin(a, b string) bool {
 	ua, errA := url.Parse(strings.TrimSpace(a))
 	ub, errB := url.Parse(strings.TrimSpace(b))
-	return errA == nil && errB == nil && strings.EqualFold(ua.Scheme, ub.Scheme) && sameAuthority(a, b)
+	return errA == nil && errB == nil && ua.User == nil && strings.EqualFold(ua.Scheme, ub.Scheme) && sameAuthority(a, b)
 }
 
 // BatchSupport reports whether this adapter's host can batch the kind (the model may still be refused
@@ -264,12 +265,18 @@ func (a *Adapter) SubmitBatch(ctx context.Context, kind BatchKind, model string,
 	return ref, nil
 }
 
-// createBatch sends a batch create call exactly once (no client retries) and sorts its failure: definite
-// when the host refused before accepting anything, else a *SubmitUnknownError. An answer without a batch id
-// is unknown too: the host answered success.
+// createBatch sends a batch create call exactly once (no client retries, no redirect followed) and sorts
+// its failure: definite when the host refused before accepting anything, else a *SubmitUnknownError. An
+// answer without a batch id is unknown too: the host answered success, or redirected the create (a
+// redirect is not followed, so its answer has no id and the submission is looked up, not called refused).
 func (a *Adapter) createBatch(ctx context.Context, rawURL string, headers map[string]string, body []byte, id func([]byte) string) (string, *providers.Response, error) {
 	c := *a.batchClient()
 	c.MaxRetries = 0
+	if c.HTTP != nil {
+		h := *c.HTTP
+		h.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+		c.HTTP = &h
+	}
 	resp, err := c.Post(ctx, rawURL, headers, body, "application/json")
 	if err != nil {
 		err = mapErr(err, resp)
@@ -287,7 +294,9 @@ func (a *Adapter) createBatch(ctx context.Context, rawURL string, headers map[st
 
 // definiteRefusal reports a failed create call the host certainly did not act on: a 4xx answer (the
 // request was refused before acceptance), a connection that was never made, or no network at all. A
-// timeout, a lost connection, a 5xx or a cancelled call may have reached a host that went on.
+// timeout, a lost connection, a 5xx or a cancelled call may have reached a host that went on, and so may a
+// redirect: the create was sent, and what answered with it (the host behind a proxy, an intermediary) may
+// have taken it, so it is looked up rather than called refused.
 func definiteRefusal(err error) bool {
 	if errors.Is(err, providers.ErrOffline) || errors.Is(err, ErrAuth) {
 		return true
@@ -304,7 +313,7 @@ func definiteRefusal(err error) bool {
 	var pe *providers.Error
 	if errors.As(err, &pe) {
 		switch {
-		case pe.NotSent, pe.Kind == "redirect", pe.Kind == "offline":
+		case pe.NotSent, pe.Kind == "offline":
 			return true
 		case pe.Kind == "status" && pe.Status >= 400 && pe.Status < 500:
 			return true
@@ -748,9 +757,9 @@ func batchItemError(msg string, class errclass.Class) error {
 	return classedError{msg: "openai: batch item " + msg, class: class}
 }
 
-// batchChatBody is the body a live call of the item would send, shape learning included.
+// batchChatBody is the body a live call of the item would send, shape learning included (batchShapeOf).
 func (a *Adapter) batchChatBody(it BatchItem) ([]byte, error) {
-	return json.Marshal(a.payload(*it.Chat, a.shapeOf(*it.Chat)))
+	return json.Marshal(a.payload(*it.Chat, a.batchShapeOf(*it.Chat)))
 }
 
 // batchEmbedBody is the body of an embeddings request.

@@ -35,6 +35,7 @@ type fakeProvider struct {
 	embedCalls, rerankCalls, chatCalls atomic.Int32
 	embedDelay                         atomic.Int64 // nanoseconds every /embeddings call takes (0 = none)
 	embedStatus                        atomic.Int32 // 0 = success; otherwise return this HTTP status
+	chatStatus                         atomic.Int32 // 0 = success; otherwise /chat/completions returns this HTTP status
 }
 
 func vecFor(text string) []float32 {
@@ -91,6 +92,10 @@ func (f *fakeProvider) handler() http.Handler {
 	})
 	mux.HandleFunc("/chat/completions", func(w http.ResponseWriter, r *http.Request) {
 		f.chatCalls.Add(1)
+		if status := f.chatStatus.Load(); status != 0 {
+			http.Error(w, `{"error":{"message":"synthetic failure"}}`, int(status))
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []map[string]any{{"message": map[string]any{"content": "요약: 약속 잡은 대화"}}},
 			"usage": map[string]any{"prompt_tokens": 21, "completion_tokens": 4, "cost": 0.00005,
 				"prompt_tokens_details": map[string]any{"cached_tokens": 2}}})

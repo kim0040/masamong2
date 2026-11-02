@@ -84,13 +84,23 @@ func (a *Adapter) submitInline(ctx context.Context, s batchSpec, kind BatchKind,
 }
 
 // noBatchVariant reports OpenRouter's refusal of a model it cannot batch ("model x has no batch variant",
-// "batch is not supported for model x") as opposed to a refusal of the request itself.
+// "batch is not supported for model x") as opposed to a refusal of the request itself. A message about a
+// parameter, a field, the request's shape or its size ("batch request contains unsupported parameter
+// 'temperature'", "batch too large") refuses this batch, not batching for the model: running it live would
+// pay full price for what the operator chose to batch.
 func noBatchVariant(msg string) bool {
 	m := strings.ToLower(msg)
 	if !strings.Contains(m, "batch") {
 		return false
 	}
-	for _, w := range []string{"variant", "not supported", "unsupported", "does not support", "not available", "no batch"} {
+	for _, w := range []string{"parameter", "field", "argument", "property", "schema", "format", "invalid", "required",
+		"missing", "too large", "too many", "too long", "exceed", "at most", "maximum", "size", " mb", " gb", "bytes",
+		"tokens", "input", "must ", "value", "temperature", "max_tokens", "max_completion_tokens", "reasoning"} {
+		if strings.Contains(m, w) {
+			return false
+		}
+	}
+	for _, w := range []string{"variant", "not supported", "unsupported", "does not support", "not available", "unavailable", "no batch"} {
 		if strings.Contains(m, w) {
 			return true
 		}

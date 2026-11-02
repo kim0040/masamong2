@@ -1,7 +1,10 @@
 package store
 
 import (
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -14,8 +17,9 @@ import (
 // writes it before and after every submit, so a restart polls the batches it has instead of submitting
 // them again.
 //
-// generation is the plan's immutable id: every write after the first compares it, so a run (or an engine)
-// still holding an older plan of the room cannot overwrite, apply to or delete a newer one.
+// generation is the plan's immutable id: a plan is inserted once (InsertBatchPlan) and every later write
+// compares it (SaveBatchPlan, CommitBatchApply update only), so a run (or an engine) still holding an
+// older plan of the room cannot overwrite, apply to, delete or recreate a newer or deleted one.
 //
 // state is "waiting" while results are outstanding, "draining" after a cancel until every batch has
 // ended at the host, "submit_unknown" when a submission's outcome could not be settled (the background
@@ -25,8 +29,11 @@ import (
 // ErrBatchPlanExists is returned when a room already has a plan (of another generation).
 var ErrBatchPlanExists = errors.New("memory: the room already has a batch plan")
 
-// ErrBatchPlanStale is returned when the room's plan is not the generation written to (replaced or deleted).
+// ErrBatchPlanStale is returned when the room's plan is not the generation written to (replaced).
 var ErrBatchPlanStale = errors.New("memory: the room's batch plan is another generation")
+
+// ErrBatchPlanMissing is returned when the room has no plan to update (deleted: discarded, finished).
+var ErrBatchPlanMissing = errors.New("memory: the room's batch plan is no longer stored")
 
 func migrateBatchPlans(db *storage.Store) error {
 	q := `CREATE TABLE IF NOT EXISTS memory_batch_plans (
@@ -59,7 +66,66 @@ func migrateBatchPlans(db *storage.Store) error {
 			return err
 		}
 	}
-	return nil
+	return backfillBatchGenerations(db)
+}
+
+// backfillBatchGenerations gives a plan stored without a generation (written before plans had one, or
+// left so by the release that added the column) one, in its column and its JSON together: the generation
+// the JSON names, else a new one written to both. Without it every compare-and-set write of the plan
+// fails, and the plan, which holds its room, could never finish, drain or be cancelled. A plan whose JSON
+// cannot be read is left alone (the engine drops it when it loads it).
+func backfillBatchGenerations(db *storage.Store) error {
+	return db.WithWriter(func(tx *sql.Tx) error {
+		rows, err := tx.Query(`SELECT room, plan FROM memory_batch_plans WHERE generation=''`)
+		if err != nil {
+			return err
+		}
+		type legacy struct{ room, plan string }
+		var found []legacy
+		for rows.Next() {
+			var l legacy
+			if err := rows.Scan(&l.room, &l.plan); err != nil {
+				rows.Close()
+				return err
+			}
+			found = append(found, l)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		for _, l := range found {
+			var doc map[string]json.RawMessage
+			if json.Unmarshal([]byte(l.plan), &doc) != nil || doc == nil {
+				continue
+			}
+			var gen string
+			_ = json.Unmarshal(doc["generation"], &gen)
+			raw := l.plan
+			if gen == "" {
+				gen = newPlanGeneration()
+				doc["generation"], _ = json.Marshal(gen)
+				b, err := json.Marshal(doc)
+				if err != nil {
+					return err
+				}
+				raw = string(b)
+			}
+			if _, err := tx.Exec(`UPDATE memory_batch_plans SET generation=?, plan=? WHERE room=? AND generation=''`, gen, raw, l.room); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// newPlanGeneration is a generation in the engine's form (32 hex characters).
+func newPlanGeneration() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return hex.EncodeToString([]byte(time.Now().UTC().Format("20060102150405.000000")))[:32]
+	}
+	return hex.EncodeToString(b[:])
 }
 
 // BatchPlanRow is a stored plan's summary, without the plan itself.
@@ -78,26 +144,118 @@ type BatchSpend struct {
 	Calls int
 }
 
-// SaveBatchPlan stores the room's plan of generation gen: it creates the row when the room has none and
-// replaces it when the stored plan is the same generation. A plan of another generation is left alone
-// (ErrBatchPlanStale).
-func (s *Store) SaveBatchPlan(room, gen, state string, items int, createdAt string, plan []byte) error {
+// BatchPlanRecord is a plan's stored form: the engine's JSON and the columns a list reads.
+type BatchPlanRecord struct {
+	State     string
+	Items     int
+	CreatedAt string
+	Plan      []byte
+}
+
+// InsertBatchPlan stores a new plan of generation gen for a room that has none (ErrBatchPlanExists
+// otherwise). Only a new preparation inserts; every later write updates (SaveBatchPlan), so an old run
+// cannot recreate a plan that was deleted meanwhile.
+func (s *Store) InsertBatchPlan(room, gen string, rec BatchPlanRecord) error {
 	return s.DB.WithWriter(func(tx *sql.Tx) error {
-		return saveBatchPlanTx(tx, room, gen, state, items, createdAt, plan, true)
+		var stored string
+		err := tx.QueryRow(`SELECT generation FROM memory_batch_plans WHERE room=?`, room).Scan(&stored)
+		switch {
+		case err == nil:
+			return ErrBatchPlanExists
+		case !errors.Is(err, sql.ErrNoRows):
+			return err
+		}
+		_, err = tx.Exec(`INSERT INTO memory_batch_plans(room, generation, state, items, created_at, updated_at, plan) VALUES(?,?,?,?,?,?,?)`,
+			room, gen, rec.State, rec.Items, rec.CreatedAt, now(), string(rec.Plan))
+		return err
 	})
 }
 
-// CommitBatchApply replaces the room's plan of generation gen (it must exist) and adds the spend entries
-// in one transaction: an applied batch's checkpoint and its cost are written together or not at all, so
-// a crash between them neither loses the cost nor counts it twice when the batch is applied again.
-func (s *Store) CommitBatchApply(room, gen, state string, items int, createdAt string, plan []byte, spends []BatchSpend) error {
+// SaveBatchPlan replaces the room's plan of generation gen. A room whose plan is another generation is
+// left alone (ErrBatchPlanStale), and a room without a plan gets none (ErrBatchPlanMissing).
+func (s *Store) SaveBatchPlan(room, gen string, rec BatchPlanRecord) error {
+	return s.DB.WithWriter(func(tx *sql.Tx) error {
+		if err := planGenerationTx(tx, room, gen); err != nil {
+			return err
+		}
+		return updateBatchPlanTx(tx, room, gen, rec)
+	})
+}
+
+// BatchWrites are the results of one applied batch, written with its checkpoint (CommitBatchApply).
+type BatchWrites struct {
+	Leaves    []LeafVectorWrite
+	Summaries []SummaryWrite
+	Messages  []MessageVector
+}
+
+// LeafVectorWrite is a leaf vector for the space, kept only if the leaf still reads Body.
+type LeafVectorWrite struct {
+	ID, Space string
+	Vec       []byte
+	Body      string
+}
+
+// SummaryWrite is a leaf's summary (without its vector) and its summary-text cache entry, kept only if the
+// leaf still reads Body.
+type SummaryWrite struct {
+	ID, Body, Summary, CacheKey string
+}
+
+// BatchWritten counts what CommitBatchApply stored; a result whose leaf or message changed meanwhile (or
+// is gone) is not stored.
+type BatchWritten struct {
+	Leaves, Summaries, Messages int
+}
+
+// CommitBatchApply writes an applied batch's results, replaces the room's plan of generation gen (it must
+// exist) with the record plan builds from what was written, and adds the spend entries, in one
+// transaction: the results, the saved counts in the plan, its checkpoint and its cost are stored together
+// or not at all. A crash before the commit leaves nothing of the apply, so applying the batch again saves
+// and counts it once; a plan of another generation, or none, gets nothing (ErrBatchPlanStale,
+// ErrBatchPlanMissing). An error plan returns rolls everything back.
+func (s *Store) CommitBatchApply(room, gen string, w BatchWrites, spends []BatchSpend, plan func(BatchWritten) (BatchPlanRecord, error)) error {
 	day := time.Now().UTC().Format("2006-01-02")
 	q := `INSERT INTO memory_spend(day, kind, usd, calls) VALUES(?,?,?,?) ON CONFLICT(day, kind) DO UPDATE SET usd=memory_spend.usd+excluded.usd, calls=memory_spend.calls+excluded.calls`
 	if s.tidb() {
 		q = `INSERT INTO memory_spend(day, kind, usd, calls) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE usd=usd+VALUES(usd), calls=calls+VALUES(calls)`
 	}
 	return s.DB.WithWriter(func(tx *sql.Tx) error {
-		if err := saveBatchPlanTx(tx, room, gen, state, items, createdAt, plan, false); err != nil {
+		if err := planGenerationTx(tx, room, gen); err != nil {
+			return err
+		}
+		var got BatchWritten
+		for _, l := range w.Leaves {
+			ok, err := s.saveLeafVectorTx(tx, l.ID, l.Space, l.Vec, []string{l.Body})
+			if err != nil {
+				return err
+			}
+			if ok {
+				got.Leaves++
+			}
+		}
+		for _, sw := range w.Summaries {
+			if err := putSummaryTextTx(tx, sw.CacheKey, sw.ID, sw.Body, sw.Summary); err != nil {
+				return err
+			}
+			ok, err := saveSummaryTx(tx, sw.ID, sw.Summary, nil, []string{sw.Body})
+			if err != nil {
+				return err
+			}
+			if ok {
+				got.Summaries++
+			}
+		}
+		n, err := s.saveMessageVectorsTx(tx, w.Messages)
+		if err != nil {
+			return err
+		}
+		got.Messages = n
+		rec, err := plan(got)
+		if err != nil {
+			return err
+		}
+		if err := updateBatchPlanTx(tx, room, gen, rec); err != nil {
 			return err
 		}
 		for _, sp := range spends {
@@ -112,27 +270,24 @@ func (s *Store) CommitBatchApply(room, gen, state string, items int, createdAt s
 	})
 }
 
-func saveBatchPlanTx(tx *sql.Tx, room, gen, state string, items int, createdAt string, plan []byte, create bool) error {
+// planGenerationTx checks that the room's stored plan is generation gen.
+func planGenerationTx(tx *sql.Tx, room, gen string) error {
 	var stored string
 	err := tx.QueryRow(`SELECT generation FROM memory_batch_plans WHERE room=?`, room).Scan(&stored)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		if !create {
-			return ErrBatchPlanStale
-		}
-		_, err = tx.Exec(`INSERT INTO memory_batch_plans(room, generation, state, items, created_at, updated_at, plan) VALUES(?,?,?,?,?,?,?)`,
-			room, gen, state, items, createdAt, now(), string(plan))
-		return err
+		return ErrBatchPlanMissing
 	case err != nil:
 		return err
 	case stored != gen:
-		if create {
-			return ErrBatchPlanExists
-		}
 		return ErrBatchPlanStale
 	}
-	_, err = tx.Exec(`UPDATE memory_batch_plans SET state=?, items=?, created_at=?, updated_at=?, plan=? WHERE room=? AND generation=?`,
-		state, items, createdAt, now(), string(plan), room, gen)
+	return nil
+}
+
+func updateBatchPlanTx(tx *sql.Tx, room, gen string, rec BatchPlanRecord) error {
+	_, err := tx.Exec(`UPDATE memory_batch_plans SET state=?, items=?, created_at=?, updated_at=?, plan=? WHERE room=? AND generation=?`,
+		rec.State, rec.Items, rec.CreatedAt, now(), string(rec.Plan), room, gen)
 	return err
 }
 

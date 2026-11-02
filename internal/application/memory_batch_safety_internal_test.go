@@ -113,17 +113,21 @@ func TestBatchCancelDrainsInTheBackground(t *testing.T) {
 	if got := waitJobDone(t, s, started.JobID); got["status"] != "cancelled" {
 		t.Fatalf("job %+v", got)
 	}
-	// the job row reads cancelled at once; the run then asks the host to cancel and waits a little
-	waitFor(t, "the plan to drain", func() bool {
-		info, ok := batchPlanOf(eng, room)
-		return ok && info.State == engine.BatchPlanDraining
-	})
+	// the job row reads cancelled at once; the run then asks the host to cancel, waits a little (the batch
+	// keeps running), and hands the plan to a background drain. The batch ends only once that drain runs,
+	// so the cancel itself cannot collect it
+	waitFor(t, "the background drain", func() bool { _, running := batchDrains.Load(drainKey(s, room)); return running })
+	info, ok := batchPlanOf(eng, room)
+	if !ok || info.State != engine.BatchPlanDraining {
+		t.Fatalf("the plan drains: %v %+v", ok, info)
+	}
 	b := blockOf(t, s, room)
 	if bb, _ := b["batch"].(map[string]any); b["waiting_batch"] != true || bb["state"] != engine.BatchPlanDraining {
 		t.Fatalf("the block shows the drain: %+v", b)
 	}
 	host.set(openai.BatchDone) // the batch ends on its own
 	waitFor(t, "the drain", func() bool { _, ok := batchPlanOf(eng, room); return !ok })
+	waitFor(t, "the drain to end", func() bool { _, running := batchDrains.Load(drainKey(s, room)); return !running })
 	var pending int
 	if err := eng.Store.DB.DB.QueryRow(`SELECT count(*) FROM memory_leaves WHERE room=? AND closed=1 AND leaf_vec IS NULL`, room).Scan(&pending); err != nil {
 		t.Fatal(err)

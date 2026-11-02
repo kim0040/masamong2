@@ -53,6 +53,9 @@ type fakeBatch struct {
 	embedPrice float64      // live USD per token BatchEmbedCost prices at (0 = no price)
 	results    int          // BatchResults calls
 	failErr    error        // the error of a failItems item (default "item rejected")
+	// onReconcile runs at the start of every ReconcileBatch (outside the lock): something that happens
+	// while the host is asked
+	onReconcile func()
 }
 
 type fakeSub struct {
@@ -132,6 +135,12 @@ func (f *fakeBatch) SubmitBatch(_ context.Context, kind openai.BatchKind, model 
 }
 
 func (f *fakeBatch) ReconcileBatch(_ context.Context, ref openai.BatchRef) (openai.BatchRef, error) {
+	f.mu.Lock()
+	hook := f.onReconcile
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.reconciles++
@@ -562,9 +571,9 @@ func TestBatchBudgetStopSubmitsNothing(t *testing.T) {
 		t.Fatal("no plan after a budget stop")
 	}
 	// the live remainder stops at the budget the batch already spent, and still loads what was applied
-	plan = BatchPlan{Version: batchPlanVersion, Room: batchRoom, State: BatchPlanWaiting, Space: e.EmbedSpace(), EmbedModel: e.Models.Embed,
-		BudgetUSD: 0.001, SpentUSD: 0.001, CreatedAt: time.Now()}
-	if err := e.saveBatchPlan(&plan); err != nil {
+	plan = BatchPlan{Version: batchPlanVersion, Room: batchRoom, Generation: newGeneration(), State: BatchPlanWaiting, Space: e.EmbedSpace(),
+		EmbedModel: e.Models.Embed, BudgetUSD: 0.001, SpentUSD: 0.001, CreatedAt: time.Now()}
+	if err := e.insertBatchPlan(&plan); err != nil {
 		t.Fatal(err)
 	}
 	out, err := e.FinishBatch(context.Background(), &plan, nil)

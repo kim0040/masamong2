@@ -155,6 +155,9 @@ func (a *Adapter) postShaped(ctx context.Context, req ChatRequest, learn bool) (
 			old, keep := a.shapeOf(req), sh
 			if !learnEffort {
 				keep.NoEffort, keep.EffortNone = old.NoEffort, old.EffortNone
+				if req.Effort == "none" && sh.NoEffort && !old.NoEffort {
+					a.noneOff.Store(shapeKey(req), true) // for batch items only (batchShapeOf)
+				}
 			}
 			if keep != old {
 				a.shapes.Store(shapeKey(req), keep)
@@ -190,16 +193,36 @@ func (a *Adapter) ShapeLearned(model string) bool {
 }
 
 // LearnRefusal applies what a batch item's refusal says about req's optional fields (the live retry's
-// rule, refusedField) to the model's shape, so the next batch leaves the field out. It reports whether
-// the shape changed.
+// rule, refusedField) to the model's shape, so the next batch leaves the field out. As in postShaped, a
+// refused effort learned from an effort "none" request holds for "none" only (batchShapeOf), so a live
+// request at another level keeps its effort. It reports whether anything was learned.
 func (a *Adapter) LearnRefusal(req ChatRequest, err error) bool {
-	sh := a.shapeOf(req)
+	sh := a.batchShapeOf(req)
 	next, ok := refusedField(a.API, err, req, sh)
 	if !ok || next == sh {
 		return false
 	}
-	a.shapes.Store(shapeKey(req), next)
+	if req.Effort == "none" && a.API != APIAnthropic && next.NoEffort && !sh.NoEffort {
+		a.noneOff.Store(shapeKey(req), true)
+		next.NoEffort = a.shapeOf(req).NoEffort
+	}
+	if cur := a.shapeOf(req); next != cur {
+		a.shapes.Store(shapeKey(req), next)
+	}
 	return true
+}
+
+// batchShapeOf is the shape a batch item of req is written with: the learned shape, and for an effort
+// "none" request without the effort field when the model took "none" only that way. A batch item
+// cannot be retried without a refused field the way a live call is.
+func (a *Adapter) batchShapeOf(req ChatRequest) shape {
+	sh := a.shapeOf(req)
+	if req.Effort == "none" && !sh.NoEffort {
+		if _, off := a.noneOff.Load(shapeKey(req)); off {
+			sh.NoEffort = true
+		}
+	}
+	return sh
 }
 
 // refusedField decides whether err is a model refusing one optional field of req, sent to a host of

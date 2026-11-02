@@ -136,17 +136,20 @@ var (
 	// a submission is looked up in the host's list no sooner than this after its create call, so a batch
 	// the host has just stored is listed by then
 	batchReconcileSettle = 2 * time.Minute
+	// the plan write after an accepted batch is tried this often, waiting from batchSaveRetry (doubling)
+	batchSaveRetry = time.Second
+	batchSaveTries = 4
 )
 
 // ShortBatchWaitsForTest shortens the batch waits (polls, the cancel wait, result retries, the reconcile
 // settle time) for a test, also of another package, and returns what restores them. Tests only: call it
 // before anything that waits starts, and restore after it stopped.
 func ShortBatchWaitsForTest() (restore func()) {
-	first, mx, cw, cp, rr, rs := batchPollFirst, batchPollMax, batchCancelWait, batchCancelPoll, batchResultRetry, batchReconcileSettle
+	first, mx, cw, cp, rr, rs, sr := batchPollFirst, batchPollMax, batchCancelWait, batchCancelPoll, batchResultRetry, batchReconcileSettle, batchSaveRetry
 	batchPollFirst, batchPollMax, batchCancelWait, batchCancelPoll, batchResultRetry = time.Millisecond, 5*time.Millisecond, 200*time.Millisecond, time.Millisecond, time.Millisecond
-	batchReconcileSettle = 0
+	batchReconcileSettle, batchSaveRetry = 0, time.Millisecond
 	return func() {
-		batchPollFirst, batchPollMax, batchCancelWait, batchCancelPoll, batchResultRetry, batchReconcileSettle = first, mx, cw, cp, rr, rs
+		batchPollFirst, batchPollMax, batchCancelWait, batchCancelPoll, batchResultRetry, batchReconcileSettle, batchSaveRetry = first, mx, cw, cp, rr, rs, sr
 	}
 }
 
@@ -162,8 +165,8 @@ var ErrBatchPlanReplaced = fmt.Errorf("%w: the room has a newer batch plan", Err
 var ErrBatchSubmitUnknown = openai.ErrBatchSubmitUnknown
 
 // ErrBatchSubmitRefused: the host refused a batch (a 4xx other than "this model cannot batch", a rate
-// limit, the daily gate) or a submission turned out never to have reached it. Nothing of it runs live;
-// what was sent before is collected.
+// limit, the daily gate), a submission turned out never to have reached it, or the summary model's live
+// shape probe failed before anything was sent. Nothing of it runs live; what was sent before is collected.
 var ErrBatchSubmitRefused = errors.New("memory: the provider refused the batch")
 
 // ErrBatchProviderGone: the provider a batch was submitted to is no longer configured as it was (removed,
@@ -474,10 +477,26 @@ func newGeneration() string {
 }
 
 // staleLogged keeps a late call on a replaced plan to one log line per room, generation and kind of call.
-var staleLogged sync.Map
+// It is bounded: past staleLogMax keys it starts afresh (a repeated line is the worst case).
+var staleLogged struct {
+	sync.Mutex
+	seen map[string]bool
+}
+
+const staleLogMax = 256
 
 func logStale(room, gen, what string) {
-	if _, seen := staleLogged.LoadOrStore(room+"|"+gen+"|"+what, true); !seen {
+	key := room + "|" + gen + "|" + what
+	staleLogged.Lock()
+	seen := staleLogged.seen[key]
+	if !seen {
+		if staleLogged.seen == nil || len(staleLogged.seen) >= staleLogMax {
+			staleLogged.seen = map[string]bool{}
+		}
+		staleLogged.seen[key] = true
+	}
+	staleLogged.Unlock()
+	if !seen {
 		slog.Info("memory: late batch "+what+" for a replaced plan ignored", "room", room, "generation", gen)
 	}
 }
@@ -501,18 +520,68 @@ func (e *Engine) LoadBatchPlan(room string) (BatchPlan, bool, error) {
 	return p, true, nil
 }
 
-// saveBatchPlan writes p over the stored plan of its generation (or stores it when the room has none).
-func (e *Engine) saveBatchPlan(p *BatchPlan) error {
+// planSaveFault lets a test fail plan writes (a full disk, a locked database) after the first one.
+var planSaveFault func(p *BatchPlan) error
+
+func planRecord(p *BatchPlan) (store.BatchPlanRecord, error) {
 	if p.Generation == "" {
-		p.Generation = newGeneration()
+		return store.BatchPlanRecord{}, errors.New("memory: a batch plan without a generation is not stored")
 	}
 	raw, err := json.Marshal(p)
+	return store.BatchPlanRecord{State: p.State, Items: p.BatchItems, CreatedAt: p.CreatedAt.UTC().Format(time.RFC3339), Plan: raw}, err
+}
+
+// planErr maps the store's compare-and-set refusals: a plan of another generation is ErrBatchPlanReplaced,
+// no plan at all ErrBatchPlanGone.
+func planErr(err error) error {
+	switch {
+	case errors.Is(err, store.ErrBatchPlanMissing):
+		return ErrBatchPlanGone
+	case errors.Is(err, store.ErrBatchPlanStale), errors.Is(err, store.ErrBatchPlanExists):
+		return ErrBatchPlanReplaced
+	}
+	return err
+}
+
+// insertBatchPlan stores a new preparation's plan; the room must have none.
+func (e *Engine) insertBatchPlan(p *BatchPlan) error {
+	rec, err := planRecord(p)
 	if err != nil {
 		return err
 	}
-	err = e.Store.SaveBatchPlan(p.Room, p.Generation, p.State, p.BatchItems, p.CreatedAt.UTC().Format(time.RFC3339), raw)
-	if errors.Is(err, store.ErrBatchPlanStale) || errors.Is(err, store.ErrBatchPlanExists) {
-		return ErrBatchPlanReplaced
+	return planErr(e.Store.InsertBatchPlan(p.Room, p.Generation, rec))
+}
+
+// saveBatchPlan writes p over the stored plan of its generation. A plan replaced meanwhile is left alone
+// (ErrBatchPlanReplaced), and one deleted meanwhile (discarded, finished) is not stored again
+// (ErrBatchPlanGone): only insertBatchPlan creates a plan.
+func (e *Engine) saveBatchPlan(p *BatchPlan) error {
+	if hook := planSaveFault; hook != nil {
+		if err := hook(p); err != nil {
+			return err
+		}
+	}
+	rec, err := planRecord(p)
+	if err != nil {
+		return err
+	}
+	return planErr(e.Store.SaveBatchPlan(p.Room, p.Generation, rec))
+}
+
+// saveAccepted stores a plan right after a batch was accepted. The batch is running and paid for, so a
+// failed write is tried again a few times (a locked or briefly full database); a plan that was replaced or
+// deleted meanwhile is not.
+func (e *Engine) saveAccepted(p *BatchPlan) error {
+	delay := batchSaveRetry
+	var err error
+	for try := 0; try < batchSaveTries; try++ {
+		if try > 0 {
+			time.Sleep(delay)
+			delay *= 2
+		}
+		if err = e.saveBatchPlan(p); err == nil || errors.Is(err, ErrBatchPlanGone) {
+			return err
+		}
 	}
 	return err
 }
@@ -690,6 +759,18 @@ func (e *Engine) PrepareBatch(ctx context.Context, room string, opts BatchOption
 		}
 	}
 	est := e.BatchEstimate(e.estimate(needEmbed, pending, msgNeed))
+	// a summary batch for a model whose request shape is not learned yet starts with one live summary
+	// (probeSummary), at the live price: the estimate the budget is checked against includes it in full
+	probe := false
+	if len(needSumm) > 0 && e.canBatch(purposeSummary) {
+		if sl, ok := e.batcher(purposeSummary).(shapeLearner); ok && !sl.ShapeLearned(e.Models.Summary) {
+			probe = true
+			if est.Summaries > 0 {
+				v := *est.BatchUSD + est.summaryChatUSD/float64(est.Summaries)*(1-e.discount(purposeSummary, e.Models.Summary))
+				est.BatchUSD = &v
+			}
+		}
+	}
 	rep.Estimate = &est
 	if e.LLM == nil || !e.LLM.Configured() {
 		if len(needEmbed)+len(needSumm)+len(msgNeed) > 0 {
@@ -715,11 +796,23 @@ func (e *Engine) PrepareBatch(ctx context.Context, room string, opts BatchOption
 	if opts.Limit > 0 {
 		plan.Workset = workset(pending, after, msgNeed, msgSelected)
 	}
-	// a summary batch for a model whose request shape is not learned yet: one live summary first, so the
-	// batch leaves out the optional fields the model refuses (a batch item cannot be retried without them)
-	if len(needSumm) > 0 && e.canBatch(purposeSummary) {
-		if sl, ok := e.batcher(purposeSummary).(shapeLearner); ok && !sl.ShapeLearned(e.Models.Summary) {
-			needSumm = e.probeSummary(ctx, needSumm, &plan)
+	// unsent is what the caller's live pass needs when nothing went to a batch: the room, the selection, and
+	// what this preparation already spent (the probe), so the pass stays within the budget
+	unsent := func() BatchPlan {
+		return BatchPlan{Room: room, BudgetUSD: opts.BudgetUSD, Limit: opts.Limit, Workset: plan.Workset, LiveItems: plan.LiveItems,
+			Summaries: plan.Summaries, SpentUSD: plan.SpentUSD}
+	}
+	if probe {
+		// one live summary first, so the batch leaves out the optional fields the model refuses (a batch item
+		// cannot be retried without them). When it fails nothing is sent: the batch would fail the same way,
+		// and running the summaries live instead is what the operator chose not to pay for
+		var err error
+		if needSumm, err = e.probeSummary(ctx, needSumm, &plan); err != nil {
+			if ctx.Err() != nil {
+				rep.StoppedBy = "cancelled"
+				return done(unsent(), nil)
+			}
+			return done(unsent(), err)
 		}
 	}
 	stored := false // a plan row exists for this generation
@@ -761,7 +854,11 @@ func (e *Engine) PrepareBatch(ctx context.Context, room string, opts BatchOption
 				Submit: submitPending, Items: items, Units: units, Ref: openai.BatchRef{API: prov.API, BaseURL: prov.BaseURL,
 					Kind: kind, Model: w.model, Count: len(chunk), SubmitKey: key, SubmittedAt: time.Now().UTC()}})
 			g := &plan.Groups[len(plan.Groups)-1]
-			if err := e.saveBatchPlan(&plan); err != nil {
+			save := e.saveBatchPlan
+			if !stored {
+				save = e.insertBatchPlan // only a new preparation creates the row
+			}
+			if err := save(&plan); err != nil {
 				plan.Groups = plan.Groups[:len(plan.Groups)-1] // nothing was sent
 				stopErr = err
 				plan.Cut = true
@@ -780,15 +877,14 @@ func (e *Engine) PrepareBatch(ctx context.Context, room string, opts BatchOption
 				}
 				plan.BatchItems += units
 				from += len(chunk)
-				if err := e.saveBatchPlan(&plan); err != nil {
-					// a batch nobody could find again would be paid for and lost: take it back (the stored intent
-					// lets a restart look it up if even this fails)
-					_ = client.CancelBatch(context.WithoutCancel(ctx), ref)
-					_ = client.CleanupBatch(context.WithoutCancel(ctx), ref)
-					plan.Groups = plan.Groups[:len(plan.Groups)-1]
-					plan.BatchItems -= units
-					_ = e.saveBatchPlan(&plan)
-					stopErr = err
+				if err := e.saveAccepted(&plan); err != nil {
+					// the batch is running and paid for: it is never cancelled or forgotten. The plan keeps it, the
+					// stored intent holds the room, and the next run looks the batch up by its key instead of
+					// sending it again; nothing more is submitted
+					slog.Error("memory: an accepted batch could not be recorded; it is kept and the room stays held",
+						"room", room, "purpose", w.purpose, "batch", ref.ID, "err", err)
+					stopErr = fmt.Errorf("memory: the %s batch %s was accepted but the plan could not be stored (%w); the batch is kept, the room stays held, and the next run looks it up instead of sending it again",
+						w.purpose, ref.ID, err)
 					plan.Cut = true
 					break chunks
 				}
@@ -828,14 +924,14 @@ func (e *Engine) PrepareBatch(ctx context.Context, room string, opts BatchOption
 				stopErr = err
 			}
 		}
-		return done(BatchPlan{LiveItems: plan.LiveItems, Summaries: plan.Summaries, SpentUSD: plan.SpentUSD}, stopErr)
+		return done(unsent(), stopErr)
 	}
 	if stopErr != nil && !hasOpenSubmit(&plan) {
 		// what was sent is collected; nothing else runs
 		plan.State, plan.Drain = BatchPlanDraining, true
 		plan.Reason = clipText("submission stopped: "+stopErr.Error()+"; the batches sent are collected, the rest is not sent; prepare again for it", 300)
 	}
-	if err := e.saveBatchPlan(&plan); err != nil && stopErr == nil {
+	if err := e.saveAccepted(&plan); err != nil && stopErr == nil {
 		stopErr = err
 	}
 	progress("batch", 0, plan.requests())
@@ -881,11 +977,11 @@ func workset(pending, after []store.PendingLeaf, msgs []store.PendingMessage, ms
 
 // probeSummary summarizes the first leaf live, the way the live pass does, so the summary model's request
 // shape is learned before its batch is written (the leaf counts as live work and its cost as spent). It
-// returns the leaves left for the batch: all of them when the live call failed (they then run live).
-func (e *Engine) probeSummary(ctx context.Context, leaves []store.PendingLeaf, plan *BatchPlan) []store.PendingLeaf {
+// returns the leaves left for the batch, or the reason it failed (ErrBatchSubmitRefused; nothing was sent).
+func (e *Engine) probeSummary(ctx context.Context, leaves []store.PendingLeaf, plan *BatchPlan) ([]store.PendingLeaf, error) {
 	a := e.summaryLLM()
 	if a == nil || !a.Configured() {
-		return leaves
+		return leaves, nil
 	}
 	p := leaves[0]
 	began := time.Now()
@@ -901,10 +997,9 @@ func (e *Engine) probeSummary(ctx context.Context, leaves []store.PendingLeaf, p
 	e.recordCall(ctx, "summary", e.Models.Summary, e.CallProviders.Summary, res.CostUSD, fallbackSummaryCall, latency,
 		res.PromptTokens, res.CompletionTokens, res.CachedTokens, logged)
 	if err != nil {
-		// a live call that fails would fail in the batch too: the summaries are left to the live remainder
-		slog.Warn("memory: the summary model's first live request failed; its summaries run live", "room", plan.Room, "err", err)
-		plan.LiveItems += len(leaves)
-		return nil
+		slog.Warn("memory: the summary model's first live request failed; no batch is sent", "room", plan.Room, "err", err)
+		return nil, fmt.Errorf("%w (summary): the summary model's first live request, which learns its request shape before a batch is written, failed: %v; nothing was sent and nothing runs live; prepare again",
+			ErrBatchSubmitRefused, err)
 	}
 	e.spend("summary", res.CostUSD, fallbackSummaryCall)
 	plan.SpentUSD += costOf(res.CostUSD, fallbackSummaryCall)
@@ -916,7 +1011,7 @@ func (e *Engine) probeSummary(ctx context.Context, leaves []store.PendingLeaf, p
 			plan.Summaries++
 		}
 	}
-	return leaves[1:]
+	return leaves[1:], nil
 }
 
 // leafWork groups leaf embeddings as the live pass does (EmbedBatch per request, the same inputs).
@@ -1009,7 +1104,7 @@ func (p *BatchPlan) requests() int {
 // held while waiting.
 func (e *Engine) ReconcilePlan(ctx context.Context, plan *BatchPlan) error {
 	if !hasOpenSubmit(plan) {
-		return e.cutToDraining(plan, nil)
+		return e.cutToDraining(plan)
 	}
 	unknown := ""
 	dropped := false
@@ -1076,13 +1171,13 @@ func (e *Engine) ReconcilePlan(ctx context.Context, plan *BatchPlan) error {
 	if dropped {
 		plan.Cut = true
 	}
-	return e.cutToDraining(plan, nil)
+	return e.cutToDraining(plan)
 }
 
 // cutToDraining turns a plan whose submission was cut short into a draining one (collected, nothing live),
 // or deletes it when nothing was sent; it returns ErrBatchSubmitRefused then. A plan that was not cut is
 // only saved.
-func (e *Engine) cutToDraining(plan *BatchPlan, cause error) error {
+func (e *Engine) cutToDraining(plan *BatchPlan) error {
 	if !plan.Cut || plan.Drain {
 		if len(plan.Groups) == 0 {
 			return e.deletePlan(plan, "reconcile")
@@ -1090,9 +1185,6 @@ func (e *Engine) cutToDraining(plan *BatchPlan, cause error) error {
 		return e.saveBatchPlan(plan)
 	}
 	why := "a batch submission did not reach the host"
-	if cause != nil {
-		why = cause.Error()
-	}
 	if len(plan.Groups) == 0 {
 		if err := e.deletePlan(plan, "reconcile"); err != nil {
 			return err
@@ -1127,7 +1219,9 @@ func hostName(p BatchProvider) string {
 // every minute at first and backing off to five. A submission still unanswered is settled first
 // (ReconcilePlan, whose errors it returns). It holds no lock and writes nothing else: the plan is saved
 // when its results are applied, and a restart polls again. It returns ctx's error when ctx ends first,
-// and ErrBatchProviderGone at once when a batch's provider is no longer configured or cannot be polled.
+// ErrBatchProviderGone at once when a batch's provider is no longer configured or cannot be polled, and
+// ErrBatchPlanGone when the plan was deleted (discarded) or replaced meanwhile: its batches are no
+// longer this run's to wait for.
 func (e *Engine) WaitBatch(ctx context.Context, plan *BatchPlan, status BatchStatusFunc) error {
 	if hasOpenSubmit(plan) {
 		if err := e.ReconcilePlan(ctx, plan); err != nil {
@@ -1136,6 +1230,9 @@ func (e *Engine) WaitBatch(ctx context.Context, plan *BatchPlan, status BatchSta
 	}
 	delay := batchPollFirst
 	for {
+		if _, err := e.storedCurrent(plan, "wait"); errors.Is(err, ErrBatchPlanGone) {
+			return err
+		}
 		open, err := e.pollPlan(ctx, plan)
 		if status != nil {
 			status(plan.pollState())
@@ -1419,17 +1516,18 @@ func (e *Engine) CollectBatch(ctx context.Context, plan *BatchPlan) (BatchApplie
 
 // Apply saves one batch's outcomes the way the live pass saves its results (fitted, normalized float16
 // leaf vectors; normalized summaries, cached by text, saved without their vector, which the live
-// remainder embeds; quantized message vectors), and marks the batch applied in the stored plan in one
-// transaction with the outcomes' cost, so applying a batch again (a crash before the checkpoint, another
-// run) never counts its cost twice. A result whose leaf or message changed or is no longer pending is
-// skipped (stale); an item with no result or an error counts as failed and stays pending. A plan of
-// another generation than the stored one, or a group that is not the stored group, changes nothing
-// (ErrBatchPlanReplaced). It holds indexMu.
+// remainder embeds; quantized message vectors). The results, the counts of what was saved, the group's
+// applied mark and the outcomes' cost are written in one transaction (store.CommitBatchApply), so a crash
+// before the commit leaves nothing of it and applying the batch again saves and counts it exactly once. A
+// result whose leaf or message changed or is no longer pending is skipped (stale); an item with no result
+// or an error counts as failed and stays pending. A plan of another generation than the stored one, or a
+// group that is not the stored group, changes nothing (ErrBatchPlanReplaced). It holds indexMu.
 func (e *Engine) Apply(ctx context.Context, plan *BatchPlan, group int, outcomes []openai.BatchOutcome) (BatchApplied, error) {
 	return e.apply(ctx, plan, group, outcomes, &applyCache{})
 }
 
-// beforeApplyCommit lets a test fail the checkpoint after the results are written (a crash).
+// beforeApplyCommit lets a test fail the apply after its results are written, inside the transaction that
+// would commit them with the checkpoint (a crash before the commit).
 var beforeApplyCommit func() error
 
 func (e *Engine) apply(ctx context.Context, plan *BatchPlan, group int, outcomes []openai.BatchOutcome, cache *applyCache) (BatchApplied, error) {
@@ -1468,41 +1566,52 @@ func (e *Engine) apply(ctx context.Context, plan *BatchPlan, group int, outcomes
 		client, _ = e.groupBatcher(g)
 	}
 	acct := &applyAccount{}
+	var w store.BatchWrites
 	switch g.Purpose {
 	case purposeLeaf:
-		out, err = e.applyLeaves(ctx, &stored, g, byID, cache, client, acct)
-		stored.LeafVectors += out.Saved
+		out, err = e.applyLeaves(ctx, &stored, g, byID, cache, client, acct, &w)
 	case purposeSummary:
-		out, err = e.applySummaries(ctx, &stored, g, byID, cache, client, acct)
-		stored.Summaries += out.Saved
+		out, err = e.applySummaries(ctx, &stored, g, byID, cache, client, acct, &w)
 	case purposeMessage:
-		out, err = e.applyMessages(ctx, &stored, g, byID, cache, client, acct)
-		stored.MessageVectors += out.Saved
+		out, err = e.applyMessages(ctx, &stored, g, byID, cache, client, acct, &w)
 	default:
 		out.Failed = g.Units
 	}
 	if err != nil {
 		return out, err
 	}
-	g.Applied = true
-	stored.SpentUSD += out.SpentUSD
-	stored.BatchFailed += out.Failed
-	stored.BatchStale += out.Stale
-	if hook := beforeApplyCommit; hook != nil {
-		if err := hook(); err != nil {
-			return out, err
+	planned := len(w.Leaves) + len(w.Summaries) + len(w.Messages)
+	before := stored // the counters before this group (the closure sets them from what was written)
+	err = e.Store.CommitBatchApply(stored.Room, stored.Generation, w, acct.list(), func(got store.BatchWritten) (store.BatchPlanRecord, error) {
+		saved := got.Leaves + got.Summaries + got.Messages
+		stored.LeafVectors = before.LeafVectors + got.Leaves
+		stored.Summaries = before.Summaries + got.Summaries
+		stored.MessageVectors = before.MessageVectors + got.Messages
+		stored.SpentUSD = before.SpentUSD + out.SpentUSD
+		stored.BatchFailed = before.BatchFailed + out.Failed
+		stored.BatchStale = before.BatchStale + out.Stale + planned - saved // changed while the transaction waited
+		g.Applied = true
+		if hook := beforeApplyCommit; hook != nil {
+			if err := hook(); err != nil {
+				return store.BatchPlanRecord{}, err
+			}
 		}
-	}
-	raw, err := json.Marshal(&stored)
+		return planRecord(&stored)
+	})
 	if err != nil {
-		return out, err
+		g.Applied = false
+		return BatchApplied{}, planErr(err)
 	}
-	if err := e.Store.CommitBatchApply(stored.Room, stored.Generation, stored.State, stored.BatchItems,
-		stored.CreatedAt.UTC().Format(time.RFC3339), raw, acct.list()); err != nil {
-		if errors.Is(err, store.ErrBatchPlanStale) {
-			return out, ErrBatchPlanReplaced
-		}
-		return out, err
+	saved := stored.LeafVectors - before.LeafVectors + stored.Summaries - before.Summaries + stored.MessageVectors - before.MessageVectors
+	out.Saved, out.Stale = saved, out.Stale+planned-saved
+	for _, l := range w.Leaves {
+		delete(cache.leaves, l.ID)
+	}
+	for _, sw := range w.Summaries {
+		delete(cache.summaries, sw.ID)
+	}
+	for _, m := range w.Messages {
+		delete(cache.messages, m.ObservationID)
 	}
 	if e.OnCall != nil {
 		for _, c := range acct.calls {
@@ -1574,8 +1683,10 @@ func (e *Engine) embedOutcome(model string, g *BatchGroup, it BatchPlanItem, o o
 	return res, true
 }
 
+// applyLeaves collects a leaf batch's vectors into w (written by apply's commit); out counts the stale and
+// failed results and the cost.
 func (e *Engine) applyLeaves(_ context.Context, plan *BatchPlan, g *BatchGroup, byID map[string]openai.BatchOutcome, cache *applyCache,
-	client BatchClient, acct *applyAccount) (BatchApplied, error) {
+	client BatchClient, acct *applyAccount, w *store.BatchWrites) (BatchApplied, error) {
 	var out BatchApplied
 	space := e.EmbedSpace()
 	if cache.leaves == nil {
@@ -1611,19 +1722,15 @@ func (e *Engine) applyLeaves(_ context.Context, plan *BatchPlan, g *BatchGroup, 
 			v := e.fitDims(res.Vectors[i])
 			e.observeLeafWidth(len(v))
 			search.Normalize(v)
-			if err := e.Store.SaveLeafVector(t.ID, space, search.EncodeFloat16(v), body); err != nil {
-				out.Failed++ // stays pending; the live remainder embeds it
-				continue
-			}
-			delete(cache.leaves, t.ID)
-			out.Saved++
+			w.Leaves = append(w.Leaves, store.LeafVectorWrite{ID: t.ID, Space: space, Vec: search.EncodeFloat16(v), Body: body})
 		}
 	}
 	return out, nil
 }
 
+// applySummaries collects a summary batch's texts into w (written by apply's commit).
 func (e *Engine) applySummaries(_ context.Context, plan *BatchPlan, g *BatchGroup, byID map[string]openai.BatchOutcome, cache *applyCache,
-	client BatchClient, acct *applyAccount) (BatchApplied, error) {
+	client BatchClient, acct *applyAccount, w *store.BatchWrites) (BatchApplied, error) {
 	var out BatchApplied
 	if cache.summaries == nil {
 		leafDims, err := e.pendingLeafDims()
@@ -1692,15 +1799,9 @@ func (e *Engine) applySummaries(_ context.Context, plan *BatchPlan, g *BatchGrou
 			out.Stale++ // a changed or erased text: its old summary is not kept anywhere
 			continue
 		}
-		summary := normalizeSummary(res.Content, body)
-		_ = e.Store.PutSummaryText(store.CacheKey(plan.SummaryModel, "summary-text", body), t.ID, body, summary)
 		// the vector needs the summary text: the live remainder embeds it (or takes it from the cache)
-		if err := e.Store.SaveSummary(t.ID, summary, nil, body); err != nil {
-			out.Failed++
-			continue
-		}
-		delete(cache.summaries, t.ID)
-		out.Saved++
+		w.Summaries = append(w.Summaries, store.SummaryWrite{ID: t.ID, Body: body, Summary: normalizeSummary(res.Content, body),
+			CacheKey: store.CacheKey(plan.SummaryModel, "summary-text", body)})
 	}
 	if allRefused && refusal != nil {
 		// every request was refused for its fields: learn the model's shape the way a live retry does, so
@@ -1712,8 +1813,10 @@ func (e *Engine) applySummaries(_ context.Context, plan *BatchPlan, g *BatchGrou
 	return out, nil
 }
 
+// applyMessages collects a message batch's vectors into w (written by apply's commit; the store keeps a
+// vector only if its message still reads as the text it was made from).
 func (e *Engine) applyMessages(_ context.Context, plan *BatchPlan, g *BatchGroup, byID map[string]openai.BatchOutcome, cache *applyCache,
-	client BatchClient, acct *applyAccount) (BatchApplied, error) {
+	client BatchClient, acct *applyAccount, w *store.BatchWrites) (BatchApplied, error) {
 	var out BatchApplied
 	dims, _, err := e.messageVectorState()
 	if err != nil {
@@ -1734,7 +1837,6 @@ func (e *Engine) applyMessages(_ context.Context, plan *BatchPlan, g *BatchGroup
 		}
 	}
 	short := false
-	var vecs []store.MessageVector
 	for _, it := range g.Items {
 		o, ok := byID[it.ID]
 		res, ok := e.embedOutcome(plan.EmbedModel, g, it, o, ok, client, acct, &out)
@@ -1760,21 +1862,8 @@ func (e *Engine) applyMessages(_ context.Context, plan *BatchPlan, g *BatchGroup
 				out.Failed++
 				continue
 			}
-			vecs = append(vecs, store.MessageVector{ObservationID: t.ID, Space: space, TextHash: p.TextHash,
+			w.Messages = append(w.Messages, store.MessageVector{ObservationID: t.ID, Space: space, TextHash: p.TextHash,
 				Vec: search.EncodeQuantizedRow(fitMessageVec(v, dims))})
-		}
-	}
-	for i := 0; i < len(vecs); i += messageSaveChunk {
-		chunk := vecs[i:min(len(vecs), i+messageSaveChunk)]
-		saved, err := e.Store.SaveMessageVectors(chunk)
-		if err != nil {
-			out.Failed += len(chunk) // they stay pending for the live remainder
-			continue
-		}
-		out.Saved += saved
-		out.Stale += len(chunk) - saved // edited, erased or blocked meanwhile: the store refused them
-		for _, v := range chunk {
-			delete(cache.messages, v.ObservationID)
 		}
 	}
 	return out, nil
@@ -1826,6 +1915,20 @@ func (e *Engine) FinishBatch(ctx context.Context, plan *BatchPlan, progress Prog
 		return rep, err
 	}
 	return rep, nil
+}
+
+// RunUnbatched is the live pass of a batch preparation that sent nothing (no paid work, no host can batch
+// it, or the summary probe took the only summary): IndexRooms on the room within what PrepareBatch
+// selected, with the budget less what PrepareBatch already spent (the probe, at the live price), as
+// FinishBatch does for a remainder. plan is PrepareBatch's plan without groups; the report carries the
+// probe's summary and cost.
+func (e *Engine) RunUnbatched(ctx context.Context, room string, opts BatchOptions, plan BatchPlan, progress Progress) (IndexReport, error) {
+	rep, err := e.IndexRooms(ctx, IndexOptions{Rooms: []string{room}, BudgetUSD: opts.BudgetUSD, Limit: opts.Limit,
+		spent: plan.SpentUSD, workset: plan.Workset}, progress)
+	rep.Mode, rep.LiveItems = "batch", plan.LiveItems
+	rep.Summaries += plan.Summaries
+	rep.SpentUSD += plan.SpentUSD
+	return rep, err
 }
 
 // markApplied releases the room: from now on its pending work is the live remainder's. A draining plan,
@@ -1960,7 +2063,11 @@ func (e *Engine) setDraining(plan *BatchPlan, reason string) error {
 func (e *Engine) DrainBatch(ctx context.Context, plan *BatchPlan) (BatchApplied, error) {
 	var total BatchApplied
 	if hasOpenSubmit(plan) {
-		if err := e.ReconcilePlan(ctx, plan); err != nil && !errors.Is(err, ErrBatchSubmitRefused) {
+		err := e.ReconcilePlan(ctx, plan)
+		if errors.Is(err, ErrBatchPlanGone) {
+			return total, nil // discarded meanwhile: nothing is stored again
+		}
+		if err != nil && !errors.Is(err, ErrBatchSubmitRefused) {
 			return total, err
 		}
 		if len(plan.Groups) == 0 {
@@ -1968,6 +2075,9 @@ func (e *Engine) DrainBatch(ctx context.Context, plan *BatchPlan) (BatchApplied,
 		}
 	}
 	if err := e.WaitBatch(ctx, plan, nil); err != nil {
+		if errors.Is(err, ErrBatchPlanGone) {
+			return total, nil
+		}
 		return total, err
 	}
 	a, err := e.CollectBatch(ctx, plan)

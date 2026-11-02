@@ -331,12 +331,17 @@ func TestBatchCancelDrainsUntilEveryBatchEnds(t *testing.T) {
 	}
 }
 
-// Finding 4: an apply whose checkpoint is lost (a crash after the results were written) and is run again
-// counts the batch's cost and calls once.
+// Finding 4 and R7: an apply that crashes after its results are written but before its checkpoint is
+// committed leaves nothing (results, counters, receipt and cost go in one transaction); run again, it saves
+// the vectors, counts them in the plan and its cost once, and the finish loads them into an index that was
+// already loaded.
 func TestBatchReapplyAfterACrashCountsTheCostOnce(t *testing.T) {
 	fastBatch(t)
 	e, _ := newEngine(t, false)
 	seedBatchRoom(t, e, batchRoom, 16, 0)
+	if _, err := e.Reload(); err != nil || e.Index() == nil {
+		t.Fatalf("an index is loaded before the batch: %v", err)
+	}
 	fb := newFakeBatch(openai.BatchEmbed)
 	e.EmbedBatcher = fb
 	var calls int
@@ -359,7 +364,13 @@ func TestBatchReapplyAfterACrashCountsTheCostOnce(t *testing.T) {
 	if usd, n := spendTotal(t, e); usd != 0 || n != 0 || calls != 0 {
 		t.Fatalf("nothing is counted before the checkpoint: %v %d calls=%d", usd, n, calls)
 	}
+	if n := countLeaves(t, e, `leaf_vec IS NOT NULL`); n != 0 {
+		t.Fatalf("the crashed apply's vectors are rolled back with it: %d", n)
+	}
 	stored, _, _ := e.LoadBatchPlan(batchRoom)
+	if stored.Groups[0].Applied || stored.LeafVectors != 0 {
+		t.Fatalf("no checkpoint: %+v", stored)
+	}
 	mergePolled(&stored, &plan)
 	again, err := e.ApplyBatch(context.Background(), &stored)
 	if err != nil {
@@ -369,11 +380,22 @@ func TestBatchReapplyAfterACrashCountsTheCostOnce(t *testing.T) {
 	if n != 1 || calls != 1 || usd <= 0 || usd != again.SpentUSD || stored.SpentUSD != usd {
 		t.Fatalf("one embedding request counted once: usd=%v calls=%d log=%d applied=%+v plan=%v", usd, n, calls, again, stored.SpentUSD)
 	}
+	if again.Saved != 2 || again.Stale != 0 || stored.LeafVectors != 2 || stored.BatchStale != 0 || countLeaves(t, e, `leaf_vec IS NOT NULL`) != 2 {
+		t.Fatalf("the retry saves and counts both vectors: applied %+v, plan vectors %d stale %d, stored %d",
+			again, stored.LeafVectors, stored.BatchStale, countLeaves(t, e, `leaf_vec IS NOT NULL`))
+	}
+	if durable, _, _ := e.LoadBatchPlan(batchRoom); durable.LeafVectors != 2 || !durable.Groups[0].Applied {
+		t.Fatalf("the counts are stored with the checkpoint: %+v", durable)
+	}
 	if _, err := e.Apply(context.Background(), &stored, 0, nil); err != nil {
 		t.Fatal(err)
 	}
 	if usd2, n2 := spendTotal(t, e); usd2 != usd || n2 != n || calls != 1 {
 		t.Fatal("an applied group is not counted again")
+	}
+	rep, err := e.FinishBatch(context.Background(), &stored, nil)
+	if err != nil || rep.LeafVectors != 2 || rep.Reload["leaves"] != 2 {
+		t.Fatalf("the finish reports and loads the saved vectors: %v %+v", err, rep)
 	}
 }
 

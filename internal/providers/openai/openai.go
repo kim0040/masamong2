@@ -45,6 +45,10 @@ type Adapter struct {
 	// shapeSeen marks models whose plain chat request (no tools) succeeded once, so their shape is known
 	// even when it refused nothing (ShapeLearned); model → true
 	shapeSeen sync.Map
+	// noneOff marks request kinds (shapeKey) whose effort "none" request worked only without the effort
+	// field. A live request learns it again each time (the model may take "low"); a batch item cannot, so
+	// its body leaves the field out (batchShapeOf); shapeKey → true
+	noneOff sync.Map
 	// imageAPI remembers models of a compatible host that refused a chat image request and answer on
 	// /images/generations instead (NanoGPT's image models); model → true
 	imageAPI sync.Map

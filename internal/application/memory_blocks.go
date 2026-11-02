@@ -322,14 +322,11 @@ func (s *Service) runBatchPrepare(ctx context.Context, eng *engine.Engine, p pre
 		if rep.StoppedBy != "" || len(rep.FailedRooms) > 0 {
 			return rep, nil
 		}
-		// nothing went to a batch (no paid work, or no host can batch it): the pass runs live now, with its
-		// usual budget
-		live, err := eng.IndexRooms(ctx, engine.IndexOptions{Rooms: []string{p.SourceRoom}, BudgetUSD: p.BudgetUSD, Limit: p.Limit}, progress)
-		live.Mode, live.LiveItems = prepareBatch, rep.LiveItems
+		// nothing went to a batch (no paid work, no host can batch it, or the summary probe took the only
+		// summary): the pass runs live now, within the budget less what the preparation already spent
+		live, err := eng.RunUnbatched(ctx, p.SourceRoom, engine.BatchOptions{BudgetUSD: p.BudgetUSD, Limit: p.Limit}, plan, progress)
 		live.FromCache += rep.FromCache
 		live.Adapted += rep.Adapted
-		live.Summaries += plan.Summaries
-		live.SpentUSD += plan.SpentUSD
 		return live, err
 	}
 	if plan.Drain {
@@ -397,31 +394,58 @@ func (s *Service) stopBatch(ctx context.Context, eng *engine.Engine, plan *engin
 	return rep, nil
 }
 
-// batchDrains are the rooms whose draining plan is being collected in the background, by service and
-// room (a channel closed when the drain ends).
+// batchDrain is a room's background drain: the generation of the plan it collects, what stops it, and a
+// channel closed when it has ended.
+type batchDrain struct {
+	gen    string
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+// batchDrains are the background drains (*batchDrain), by service and room: at most one per room.
 var batchDrains sync.Map
 
 func drainKey(s *Service, room string) string { return fmt.Sprintf("%p|%s", s, room) }
 
-// goDrain collects the room's draining plan in the background (engine.DrainBatch): its batches run to
-// their end at the hosts, their results are applied and the plan is deleted. One drain per room; it
-// stops with the service and resumes at the next start (ResumeJobs).
+// goDrain collects the room's stored draining plan in the background (engine.DrainBatch): its batches
+// run to their end at the hosts, their results are applied and the plan is deleted. One drain per room
+// and plan generation: a drain still registered for a plan that is gone (discarded) is stopped. It stops
+// with the service and resumes at the next start (ResumeJobs), and when the plan is discarded
+// (retireDrain).
 func (s *Service) goDrain(room string) {
-	ch := make(chan struct{})
-	key := drainKey(s, room)
-	if _, running := batchDrains.LoadOrStore(key, ch); running {
+	eng, err := s.MemoryEngine()
+	if err != nil {
 		return
 	}
-	ctx, done, ok := s.beginWork(s.jobCtx)
+	plan, ok, err := eng.LoadBatchPlan(room)
+	if err != nil || !ok || !plan.Drain {
+		return // only a stored draining plan is collected
+	}
+	ctx, workDone, ok := s.beginWork(s.jobCtx)
 	if !ok {
-		batchDrains.Delete(key)
-		close(ch)
 		return
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	key := drainKey(s, room)
+	d := &batchDrain{gen: plan.Generation, cancel: cancel, done: make(chan struct{})}
+	for {
+		v, loaded := batchDrains.LoadOrStore(key, d)
+		if !loaded {
+			break
+		}
+		old := v.(*batchDrain)
+		if old.gen == d.gen {
+			cancel() // already being collected
+			workDone()
+			return
+		}
+		old.cancel() // a drain of a plan that is gone
+		batchDrains.CompareAndDelete(key, old)
 	}
 	log := s.Log
 	go func() {
-		defer done()
-		defer func() { batchDrains.Delete(key); close(ch) }()
+		defer workDone()
+		defer func() { batchDrains.CompareAndDelete(key, d); cancel(); close(d.done) }()
 		defer crash.Recover(log, "batch drain "+room)
 		for attempt := 0; attempt < 3; attempt++ {
 			eng, err := s.MemoryEngine()
@@ -429,17 +453,17 @@ func (s *Service) goDrain(room string) {
 				return
 			}
 			plan, ok, err := eng.LoadBatchPlan(room)
-			if err != nil || !ok {
-				return
+			if err != nil || !ok || plan.Generation != d.gen {
+				return // discarded or replaced meanwhile
 			}
 			_, err = eng.DrainBatch(ctx, &plan)
 			if errors.Is(err, engine.ErrRetired) {
 				continue // a config change: the current engine collects it
 			}
-			if err != nil && ctx.Err() == nil {
+			if err != nil && ctx.Err() == nil && !errors.Is(err, engine.ErrBatchPlanGone) {
 				log.Warn("memory: a draining batch was not collected; the room stays held", "room", room, "err", err)
 			}
-			if err == nil {
+			if err == nil && ctx.Err() == nil {
 				s.emit("memory", "", map[string]any{"source_room": room, "batch_drained": true})
 			}
 			return
@@ -447,26 +471,70 @@ func (s *Service) goDrain(room string) {
 	}()
 }
 
-// awaitDrain waits for the room's draining plan: a background drain if one runs, else the drain itself.
-// A plan that drains is only collected (nothing of it runs live); the caller then starts afresh.
-func (s *Service) awaitDrain(ctx context.Context, room string, status engine.BatchStatusFunc) error {
-	if v, running := batchDrains.Load(drainKey(s, room)); running {
-		if status != nil {
-			status(openai.BatchRunning, 0, 0)
-		}
-		select {
-		case <-v.(chan struct{}):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+// retireDrain stops the room's background drain of generation gen (the plan being discarded) and waits
+// for it to end, at most until ctx ends.
+func (s *Service) retireDrain(ctx context.Context, room, gen string) {
+	v, ok := batchDrains.Load(drainKey(s, room))
+	if !ok {
+		return
 	}
+	d := v.(*batchDrain)
+	if d.gen != gen {
+		return
+	}
+	d.cancel()
+	select {
+	case <-d.done:
+	case <-ctx.Done():
+	}
+}
+
+// discardBatch drops the room's plan (memory.blocks.update discard_batch, a deleted block): its background
+// drain is stopped first, then the plan is discarded (engine.DiscardBatch).
+func (s *Service) discardBatch(ctx context.Context, eng *engine.Engine, room string) error {
+	plan, ok, err := eng.LoadBatchPlan(room)
+	if err != nil || !ok {
+		return err
+	}
+	s.retireDrain(ctx, room, plan.Generation)
+	return eng.DiscardBatch(ctx, room)
+}
+
+// awaitDrain waits for the room's draining plan: a background drain if one runs for the stored plan, else
+// the drain itself. A drain of a plan that is gone (discarded) is stopped, not waited for. A plan that
+// drains is only collected (nothing of it runs live); the caller then starts afresh.
+func (s *Service) awaitDrain(ctx context.Context, room string, status engine.BatchStatusFunc) error {
 	eng, err := s.MemoryEngine()
 	if err != nil {
 		return err
 	}
 	plan, ok, err := eng.LoadBatchPlan(room)
-	if err != nil || !ok || !plan.Drain {
+	if err != nil {
 		return err
+	}
+	if v, running := batchDrains.Load(drainKey(s, room)); running {
+		d := v.(*batchDrain)
+		if !ok || d.gen != plan.Generation {
+			d.cancel()
+		} else {
+			if status != nil {
+				status(openai.BatchRunning, 0, 0)
+			}
+			select {
+			case <-d.done:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			if eng, err = s.MemoryEngine(); err != nil {
+				return err
+			}
+			if plan, ok, err = eng.LoadBatchPlan(room); err != nil {
+				return err
+			}
+		}
+	}
+	if !ok || !plan.Drain {
+		return nil
 	}
 	_, err = eng.DrainBatch(ctx, &plan)
 	return err
@@ -1100,7 +1168,7 @@ func (s *Service) updateMemoryBlock(req action.Request, in map[string]any) actio
 			}
 		}
 		dctx, cancel := context.WithTimeout(context.Background(), batchCancelTimeout)
-		err := eng.DiscardBatch(dctx, b.SourceRoom)
+		err := s.discardBatch(dctx, eng, b.SourceRoom)
 		cancel()
 		if err != nil {
 			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
@@ -1172,7 +1240,7 @@ func (s *Service) deleteMemoryBlock(req action.Request, in map[string]any) actio
 	// drops the plan row with the rest)
 	if _, ok := batchPlanOf(eng, b.SourceRoom); ok {
 		dctx, cancel := context.WithTimeout(context.Background(), batchCancelTimeout)
-		if err := eng.DiscardBatch(dctx, b.SourceRoom); err != nil {
+		if err := s.discardBatch(dctx, eng, b.SourceRoom); err != nil {
 			s.Log.Warn("memory: batch of a deleted block not discarded", "room", b.SourceRoom, "err", err)
 		}
 		cancel()
