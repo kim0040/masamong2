@@ -240,6 +240,11 @@ func (e *Engine) IndexRooms(ctx context.Context, opts IndexOptions, progress Pro
 	if rooms, err = e.syncRooms(rooms, &rep, progress); err != nil {
 		return rep, err
 	}
+	if len(rooms) == 0 && len(rep.FailedRooms) > 0 {
+		// no room synced: an empty list must not reach the pending queries, where it means every room
+		rep.Elapsed = time.Since(start).Round(time.Millisecond).String()
+		return rep, nil
+	}
 	space := e.EmbedSpace()
 	if rep.Adapted, err = e.adaptSpace(); err != nil {
 		return rep, err
