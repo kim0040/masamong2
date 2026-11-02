@@ -597,7 +597,12 @@ func (s *Service) memoryActions(ctx context.Context, req action.Request) action.
 		if err != nil {
 			return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
 		}
-		return action.OK(req, map[string]any{"report": rep})
+		out := map[string]any{"report": rep}
+		if len(rep.BatchWaiting) > 0 {
+			// left out of the pass: their pending work is paid for in a batch still at the provider
+			out["note"] = "rooms waiting for their batch at the provider were not indexed (report.batch_waiting_rooms)"
+		}
+		return action.OK(req, out)
 	case "chat.respond":
 		ci := ChatInput{GuildID: strVal(in, "guild_id", "0"), ChannelID: strVal(in, "channel_id", ""),
 			Message: strVal(in, "message", ""), Speaker: strVal(in, "speaker", "tester"), SpeakerID: strVal(in, "speaker_id", ""), DryRun: true,
@@ -1696,6 +1701,9 @@ func (s *Service) memoryPass(ctx context.Context) {
 	if unfinished {
 		eng.MarkDirty(rooms...)
 	}
+	// a room whose batch is still at the provider was left alone (its pending leaves are paid for there):
+	// it stays queued and is indexed once the batch is applied
+	eng.MarkDirty(rep.BatchWaiting...)
 	s.saveIndexQueue(eng)
 	st := scheduleState{LastRun: started.UTC().Format(time.RFC3339), OK: err == nil, DurationMS: s.Clock.Now().Sub(started).Milliseconds(),
 		Detail: map[string]any{"rooms": len(rooms)}}

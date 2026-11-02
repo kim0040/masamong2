@@ -279,6 +279,9 @@ func Open(db *storage.Store) (*Store, error) {
 	if err := migrateEpisodes(db); err != nil {
 		return nil, err
 	}
+	if err := migrateBatchPlans(db); err != nil {
+		return nil, fmt.Errorf("memory migration: batch plans: %w", err)
+	}
 	return st, nil
 }
 
@@ -455,6 +458,10 @@ func (s *Store) DeleteRoom(room string) (int, error) {
 			}
 		}
 		if _, err := tx.Exec(`DELETE FROM memory_message_vectors WHERE room=?`, room); err != nil {
+			return err
+		}
+		// an in-flight batch plan names the room's leaves and messages (ids and text hashes)
+		if _, err := tx.Exec(`DELETE FROM memory_batch_plans WHERE room=?`, room); err != nil {
 			return err
 		}
 		if !s.tidb() {
