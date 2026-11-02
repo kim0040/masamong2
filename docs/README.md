@@ -31,6 +31,7 @@
 | [REPO_MAP.md](REPO_MAP.md) | 디렉터리와 주요 패키지 지도 |
 | [plan-discord-experience.md](plan-discord-experience.md) | 역사 문서(구현됨): Discord 사용 경험·운영 개선(2026-10-15): 예약 작업, 운세·공지 카드, 콘솔 페이지 전환 버그, 기다리는 동안 안내·팁, 운영 데이터 점검 |
 | [plan-memory-conversation.md](plan-memory-conversation.md) | 기억·대화·도구 설계 근거(2026-10, 구현 완료): 의도, 설계 원칙, 기능별 설계. 코드 주석이 절 번호를 가리킴 |
+| [plan-fortune.md](plan-fortune.md) | 매일 운세 개선 계획(2026-11-02, 구현 전): 확인한 문제, 우선순위별 제안, 하지 않을 것, 결정할 것 |
 | [admin-gui-ia.md](admin-gui-ia.md) | 현재 관리 콘솔 페이지와 구현 상태 |
 | [brand-assets.md](brand-assets.md) | 배포에 쓰는 로고·아이콘·마스코트 |
 | [license-audit.md](license-audit.md) | 의존성 라이선스 검사, 외부 서비스 약관 요약 |
