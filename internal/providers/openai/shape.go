@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -66,13 +67,54 @@ func shapeKey(req ChatRequest) string {
 // model's plain shape. Shapes are kept in the capability cache (CapsCache), which the application shares
 // across a provider's adapters.
 func (a *Adapter) shapeOf(req ChatRequest) shape {
-	if sh, ok := a.caps().shape(shapeKey(req)); ok {
-		return sh
+	sh, _ := a.shapeAt(req)
+	return sh
+}
+
+// shapeAt is shapeOf and the generation a lesson of this call is kept under (keepLesson).
+func (a *Adapter) shapeAt(req ChatRequest) (shape, uint64) {
+	sh, gen, _ := a.caps().shape(shapeKey(req))
+	return sh, gen
+}
+
+// keepLesson adds to req's stored shape the flags next has and start had not (what this call learned),
+// under the generation the call started in (CapsCache.updateShape): a lesson of another call is never
+// written over, and one from before the shapes were dropped is not kept. learnEffort false keeps the
+// effort flags out (postShaped). A bare tool turn sends a budget as thinking off (anthropicThinking), so
+// Budgeted learned there is used for the call only: no request with a budget has been seen to work.
+func (a *Adapter) keepLesson(req ChatRequest, gen uint64, start, next shape, learnEffort bool) {
+	learned := learnedFlags(start, next)
+	if !learnEffort {
+		learned.NoEffort, learned.EffortNone = false, false
 	}
-	if sh, ok := a.caps().shape(req.Model); ok {
-		return sh
+	if req.bareToolTurn {
+		learned.Budgeted = false
 	}
-	return shape{}
+	if learned == (shape{}) {
+		return
+	}
+	a.caps().updateShape(shapeKey(req), gen, func(old shape) shape { return withFlags(old, learned) })
+}
+
+// learnedFlags is the flags set in next and not in start. Every field of shape is a flag (bool).
+func learnedFlags(start, next shape) shape {
+	var out shape
+	o, s, n := reflect.ValueOf(&out).Elem(), reflect.ValueOf(start), reflect.ValueOf(next)
+	for i := range o.NumField() {
+		o.Field(i).SetBool(n.Field(i).Bool() && !s.Field(i).Bool())
+	}
+	return out
+}
+
+// withFlags is sh with every flag of add set as well.
+func withFlags(sh, add shape) shape {
+	o, n := reflect.ValueOf(&sh).Elem(), reflect.ValueOf(add)
+	for i := range o.NumField() {
+		if n.Field(i).Bool() {
+			o.Field(i).SetBool(true)
+		}
+	}
+	return sh
 }
 
 // payload writes a chat-completions request for the host family and the model's known shape (an
@@ -195,9 +237,10 @@ func (a *Adapter) byokRoute(p map[string]any, model string) {
 	p["provider"] = route
 }
 
-// postShaped posts a chat request, retrying at most twice when the model refuses an optional field (three
-// times on Anthropic, whose effort, adaptive thinking and budgeted thinking may each be refused), and
-// keeps the shape that worked for the model's later requests. What a request asking effort "none" (a
+// postShaped posts a chat request, retrying at most twice when the model refuses an optional field (four
+// times on Anthropic, whose effort level above high, effort field, adaptive thinking and budgeted thinking
+// may each be refused), and keeps each refusal it learns for the model's later requests (keepLesson), also
+// when the call runs out of retries, so the next call goes on from there. What a request asking effort "none" (a
 // quick classifier, or the no-thinking retry in Chat, which passes learn false) learns about the effort
 // field holds for "none" only: a model that refuses "none" may take "low", so that part is not kept,
 // except on Anthropic, where each way of turning thinking on or off has a flag of its own. Every other
@@ -211,12 +254,13 @@ func (a *Adapter) postShaped(ctx context.Context, req ChatRequest, learn bool) (
 	if a.API == APIAnthropic {
 		req.bareToolTurn = a.bareToolTurn(req) // what anthropicPayload sends, for reading a refusal
 	}
-	sh := a.shapeOf(req)
+	start, gen := a.shapeAt(req)
+	sh := start
 	caps := a.knownCaps(req.Model)
 	var sent []byte
 	retries := 2
 	if a.API == APIAnthropic {
-		retries = 3
+		retries = 4
 	}
 	for attempt := 0; ; attempt++ {
 		addr, headers := a.BaseURL+"/chat/completions", a.headers()
@@ -230,15 +274,8 @@ func (a *Adapter) postShaped(ctx context.Context, req ChatRequest, learn bool) (
 		sent = body
 		resp, err := a.Client.PostJSON(final(ctx), addr, headers, body)
 		if err == nil {
-			old, keep := a.shapeOf(req), sh
-			if !learnEffort {
-				keep.NoEffort, keep.EffortNone = old.NoEffort, old.EffortNone
-				if req.Effort == "none" && sh.NoEffort && !old.NoEffort {
-					a.noneOff.Store(shapeKey(req), true) // for batch items only (batchShapeOf)
-				}
-			}
-			if keep != old {
-				a.caps().setShape(shapeKey(req), keep)
+			if !learnEffort && req.Effort == "none" && sh.NoEffort && !start.NoEffort {
+				a.noneOff.Store(shapeKey(req), true) // for batch items only (batchShapeOf)
 			}
 			if len(req.Tools) == 0 {
 				a.shapeSeen.Store(req.Model, true)
@@ -252,12 +289,15 @@ func (a *Adapter) postShaped(ctx context.Context, req ChatRequest, learn bool) (
 			return resp, &visionError{err: err}
 		}
 		next, ok := refusedField(a.API, err, req, sh, caps)
-		if ok && attempt < retries {
+		if ok {
 			// the same bytes would be refused the same way: a learned flag that changes nothing on the
 			// wire (a list that disagrees with the route) ends the call instead of spending two more
 			if again, berr := a.shapedBody(req, next, caps); berr == nil && !bytes.Equal(again, sent) {
-				sh = next
-				continue
+				a.keepLesson(req, gen, start, next, learnEffort)
+				if attempt < retries {
+					sh = next
+					continue
+				}
 			}
 		}
 		if len(req.Tools) > 0 && errclass.Of(err) == errclass.Unsupported {
@@ -292,19 +332,22 @@ func (a *Adapter) ShapeLearned(model string) bool {
 // refused effort learned from an effort "none" request holds for "none" only (batchShapeOf), so a live
 // request at another level keeps its effort. It reports whether anything was learned.
 func (a *Adapter) LearnRefusal(req ChatRequest, err error) bool {
+	if a.API == APIAnthropic {
+		req.bareToolTurn = a.bareToolTurn(req) // the item was written this way (anthropicPayload)
+	}
+	_, gen := a.shapeAt(req)
 	sh := a.batchShapeOf(req)
 	caps := a.knownCaps(req.Model)
 	next, ok := refusedField(a.API, err, req, sh, caps)
 	if !ok || next == sh {
 		return false
 	}
-	if req.Effort == "none" && a.API != APIAnthropic && next.NoEffort && !sh.NoEffort {
+	learned := learnedFlags(sh, next)
+	if req.Effort == "none" && a.API != APIAnthropic && learned.NoEffort {
 		a.noneOff.Store(shapeKey(req), true)
-		next.NoEffort = a.shapeOf(req).NoEffort
+		learned.NoEffort = false
 	}
-	if cur := a.shapeOf(req); next != cur {
-		a.caps().setShape(shapeKey(req), next)
-	}
+	a.caps().updateShape(shapeKey(req), gen, func(old shape) shape { return withFlags(old, learned) })
 	return true
 }
 

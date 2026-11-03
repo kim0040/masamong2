@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -679,6 +680,10 @@ func thinkingBlockError(m string) bool {
 		strings.Contains(m, "thinking` block") || strings.Contains(m, "cannot be modified")
 }
 
+// effortLevelNamed matches an effort level named as a word (not max_tokens): a refusal about the level
+// rather than about the effort field.
+var effortLevelNamed = regexp.MustCompile(`\b(minimal|low|medium|high|xhigh|max)\b`)
+
 // anthropicRefusal is refusedField for an Anthropic-format host: what a 400 says about the optional
 // fields anthropicEffort wrote (the thinking type, the output_config effort) and the shape without it.
 func anthropicRefusal(m string, req ChatRequest, sh shape, caps Caps) (shape, bool) {
@@ -702,8 +707,11 @@ func anthropicRefusal(m string, req ChatRequest, sh shape, caps Caps) (shape, bo
 		// '"thinking.type.disabled" is not supported for this model. Use "thinking.type.adaptive" and
 		// "output_config.effort" to control thinking behavior' (Claude Opus 5.5): it cannot stop thinking
 		sh.NoThinkingOff = true
-	case level != "" && high && !sh.MaxHigh && strings.Contains(m, "effort"):
-		sh.MaxHigh = true // a level above high refused: high is the most it takes
+	case level != "" && high && !sh.MaxHigh && strings.Contains(m, "effort") && effortLevelNamed.MatchString(m):
+		// a level above high refused, by a message that names levels ("output_config.effort: Input should
+		// be 'low', 'medium' or 'high'"): high is the most it takes. One that names none ("This model does
+		// not support the effort parameter") refuses the field, below
+		sh.MaxHigh = true
 	case level != "" && (strings.Contains(m, "output_config") || strings.Contains(m, "effort") && !strings.Contains(m, "thinking")):
 		sh.NoOutputConfig = true
 	case typ == "adaptive" && !sh.Budgeted && (caps.Thinking == nil || slices.Contains(caps.Thinking, "enabled")) &&

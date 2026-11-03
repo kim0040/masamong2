@@ -202,15 +202,29 @@ func clampEffort(effort string, levels []string) (string, bool) {
 // CapsCache keeps the capabilities model lists gave, per model, and the request shapes learned from the
 // models' refusals (shape.go). The application shares one per provider across the adapters it builds
 // (they are made per turn), so a refusal learned in one turn holds in the next; an adapter without one
-// keeps its own. A model's learned shapes are dropped when its capabilities change (Put): a refusal read
-// while they were unknown or different may be wrong for what is known now.
+// keeps its own. A learned shape lasts shapeTTL, and a model's learned shapes are dropped when its
+// capabilities change (Put): a refusal read while they were unknown or different may be wrong for what is
+// known now. The application drops all of a provider's shapes when the operator edits or tests it
+// (ResetShapes). Calls update a shape only by adding what they learned (updateShape), and a lesson from a
+// call that began before a drop is not kept.
 type CapsCache struct {
 	mu      sync.Mutex
 	entries map[string]capsEntry
-	noted   map[string]bool  // clamps already logged (model, asked, sent)
-	looking map[string]bool  // Anthropic lookups in flight
-	shapes  map[string]shape // shapeKey → the optional fields that model refused
+	noted   map[string]bool       // clamps already logged (model, asked, sent)
+	looking map[string]bool       // Anthropic lookups in flight
+	shapes  map[string]shapeEntry // shapeKey → the optional fields that model refused
+	gen     uint64                // bumped each time shapes are dropped (replace, ResetShapes)
 }
+
+// shapeEntry is a learned shape and when its first lesson was learned (it expires shapeTTL later).
+type shapeEntry struct {
+	sh shape
+	at time.Time
+}
+
+// shapeTTL is how long a learned shape is used: a refusal read wrong (a generic 400, a route that has
+// changed since) costs at most one refused call per model an hour, once it expires and is learned again.
+const shapeTTL = time.Hour
 
 type capsEntry struct {
 	caps Caps
@@ -227,7 +241,7 @@ const (
 
 // NewCapsCache is an empty cache.
 func NewCapsCache() *CapsCache {
-	return &CapsCache{entries: map[string]capsEntry{}, noted: map[string]bool{}, looking: map[string]bool{}, shapes: map[string]shape{}}
+	return &CapsCache{entries: map[string]capsEntry{}, noted: map[string]bool{}, looking: map[string]bool{}, shapes: map[string]shapeEntry{}}
 }
 
 // Put records what a list said about model. A list that says nothing does not erase an earlier answer.
@@ -247,8 +261,21 @@ func (c *CapsCache) replace(model string, caps Caps) {
 	if old, ok := c.entries[model]; !ok || old.miss || !sameCaps(old.caps, caps) {
 		delete(c.shapes, model)
 		delete(c.shapes, model+"\x00tools")
+		c.gen++
 	}
 	c.entries[model] = capsEntry{caps: caps, at: now()}
+}
+
+// ResetShapes drops every learned shape (the provider was edited or tested, or its key changed: what its
+// route refused before may not hold now). A call already running keeps none of what it learns.
+func (c *CapsCache) ResetShapes() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.shapes = map[string]shapeEntry{}
+	c.gen++
 }
 
 // sameCaps reports equal capabilities, an unknown (nil) list differing from a known-empty one.
@@ -258,22 +285,53 @@ func sameCaps(x, y Caps) bool {
 		same(x.Efforts, y.Efforts) && same(x.Thinking, y.Thinking)
 }
 
-// shape is the shape learned for key (shapeKey); ok is false when none is.
-func (c *CapsCache) shape(key string) (shape, bool) {
+// shape is the shape learned for key (shapeKey), and the generation a call that starts from it updates
+// it under (updateShape); a tool key without a shape of its own has the model's plain one. ok is false
+// when none is, or the one learned has expired.
+func (c *CapsCache) shape(key string) (sh shape, gen uint64, ok bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	sh, ok := c.shapes[key]
-	return sh, ok
+	e, ok := c.liveShape(key)
+	return e.sh, c.gen, ok
 }
 
-// setShape keeps the shape learned for key (shapeKey).
-func (c *CapsCache) setShape(key string, sh shape) {
+// liveShape is the unexpired shape entry for key, else the model's plain one for a tool key. c.mu is held.
+func (c *CapsCache) liveShape(key string) (shapeEntry, bool) {
+	keys := []string{key}
+	if model, ok := strings.CutSuffix(key, "\x00tools"); ok {
+		keys = append(keys, model)
+	}
+	for _, k := range keys {
+		// a clock stepped back counts as expired
+		if e, ok := c.shapes[k]; ok && now().Sub(e.at) >= 0 && now().Sub(e.at) < shapeTTL {
+			return e, true
+		}
+	}
+	return shapeEntry{}, false
+}
+
+// updateShape sets key's shape to learn(the shape now), atomically. A call passes the generation it
+// started under (shape) and adds only the flags it learned, so a lesson another call stored meanwhile is
+// kept; when shapes were dropped since it started (a new list, ResetShapes), nothing is stored. An
+// expired shape is learned again from nothing.
+func (c *CapsCache) updateShape(key string, gen uint64, learn func(old shape) shape) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.shapes == nil {
-		c.shapes = map[string]shape{}
+	if gen != c.gen {
+		return
 	}
-	c.shapes[key] = sh
+	e, ok := c.liveShape(key)
+	if !ok {
+		e.at = now()
+	}
+	next := learn(e.sh)
+	if next == e.sh {
+		return
+	}
+	if c.shapes == nil {
+		c.shapes = map[string]shapeEntry{}
+	}
+	c.shapes[key] = shapeEntry{sh: next, at: e.at}
 }
 
 // Get is what is known about model; ok is false when nothing is.

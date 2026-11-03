@@ -830,14 +830,12 @@ func (a *Adapter) chat(ctx context.Context, req ChatRequest) (ChatResult, error)
 	// field. Ask once more with room past the thinking, and keep the room for the model's later calls.
 	// The room is kept only when it helped, so a model that answers empty for another reason keeps the
 	// output limit its callers asked for.
-	sh := a.shapeOf(req)
-	sh.Headroom = true
-	a.caps().setShape(shapeKey(req), sh)
-	next, err := a.chatOnce(ctx, req, false)
-	if err != nil || thoughtAway(next) {
-		sh = a.shapeOf(req)
-		sh.Headroom = false
-		a.caps().setShape(shapeKey(req), sh)
+	_, gen := a.shapeAt(req)
+	roomy := req
+	roomy.thinkRoom = true // the room Headroom gives
+	next, err := a.chatOnce(ctx, roomy, false)
+	if err == nil && !thoughtAway(next) {
+		a.caps().updateShape(shapeKey(req), gen, func(old shape) shape { old.Headroom = true; return old })
 	}
 	if err != nil {
 		out.Elapsed += next.Elapsed

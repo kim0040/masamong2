@@ -412,7 +412,7 @@ func TestSubmitOpenAIWireShape(t *testing.T) {
 func TestSubmitUsesLearnedShape(t *testing.T) {
 	f := newFake(t)
 	a := f.adapter(APIOpenAI, "/v1")
-	a.caps().setShape("m", shape{NoTemperature: true, NoEffort: true})
+	a.caps().updateShape("m", 0, func(shape) shape { return shape{NoTemperature: true, NoEffort: true} })
 	f.reply("POST", "/v1/files", 200, `{"id":"file-in"}`)
 	f.reply("POST", "/v1/batches", 200, `{"id":"b1","status":"validating"}`)
 	it := chatItem("a", "m")
