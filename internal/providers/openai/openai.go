@@ -578,11 +578,15 @@ func decimalValue(value json.RawMessage) bool {
 	return err == nil && f >= 0 && !math.IsInf(f, 0)
 }
 
-// conditionKey reports an override key named like a condition (min_prompt_tokens, utc_start, and the
-// like a list may add: max_*, context_*). An unknown one drops the entry: a context_over "200000" read
+// priceName reports an override key named like a price (prompt_audio, input_cache_write_1h, web_fetch,
+// a *_price or *_cost): an unknown one with a decimal value is skipped and its entry kept. Any other
+// unknown key drops the entry: a threshold (context_over, above_tokens "200000"), a tier or an hour read
 // as a price, or skipped, would make the entry apply to every request.
-func conditionKey(key string) bool {
-	for _, p := range []string{"min_", "max_", "utc_", "context_"} {
+func priceName(key string) bool {
+	if strings.Contains(key, "price") || strings.Contains(key, "cost") {
+		return true
+	}
+	for _, p := range []string{"input_", "output_", "cache", "audio", "image", "web_", "internal_", "request", "prompt_", "completion_"} {
 		if strings.HasPrefix(key, p) {
 			return true
 		}
@@ -596,8 +600,8 @@ func parsePricingOverrides(raw json.RawMessage) []PricingOverride {
 }
 
 // pricingOverrides reads a pricing.overrides list. Each entry's keys are the conditions it applies under
-// and the prices it sets. A condition this code does not know drops the entry. A key that is neither, with
-// a decimal value, is a price this code does not use (OpenRouter adds price names, input_cache_write_1h
+// and the prices it sets. A condition this code does not know drops the entry. A key named like a price
+// (priceName), with a decimal value, is a price this code does not use (OpenRouter adds price names, input_cache_write_1h
 // and audio among them): it is skipped, the entry kept, and its name returned in ignored (logged once
 // per model by ListModels), so a surcharge entry is not lost for one new price name.
 func pricingOverrides(raw json.RawMessage) (out []PricingOverride, ignored []string) {
@@ -622,7 +626,7 @@ func pricingOverrides(raw json.RawMessage) (out []PricingOverride, ignored []str
 		for key, value := range fields {
 			switch {
 			case known[key] || extraPrice(key, value):
-			case !conditionKey(key) && decimalValue(value):
+			case priceName(key) && decimalValue(value):
 				skipped = append(skipped, key)
 			default:
 				valid = false // unknown condition fields must not make an override apply too broadly.

@@ -323,3 +323,18 @@ func TestBatchRefusalReadsTheBareToolTurn(t *testing.T) {
 		t.Fatalf("thinking off was refused, not thinking: %+v", sh)
 	}
 }
+
+// P3-4: an override key this code does not know is skipped only when it is named like a price; any other
+// unknown key (a threshold, a tier, an hour) drops the entry, which would otherwise apply to every request.
+func TestPricingOverrideSkipsOnlyPriceNames(t *testing.T) {
+	raw := json.RawMessage(`[` +
+		`{"above_tokens":200000,"prompt":"0.000006"},{"threshold":"200000","prompt":"0.000006"},{"tier":2,"prompt":"0.000006"},{"hour":14,"prompt":"0.000006"},` +
+		`{"min_prompt_tokens":100000,"prompt":"0.000002","input_video":"0.00001","cache_storage":"0.1","search_price":0.01,"output_reasoning":"0.00002"}]`)
+	got, ignored := pricingOverrides(raw)
+	if len(got) != 1 || got[0].MinPromptTokens == nil || *got[0].MinPromptTokens != 100000 {
+		t.Fatalf("only the entry with price-named extra keys stays: %+v", got)
+	}
+	if len(ignored) != 4 {
+		t.Fatalf("its four unknown prices are reported: %v", ignored)
+	}
+}
