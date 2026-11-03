@@ -192,6 +192,8 @@ type Model struct {
 	// paramsNoReasoning marks a Reasoning false read from a supported_parameters list without a
 	// reasoning parameter (OpenRouter's way of saying so; ListModels keeps it for OpenRouter only)
 	paramsNoReasoning bool
+	// ignoredPrices are override price names this code does not know, skipped (pricingOverrides)
+	ignoredPrices []string
 	// PriceUntil is when the listed price stops applying (OpenGateway's pricing.until: a scheduled
 	// promotion, its next price taking over); zero when the list gives no end
 	PriceUntil time.Time
@@ -274,6 +276,11 @@ func (a *Adapter) ListModels(ctx context.Context) ([]Model, error) {
 	}
 	for _, m := range models {
 		a.caps().Put(a.API.trimModelID(m.ID), m.Caps())
+		for _, k := range m.ignoredPrices {
+			if a.caps().note("price\x00"+m.ID+"\x00"+k) && a.Client != nil && a.Client.Log != nil {
+				a.Client.Log.Warn("model list: an unknown price in a pricing override is ignored", "model", m.ID, "key", k)
+			}
+		}
 	}
 	if err != nil || a.API == APIOpenRouter {
 		return models, err
@@ -443,7 +450,7 @@ func ParseModels(contentType string, body []byte) ([]Model, error) {
 				m.PromptPrice = priceStr(pr["prompt"])
 				m.CompletionPrice = priceStr(pr["completion"])
 				m.CachedPrice = priceStr(pr["input_cache_read"])
-				m.Overrides = parsePricingOverrides(pr["overrides"])
+				m.Overrides, m.ignoredPrices = pricingOverrides(pr["overrides"])
 				m.PriceUntil = listedTime(pr["until"])
 				// NanoGPT's detailed list: numbers per million tokens, {"unit":"per_million_tokens"}
 				if strings.Contains(strings.ToLower(decode.Str(pr["unit"])), "million") {
@@ -556,43 +563,69 @@ var otherPrices = map[string]bool{
 }
 
 // extraPrice reports an override key that is another price this code does not use: a decimal string
-// under a name otherPrices lists. Any other key, a condition included (a context_over "200000" read as a
-// price would make the entry apply to every request), drops the entry.
+// under a name otherPrices lists.
 func extraPrice(key string, value json.RawMessage) bool {
-	if !otherPrices[key] {
-		return false
-	}
-	var s string
-	if json.Unmarshal(value, &s) != nil {
-		return false
+	return otherPrices[key] && decimalValue(value)
+}
+
+// decimalValue reports a value that reads as a price: a non-negative decimal, as a string or a number.
+func decimalValue(value json.RawMessage) bool {
+	s := decode.Str(value)
+	if s == "" {
+		s = strings.TrimSpace(string(value))
 	}
 	f, err := strconv.ParseFloat(s, 64)
-	return err == nil && f >= 0
+	return err == nil && f >= 0 && !math.IsInf(f, 0)
+}
+
+// conditionKey reports an override key named like a condition (min_prompt_tokens, utc_start, and the
+// like a list may add: max_*, context_*). An unknown one drops the entry: a context_over "200000" read
+// as a price, or skipped, would make the entry apply to every request.
+func conditionKey(key string) bool {
+	for _, p := range []string{"min_", "max_", "utc_", "context_"} {
+		if strings.HasPrefix(key, p) {
+			return true
+		}
+	}
+	return false
 }
 
 func parsePricingOverrides(raw json.RawMessage) []PricingOverride {
+	out, _ := pricingOverrides(raw)
+	return out
+}
+
+// pricingOverrides reads a pricing.overrides list. Each entry's keys are the conditions it applies under
+// and the prices it sets. A condition this code does not know drops the entry. A key that is neither, with
+// a decimal value, is a price this code does not use (OpenRouter adds price names, input_cache_write_1h
+// and audio among them): it is skipped, the entry kept, and its name returned in ignored (logged once
+// per model by ListModels), so a surcharge entry is not lost for one new price name.
+func pricingOverrides(raw json.RawMessage) (out []PricingOverride, ignored []string) {
 	if len(raw) == 0 || string(raw) == "null" {
-		return nil
+		return nil, nil
 	}
 	var entries []json.RawMessage
 	if json.Unmarshal(raw, &entries) != nil {
-		return nil
+		return nil, nil
 	}
 	known := map[string]bool{
 		"min_prompt_tokens": true, "utc_start": true, "utc_end": true, "utc_days": true,
 		"prompt": true, "completion": true, "input_cache_read": true, "input_cache_write": true, "image_output": true,
 	}
-	var out []PricingOverride
 	for _, entry := range entries {
 		var fields map[string]json.RawMessage
 		if json.Unmarshal(entry, &fields) != nil || fields == nil {
 			continue
 		}
 		valid := true
+		var skipped []string
 		for key, value := range fields {
-			if !known[key] && !extraPrice(key, value) {
+			switch {
+			case known[key] || extraPrice(key, value):
+			case !conditionKey(key) && decimalValue(value):
+				skipped = append(skipped, key)
+			default:
 				valid = false // unknown condition fields must not make an override apply too broadly.
-				break
 			}
 		}
 		if !valid {
@@ -651,9 +684,15 @@ func parsePricingOverrides(raw json.RawMessage) []PricingOverride {
 		}
 		if valid {
 			out = append(out, override)
+			for _, k := range skipped {
+				if !slices.Contains(ignored, k) {
+					ignored = append(ignored, k)
+				}
+			}
 		}
 	}
-	return out
+	sort.Strings(ignored)
+	return out, ignored
 }
 
 func validHHMM(value int) bool {

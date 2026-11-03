@@ -1,11 +1,14 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Regression tests for the effort-control review (2026-11-03, round 2): one per finding, named after it.
@@ -188,5 +191,39 @@ func TestBudgetModelAfterBareToolTurn(t *testing.T) {
 	}
 	if thinkingType(ownHost.bodies[1]) != "enabled" || blockTypes(ownHost.bodies[1])[1] != "thinking" {
 		t.Fatalf("own thinking kept, thinking on: %v", ownHost.bodies[1])
+	}
+}
+
+// Finding 6: a surcharge entry with a price name this code does not know yet (prompt_audio) still
+// applies: the unknown price is skipped and logged once per model and key. A key named like a condition
+// still drops its entry, and so does a key whose value is not a price.
+func TestPricingOverrideUnknownPriceIsSkipped(t *testing.T) {
+	list := `{"data":[{"id":"vendor/m","pricing":{"prompt":"0.000001","completion":"0.000002","overrides":[` +
+		`{"min_prompt_tokens":200000,"prompt":"0.000002","prompt_audio":"0.00001","web_fetch":0.01},` +
+		`{"context_over":"200000","prompt":"0.000009"},{"max_prompt_tokens":"5000","prompt":"0.000009"},{"tier":"eu","prompt":"0.000009"}]}}]}`
+	var logs bytes.Buffer
+	a := testAdapter(t, APIOpenRouter, func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(list)) })
+	a.Client.Log = slog.New(slog.NewTextHandler(&logs, nil))
+	for range 2 {
+		models, err := a.ListModels(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		o := models[0].Overrides
+		if len(o) != 1 || o[0].MinPromptTokens == nil || *o[0].MinPromptTokens != 200000 || o[0].PromptPrice == nil || *o[0].PromptPrice != 0.000002 {
+			t.Fatalf("the surcharge entry stays, the others drop: %+v", o)
+		}
+		if !o[0].Applies(250000, time.Now()) || o[0].Applies(1000, time.Now()) {
+			t.Fatalf("the surcharge applies above its threshold only: %+v", o[0])
+		}
+	}
+	got := logs.String()
+	for _, key := range []string{"prompt_audio", "web_fetch"} {
+		if strings.Count(got, "key="+key) != 1 {
+			t.Fatalf("one warning for %s over two list reads:\n%s", key, got)
+		}
+	}
+	if strings.Contains(got, "context_over") || strings.Contains(got, "tier") {
+		t.Fatalf("a dropped entry is not reported as a skipped price:\n%s", got)
 	}
 }
