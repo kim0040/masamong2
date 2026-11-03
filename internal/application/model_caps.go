@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"slices"
 	"sync"
 	"time"
@@ -17,10 +18,13 @@ import (
 // list request and, on Anthropic-format hosts, by a lookup of the role models a provider test runs
 // (lookupModelCaps, in the background after the test answers). A chat call or a status read never asks
 // the host: what is not known stays unknown, and the request follows the shape learned from refusals
-// (kept in the same cache, so every adapter of the provider uses it).
+// (kept in the same cache, so every adapter of the provider uses it). The learned shapes are dropped when
+// the provider's settings change in any way, when its key is saved and when it is tested: what its route
+// refused before may not hold after an edit, and a test is the operator asking to look again.
 
 type capsSlot struct {
 	key   string // the provider's address and family: a provider pointed elsewhere starts empty
+	conf  string // the provider's settings as a whole: any other change drops the learned shapes
 	cache *openai.CapsCache
 }
 
@@ -34,15 +38,21 @@ var capsStates sync.Map // *Service → *capsState
 // modelCaps is provider's capability cache.
 func (s *Service) modelCaps(provider string, p config.Provider) *openai.CapsCache {
 	key := p.BaseURL + "\x00" + string(openai.ResolveAPI(p.API, p.BaseURL))
+	raw, _ := json.Marshal(p)
+	conf := string(raw)
 	v, _ := capsStates.LoadOrStore(s, &capsState{slots: map[string]*capsSlot{}})
 	st := v.(*capsState)
 	st.mu.Lock()
 	slot := st.slots[provider]
 	if slot != nil && slot.key == key {
+		if slot.conf != conf {
+			slot.conf = conf
+			slot.cache.ResetShapes() // byok_only, the key's reference, … changed: the route may differ
+		}
 		st.mu.Unlock()
 		return slot.cache
 	}
-	slot = &capsSlot{key: key, cache: openai.NewCapsCache()}
+	slot = &capsSlot{key: key, conf: conf, cache: openai.NewCapsCache()}
 	st.slots[provider] = slot
 	st.mu.Unlock()
 	if s.Store != nil {
@@ -54,6 +64,20 @@ func (s *Service) modelCaps(provider string, p config.Provider) *openai.CapsCach
 		}
 	}
 	return slot.cache
+}
+
+// resetShapes drops the shapes learned for provider (its key was saved, or it is being tested).
+func (s *Service) resetShapes(provider string) {
+	v, ok := capsStates.Load(s)
+	if !ok {
+		return
+	}
+	st := v.(*capsState)
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if slot := st.slots[provider]; slot != nil {
+		slot.cache.ResetShapes()
+	}
 }
 
 // shareCaps gives an adapter its provider's capability cache.
@@ -131,10 +155,15 @@ func (s *Service) modelReasoning() map[string]any {
 // yet (one GET /models/{id} each, free), when the operator tests the provider (in the background, after
 // the test's answer): a host whose list the test read already answered for its listed models, and a host
 // without a list may still answer per model.
+// looksUpCaps reports a provider whose test looks its role models up (an Anthropic-format host).
+func (s *Service) looksUpCaps(p config.Provider) bool {
+	return p.Kind == config.KindOpenAI && openai.ResolveAPI(p.API, p.BaseURL) == openai.APIAnthropic && !s.practice && s.Registry() != nil
+}
+
 func (s *Service) lookupModelCaps(ctx context.Context, provider string) {
 	doc := s.Doc()
 	p, ok := doc.Providers[provider]
-	if !ok || p.Kind != config.KindOpenAI || openai.ResolveAPI(p.API, p.BaseURL) != openai.APIAnthropic || s.practice || s.Registry() == nil {
+	if !ok || !s.looksUpCaps(p) {
 		return
 	}
 	a := s.Registry().LLM[provider] // shares the provider's cache (priceAdapters)

@@ -113,6 +113,7 @@ func (s *Service) providers(ctx context.Context, req action.Request) action.Resu
 		if !st.Configured {
 			return action.Fail(req, errcode.ProviderUnconfigured, "provider.unconfigured", s.msg(req, "provider.unconfigured", "provider", id), map[string]any{"provider": id, "credential_ref": st.CredentialRef})
 		}
+		s.resetShapes(id) // the test and the calls after it learn the route's refusals again
 		out, err := s.Registry().Probe(ctx, id)
 		if err == nil {
 			err = s.proveModelKey(ctx, id, out)
@@ -122,8 +123,12 @@ func (s *Service) providers(ctx context.Context, req action.Request) action.Resu
 		}
 		s.noteProvider(id, nil)
 		// the one time the host is asked about its role models' reasoning: after the answer, not before it
-		// (one GET per model, up to 20 s in all)
+		// (one GET per model, up to 20 s in all). caps_pending tells the console to read providers.list
+		// again shortly, when the lookup has had time to finish
 		s.ownedGo("providers.test model caps", func(ctx context.Context) { s.lookupModelCaps(ctx, id) })
+		if p, ok := s.Doc().Providers[id]; ok && s.looksUpCaps(p) {
+			out["caps_pending"] = true
+		}
 		out["ok"] = true
 		out["live"] = true
 		out["credential_ref"] = st.CredentialRef
@@ -151,6 +156,7 @@ func (s *Service) providers(ctx context.Context, req action.Request) action.Resu
 			res.Output["value_echoed"] = false
 			res.Output["credential_ref"] = ref
 			s.credentialsChanged() // the same reference may now hold another key
+			s.resetShapes(id)      // and another account's route
 		}
 		return res
 	case "models.list":

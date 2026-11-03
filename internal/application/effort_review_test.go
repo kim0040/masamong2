@@ -300,11 +300,18 @@ func TestModelCapsComeFromListsAndTests(t *testing.T) {
 		}
 		waitLookups(t, h, 1) // the lookup runs after the test's answer
 	}
-	time.Sleep(100 * time.Millisecond) // a second lookup would have run by now
+	// once the first lookup is recorded, the lookup a test starts asks nothing (run here, not waited for)
+	var status map[string]any
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		status, _ = exec(svc, "providers.list", nil).Output["model_reasoning"].(map[string]any)
+		if x, _ := status["claude/claude-x"].(map[string]any); x["thinking_off"] != nil || time.Now().After(deadline) {
+			break
+		}
+	}
+	application.LookupModelCapsForTest(svc, context.Background(), "claude")
 	if got := h.lookups(); !reflect.DeepEqual(got, []string{"/v1/models/claude-x"}) {
 		t.Fatalf("one lookup, for the role model the list did not cover: %v", got)
 	}
-	status, _ := exec(svc, "providers.list", nil).Output["model_reasoning"].(map[string]any)
 	x, _ := status["claude/claude-x"].(map[string]any)
 	b, _ := status["claude/claude-budget"].(map[string]any)
 	if x["thinking_off"] != "disabled" || strings.Join(b["efforts"].([]string), ",") != "none,minimal,low,medium,high,xhigh,max" {

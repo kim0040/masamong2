@@ -351,3 +351,13 @@ func ParticipationChannelCountForTest(s *Service) int {
 	defer s.part.mu.Unlock()
 	return len(s.part.chans)
 }
+
+// CapsCacheForTest is provider's capability cache, as an adapter built now is given it (shareCaps).
+func CapsCacheForTest(s *Service, provider string) *openai.CapsCache {
+	return s.modelCaps(provider, s.Doc().Providers[provider])
+}
+
+// LookupModelCapsForTest runs the role-model lookup a provider test starts in the background.
+func LookupModelCapsForTest(s *Service, ctx context.Context, provider string) {
+	s.lookupModelCaps(ctx, provider)
+}

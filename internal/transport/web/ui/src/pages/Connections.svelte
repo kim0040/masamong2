@@ -92,8 +92,13 @@
     else if (r.ok) toast('ok', t('conn.test_ok', { id: provName(id) }), r.output?.latency_ms ? ms(r.output.latency_ms) : undefined)
     else toast('error', t('conn.test_fail', { id: provName(id) }), r.error?.message)
     void providers.refresh()
+    // the host is asked about its role models' reasoning after the test answers: read the Models
+    // table's source again while that lookup is likely running (it takes up to 20 s)
+    if (r.ok && r.output?.caps_pending) for (const at of [2000, 5000, 10000]) capsTimers.push(setTimeout(() => void providers.refresh(), at))
     return r.ok
   }
+  let capsTimers: ReturnType<typeof setTimeout>[] = []
+  $effect(() => () => capsTimers.forEach(clearTimeout))
   // what the server says about hosts, so this page knows none of them by name
   const modelCaps = $derived((providers.data?.model_providers ?? {}) as Record<string, { api: string; rerank: boolean; host?: string }>)
   const webKinds = $derived(((providers.data?.web_hosts ?? []) as any[]).map((h) => h.kind))
