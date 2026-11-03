@@ -8,18 +8,19 @@ import (
 
 // API is the family of host an adapter talks to. Hosts that speak /chat/completions still disagree on
 // a handful of things, and each difference is decided here once instead of by URL checks scattered
-// through the adapter:
+// through the adapter. The anthropic family speaks Anthropic's Messages format instead (anthropic.go):
 //
 //	                 reasoning field          token limit field       key check   rerank  images
 //	openrouter       reasoning:{effort}       max_tokens              GET /key    /rerank chat modalities
 //	openai           reasoning_effort         max_completion_tokens   GET /models  –      /images/generations
 //	gemini           reasoning_effort         max_tokens              GET /models  –      native generateContent
 //	compatible       reasoning_effort         max_tokens              GET /models /rerank chat modalities
-//	anthropic        thinking:{type}          max_tokens              GET /models  –      –
+//	anthropic        thinking+output_config   max_tokens              GET /models  –      –
 //
 // Per-model differences (which reasoning levels a model accepts, whether it takes a temperature) are
-// not tabulated: a request a model refuses for an optional field is retried once without it, and the
-// adapter remembers the shape that worked (see shape.go).
+// read from the model list where it says them (caps.go) and otherwise not tabulated: a request a model
+// refuses for an optional field is retried once without it, and the adapter remembers the shape that
+// worked (see shape.go).
 type API string
 
 const (
@@ -27,9 +28,12 @@ const (
 	APIOpenAI     API = "openai"
 	APIGemini     API = "gemini"
 	APICompatible API = "compatible"
-	// APIAnthropic is Anthropic's own OpenAI-compatible endpoint: it ignores reasoning_effort (Claude 5
-	// models think by default), so thinking is turned off with its "thinking" field instead (shape.go),
-	// and its model list wants an anthropic-version header
+	// APIAnthropic is Anthropic's native Messages API at any address: Anthropic's own
+	// (https://api.anthropic.com/v1) or another company's Anthropic-format endpoint (…/anthropic or
+	// …/anthropic/v1; /v1 is added when missing, a pasted …/v1/messages is trimmed). Requests go to
+	// {base}/messages with x-api-key and anthropic-version, plus a bearer token off Anthropic's host
+	// (anthropic.go). Thinking is set with "thinking" and output_config.effort from the model's
+	// capabilities (GET /models/{id}); a host without that list works with typed model IDs.
 	APIAnthropic API = "anthropic"
 )
 

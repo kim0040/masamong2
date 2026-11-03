@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 
 	"masamong/internal/errclass"
@@ -32,6 +33,14 @@ type shape struct {
 	// BetweenTools turns thinking off on Anthropic with {"type":"between_tools"}: the model refuses
 	// "disabled" and names that type instead (Claude Sonnet 5.5)
 	BetweenTools bool
+	// NoThinkingOff: on Anthropic the model refused every way to turn thinking off (Claude Opus 5.5), so
+	// "none" is sent as its lowest effort level instead (anthropic.go). NoEffort there means the model
+	// or host takes no adaptive thinking (its default is used)
+	NoThinkingOff bool
+	// NoOutputConfig: the Anthropic-format host refused output_config (the effort level)
+	NoOutputConfig bool
+	// MaxHigh: the model refused a level above "high" (xhigh, max), so those are sent as "high"
+	MaxHigh bool
 }
 
 // thinkingHeadroom is the output room added for a model that thinks before every answer. Only the
@@ -60,7 +69,8 @@ func (a *Adapter) shapeOf(req ChatRequest) shape {
 	return shape{}
 }
 
-// payload writes a chat request for the host family and the model's known shape.
+// payload writes a chat-completions request for the host family and the model's known shape (an
+// Anthropic-format host is written by anthropicPayload instead).
 func (a *Adapter) payload(req ChatRequest, sh shape) map[string]any {
 	p := map[string]any{"model": req.Model, "messages": req.Messages}
 	if req.MaxTokens > 0 {
@@ -76,7 +86,7 @@ func (a *Adapter) payload(req ChatRequest, sh shape) map[string]any {
 			}
 		}
 		p[field] = req.MaxTokens
-		if sh.Headroom {
+		if sh.Headroom || req.thinkRoom {
 			p[field] = req.MaxTokens + thinkingHeadroom
 		}
 	}
@@ -85,24 +95,11 @@ func (a *Adapter) payload(req ChatRequest, sh shape) map[string]any {
 	if req.Temperature != nil && !sh.NoTemperature && a.API != APIAnthropic {
 		p["temperature"] = *req.Temperature
 	}
-	effort := req.Effort
-	if sh.EffortNone {
-		effort = "none"
-	} else if effort == "none" && sh.NoneAsMinimal {
-		effort = "minimal"
-	}
-	if a.API == APIAnthropic {
-		// reasoning_effort is ignored there and the model thinks by default; a low level turns thinking
-		// off, a higher one leaves the model's own default (NoEffort: it cannot be turned off, Claude
-		// Opus 5.5, whose short limits the headroom retry in Chat covers)
-		if thinkingOff(effort) && !sh.NoEffort {
-			off := "disabled"
-			if sh.BetweenTools {
-				off = "between_tools"
-			}
-			p["thinking"] = map[string]any{"type": off}
+	caps, _ := a.caps().Get(req.Model)
+	if effort := writtenEffort(a.API, req, sh, caps); effort != "" {
+		if effort != req.Effort && !sh.EffortNone && !(req.Effort == "none" && sh.NoneAsMinimal) && !sh.MaxHigh {
+			a.noteClamp(req.Model, req.Effort, effort)
 		}
-	} else if effort != "" && !sh.NoEffort {
 		if a.API == APIOpenRouter {
 			p["reasoning"] = map[string]any{"effort": effort}
 		} else {
@@ -114,9 +111,52 @@ func (a *Adapter) payload(req ChatRequest, sh shape) map[string]any {
 	return p
 }
 
-// thinkingOff reports the levels that turn thinking off where only on and off can be asked (Anthropic).
-func thinkingOff(effort string) bool {
-	return effort == "none" || effort == "minimal" || effort == "low"
+// writtenEffort is the reasoning level a chat-completions request carries ("" leaves the field out):
+// the level asked, unless the model refused the field (NoEffort) or its list says it does not reason;
+// clamped to the levels its list names, and to the highest level the host family takes (topEffort).
+func writtenEffort(api API, req ChatRequest, sh shape, caps Caps) string {
+	if sh.NoEffort || caps.NoReasoning() {
+		return ""
+	}
+	if sh.EffortNone {
+		return "none"
+	}
+	effort := req.Effort
+	switch {
+	case effort == "":
+		return ""
+	case effort == "none" && sh.NoneAsMinimal:
+		return "minimal"
+	}
+	if caps.Efforts != nil {
+		l, ok := clampEffort(effort, caps.Efforts)
+		if !ok {
+			return ""
+		}
+		effort = l
+	}
+	if top := api.topEffort(); top != "" && effortRank(effort) > effortRank(top) {
+		effort = top
+	}
+	if sh.MaxHigh && effortRank(effort) > effortRank("high") {
+		effort = "high"
+	}
+	return effort
+}
+
+func effortRank(effort string) int { return slices.Index(EffortLevels, effort) }
+
+// topEffort is the highest reasoning level a host family takes; "" lets every level through (a
+// compatible host, whose models differ: a refused level is learned, MaxHigh). OpenAI and OpenRouter take
+// up to xhigh, Gemini's OpenAI endpoint up to high; Anthropic's levels come from each model's list entry.
+func (a API) topEffort() string {
+	switch a {
+	case APIOpenAI, APIOpenRouter:
+		return "xhigh"
+	case APIGemini:
+		return "high"
+	}
+	return ""
 }
 
 // byokRoute pins an OpenRouter request for a ByokOnly model family to its one upstream provider, with
@@ -143,14 +183,30 @@ func (a *Adapter) byokRoute(p map[string]any, model string) {
 // keeps the shape that worked for the model's later requests. What a request asking effort "none" (a
 // quick classifier, or the no-thinking retry in Chat, which passes learn false) learns about the effort
 // field holds for "none" only: a model that refuses "none" may take "low", so that part is not kept,
-// except on Anthropic, where "none" and "low" write the same field. Every other field it learns is kept,
-// so a refused temperature costs one extra call per model, not one per classifier call.
+// except on Anthropic, where each way of turning thinking on or off has a flag of its own. Every other
+// field it learns is kept, so a refused temperature costs one extra call per model, not one per
+// classifier call. An Anthropic-format host is sent the Messages format (anthropic.go).
 func (a *Adapter) postShaped(ctx context.Context, req ChatRequest, learn bool) (*providers.Response, error) {
-	learnEffort := learn && req.Effort != "none" || a.API == APIAnthropic && thinkingOff(req.Effort)
+	learnEffort := learn && req.Effort != "none" || a.API == APIAnthropic
 	sh := a.shapeOf(req)
+	caps := a.CapsOf(ctx, req.Model)
 	for attempt := 0; ; attempt++ {
-		body, _ := json.Marshal(a.payload(req, sh))
-		resp, err := a.Client.PostJSON(ctx, a.BaseURL+"/chat/completions", a.headers(), body)
+		addr, headers := a.BaseURL+"/chat/completions", a.headers()
+		var body []byte
+		if a.API == APIAnthropic {
+			p, err := a.anthropicPayload(req, sh, caps)
+			if err != nil {
+				return nil, err
+			}
+			body, _ = json.Marshal(p)
+			addr, headers = a.anthropicBase()+"/messages", a.anthropicHeaders()
+		} else {
+			var err error
+			if body, err = json.Marshal(a.payload(req, sh)); err != nil {
+				return nil, err
+			}
+		}
+		resp, err := a.Client.PostJSON(ctx, addr, headers, body)
 		if err == nil {
 			old, keep := a.shapeOf(req), sh
 			if !learnEffort {
@@ -173,7 +229,7 @@ func (a *Adapter) postShaped(ctx context.Context, req ChatRequest, learn bool) (
 			a.visionOff.Store(req.Model, now())
 			return resp, &visionError{err: err}
 		}
-		next, ok := refusedField(a.API, err, req, sh)
+		next, ok := refusedField(a.API, err, req, sh, caps)
 		if !ok || attempt >= 2 {
 			if len(req.Tools) > 0 && errclass.Of(err) == errclass.Unsupported {
 				a.toolsOff.Store(req.Model, true) // later tool requests for this model fail fast (tools.go)
@@ -198,7 +254,8 @@ func (a *Adapter) ShapeLearned(model string) bool {
 // request at another level keeps its effort. It reports whether anything was learned.
 func (a *Adapter) LearnRefusal(req ChatRequest, err error) bool {
 	sh := a.batchShapeOf(req)
-	next, ok := refusedField(a.API, err, req, sh)
+	caps, _ := a.caps().Get(req.Model)
+	next, ok := refusedField(a.API, err, req, sh, caps)
 	if !ok || next == sh {
 		return false
 	}
@@ -228,17 +285,21 @@ func (a *Adapter) batchShapeOf(req ChatRequest) shape {
 // refusedField decides whether err is a model refusing one optional field of req, sent to a host of
 // family api, and returns the shape without it. Only a 400/422 about the request qualifies; a refused
 // key never does.
-func refusedField(api API, err error, req ChatRequest, sh shape) (shape, bool) {
+func refusedField(api API, err error, req ChatRequest, sh shape, caps Caps) (shape, bool) {
 	var ae *APIError
 	if !errors.As(err, &ae) || errors.Is(err, ErrAuth) {
 		return sh, false
 	}
 	m := strings.ToLower(ae.Message + " " + ae.Code)
-	sentEffort := req.Effort != "" && !sh.NoEffort
 	if api == APIAnthropic {
-		sentEffort = thinkingOff(req.Effort) && !sh.NoEffort // only these write a field there (payload)
+		if ae.Status != 400 && ae.Status != 422 {
+			return sh, false
+		}
+		return anthropicRefusal(m, req, sh, caps)
 	}
-	sentTemp := req.Temperature != nil && !sh.NoTemperature && api != APIAnthropic
+	written := writtenEffort(api, req, sh, caps)
+	sentEffort := written != ""
+	sentTemp := req.Temperature != nil && !sh.NoTemperature
 	if ae.Status == 404 && len(req.Tools) > 0 && strings.Contains(m, "requested parameters") {
 		// OpenRouter with require_parameters (tools.go) found no endpoint taking every field sent and
 		// names none (seen live for openai/gpt-6-luna and anthropic/claude-haiku-5.5, which list
@@ -258,11 +319,9 @@ func refusedField(api API, err error, req ChatRequest, sh shape) (shape, bool) {
 	if ae.Status != 400 && ae.Status != 422 {
 		return sh, false
 	}
-	if api == APIAnthropic && sentEffort && !sh.BetweenTools && strings.Contains(m, "between_tools") {
-		// Anthropic: 'To turn thinking off on this model, send "thinking": {"type": "between_tools"}
-		// instead of {"type": "disabled"}' (Claude Sonnet 5.5). Another refusal of the thinking field
-		// ("not supported for this model", Claude Opus 5.5) leaves it out below (NoEffort)
-		sh.BetweenTools = true
+	if sentEffort && !sh.MaxHigh && effortRank(written) > effortRank("high") && (strings.Contains(m, "reasoning") || strings.Contains(m, "effort")) {
+		// a level above high (xhigh, max) the model does not have: it may take high
+		sh.MaxHigh = true
 		return sh, true
 	}
 	if len(req.Tools) > 0 {
@@ -287,7 +346,7 @@ func refusedField(api API, err error, req ChatRequest, sh shape) (shape, bool) {
 		}
 	}
 	switch {
-	case api != APIAnthropic && sentEffort && req.Effort == "none" && !sh.EffortNone && !sh.NoneAsMinimal && strings.Contains(m, "reasoning") &&
+	case sentEffort && req.Effort == "none" && !sh.EffortNone && !sh.NoneAsMinimal && strings.Contains(m, "reasoning") &&
 		(strings.Contains(m, "mandatory") || strings.Contains(m, "cannot be disabled")):
 		// leaving the field out would think at the model's default; its lowest level thinks least
 		sh.NoneAsMinimal = true

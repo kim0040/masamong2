@@ -1,6 +1,7 @@
 package application
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -124,6 +125,12 @@ func (s *Service) llmAdapterFor(doc config.Document, role string) (*openai.Adapt
 	a := newLLMAdapter(client, p, cred)
 	a.Price, a.CachedPrice, a.ContextPrice = s.pricer(m.Provider), s.cachedPricer(m.Provider), s.contextPricer(m.Provider)
 	a.Gate = s.llmGate(m.Provider)
+	s.shareCaps(a, m.Provider, p)
+	if slices.Contains(config.FallbackRoles, role) {
+		// a Quick call of this role (a classifier, a one-line summary) thinks only when the operator set
+		// the role's effort (openai.Adapter.RoleEffort; the precedence is on config.Model.Effort)
+		a.RoleEffort = m.Effort
+	}
 	if len(m.Fallbacks) > 0 && slices.Contains(config.FallbackRoles, role) {
 		a.Failover = s.failoverFor(doc, role, m)
 	}
@@ -162,6 +169,7 @@ func (s *Service) batchResolver(doc config.Document, eng *engine.Engine) engine.
 		a := newLLMAdapter(client, cp, cred)
 		a.Price, a.CachedPrice, a.ContextPrice = s.pricer(p.ID), s.cachedPricer(p.ID), s.contextPricer(p.ID)
 		a.Gate = s.llmGate(p.ID)
+		s.shareCaps(a, p.ID, cp)
 		if !same(a, p) {
 			return nil, fmt.Errorf("provider %q is now at %s (%s), not %s (%s)", p.ID, a.BaseURL, a.API, p.BaseURL, p.API)
 		}
@@ -203,7 +211,11 @@ func (s *Service) failoverFor(doc config.Document, role string, m config.Model) 
 		a := newLLMAdapter(client, p, cred)
 		a.Price, a.CachedPrice, a.ContextPrice = s.pricer(fb.Provider), s.cachedPricer(fb.Provider), s.contextPricer(fb.Provider)
 		a.Gate = s.llmGate(fb.Provider)
-		f.Fallbacks = append(f.Fallbacks, openai.Fallback{A: a, Provider: fb.Provider, Model: fb.Model, Timeout: roleTimeout(role, fb.TimeoutSeconds)})
+		s.shareCaps(a, fb.Provider, p)
+		// the fallback's own effort, else the role's, for its Quick calls; its other calls take fb.Effort
+		// when set (openai.Fallback.Effort), else the role's level the request carries
+		a.RoleEffort = cmp.Or(fb.Effort, m.Effort)
+		f.Fallbacks = append(f.Fallbacks, openai.Fallback{A: a, Provider: fb.Provider, Model: fb.Model, Timeout: roleTimeout(role, fb.TimeoutSeconds), Effort: fb.Effort})
 	}
 	return f
 }
@@ -304,6 +316,9 @@ func (s *Service) MemoryEngine() (*engine.Engine, error) {
 	var llm *openai.Adapter
 	if a, err := s.llmAdapterFor(doc, "embed"); err == nil {
 		llm = a
+		// the embed adapter also writes the memory summaries when the summary model shares its provider:
+		// the one-line summary is a Quick call, thinking only when models.summary.effort is set
+		llm.RoleEffort = doc.Models["summary"].Effort
 	}
 	models := engine.Models{}
 	if m, ok := modelOf(doc, "embed"); ok {
@@ -365,6 +380,16 @@ func (s *Service) MemoryEngine() (*engine.Engine, error) {
 		if m, ok := modelOf(doc, role); ok && m.Provider != embedProvider {
 			if a, err := s.llmAdapterFor(doc, role); err == nil {
 				*dst = a
+			}
+		}
+	}
+	if st.eng.SummaryLLM != nil {
+		// the job decides, not the model it falls back to: the response model writing summaries keeps them
+		// thinking-free unless models.summary.effort is set
+		st.eng.SummaryLLM.RoleEffort = doc.Models["summary"].Effort
+		if st.eng.SummaryLLM.Failover != nil {
+			for _, fb := range st.eng.SummaryLLM.Failover.Fallbacks {
+				fb.A.RoleEffort = cmp.Or(fb.Effort, doc.Models["summary"].Effort)
 			}
 		}
 	}
@@ -978,7 +1003,8 @@ type chatRoute struct {
 	effort          string        // models.<role>.effort; "" = low
 }
 
-// callEffort is the reasoning effort of the route's calls: the configured one, else low.
+// callEffort is the reasoning effort of the route's calls: the configured one, else low. A quick
+// classifier call asks for none instead, unless the role's effort is set (openai.ChatRequest.Quick).
 func (r chatRoute) callEffort() string {
 	if r.effort != "" {
 		return r.effort
@@ -1069,15 +1095,15 @@ func (c chatLLM) ask(ctx context.Context, r chatRoute, role string, msgs []chat.
 		om[i] = openai.Message{Role: m.Role, Content: m.Content, Images: imageParts(m.Images)}
 	}
 	t := temperature
-	effort := r.callEffort()
-	if quickAnswer(ctx) {
-		effort = "none"
+	effort, quick := r.callEffort(), quickAnswer(ctx)
+	if quick {
+		effort = "none" // the adapter asks for the role's level instead when one is set (RoleEffort)
 	}
 	began := time.Now()
 	end := chat.GuardFrom(ctx).Begin()
 	cost := 0.0
 	defer func() { end(cost) }()
-	res, err := r.a.Chat(ctx, openai.ChatRequest{Model: r.model, Messages: om, MaxTokens: maxTokens, Temperature: &t, Effort: effort})
+	res, err := r.a.Chat(ctx, openai.ChatRequest{Model: r.model, Messages: om, MaxTokens: maxTokens, Temperature: &t, Effort: effort, Quick: quick})
 	class := errclass.Of(err)
 	if err == nil && strings.TrimSpace(res.Content) == "" {
 		class = errclass.Empty
@@ -1138,7 +1164,7 @@ func (s *Service) chatRoutes(doc config.Document) (map[string]chatRoute, error) 
 	// reached (no key, a provider since removed) is left out, and pictures fall back to the chat models
 	if m, ok := modelOf(doc, "vision"); ok {
 		if a, err := s.visionAdapter(doc); err == nil && a.Configured() {
-			routes["vision"] = chatRoute{model: m.Model, provider: m.Provider, a: a, timeout: time.Duration(m.TimeoutSeconds) * time.Second}
+			routes["vision"] = chatRoute{model: m.Model, provider: m.Provider, a: a, timeout: time.Duration(m.TimeoutSeconds) * time.Second, effort: m.Effort}
 		}
 	}
 	return routes, nil

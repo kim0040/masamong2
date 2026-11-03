@@ -75,6 +75,9 @@ func (p modelPrice) conservative() modelPrice {
 type priceList struct {
 	FetchedAt string                `json:"fetched_at"`
 	Models    map[string]modelPrice `json:"models"`
+	// Caps is what the list said about the models' reasoning (model_caps.go seeds a provider's cache from
+	// it after a restart); only models it said something about
+	Caps map[string]openai.Caps `json:"caps,omitempty"`
 }
 
 const priceListTTL = 24 * time.Hour
@@ -295,6 +298,16 @@ func (s *Service) storePrices(provider string, models []openai.Model) {
 		}
 		l.Models[m.ID] = mp
 	}
+	if provider != referenceList {
+		for _, m := range models {
+			if c := m.Caps(); c.Known() {
+				if l.Caps == nil {
+					l.Caps = map[string]openai.Caps{}
+				}
+				l.Caps[m.ID] = c
+			}
+		}
+	}
 	// a list without prices (CometAPI) is kept too, empty: its date stops a refetch on every lookup
 	st := s.prices()
 	st.mu.Lock()
@@ -312,6 +325,7 @@ func (s *Service) priceAdapters(reg *Registry, doc config.Document) {
 	for id, a := range reg.LLM {
 		if p, ok := doc.Providers[id]; ok && p.Kind == config.KindOpenAI {
 			a.Price, a.CachedPrice, a.ContextPrice = s.pricer(id), s.cachedPricer(id), s.contextPricer(id)
+			s.shareCaps(a, id, p)
 			s.priceList(id) // loads the stored list; refreshes it in the background when stale
 			reference = reference || openai.ResolveAPI(p.API, p.BaseURL) == openai.APICompatible
 		}

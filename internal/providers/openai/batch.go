@@ -757,9 +757,11 @@ func batchItemError(msg string, class errclass.Class) error {
 	return classedError{msg: "openai: batch item " + msg, class: class}
 }
 
-// batchChatBody is the body a live call of the item would send, shape learning included (batchShapeOf).
+// batchChatBody is the body a live call of the item would send, shape learning and a Quick request's
+// effort precedence included (batchShapeOf, resolveQuick).
 func (a *Adapter) batchChatBody(it BatchItem) ([]byte, error) {
-	return json.Marshal(a.payload(*it.Chat, a.batchShapeOf(*it.Chat)))
+	req := a.resolveQuick(*it.Chat)
+	return json.Marshal(a.payload(req, a.batchShapeOf(req)))
 }
 
 // batchEmbedBody is the body of an embeddings request.

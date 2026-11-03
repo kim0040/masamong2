@@ -28,6 +28,9 @@ type Fallback struct {
 	Provider string // the config provider id, for logs and the call ledger
 	Model    string
 	Timeout  time.Duration // 0 = the primary's
+	// Effort, when set, replaces the request's effort on this model (models.<role>.fallbacks[].effort): a
+	// fallback may need another level than the role's model. A Quick request follows A.RoleEffort instead.
+	Effort string
 }
 
 // Failover is the primary model's side of the chain, set on the adapter the role's model uses.
@@ -99,6 +102,9 @@ func (a *Adapter) chatFailover(ctx context.Context, req ChatRequest) (ChatResult
 		}
 		r := req
 		r.Model = link.Model
+		if link.Effort != "" && !r.Quick {
+			r.Effort = link.Effort
+		}
 		actx, cancel := ctx, context.CancelFunc(func() {})
 		if link.Timeout > 0 {
 			actx, cancel = context.WithTimeout(ctx, link.Timeout)

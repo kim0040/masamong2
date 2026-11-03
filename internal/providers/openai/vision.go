@@ -25,8 +25,10 @@ type ImagePart struct {
 
 // URL is the part's data: URL.
 func (p ImagePart) URL() string {
-	return "data:" + p.MIME + ";base64," + base64.StdEncoding.EncodeToString(p.Data)
+	return "data:" + p.MIME + ";base64," + p.base64()
 }
+
+func (p ImagePart) base64() string { return base64.StdEncoding.EncodeToString(p.Data) }
 
 type textPart struct {
 	Type string `json:"type"`

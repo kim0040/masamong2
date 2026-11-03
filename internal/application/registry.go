@@ -281,6 +281,12 @@ func (r *Registry) Probe(ctx context.Context, id string) (map[string]any, error)
 			var ms []openai.Model
 			ms, err = a.ListModels(ctx)
 			out["models"] = len(ms)
+			if errors.Is(err, openai.ErrNoModelList) {
+				// an Anthropic-format host without a model list: not a failure, the operator types the model
+				// ID; the key is proven by the first answer instead
+				out["model_list"], out["key_checked"] = "unavailable", false
+				err = nil
+			}
 		}
 	case config.KindOpenMeteo:
 		var p openmeteo.Place

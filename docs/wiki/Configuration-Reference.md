@@ -75,7 +75,7 @@ Outside providers, keyed by provider ID:
 |---|---|
 | `kind` | `openai_compat` (models), `kma`, `open_meteo`, `finnhub`, `exchangerate`, web search `tavily`, `linkup`, `exa`, `serper`, `brave`, `tinyfish`, `kakao_search`, link reading `jina_reader` |
 | `base_url` | API address (any OpenAI-compatible host: OpenRouter, OpenAI, Gemini, your own server, …). It must be HTTPS. Plain HTTP is accepted only for `localhost` and loopback IP addresses (`127.0.0.0/8`, `::1`), for a model server on the same computer. Addresses with a username or password and look-alike hosts such as `localhost.example.com` are refused. A redirect to another scheme, host or port is not followed |
-| `api` | `openai_compat` only: host kind `openrouter`, `openai`, `gemini`, `anthropic`, `compatible`. Empty means it is detected from `base_url`; set it only when the address cannot tell (e.g. a test server) |
+| `api` | `openai_compat` only: host kind `openrouter`, `openai`, `gemini`, `anthropic` (the Messages API, at any address), `compatible`. Empty means it is detected from `base_url`; set it when the address cannot tell (a test server, or another company's Anthropic-format endpoint) |
 | `credential_ref` | Key reference |
 | `daily_limit` | Calls per day (kept across restarts) |
 | `disabled` | Turn off |
@@ -100,6 +100,15 @@ When **Fill roles** recommends OpenRouter models, it recognizes catalog entries 
 
 CometAPI and NanoGPT can be picked directly under **Connections → Add provider** (`providers add --host cometapi`) and have their own recommended-model rules (CometAPI's embedding is `qwen3-embedding-8b`, which the memory recipe was measured with). Models from providers without a price list use a **reference price**: the same model name (after the last `/`, without a `:variant`) is looked up in OpenRouter's public list (fetched once a day without a key), and image models are priced by image output (`image_output`). CometAPI charges about 80% of list price, so the reference price keeps the budget on the safe side. A model with no price anywhere raises a "model with unknown price" notice on Home, because the monthly budget cannot cap its cost.
 
+**Anthropic (Messages API).** `api: anthropic` speaks Anthropic's native Messages API at any address: Anthropic's own (`https://api.anthropic.com/v1`) or another company's Anthropic-format endpoint (`https://<host>/anthropic`; `/v1` is added when missing, and a pasted `…/v1/messages` is trimmed). Requests go to `{base}/v1/messages` with `x-api-key` and `anthropic-version`. Hosts other than `api.anthropic.com` also get the key as `Authorization: Bearer`, because some of them read only that header. Effort is sent as `thinking` plus `output_config.effort` from the model's capabilities (`GET /v1/models/{id}`, looked up once a day):
+
+| Effort | Model that can turn thinking off (Haiku 5.5) | Thinks between tool calls only (Sonnet 5.5) | Always thinks (Opus 5.5) | Budgeted thinking (Haiku 4.5) |
+|---|---|---|---|---|
+| `none`, `minimal` | `thinking: disabled` | `thinking: between_tools` | no `thinking`, effort `low` | `thinking: disabled` |
+| `low` … `max` | `thinking: adaptive` + `output_config.effort` | the same | the same | `thinking: enabled` with a token budget (1024–16384) |
+
+Thinking gets extra output room on top of the call's limit (`low` 1024 up to `max` 16384 tokens). Signed thinking blocks go back unchanged within a tool loop. Prompt caching is not sent yet. The cost counts cache reads at 0.1× and cache writes at 1.25× the input price if a host reports them. A host without an Anthropic-format model list still passes the connection test ("list unavailable"): type the model ID in **Change**, and the key is proven by a one-token answer once a role uses the host. A refusal (`stop_reason: refusal`) goes to the role's fallback.
+
 When a model rejects an option (e.g. Gemini 3.8 Flash rejects `reasoning_effort: minimal`, OpenAI reasoning models reject `temperature`), the request is sent once more without it and that shape is remembered for the model. When the planner or reply model fails (model missing, overloaded, timeout, ran out of output while thinking), the other one gets the same request once; there is no setting for this. Official prices are in `internal/providers/openai/hosts.json` with the date they were checked; prices entered by the operator always come first.
 
 ## models
@@ -113,7 +122,18 @@ A model per role. Roles: `response`, `planner`, `summary`, `embed`, `rerank`, `i
 | `dimensions` | Embedding dimensions (`embed` only). Default `1024`; `0` = the model's full width |
 | `price_in_per_mtok`, `price_out_per_mtok` | USD per million tokens, used when the provider reports no cost |
 | `timeout_seconds` | Time limit for one call. 0 = default (`planner` 30, `response` 90), otherwise 5–600. Past it, or on an empty reply, the other chat model takes over. Console: **Connections → Models → prices** |
-| `effort` | `planner` and `response` only. How long a reasoning model thinks before it answers: `none`, `minimal`, `low`, `medium` or `high`. Empty = `low`. Short checks (name calls, references, follow-ups) always use `none`, regardless of this setting. Models that do not reason ignore it. Console: **Connections → Models → prices** |
+| `effort` | The chat roles (`response`, `planner`, `summary`, `vision`). How long a reasoning model thinks before it answers: `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. Empty = `low`. Precedence is below the table. Console: **Connections → Models → prices** |
+| `fallbacks` | The chat roles. Up to 3 models (`provider`, `model`, optional `price_in_per_mtok`, `price_out_per_mtok`, `timeout_seconds`, `effort`) asked in order when the role's model fails. A fallback's `effort` replaces the role's on that model; empty keeps the role's. Console: **Connections → Models → Fallbacks** |
+
+**Thinking effort, in order of precedence:**
+
+1. A call of the role asks for the role's `effort` (empty: `low`). A fallback with its own `effort` asks for that instead.
+2. Calls the code makes thinking-free on purpose ask for `none` while the role's `effort` is empty: the name-call, reference and follow-up checks of the planner, the one-line memory summary and summary-role write-ups, and fortunes. They stop at a short output limit that thinking would use up. Once the role's `effort` is set, these calls think at that level too and get extra output room for the thinking.
+3. The level is then fitted to the host and model. A model whose list says it does not reason gets no field. A level the list says the model lacks becomes the nearest level below (a clamp is logged once). `xhigh` and `max` become `high` on Gemini and on hosts that refuse them (learned after one refusal). OpenAI and OpenRouter take `xhigh`, and `max` becomes `xhigh` there.
+
+What the console shows comes from the model lists: **Thinks** or **No thinking** when the list says (Anthropic's capabilities, OpenRouter's `supported_parameters`, NanoGPT's detailed list, Gemini's native list), **Not known** otherwise (OpenAI's list, CometAPI). Levels a model does not take are greyed out.
+
+On Anthropic, `low` now means adaptive thinking at effort `low`. The model may think a little on easy questions, so answers can use somewhat more output tokens and time than before, when Claude did not think at all. Set `none` to turn thinking off.
 
 With a provider that has no rerank (OpenAI, Gemini) in `rerank`, or a rerank provider without a key, memory search answers with the fused ranking and no rerank (the console marks it in the role table). Each role can use a different provider — for example chat and embeddings on Gemini, only rerank on OpenRouter. The role table's **Change** button lists the chosen provider's models (pick another provider in the same dialog) with badges for picture input and tools, context, and input/output/cached prices per million tokens; search, sort by price or context, and for `vision` only models that take pictures are shown when the list says (a name-based list, like OpenAI's or Gemini's, does not, so all are shown with a note). Models whose list says "no tools" are marked for `response` and `planner`; where a list has no prices the console says "No price info".
 

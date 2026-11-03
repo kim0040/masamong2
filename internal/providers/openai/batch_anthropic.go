@@ -13,10 +13,8 @@ import (
 	"masamong/internal/providers/decode"
 )
 
-// Anthropic's native Message Batches. The adapter otherwise talks to Anthropic's OpenAI-compatible
-// /chat/completions; batches exist only natively, so the chat request is translated here: system
-// messages become the top-level system, user and assistant messages the messages, and the optional
-// fields (thinking, temperature, output limit) are the ones the live payload would send.
+// Anthropic's native Message Batches. A batch item's params are the Messages request a live call sends
+// (anthropic.go): the same system, turns, thinking, effort and output limit.
 
 type anthropicBatchCreate struct {
 	Requests []anthropicBatchRequest `json:"requests"`
@@ -27,66 +25,34 @@ type anthropicBatchRequest struct {
 	Params   anthropicParams `json:"params"`
 }
 
-type anthropicParams struct {
-	Model       string          `json:"model"`
-	MaxTokens   int             `json:"max_tokens"`
-	Messages    []anthropicMsg  `json:"messages"`
-	System      string          `json:"system,omitempty"`
-	Temperature *float64        `json:"temperature,omitempty"`
-	Thinking    json.RawMessage `json:"thinking,omitempty"`
-}
+// anthropicParams are a batch item's params: the request a live call sends (anthropicPayload).
+type anthropicParams = anthropicRequest
 
-type anthropicMsg struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// anthropicHeaders authenticate a native call: x-api-key, not a bearer token.
-func (a *Adapter) anthropicHeaders() map[string]string {
-	h := map[string]string{"x-api-key": a.Cred.Value(), "anthropic-version": anthropicVersion}
-	for k, v := range a.Headers {
-		h[k] = v
-	}
-	return h
-}
-
-// anthropicParamsOf translates one chat request.
+// anthropicParamsOf translates one chat request the way a live call would (anthropicPayload, with the
+// learned shape and the capabilities known now). A batch cannot send back a raw answer or start with
+// the model's turn.
 func (a *Adapter) anthropicParamsOf(it BatchItem) (anthropicParams, error) {
-	req := *it.Chat
-	p := anthropicParams{Model: req.Model}
-	var system []string
+	req := a.resolveQuick(*it.Chat)
 	for _, m := range req.Messages {
 		if len(m.Raw) > 0 {
-			return p, fmt.Errorf("openai: batch item %q carries a raw message, which a native Anthropic batch cannot take", it.ID)
+			return anthropicParams{}, fmt.Errorf("openai: batch item %q carries a raw message, which a native Anthropic batch cannot take", it.ID)
 		}
-		if strings.TrimSpace(m.Content) == "" {
-			return p, fmt.Errorf("openai: batch item %q has an empty %s message", it.ID, m.Role)
+		if strings.TrimSpace(m.Content) == "" && len(m.Images) == 0 {
+			return anthropicParams{}, fmt.Errorf("openai: batch item %q has an empty %s message", it.ID, m.Role)
 		}
 		switch m.Role {
-		case "system", "developer":
-			system = append(system, m.Content)
-		case "user", "assistant":
-			p.Messages = append(p.Messages, anthropicMsg{Role: m.Role, Content: m.Content})
+		case "system", "developer", "user", "assistant":
 		default:
-			return p, fmt.Errorf("openai: batch item %q has a %q message, which a native Anthropic batch cannot take", it.ID, m.Role)
+			return anthropicParams{}, fmt.Errorf("openai: batch item %q has a %q message, which a native Anthropic batch cannot take", it.ID, m.Role)
 		}
+	}
+	caps, _ := a.caps().Get(req.Model)
+	p, err := a.anthropicPayload(req, a.batchShapeOf(req), caps)
+	if err != nil {
+		return p, err
 	}
 	if len(p.Messages) == 0 || p.Messages[0].Role != "user" {
 		return p, fmt.Errorf("openai: batch item %q must start with a user message", it.ID)
-	}
-	p.System = strings.Join(system, "\n\n")
-	// the live payload decides the optional fields, learned shape included
-	live := a.payload(req, a.batchShapeOf(req))
-	for _, k := range []string{"max_tokens", "max_completion_tokens"} {
-		if n, ok := live[k].(int); ok {
-			p.MaxTokens = n
-		}
-	}
-	if t, ok := live["temperature"].(float64); ok {
-		p.Temperature = &t
-	}
-	if th, ok := live["thinking"]; ok {
-		p.Thinking, _ = json.Marshal(th)
 	}
 	return p, nil
 }
@@ -228,18 +194,6 @@ func anthropicStatus(errType string) int {
 		return 529
 	}
 	return 500
-}
-
-func anthropicFinish(stop string) string {
-	switch stop {
-	case "max_tokens":
-		return "length"
-	case "end_turn", "stop_sequence":
-		return "stop"
-	case "refusal":
-		return "content_filter"
-	}
-	return stop
 }
 
 func (a *Adapter) anthropicOutcome(ref BatchRef, r anthropicRow, discount float64) BatchOutcome {

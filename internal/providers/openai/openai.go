@@ -62,6 +62,14 @@ type Adapter struct {
 	// checks or model lists): the operator's daily call limit for this provider. Its error ends the
 	// call; with a Failover the next model is asked.
 	Gate func() error
+	// Caps keeps what model lists said about the models' reasoning (caps.go). The application shares one
+	// per provider across the adapters it builds; nil makes one for this adapter on first use.
+	Caps     *CapsCache
+	capsOnce sync.Once
+	// RoleEffort is the effort configured for the role this adapter serves (models.<role>.effort, or a
+	// fallback's own effort); "" when none is set. A Quick request (a call the code makes thinking-free on
+	// purpose) asks for "none" unless this is set, and then asks for this level with room for the thinking.
+	RoleEffort string
 }
 
 func (a *Adapter) gate() error {
@@ -95,6 +103,15 @@ func (a *Adapter) estimateCached(cost **float64, estimated *bool, model string, 
 }
 
 func (a *Adapter) estimateCachedAt(cost **float64, estimated *bool, model string, in, cached, out int, at time.Time) {
+	a.estimateWrittenAt(cost, estimated, model, in, cached, 0, out, at)
+}
+
+// cacheWriteFactor is the price of an input token written to the prompt cache as a share of the input
+// price (Anthropic's five-minute cache write: 1.25×). Only Anthropic reports such tokens.
+const cacheWriteFactor = 1.25
+
+// estimateWrittenAt is estimateCachedAt with written of the in tokens written to the prompt cache.
+func (a *Adapter) estimateWrittenAt(cost **float64, estimated *bool, model string, in, cached, written, out int, at time.Time) {
 	if *cost != nil || (a.Price == nil && a.ContextPrice == nil) || in+out == 0 {
 		return
 	}
@@ -120,7 +137,8 @@ func (a *Adapter) estimateCachedAt(cost **float64, estimated *bool, model string
 		pc = pin
 	}
 	cached = min(max(cached, 0), in)
-	v := float64(in-cached)*pin + float64(cached)*pc + float64(out)*pout
+	written = min(max(written, 0), in-cached)
+	v := float64(in-cached-written)*pin + float64(cached)*pc + float64(written)*pin*cacheWriteFactor + float64(out)*pout
 	*cost, *estimated = &v, true
 }
 
@@ -163,7 +181,13 @@ type Model struct {
 	// ImageInput is whether the host's list says the model reads pictures (OpenRouter's
 	// architecture.input_modalities holds "image"); nil when the list does not say (name-based lists).
 	ImageInput *bool
-	Overrides  []PricingOverride
+	// Reasoning, Efforts and Thinking are what the list says about the model's reasoning (caps.go): whether
+	// it thinks, the effort levels it takes, and (Anthropic) the thinking types it takes, which say how
+	// thinking is turned off. nil when the list does not say.
+	Reasoning *bool
+	Efforts   []string
+	Thinking  []string
+	Overrides []PricingOverride
 }
 
 // PricingOverride is one OpenRouter conditional rate entry. A missing price inherits the base rate.
@@ -211,20 +235,30 @@ func (a *Adapter) ListModels(ctx context.Context) ([]Model, error) {
 	if !a.Configured() {
 		return nil, providers.ErrNoCredential
 	}
-	url := a.BaseURL + "/models"
+	url, headers := a.BaseURL+"/models", a.headers()
 	switch a.API {
 	case APIOpenRouter:
 		url += "?output_modalities=all" // embedding and rerank models are listed only with this
 	case APICompatible:
-		url += "?detailed=true" // NanoGPT lists prices only then; other hosts ignore the parameter
+		url += "?detailed=true" // NanoGPT lists prices (and capabilities) only then; other hosts ignore it
 	case APIAnthropic:
-		url += "?limit=1000" // its list comes in pages of 20 by default
+		url, headers = a.anthropicBase()+"/models?limit=1000", a.anthropicHeaders() // pages of 20 by default
 	}
-	resp, err := a.Client.Get(ctx, url, a.headers())
+	resp, err := a.Client.Get(ctx, url, headers)
 	if err != nil {
-		return nil, mapErr(err, resp)
+		err = mapErr(err, resp)
+		if a.API == APIAnthropic && !errors.Is(err, ErrAuth) && noModelList(err) {
+			return nil, fmt.Errorf("%w: %v", ErrNoModelList, err)
+		}
+		return nil, err
 	}
 	models, err := ParseModels(resp.ContentType, resp.Body)
+	if err != nil && a.API == APIAnthropic && noModelList(err) {
+		return nil, fmt.Errorf("%w: %v", ErrNoModelList, err)
+	}
+	for _, m := range models {
+		a.caps().Put(a.API.trimModelID(m.ID), m.Caps())
+	}
 	if err != nil || a.API == APIOpenRouter {
 		return models, err
 	}
@@ -430,6 +464,7 @@ func ParseModels(contentType string, body []byte) ([]Model, error) {
 				m.SupportsTools = &has
 			}
 		}
+		parseCaps(it, &m)
 		arch := decode.Str(it["object"])
 		if strings.Contains(id, "embed") {
 			m.Kind = "embedding"
@@ -580,6 +615,12 @@ type ChatRequest struct {
 	// stop, or none sent) is an answer, not a failure for a fallback to retry. A tool round is one: the model needs
 	// no more tools, and the reply is written by another call.
 	EmptyOK bool
+	// Quick marks a call the code makes thinking-free on purpose (a classifier of tens of tokens, a
+	// one-line summary): Effort should be "none". When the role behind the adapter has an effort of its
+	// own (Adapter.RoleEffort), that level is asked instead, with output room for the thinking.
+	Quick bool
+	// thinkRoom adds thinkingHeadroom to the output limit (a Quick call asked to think)
+	thinkRoom bool
 }
 
 type ChatResult struct {
@@ -591,7 +632,13 @@ type ChatResult struct {
 	// CachedTokens is the part of PromptTokens the host served from its prompt cache
 	// (usage.prompt_tokens_details.cached_tokens; DeepSeek: usage.prompt_cache_hit_tokens)
 	CachedTokens int
-	Elapsed      time.Duration
+	// CacheWriteTokens is the part of PromptTokens written to the prompt cache (Anthropic
+	// cache_creation_input_tokens), billed above the input price
+	CacheWriteTokens int
+	// ReasoningTokens is the part of CompletionTokens spent thinking, when the host says
+	// (Anthropic output_tokens_details.thinking_tokens)
+	ReasoningTokens int
+	Elapsed         time.Duration
 	// CostUSD is the provider-reported usage.cost (OpenRouter), else tokens × Price; nil when neither is known.
 	CostUSD       *float64
 	CostEstimated bool
@@ -633,11 +680,12 @@ func (a *Adapter) chat(ctx context.Context, req ChatRequest) (ChatResult, error)
 	if hasImages(req) && a.VisionUnsupported(req.Model) {
 		return ChatResult{}, fmt.Errorf("%w: %s", ErrVisionUnsupported, req.Model)
 	}
+	req = a.resolveQuick(req)
 	out, err := a.chatOnce(ctx, req, true)
 	if err != nil || !thoughtAway(out) || req.MaxTokens == 1 { // a 1-token probe (ProbeChat) wants no answer
 		return out, err
 	}
-	// on Anthropic every level up to "low" already went out with thinking off (shape.go)
+	// on Anthropic "minimal" already went out with thinking off, as "none" does (anthropic.go)
 	if req.Effort != "none" && !(a.API == APIAnthropic && thinkingOff(req.Effort)) {
 		// A reasoning model can spend the whole output budget thinking and return no text (DeepSeek V4.1
 		// Flash thinks 120+ tokens at "low"). Ask once more without thinking; both calls are charged.
@@ -677,11 +725,28 @@ func (a *Adapter) chat(ctx context.Context, req ChatRequest) (ChatResult, error)
 	return addUsage(next, out), nil
 }
 
+// resolveQuick applies the effort precedence to a Quick request: "none", unless the role this adapter
+// serves has an explicit effort (RoleEffort), which then applies with output room for the thinking.
+// Every other request keeps the effort its caller set (the role's, else "low").
+func (a *Adapter) resolveQuick(req ChatRequest) ChatRequest {
+	if !req.Quick {
+		return req
+	}
+	req.Effort = "none"
+	if a.RoleEffort != "" {
+		req.Effort = a.RoleEffort
+	}
+	req.thinkRoom = !thinkingOff(req.Effort) && req.MaxTokens > 0
+	return req
+}
+
 // addUsage is next with out's tokens, time and cost added: both calls are charged.
 func addUsage(next, out ChatResult) ChatResult {
 	next.PromptTokens += out.PromptTokens
 	next.CompletionTokens += out.CompletionTokens
 	next.CachedTokens += out.CachedTokens
+	next.CacheWriteTokens += out.CacheWriteTokens
+	next.ReasoningTokens += out.ReasoningTokens
 	next.Elapsed += out.Elapsed
 	next.CostEstimated = next.CostEstimated || out.CostEstimated
 	if out.CostUSD != nil {
@@ -700,10 +765,14 @@ func (a *Adapter) chatOnce(ctx context.Context, req ChatRequest, learn bool) (Ch
 	if err != nil {
 		return ChatResult{}, err
 	}
-	out, err := ParseChat(resp.ContentType, resp.Body)
+	parse := ParseChat
+	if a.API == APIAnthropic {
+		parse = ParseAnthropicChat
+	}
+	out, err := parse(resp.ContentType, resp.Body)
 	out.Elapsed = resp.Elapsed
-	if err == nil {
-		a.estimateCachedAt(&out.CostUSD, &out.CostEstimated, req.Model, out.PromptTokens, out.CachedTokens, out.CompletionTokens, requestedAt)
+	if err == nil || errors.Is(err, ErrRefused) { // a refused answer is still billed
+		a.estimateWrittenAt(&out.CostUSD, &out.CostEstimated, req.Model, out.PromptTokens, out.CachedTokens, out.CacheWriteTokens, out.CompletionTokens, requestedAt)
 	}
 	return out, err
 }

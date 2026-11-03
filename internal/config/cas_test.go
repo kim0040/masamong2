@@ -112,14 +112,20 @@ func TestModelTimeoutBounds(t *testing.T) {
 	}
 }
 
-// A chat model's effort is empty (low) or one of ModelEfforts, and only the planner and response take one.
+// A chat model's effort is empty (low) or one of ModelEfforts, xhigh and max included; every chat role
+// (FallbackRoles) takes one, the embedding, rerank and image roles none. A fallback may name its own.
 func TestModelEffort(t *testing.T) {
 	for _, c := range []struct {
 		role, effort string
 		ok           bool
-	}{{"planner", "", true}, {"planner", "none", true}, {"response", "high", true}, {"planner", "max", false}, {"summary", "none", false}} {
+	}{{"planner", "", true}, {"planner", "none", true}, {"response", "high", true}, {"planner", "max", true}, {"response", "xhigh", true},
+		{"summary", "none", true}, {"summary", "medium", true}, {"vision", "low", true}, {"embed", "low", false}, {"rerank", "none", false},
+		{"planner", "ultra", false}, {"response", "Low", false}} {
 		d := Default("x", t.TempDir())
 		m := d.Models[c.role]
+		if c.role == "vision" {
+			m = d.Models["response"]
+		}
 		m.Effort = c.effort
 		d.Models[c.role] = m
 		raw, err := Marshal(d)
@@ -128,6 +134,19 @@ func TestModelEffort(t *testing.T) {
 		}
 		if _, err := Parse(raw); (err == nil) != c.ok {
 			t.Fatalf("models.%s.effort %q: err=%v", c.role, c.effort, err)
+		}
+	}
+	for effort, ok := range map[string]bool{"": true, "none": true, "max": true, "xhigh": true, "turbo": false} {
+		d := Default("x", t.TempDir())
+		m := d.Models["response"]
+		m.Fallbacks = []ModelFallback{{Provider: m.Provider, Model: m.Model + "-other", Effort: effort}}
+		d.Models["response"] = m
+		raw, err := Marshal(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Parse(raw); (err == nil) != ok {
+			t.Fatalf("fallbacks[0].effort %q: err=%v", effort, err)
 		}
 	}
 }

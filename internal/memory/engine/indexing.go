@@ -734,7 +734,7 @@ func (e *Engine) summaryRequest(body string) openai.ChatRequest {
 	r := []rune(body)
 	temp := 0.1
 	return openai.ChatRequest{Model: e.Models.Summary, MaxTokens: 120, Temperature: &temp,
-		Effort:   "none", // a one-line summary needs no thinking, which would eat the 120 tokens
+		Effort: "none", Quick: true, // no thinking, which would eat the 120 tokens, unless models.summary.effort is set
 		Messages: []openai.Message{{Role: "user", Content: lang.Fill(e.Settings.SummaryPrompt, "body", string(r[:min(summaryBodyRuneLimit, len(r))]))}}}
 }
 
