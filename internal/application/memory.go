@@ -398,9 +398,11 @@ func (s *Service) MemoryEngine() (*engine.Engine, error) {
 	}
 	if st.eng.SummaryLLM != nil {
 		// the job decides, not the model it falls back to: the response model writing summaries keeps them
-		// thinking-free unless models.summary.effort is set, and so do its fallbacks; a fallback with an
-		// effort of its own uses it, capped as any Quick call of the role it belongs to (quickEffort), as
-		// featureText does
+		// thinking-free unless models.summary.effort is set, and so do its fallbacks. A fallback with an
+		// effort of its own uses it, as featureText does. Only a borrowed fallback (models.summary unset,
+		// the response model's chain) is capped at low like any Quick call of that role (quickEffort); a
+		// fallback of models.summary itself is not capped, so a summary fallback set to max thinks at max
+		// on every summary
 		st.eng.SummaryLLM.RoleEffort = doc.Models["summary"].Effort
 		if st.eng.SummaryLLM.Failover != nil {
 			for _, fb := range st.eng.SummaryLLM.Failover.Fallbacks {
