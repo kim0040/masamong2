@@ -1,6 +1,6 @@
 # 라이선스·비용 감사
 
-기준일: 2026-09-24 (배포 대상 확장·외부 서비스 약관 2026-10-01)  
+기준일: 2026-09-24 (배포 대상 확장·외부 서비스 약관 2026-10-01, lunar-go 추가 2026-11-03)  
 대상: Masamong `main`의 소스, 실제 release 바이너리 의존성, Svelte 배포물, 글꼴·아이콘·브랜드 에셋, 선택형 개발 도구
 
 ## 결론
@@ -27,7 +27,7 @@
 
 `go.sum` 전체는 테스트·도구·간접 해석용 모듈까지 포함할 수 있으므로 다음 두 층을 구분했다.
 
-1. `go list -deps ./cmd/masamong ./cmd/masamongd`를 `scripts/release.sh`의 10개 대상(GOOS/GOARCH/CGO_ENABLED, armv7은 GOARM=7)마다 실행하고 합집합 39개 외부 모듈을 추출했다(2026-10-01: 이전에는 5개 대상만 보았으나 armv7·riscv64·Windows arm64·FreeBSD를 더해도 모듈은 같았다). 대상별 집합이 다르므로 실행 호스트와 관계없이 같은 결과가 나오도록 대상을 고정했다.
+1. `go list -deps ./cmd/masamong ./cmd/masamongd`를 `scripts/release.sh`의 10개 대상(GOOS/GOARCH/CGO_ENABLED, armv7은 GOARM=7)마다 실행하고 합집합 외부 모듈을 추출했다(2026-10-01: 39개. 이전에는 5개 대상만 보았으나 armv7·riscv64·Windows arm64·FreeBSD를 더해도 모듈은 같았다. 2026-11-03: lunar-go를 더해 40개). 대상별 집합이 다르므로 실행 호스트와 관계없이 같은 결과가 나오도록 대상을 고정했다.
 2. 각 module cache 루트의 `LICENSE*`, `LICENCE*`, `COPYING*`, `NOTICE*`를 읽고 배포용 전문 묶음에 포함했다.
 3. `go list -m all`도 비교하여 release 경로에 링크되지 않은 테스트·개발 전용 모듈을 구분했다.
 
@@ -35,6 +35,7 @@
 
 - `github.com/go-sql-driver/mysql v1.10.1`: [MPL-2.0](https://www.mozilla.org/en-US/MPL/2.0/). Mozilla의 [MPL FAQ](https://www.mozilla.org/en-US/MPL/2.0/FAQ/)가 설명하는 파일 단위 copyleft와 larger work 배포 조건에 따라 upstream 소스 경로와 라이선스를 제공한다.
 - `modernc.org/sqlite v1.59.0`: [공식 mirror](https://github.com/modernc-org/sqlite)의 BSD-3-Clause, SQLite public domain, sqlite-vec MIT 고지를 포함한다.
+- `github.com/6tail/lunar-go v1.4.6`: MIT (`Copyright (c) 2020 6tail`). module cache의 LICENSE 전문을 확인했고, 패키지의 다른 파일에 별도 라이선스·저작권 표시가 없으며 표준 라이브러리 밖 의존성도 없다. 운세의 절기 시각과 택일(宜·忌) 표, 건제12신·황흑도 대조 시험에 쓴다. 중국 달력 기준이라 시각이 베이징 시간(UTC+8)이므로 `internal/features/fortune/calendar.go`가 절대 시각으로 바꿔 사용자 시간대에 맞춘다. 실행 중 네트워크 호출이나 유료 API는 없다.
 - `modernc.org/libc v1.75.7`: [pkg.go.dev](https://pkg.go.dev/modernc.org/libc)의 BSD-3-Clause 표시와 module의 제3자 고지 전문을 확인했다. 생성 코드에 나타나는 GCC/glibc 원문 표시는 실제 package의 주 라이선스와 예외·제3자 고지를 함께 읽어 판단했다.
 
 ### 3. npm과 웹 배포물

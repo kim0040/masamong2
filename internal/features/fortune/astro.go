@@ -120,24 +120,57 @@ type Pillar struct{ Stem, Branch int }
 
 func mod(a, n int) int { return ((a % n) + n) % n }
 
-// Pillars are the year, month and day pillars of a local date, and the hour pillar when hour >= 0.
-// The year and month change at the solar terms (입춘 and each 절기), found from the sun's longitude;
-// the day pillar follows the Julian day number.
+// Pillars are the year, month and day pillars of a local date, and the hour pillar when hour >= 0. The
+// date's wall clock is read in its own Location at hour:00 (or noon when the hour is not known), so the
+// caller decides the zone; PillarsAt is the same for an exact moment.
 func Pillars(date time.Time, hour int) (year, month, day, hourP Pillar, hasHour bool) {
-	noon := time.Date(date.Year(), date.Month(), date.Day(), 12, 0, 0, 0, time.UTC)
-	sun := Longitude("sun", noon.Add(-9*time.Hour)) // noon in East Asia
-	y := date.Year()
-	if date.Month() <= 2 && sun >= 270 && sun < 315 {
-		y-- // before 입춘
-	}
-	year = Pillar{Stem: mod(y-4, 10), Branch: mod(y-4, 12)}
-	m := int(norm360(sun-315) / 30) // 0 = 인월
-	month = Pillar{Stem: mod(year.Stem%5*2+2+m, 10), Branch: mod(2+m, 12)}
-	jdn := int(math.Floor(julianDay(noon) + 0.5))
-	day = Pillar{Stem: mod(jdn+9, 10), Branch: mod(jdn+1, 12)}
+	h := 12
 	if hour >= 0 {
-		b := mod((hour+1)/2, 12) // 자시 23:00–00:59
-		hourP, hasHour = Pillar{Stem: mod(day.Stem%5*2+b, 10), Branch: b}, true
+		h = hour
+	}
+	t := time.Date(date.Year(), date.Month(), date.Day(), h, 0, 0, 0, date.Location())
+	return PillarsAt(t, hour >= 0)
+}
+
+// PillarsAt are the four pillars of a moment, read in t's own Location (the person's zone).
+//
+//   - Year and month change at the instants of 입춘 and each 절기 (calendar.go, from lunar-go), compared
+//     as absolute moments, so the boundary is exact to the minute in any zone.
+//   - The day pillar follows the local civil date (Julian day number). It does not roll over at 23:00:
+//     23:00–23:59 keeps the date's day pillar (the 야자시 convention, lunar-go's default "sect 2").
+//   - The hour pillar is the two-hour 시진 of the local wall clock (자시 23:00–00:59). Its stem follows
+//     the day it starts: 23:00–23:59 is the 자시 that begins the next day, so its stem is counted from
+//     the next day's stem (a 무 day's 23:30 is 갑자, its 00:30 is 임자). Both 자시 conventions agree on
+//     this; they differ only in the day pillar.
+//
+// Local mean solar time is not corrected for (Seoul's clock runs about 30 minutes ahead of the sun);
+// a zone with historical offsets (Asia/Seoul's 1950s UTC+8:30 and summer time) is applied as the
+// time package knows it.
+func PillarsAt(t time.Time, hasHour bool) (year, month, day, hourP Pillar, ok bool) {
+	gy, branch := solarMonth(t)
+	year = Pillar{Stem: mod(gy-4, 10), Branch: mod(gy-4, 12)}
+	m := mod(branch-2, 12) // 0 = 인월
+	month = Pillar{Stem: mod(year.Stem%5*2+2+m, 10), Branch: branch}
+	day = dayPillar(t.Year(), t.Month(), t.Day())
+	if hasHour {
+		b := mod((t.Hour()+1)/2, 12) // 자시 23:00–00:59
+		stem := day.Stem
+		if t.Hour() == 23 {
+			stem = (stem + 1) % 10 // the 자시 that starts the next day
+		}
+		hourP, ok = Pillar{Stem: mod(stem%5*2+b, 10), Branch: b}, true
 	}
 	return
+}
+
+// dayPillar of a civil date, from its Julian day number (2000-01-01 is 무오).
+func dayPillar(y int, m time.Month, d int) Pillar {
+	jdn := JDN(y, m, d)
+	return Pillar{Stem: mod(jdn+9, 10), Branch: mod(jdn+1, 12)}
+}
+
+// JDN is the Julian day number of a civil date; consecutive dates differ by one.
+func JDN(y int, m time.Month, d int) int {
+	noon := time.Date(y, m, d, 12, 0, 0, 0, time.UTC)
+	return int(math.Floor(julianDay(noon) + 0.5))
 }

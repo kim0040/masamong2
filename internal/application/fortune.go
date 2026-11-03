@@ -151,8 +151,7 @@ func (s *Service) skyText(loc string, at time.Time) string {
 	return strings.Join(parts, ", ")
 }
 
-func (s *Service) pillarsText(loc string, date time.Time, hour int) string {
-	y, m, d, h, hasHour := fortune.Pillars(date, hour)
+func (s *Service) pillarsText(loc string, y, m, d, h fortune.Pillar, hasHour bool) string {
 	text := s.I18n.T(loc, "fortune.data.pillars", "year", s.pillarText(loc, y), "month", s.pillarText(loc, m), "day", s.pillarText(loc, d))
 	if hasHour {
 		text += " " + s.I18n.T(loc, "fortune.data.hour_pillar", "hour", s.pillarText(loc, h))
@@ -160,13 +159,30 @@ func (s *Service) pillarsText(loc string, date time.Time, hour int) string {
 	return text
 }
 
-// fortuneData is the fact sheet a fortune is written from, in loc's words.
-func (s *Service) fortuneData(loc string, p fortuneProfile, at time.Time) string {
+// fortuneNatal is the person's chart. The birth date and time are read in zone (the person's own: the
+// birth place's zone is not known); without a birth time the year and month are taken at noon and there
+// is no hour pillar.
+func fortuneNatal(p fortuneProfile, zone *time.Location) fortune.Natal {
 	birth, _ := time.Parse("2006-01-02", p.BirthDate)
-	hour := -1
+	h, m, has := 12, 0, false
 	if t, err := time.Parse("15:04", p.BirthTime); err == nil {
-		hour = t.Hour()
+		h, m, has = t.Hour(), t.Minute(), true
 	}
+	y, mo, d, hp, ok := fortune.PillarsAt(time.Date(birth.Year(), birth.Month(), birth.Day(), h, m, 0, 0, zone), has)
+	return fortune.Natal{Year: y, Month: mo, Day: d, Hour: hp, HasHour: ok}
+}
+
+// fortuneDay is the computed day of a person for the local date of at (docs/plan-fortune.md §8): the
+// same birth data and date always give the same scores and lucky points.
+func fortuneDay(p fortuneProfile, at time.Time) *fortune.Day {
+	d := fortune.Analyze(fortuneNatal(p, at.Location()), at)
+	return &d
+}
+
+// fortuneData is the fact sheet a fortune is written from, in loc's words; day, when given, adds the
+// computed facts the reading must keep (a day's reading: today, detail, morning).
+func (s *Service) fortuneData(loc string, p fortuneProfile, at time.Time, day *fortune.Day) string {
+	birth, _ := time.Parse("2006-01-02", p.BirthDate)
 	unknown := s.I18n.T(loc, "fortune.data.not_given")
 	orUnknown := func(v string) string {
 		if v == "" {
@@ -174,12 +190,18 @@ func (s *Service) fortuneData(loc string, p fortuneProfile, at time.Time) string
 		}
 		return v
 	}
-	return s.I18n.T(loc, "fortune.data.block",
+	n := fortuneNatal(p, at.Location())
+	ty, tm, td, _, _ := fortune.PillarsAt(at, false)
+	text := s.I18n.T(loc, "fortune.data.block",
 		"date", at.Format("2006-01-02 15:04"),
 		"birth", p.BirthDate, "birth_time", orUnknown(p.BirthTime), "place", orUnknown(p.BirthPlace),
-		"natal", s.pillarsText(loc, birth, hour), "today", s.pillarsText(loc, at, -1),
+		"natal", s.pillarsText(loc, n.Year, n.Month, n.Day, n.Hour, n.HasHour), "today", s.pillarsText(loc, ty, tm, td, fortune.Pillar{}, false),
 		"sign", s.I18n.T(loc, fmt.Sprintf("fortune.sign.%d", fortune.SunSign(int(birth.Month()), birth.Day()))),
 		"sky", s.skyText(loc, at))
+	if day != nil {
+		text += "\n\n" + s.factsText(loc, *day)
+	}
+	return text
 }
 
 func (s *Service) genderText(loc, g string) string {
@@ -413,7 +435,11 @@ func (s *Service) fortuneQuery(ctx context.Context, req action.Request) action.R
 		name = s.msg(req, "fortune.someone")
 	}
 	birth, _ := time.Parse("2006-01-02", p.BirthDate)
-	vars := []string{"data", s.fortuneData(loc, p, now), "name", name, "gender", s.genderText(loc, p.Gender),
+	var day *fortune.Day
+	if what == "today" || what == "detail" {
+		day = fortuneDay(p, now) // a day's reading: computed scores and lucky points; month and year are the model's
+	}
+	vars := []string{"data", s.fortuneData(loc, p, now, day), "name", name, "gender", s.genderText(loc, p.Gender),
 		"sign", s.I18n.T(loc, fmt.Sprintf("fortune.sign.%d", fortune.SunSign(int(birth.Month()), birth.Day())))}
 	tpl := map[string]string{"today": pack.Features.FortuneToday, "detail": pack.Features.FortuneDetailDay,
 		"month": pack.Features.FortuneDetailMonth, "year": pack.Features.FortuneDetailYear}[what]
@@ -439,7 +465,7 @@ func (s *Service) fortuneQuery(ctx context.Context, req action.Request) action.R
 		footer := s.msg(req, "fortune.left", "n", left)
 		card.Footer, card.Ephemeral = footer, true
 		head := s.msg(req, "fortune.card.head", "name", name, "date", s.dayLabel(loc, now))
-		card = s.fortuneCard(loc, what, card, head, s.fortuneBasis(loc, p, now)+" · "+footer)
+		card = s.fortuneCardFor(loc, what, card, head, s.fortuneBasis(loc, p, now)+" · "+footer, day)
 	}
 	return action.WithCard(action.OK(req, map[string]any{"status": "ok", "what": what, "text": text, "cost_usd": cost, "left_today": left}), card)
 }
@@ -919,7 +945,7 @@ func (s *Service) morningFor(ctx context.Context, sender DiscordSender, userID s
 		if name == "" {
 			name = s.I18n.T(loc, "fortune.someone")
 		}
-		prompt := lang.Fill(pack.Features.FortuneMorning, "data", s.fortuneData(loc, p, due), "name", name, "gender", s.genderText(loc, p.Gender), "date", date)
+		prompt := lang.Fill(pack.Features.FortuneMorning, "data", s.fortuneData(loc, p, due, fortuneDay(p, due)), "name", name, "gender", s.genderText(loc, p.Gender), "date", date)
 		text, _, err := s.featureText(ctx, "response", "fortune", lang.Fill(pack.Features.FortuneSystem, "bot", s.Doc().BotNames()[0]), prompt,
 			s.toolDefault("fortune.subscribe", "max_tokens", 900), 0.8)
 		if err != nil {
@@ -953,7 +979,7 @@ func (s *Service) morningFor(ctx context.Context, sender DiscordSender, userID s
 	if name == "" {
 		name = s.I18n.T(loc, "fortune.someone")
 	}
-	card = s.fortuneCard(loc, "morning", card, s.I18n.T(loc, "fortune.card.head", "name", name, "date", s.dayLabel(loc, due)), basis)
+	card = s.fortuneCardFor(loc, "morning", card, s.I18n.T(loc, "fortune.card.head", "name", name, "date", s.dayLabel(loc, due)), basis, fortuneDay(p, due))
 	sendCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	err = sender.SendDM(sendCtx, userID, card, "")
 	cancel()

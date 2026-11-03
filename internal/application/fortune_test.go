@@ -2,7 +2,9 @@ package application_test
 
 import (
 	"context"
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,6 +15,7 @@ import (
 	"masamong/internal/application"
 	"masamong/internal/clock"
 	"masamong/internal/config"
+	"masamong/internal/features/fortune"
 )
 
 // dmGateway is a connected gateway that records direct messages.
@@ -182,20 +185,35 @@ func TestMorningBriefingIsWrittenEarlyAndSentOnce(t *testing.T) {
 }
 
 // A reading in "KEY: value" lines becomes a laid-out card; the public summary carries no personal count;
-// the morning DM gets its stop button.
+// the morning DM gets its stop button. A day's reading shows the computed score, lucky points and basis,
+// not the ones the model wrote (77, 파랑, 시계).
 func TestFortuneTagReadingBecomesACard(t *testing.T) {
 	var calls atomic.Int32
 	url := chatServer(t, "SCORE: 77\nSUMMARY: 좋은 흐름이에요.\nWORK: 집중\nLUCKY_COLOR: 파랑\nLUCKY_ITEM: 시계", "stop", &calls)
 	svc := routedSvc(t, url, url)
-	applyDoc(t, svc, func(d *config.Document) { d.Discord.Enabled = true })
+	applyDoc(t, svc, func(d *config.Document) { d.Discord.Enabled = true; d.I18n.Timezone = "Asia/Seoul" })
 	serveAnyServer(t, svc)
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	at := time.Date(2026, 10, 15, 8, 0, 0, 0, seoul)
+	svc.Clock = clock.Fixed{T: at}
 	dm := person("u1", true)
 	_ = as(svc, "privacy.consent", map[string]any{"scope": "fortune", "decision": "grant", "confirmed": true}, dm)
 	_ = as(svc, "fortune.subscribe", map[string]any{"op": "register", "birth_date": "1995-06-15"}, dm)
+	// the expected day, from the rule engine itself: born 1995-06-15 (no time, so noon), in Seoul
+	y, mo, d, _, _ := fortune.PillarsAt(time.Date(1995, 6, 15, 12, 0, 0, 0, seoul), false)
+	natal := fortune.Natal{Year: y, Month: mo, Day: d}
+	want := fortune.Analyze(natal, at)
 	r := as(svc, "fortune.query", map[string]any{"what": "today"}, dm)
 	card := r.Output["card"].(action.Card)
-	if !strings.Contains(card.Text, "**77**/100") || !strings.HasPrefix(card.Text, "철수") || len(card.Fields) != 2 || !card.Fields[0].Inline || card.Tone != "fortune" {
+	score := fmt.Sprintf("**%d**/100", want.Scores.Overall)
+	if !strings.Contains(card.Text, score) || !strings.HasPrefix(card.Text, "철수") || !strings.Contains(card.Text, "🧭 ") || card.Tone != "fortune" {
 		t.Fatalf("laid out: %+v", card)
+	}
+	if want.Scores.Overall != 77 && strings.Contains(card.Text, "**77**") || strings.Contains(fmt.Sprint(card.Fields), "파랑") || strings.Contains(fmt.Sprint(card.Fields), "시계") {
+		t.Fatalf("the model's score or lucky points leaked: %+v", card)
+	}
+	if len(card.Fields) != 1 || !strings.Contains(card.Fields[0].Value, "🧭") || !strings.Contains(card.Fields[0].Value, "🔢 "+strconv.Itoa(want.Lucky.Number)) {
+		t.Fatalf("computed lucky points in one line: %+v", card.Fields)
 	}
 	// the day pillar is today's (it changes daily); the requests here are in English
 	if !regexp.MustCompile(`Day pillar [A-Z][a-z]+-[A-Z][a-z]+`).MatchString(card.Footer) || !strings.Contains(card.Footer, "Gemini") {
@@ -209,14 +227,15 @@ func TestFortuneTagReadingBecomesACard(t *testing.T) {
 	_ = as(svc, "fortune.subscribe", map[string]any{"op": "subscribe", "time": "07:30"}, dm)
 	gw := &dmGateway{}
 	svc.Discord = gw
-	seoul, _ := time.LoadLocation("Asia/Seoul")
-	svc.Clock = clock.Fixed{T: time.Date(2026, 10, 15, 7, 30, 0, 0, seoul)}
+	due := time.Date(2026, 10, 16, 7, 30, 0, 0, seoul)
+	svc.Clock = clock.Fixed{T: due}
 	application.RunFortuneMorning(svc, context.Background())
 	if len(gw.sent) != 1 {
 		t.Fatalf("sent %d", len(gw.sent))
 	}
 	m := gw.sent[0]
-	if !strings.Contains(m.Title, "15") || strings.Contains(m.Title, "2026-10-15") || len(m.Buttons) != 1 || m.Buttons[0].ID != "fortune:unsub" || !strings.Contains(m.Text, "**77**/100") {
+	morning := fmt.Sprintf("**%d**/100", fortune.Analyze(natal, due).Scores.Overall)
+	if !strings.Contains(m.Title, "16") || strings.Contains(m.Title, "2026-10-16") || len(m.Buttons) != 1 || m.Buttons[0].ID != "fortune:unsub" || !strings.Contains(m.Text, morning) {
 		t.Fatalf("morning card: %+v", m)
 	}
 }
