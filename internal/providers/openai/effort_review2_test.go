@@ -2,7 +2,9 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -121,5 +123,70 @@ func TestKnownCapsPutClearsStaleNoEffort(t *testing.T) {
 	}
 	if h.bodies[0]["output_config"] != nil {
 		t.Fatalf("a model without effort levels gets no output_config: %v", h.bodies[0])
+	}
+}
+
+// Finding 3: a model thinking with a fixed budget (Claude Haiku 4.5) refuses a tool loop's next round
+// when the last assistant turn calls a tool without a thinking block. After a failover (the primary's
+// thinking left out) or after another host's answer, that round goes out with thinking off; its own
+// answer, sent back with its thinking, keeps thinking on.
+func TestBudgetModelAfterBareToolTurn(t *testing.T) {
+	const budget = "claude-haiku-4-5-20251001"
+	models, err := ParseModels("application/json", []byte(`{"data":[`+capsHaiku45+`]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manualHost := func(answer string) (*anthropicHost, *Adapter) {
+		h := &anthropicHost{manual: true, chat: func(w http.ResponseWriter, _ map[string]any) { _, _ = w.Write([]byte(answer)) }}
+		a := newAnthropicHost(t, "/v1", h)
+		a.caps().Put(budget, models[0].Caps())
+		return h, a
+	}
+	tools := []Tool{{Type: "function", Function: ToolFunction{Name: "temperature_c", Parameters: json.RawMessage(`{"type":"object"}`)}}}
+	ask := []Message{{Role: "user", Content: "Oslo and Cairo?"}}
+	round2 := func(assistant Message) ChatRequest {
+		msgs := append(append([]Message(nil), ask...), assistant,
+			Message{Role: "tool", ToolCallID: "toolu_1", Content: "4"}, Message{Role: "tool", ToolCallID: "toolu_2", Content: "27"})
+		return ChatRequest{Model: budget, Messages: msgs, MaxTokens: 100, Effort: "high", Tools: tools}
+	}
+
+	// round 1 on another model, which is down for round 2: the budget model is the fallback
+	first := &anthropicHost{chat: func(w http.ResponseWriter, _ map[string]any) { _, _ = w.Write([]byte(nativeToolCall)) }}
+	a := newAnthropicHost(t, "/v1", first)
+	res, err := a.Chat(context.Background(), ChatRequest{Model: "claude-a", Messages: ask, MaxTokens: 100, Effort: "high", Tools: tools})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fbHost, fb := manualHost(nativeText)
+	down := failingAnthropic(t)
+	down.Failover = &Failover{Provider: "p", Model: "claude-a", Fallbacks: []Fallback{{A: fb, Provider: "f", Model: budget}}}
+	req := round2(Message{Role: "assistant", Raw: res.Message, ToolCalls: res.ToolCalls})
+	req.Model = "claude-a"
+	if _, err := down.Chat(context.Background(), req); err != nil {
+		t.Fatalf("failover to a budget model: %v (%v)", err, fbHost.bodies)
+	}
+	if len(fbHost.bodies) != 1 || thinkingType(fbHost.bodies[0]) != "disabled" {
+		t.Fatalf("the fallback's round goes out with thinking off: %v", fbHost.bodies)
+	}
+
+	// the previous round came from a chat-completions host: no thinking block either
+	ccHost, cc := manualHost(nativeText)
+	foreign := Message{Role: "assistant", ToolCalls: []ToolCall{{ID: "toolu_1", Type: "function", Function: ToolCallFunction{Name: "temperature_c", Arguments: `{"city":"Oslo"}`}},
+		{ID: "toolu_2", Type: "function", Function: ToolCallFunction{Name: "temperature_c", Arguments: `{"city":"Cairo"}`}}}}
+	if _, err := cc.Chat(context.Background(), round2(foreign)); err != nil || thinkingType(ccHost.bodies[0]) != "disabled" {
+		t.Fatalf("after another host's answer: %v %v", err, ccHost.bodies)
+	}
+
+	// the budget model's own answer goes back with its thinking: thinking stays on
+	ownHost, own := manualHost(strings.Replace(nativeToolCall, "claude-haiku-5-5", budget, 1))
+	res, err = own.Chat(context.Background(), ChatRequest{Model: budget, Messages: ask, MaxTokens: 100, Effort: "high", Tools: tools})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := own.Chat(context.Background(), round2(Message{Role: "assistant", Raw: res.Message, ToolCalls: res.ToolCalls})); err != nil {
+		t.Fatalf("own round trip: %v", err)
+	}
+	if thinkingType(ownHost.bodies[1]) != "enabled" || blockTypes(ownHost.bodies[1])[1] != "thinking" {
+		t.Fatalf("own thinking kept, thinking on: %v", ownHost.bodies[1])
 	}
 }

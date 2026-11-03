@@ -696,6 +696,9 @@ type ChatRequest struct {
 	Quick bool
 	// thinkRoom adds thinkingHeadroom to the output limit (a Quick call asked to think)
 	thinkRoom bool
+	// bareToolTurn (Anthropic) marks a request whose last assistant turn calls a tool without a thinking
+	// block (one stripped after a failover, or an answer of another host): see anthropicThinking
+	bareToolTurn bool
 }
 
 type ChatResult struct {

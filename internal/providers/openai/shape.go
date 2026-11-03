@@ -208,6 +208,9 @@ func (a *Adapter) byokRoute(p map[string]any, model string) {
 // asks the host about the model first. A refusal that would not change the request sent is not retried.
 func (a *Adapter) postShaped(ctx context.Context, req ChatRequest, learn bool) (*providers.Response, error) {
 	learnEffort := learn && req.Effort != "none" || a.API == APIAnthropic
+	if a.API == APIAnthropic {
+		req.bareToolTurn = a.bareToolTurn(req) // what anthropicPayload sends, for reading a refusal
+	}
 	sh := a.shapeOf(req)
 	caps := a.knownCaps(req.Model)
 	var sent []byte

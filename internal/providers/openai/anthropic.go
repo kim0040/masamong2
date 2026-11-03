@@ -161,6 +161,58 @@ func anthropicEffort(effort string, caps Caps, sh shape, tools bool) (thinking m
 	return thinking, level, true
 }
 
+// anthropicThinking is anthropicEffort for req, with one exception: a model thinking with a fixed budget
+// (type "enabled", manual mode) needs the final assistant turn to start with a thinking block ("Expected
+// `thinking` or `redacted_thinking`", a 400 that is not failover-worthy). When that turn calls a tool
+// without one (its thinking was another model's and was left out, or another host wrote it), the request
+// is sent with thinking off instead; adaptive thinking has no such rule.
+func anthropicThinking(req ChatRequest, caps Caps, sh shape) (thinking map[string]any, level string, thinks bool) {
+	thinking, level, thinks = anthropicEffort(req.Effort, caps, sh, len(req.Tools) > 0)
+	if req.bareToolTurn && thinking["type"] == "enabled" {
+		return map[string]any{"type": "disabled"}, level, false
+	}
+	return thinking, level, thinks
+}
+
+// bareToolTurn reports a request whose last assistant message calls a tool and, as anthropicMessages
+// writes it for this adapter, carries no thinking block.
+func (a *Adapter) bareToolTurn(req ChatRequest) bool {
+	origin := a.thinkingOrigin(req.Model)
+	for i := len(req.Messages) - 1; i >= 0; i-- {
+		m := req.Messages[i]
+		if len(m.Raw) > 0 {
+			raw, err := rawMessage(m.Raw)
+			if err != nil {
+				return false
+			}
+			if raw.native != nil {
+				if anthropicRole(raw.msg.Role) != "assistant" {
+					continue
+				}
+				blocks := raw.native
+				if raw.origin != "" && raw.origin != origin {
+					blocks = withoutThinking(blocks)
+				}
+				calls, thought := false, false
+				for _, b := range blocks {
+					switch blockType(b) {
+					case "tool_use":
+						calls = true
+					case "thinking", "redacted_thinking":
+						thought = true
+					}
+				}
+				return calls && !thought
+			}
+			m = raw.msg
+		}
+		if m.Role == "assistant" {
+			return len(m.ToolCalls) > 0
+		}
+	}
+	return false
+}
+
 // anthropicLevel is the output_config effort sent for effort: clamped to the levels the model's list
 // names, at most high once the route refused a higher one, and none at all once it refused the field.
 func anthropicLevel(effort string, caps Caps, sh shape) string {
@@ -202,7 +254,8 @@ func (a *Adapter) anthropicPayload(req ChatRequest, sh shape, caps Caps) (anthro
 		return p, classedError{msg: "openai: an Anthropic request must start with a user message", class: errclass.BadRequest}
 	}
 	p.System, p.Messages = system, turns
-	thinking, level, thinks := anthropicEffort(req.Effort, caps, sh, len(req.Tools) > 0)
+	req.bareToolTurn = a.bareToolTurn(req)
+	thinking, level, thinks := anthropicThinking(req, caps, sh)
 	p.Thinking = thinking
 	// Claude Opus 4.7 and every later model refuse a temperature (400 "deprecated for this model"), and
 	// the older ones take none while thinking ("Thinking isn't compatible with temperature"): it goes only
@@ -632,7 +685,7 @@ func anthropicRefusal(m string, req ChatRequest, sh shape, caps Caps) (shape, bo
 	if thinkingBlockError(m) {
 		return sh, false
 	}
-	thinking, level, thinks := anthropicEffort(req.Effort, caps, sh, len(req.Tools) > 0)
+	thinking, level, thinks := anthropicThinking(req, caps, sh)
 	typ, _ := thinking["type"].(string)
 	sentOff := typ == "disabled" || typ == "between_tools"
 	sentOn := thinking != nil && !sentOff

@@ -55,6 +55,9 @@ type anthropicHost struct {
 	paths   []string
 	headers []http.Header
 	chat    func(w http.ResponseWriter, body map[string]any)
+	// manual enforces the rule of thinking type "enabled" (manual mode): the final assistant turn of a
+	// tool loop must start with a thinking block
+	manual bool
 }
 
 func (h *anthropicHost) serve(w http.ResponseWriter, r *http.Request) {
@@ -88,11 +91,39 @@ func (h *anthropicHost) serve(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	h.bodies = append(h.bodies, body)
 	h.mu.Unlock()
+	if h.manual && thinkingType(body) == "enabled" && !startsWithThinking(body) {
+		anthropicError(w, 400, "invalid_request_error", "messages.1.content.0.type: Expected `thinking` or `redacted_thinking`, but found `text`. "+
+			"When `thinking` is enabled, a final `assistant` message must start with a thinking block (preceeding the lastmost set of `tool_use` and `tool_result` blocks).")
+		return
+	}
 	if h.chat != nil {
 		h.chat(w, body)
 		return
 	}
 	_, _ = w.Write([]byte(nativeText))
+}
+
+// startsWithThinking reports a request whose last assistant turn, when it calls a tool, starts with a
+// thinking block (true when there is no such turn).
+func startsWithThinking(body map[string]any) bool {
+	msgs, _ := body["messages"].([]any)
+	for i := len(msgs) - 1; i >= 0; i-- {
+		m, _ := msgs[i].(map[string]any)
+		if m["role"] != "assistant" {
+			continue
+		}
+		content, _ := m["content"].([]any)
+		calls := false
+		for _, b := range content {
+			calls = calls || b.(map[string]any)["type"] == "tool_use"
+		}
+		if !calls || len(content) == 0 {
+			return true
+		}
+		first := content[0].(map[string]any)["type"]
+		return first == "thinking" || first == "redacted_thinking"
+	}
+	return true
 }
 
 func newAnthropicHost(t *testing.T, base string, h *anthropicHost) *Adapter {
