@@ -276,7 +276,7 @@ Code layout and rules: [CONTRIBUTING.md](CONTRIBUTING.md) and [wiki › Developm
 
 ## Contributors
 
-- **Hyunmin Kim (김현민)** — author · [mini0227kim@gmail.com](mailto:mini0227kim@gmail.com)
+- **Hyeonmin Kim (김현민)** — author · [mini0227kim@gmail.com](mailto:mini0227kim@gmail.com)
 
 Masamong is a spare-time project by a university student, built and looked after between classes and everyday life. It is used every day with friends and improved whenever there is time, but it has not been through the polish of a company product — you may run into rough edges, missing conveniences or slow replies. It is shared in the hope that you find it useful anyway.
 

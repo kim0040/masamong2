@@ -2,11 +2,11 @@
   "note": "Translation record checked by tools/doccheck. When a file of a group changes, bring the other languages along, then run: go run ./tools/doccheck -write",
   "groups": {
     "README": {
-      "README.es.md": "a5b1d27efde2f96e",
-      "README.ja.md": "b2c2ca3b6a2bcfa4",
-      "README.ko.md": "5286025200958089",
-      "README.md": "ba5d850d6973d1cb",
-      "README.zh-Hans.md": "cdde581120b5d344"
+      "README.es.md": "d73d76b870d7bfc0",
+      "README.ja.md": "5ac1b94188cb3534",
+      "README.ko.md": "a93e96ab79b54e5f",
+      "README.md": "3037d5db3197149a",
+      "README.zh-Hans.md": "22bc915db9fac904"
     },
     "wiki/CLI-명령어": {
       "docs/wiki/CLI-Commands.md": "cb6e440750dc6a01",

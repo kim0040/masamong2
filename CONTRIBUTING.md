@@ -2,7 +2,7 @@
 
 **In English:** Issues and pull requests are welcome; replies may be slow. Run `go test ./... && go vet ./...` before you open a pull request, and `make docs` if you changed documentation. Never include real conversations, user IDs, keys or production databases. Report security problems privately as described in [SECURITY.md](SECURITY.md). The rest of this page is in Korean.
 
-Masamong에 관심을 가져 주셔서 감사합니다. Maintainer는 **김현민 (Hyunmin Kim)**이며 연락처는 [mini0227kim@gmail.com](mailto:mini0227kim@gmail.com)입니다.
+Masamong에 관심을 가져 주셔서 감사합니다. Maintainer는 **김현민 (Hyeonmin Kim)**이며 연락처는 [mini0227kim@gmail.com](mailto:mini0227kim@gmail.com)입니다.
 
 ## 작업 전
 

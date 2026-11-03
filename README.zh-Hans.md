@@ -276,7 +276,7 @@ make try       # 运行与正式实例分离的测试实例（~/.masamong-try）
 
 ## 贡献者
 
-- **Hyunmin Kim (김현민)** — 作者 · [mini0227kim@gmail.com](mailto:mini0227kim@gmail.com)
+- **Hyeonmin Kim (김현민)** — 作者 · [mini0227kim@gmail.com](mailto:mini0227kim@gmail.com)
 
 Masamong 是一名大学生利用课余时间做的项目，在课程和日常生活之间一点点开发和维护。它每天都在朋友之间使用，有空就会改进，但没有经过公司产品那样的打磨——你可能会遇到粗糙的地方、缺少的便利功能或较慢的回复。分享出来，是希望它对你有所帮助。
 
