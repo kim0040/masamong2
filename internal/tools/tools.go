@@ -164,7 +164,7 @@ func Builtins() []Builtin {
 		{ID: "polls.close", Feature: "polls", Implemented: true, Scoped: true, Writes: true, Inputs: []Input{{Name: "id", Type: "text", Required: true}}},
 		{ID: "polls.result", Feature: "polls", Implemented: true, Inputs: []Input{{Name: "id", Type: "text", Required: true}}},
 		{ID: "fortune.query", Feature: "fortune", Command: true, Uses: "model", Role: "response", Implemented: true,
-			Inputs: []Input{{Name: "what", Type: "select", Options: []string{"today", "detail", "month", "year", "zodiac", "ranking"}}}},
+			Inputs: []Input{{Name: "what", Type: "select", Options: []string{"today", "detail", "month", "year", "zodiac", "ranking", "animals"}}}},
 		{ID: "fortune.subscribe", Feature: "fortune", Command: true, Uses: "model", Role: "response", Implemented: true, Writes: true,
 			Inputs: []Input{{Name: "op", Type: "select", Options: subscribe}, {Name: "time", Type: "text", Example: "08:00"}}},
 		{ID: "notices.status", Feature: "notices", Command: true, Uses: "web", Implemented: true,

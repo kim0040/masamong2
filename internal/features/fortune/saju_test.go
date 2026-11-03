@@ -118,7 +118,8 @@ func TestRelationsWithoutAnOracle(t *testing.T) {
 		want []int
 	}{
 		{8, 0, []int{RelHalfTriad}},                       // 신자 (신자진)
-		{11, 7, []int{RelHalfTriad}},                      // 해미 (해묘미)
+		{11, 3, []int{RelHalfTriad}},                      // 해묘 (해묘미, with the cardinal 묘)
+		{11, 7, nil},                                      // 해미: no cardinal, no 반합
 		{2, 5, []int{RelPunish, RelHarm}},                 // 인사: 형, 해
 		{5, 8, []int{RelSixHarmony, RelPunish, RelBreak}}, // 사신: 육합, 형, 파
 		{2, 8, []int{RelClash, RelPunish}},                // 인신: 충, 형
@@ -305,8 +306,10 @@ func TestWorkedExample(t *testing.T) {
 	if d.Scores != (Scores{Overall: 76, Money: 70, Love: 70, Work: 65, Health: 62}) {
 		t.Fatalf("scores %+v", d.Scores)
 	}
-	// 수: k = (2460000 + 0) mod 3 = 0 → colour 12, item 13, north, number 1 (2460000 is even)
-	if d.Lucky != (Lucky{Color: 12, Item: 13, Direction: 4, Number: 1}) {
+	// lucky element: natal 목2 화1 토1 금1 수1 plus today's 기 (토) and 축 (토) = 목2 화1 토3 금1 수1; 화 금 수
+	// tie and the tie-break from 갑's 인성 gives 수. k = (2460000 + 5, today's stem 기) mod 3 = 2 → colour
+	// 4*3+2 = 14, item 4*3+0 = 12, north, number 1 (2460000 is even)
+	if d.LuckyElem != 4 || d.Lucky != (Lucky{Color: 14, Item: 12, Direction: 4, Number: 1}) {
 		t.Fatalf("lucky %+v", d.Lucky)
 	}
 	// 축 day hours 묘…술 under 황도: 묘 천덕, 사 옥당, 신 사명, 술 청룡; 신 is in 삼합 with 자 (rank 1),
@@ -354,8 +357,8 @@ func TestAnalyzeIsDeterministicAndBounded(t *testing.T) {
 		if d.Lucky.Color == prev.Color || d.Lucky.Item == prev.Item || d.Lucky.Number == prev.Number {
 			t.Fatalf("%s: lucky %+v repeats %+v", day.Format("2006-01-02"), d.Lucky, prev)
 		}
-		if d.Lucky.Color/LuckyChoices != d.Weakest || d.Lucky.Item/LuckyChoices != d.Weakest || d.Lucky.Direction != d.Weakest {
-			t.Fatalf("lucky %+v not of element %d", d.Lucky, d.Weakest)
+		if d.Lucky.Color/LuckyChoices != d.LuckyElem || d.Lucky.Item/LuckyChoices != d.LuckyElem || d.Lucky.Direction != d.LuckyElem {
+			t.Fatalf("lucky %+v not of element %d", d.Lucky, d.LuckyElem)
 		}
 		prev = d.Lucky
 	}

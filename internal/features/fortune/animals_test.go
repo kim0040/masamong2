@@ -23,3 +23,11 @@ func TestAnimalScores(t *testing.T) {
 		t.Fatalf("ranking %v", r)
 	}
 }
+
+func TestAnimalHalfTriadNeedsTheCardinal(t *testing.T) {
+	// on a 인 day: 오 is 반합 (+12) → 72; 술 shares 인오술 without the cardinal → no relation, 60
+	got := AnimalScores(2)
+	if got[6] != 72 || got[10] != 60 {
+		t.Fatalf("인 day: 오 %d 술 %d", got[6], got[10])
+	}
+}

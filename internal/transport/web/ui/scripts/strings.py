@@ -79,9 +79,9 @@ add("people", {
     "memory_confirm": ("철회 및 데이터 삭제", "Withdraw and delete"),
     "subscriptions": ("구독", "Subscriptions"), "no_subs": ("구독이 없습니다.", "No subscriptions."),
     "sub.active": ("받는 중", "Active"), "sub.paused": ("일시 중지", "Paused"),
-    "fortune.at": ("매일 {time}", "Daily at {time}"), "fortune.no_time": ("아침 운세 없음", "No morning briefing"),
-    "fortune.unsubscribe": ("아침 운세 끄기", "Stop briefings"), "fortune.delete": ("운세 정보 삭제", "Delete fortune data"),
-    "fortune.unsubscribe_done": ("아침 운세를 껐습니다", "Morning briefings stopped"), "fortune.delete_done": ("운세 정보를 삭제했습니다", "Fortune data deleted"),
+    "fortune.at": ("매일 {time}", "Daily at {time}"), "fortune.no_time": ("매일 운세 없음", "No daily briefing"),
+    "fortune.unsubscribe": ("매일 운세 끄기", "Stop briefings"), "fortune.delete": ("운세 정보 삭제", "Delete fortune data"),
+    "fortune.unsubscribe_done": ("매일 운세를 껐습니다", "Daily briefings stopped"), "fortune.delete_done": ("운세 정보를 삭제했습니다", "Fortune data deleted"),
     "fortune.delete_title": ("운세 정보를 삭제할까요?", "Delete fortune data?"),
     "fortune.delete_body": ("생년월일·출생 정보와 사용 기록을 삭제합니다. 동의 기록은 유지됩니다.", "Deletes birth data and usage. The consent record stays."),
     "notice.kind.school": ("학교 공지", "School notices"), "notice.kind.transfer": ("편입 공지", "Transfer notices"),
@@ -448,7 +448,7 @@ add("tool", {
     "desc.web.read": ("메시지에 있는 링크의 본문을 읽어 답변에 씁니다. 광고·메뉴를 뺀 글만 가져오며(Jina Reader), 키 없이도 분당 20회까지 됩니다. 링크가 외부 서비스로 가므로 직접 켜야 동작합니다.", "Reads the page behind a link in the message for the answer: the article without menus or ads (Jina Reader), 20 a minute without a key. Links go to an outside service, so it stays off until you turn it on."), "desc.images.generate": ("설명을 바탕으로 이미지를 생성합니다. 연결 설정의 이미지 모델을 사용하며, 순차적으로 생성합니다.", "Draws a picture from a description with the image model role, one at a time."),
     "desc.polls.create": ("채널에 투표를 생성합니다.", "Posts a poll in the room."), "desc.polls.vote": ("투표에 참여합니다.", "Casts a vote."), "desc.polls.close": ("투표를 마감합니다.", "Closes a poll."),
     "desc.polls.result": ("투표 결과를 표시합니다.", "Shows poll results."), "desc.help.version": ("봇이 제공하는 기능과 사용법을 안내합니다.", "Tells what the bot can do."),
-    "desc.fortune.query": ("오늘·이번 달·올해 운세와 별자리 운세를 조회합니다. 서버 채널에는 요약만 표시되며, 상세 운세는 개인에게만 전달됩니다.", "Today's, this month's and this year's fortune, and zodiac readings. In a server only the summary shows; details are private."), "desc.fortune.subscribe": ("생일을 등록하고 매일 아침 운세를 DM으로 수신합니다. 운세 동의가 필요합니다.", "Register a birthday and get a morning fortune by DM. Needs fortune consent."),
+    "desc.fortune.query": ("오늘·이번 달·올해 운세와 별자리·띠별 운세를 조회합니다. 서버 채널에는 요약만 표시되며, 상세 운세는 개인에게만 전달됩니다.", "Today's, this month's and this year's fortune, and zodiac and twelve-animal readings. In a server only the summary shows; details are private."), "desc.fortune.subscribe": ("생일을 등록하고 정한 시간에 매일 운세를 DM으로 받습니다. 운세 동의가 필요합니다.", "Register a birthday and get a daily fortune by DM at a set time. Needs fortune consent."),
     "desc.notices.status": ("등록한 한국 대학의 공지 중 설정에 맞는 최신 소식을 확인합니다(한국 전용).", "Shows the notices of your Korean university that fit your profile (Korea only)."), "desc.notices.subscribe": ("한국 대학의 학교 및 편입 공지를 구독하고 매일 지정된 시간에 DM으로 수신합니다(한국 전용). 공지 동의가 필요합니다.", "Subscribe to a Korean university's notices or transfer notices and get a daily DM (Korea only). Needs notice consent."),
     "desc.transfer.recent": ("한국 대학 입학처의 최근 편입 공지를 모아서 확인합니다(한국 전용).", "Recent transfer admission notices from Korean university admission boards (Korea only)."), "summaries.channel": ("채널 요약", "Channel summary"), "reminders.propose": ("알림 예약 제안", "Remind me"), "reminders.update": ("내 알림 관리", "My reminders"), "desc.reminders.propose": ("\"내일 오후 3시에 알려줘\"처럼 요청하면 시간과 전달 위치(DM 또는 채널)를 확인한 뒤 예약합니다. \"매일 아침 8시에\"처럼 반복도 요청할 수 있고, 대화 중에도 요청할 수 있습니다.", "Ask like \"remind me tomorrow at 3pm\"; the person who asked confirms the time and where it goes (DM or the channel). It can repeat (daily, weekly, monthly, every N hours), and works in conversation too."), "desc.reminders.update": ("예정된 알림 조회, 시간 변경, 일시 정지·재개(반복 알림), 취소.", "See, reschedule, pause or resume (repeating) or cancel reminders still to come."), "desc.summaries.channel": ("이 채널의 최근 대화를 요약합니다. 새 대화만 이어서 점진적으로 반영합니다.", "Summarizes this room's recent conversation, folding in only new messages later."), "desc.chat.respond": ("채널에서 대화에 응답합니다. 한도를 설정하면 답변 횟수가 제한됩니다.", "Answers in rooms. Limits cap how many replies are sent."),
     "try": ("테스트 실행", "Try it"), "delete": ("도구 삭제", "Delete tool"), "not_found": ("없는 도구입니다", "Tool not found"),
@@ -1127,7 +1127,7 @@ add("maint", {
     "v1_school": ("학교 공지 구독", "School notice subscriptions"), "v1_transfer": ("편입 공지 구독", "Transfer notice subscriptions"),
     "v1_skipped": ("건너뛸 항목 {n}개", "{n} items skipped"),
     "v1_skip.consent_unknown_scope": ("알 수 없는 동의 항목", "Unknown consent scope"), "v1_skip.consent_already_here": ("이미 등록된 동의 기록", "Consent already recorded here"),
-    "v1_skip.fortune_no_birthday": ("생년월일이 없는 운세 프로필", "Fortune profile without a birthday"), "v1_skip.fortune_no_consent": ("운세 동의가 없는 사용자", "No fortune consent"),
+    "v1_skip.fortune_no_birthday": ("생년월일이 없거나 올바르지 않은 운세 프로필", "Fortune profile without a valid birthday"), "v1_skip.fortune_no_consent": ("운세 동의가 없는 사용자", "No fortune consent"),
     "v1_skip.fortune_already_here": ("이미 등록된 운세 프로필", "Fortune profile already here"),
     "v1_skip.school_no_consent": ("학교 공지 동의가 없는 사용자", "No school notice consent"), "v1_skip.school_not_in_catalog": ("카탈로그에 없는 학교", "School not in the catalog"),
     "v1_skip.school_already_here": ("이미 등록된 학교 공지 구독", "School subscription already here"), "v1_skip.school_unreadable": ("형식이 올바르지 않은 학교 공지 설정", "Unreadable school profile"),
@@ -1156,8 +1156,8 @@ add("notices", {
     "read_ok": ("공지 {n}건", "{n} notices"), "read_failed": ("수집 실패", "Failed"),
 })
 add("fortune_ops", {
-    "title": ("아침 운세 브리핑", "Morning briefings"), "desc": ("운세 프로필 등록 사용자와 매일 아침 DM 발송 현황입니다. 생년월일 정보는 이 화면에 표시되지 않습니다.", "Who registered and how the daily DMs go. Birth data is not shown here."),
-    "registered": ("등록 사용자", "Registered"), "subscribed": ("아침 운세 수신 중", "Getting briefings"), "no_consent": ("동의 철회로 일시 중지", "Paused for lack of consent"),
+    "title": ("매일 운세 브리핑", "Daily briefings"), "desc": ("운세 프로필 등록 사용자와 매일 운세 DM 발송 현황입니다. 생년월일 정보는 이 화면에 표시되지 않습니다.", "Who registered and how the daily DMs go. Birth data is not shown here."),
+    "registered": ("등록 사용자", "Registered"), "subscribed": ("매일 운세 수신 중", "Getting briefings"), "no_consent": ("동의 철회로 일시 중지", "Paused for lack of consent"),
     "last_sent": ("최근 발송일", "Last sent"), "failed": ("오늘 {n}명에게 발송하지 못했습니다. DM 수신이 차단되었거나 모델 API 호출에 실패했습니다.", "Could not send to {n} people today: DMs closed or the model call failed."),
 })
 add("persona", {

@@ -20,12 +20,20 @@ type jie struct {
 	branch int
 }
 
-var jieCache sync.Map // year -> []jie
+var jieCache sync.Map // year -> []jie, for jieCacheFrom…jieCacheTo only
+
+// The years whose terms are kept once computed: every birth date a profile accepts and every day the
+// bot runs. A year outside them (a library caller's) is computed each time instead of growing the cache.
+const (
+	jieCacheFrom = 1900
+	jieCacheTo   = 2200
+)
 
 // jieOf are the month-starting terms lunar-go lists for a year: from the previous year's 대설 to the
 // next year's 경칩, in time order.
 func jieOf(year int) []jie {
-	if v, ok := jieCache.Load(year); ok {
+	cached := year >= jieCacheFrom && year <= jieCacheTo
+	if v, ok := jieCache.Load(year); cached && ok {
 		return v.([]jie)
 	}
 	// lunar-go's table for a year: index 0 is the previous 大雪, then every term from 冬至 to the next
@@ -36,7 +44,9 @@ func jieOf(year int) []jie {
 		out = append(out, jie{at: beijingJD(jds[i]), branch: (i / 2) % 12})
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].at.Before(out[b].at) })
-	jieCache.Store(year, out)
+	if cached {
+		jieCache.Store(year, out)
+	}
 	return out
 }
 
@@ -62,6 +72,32 @@ func solarMonth(t time.Time) (ganzhiYear, branch int) {
 		ganzhiYear--
 	}
 	return ganzhiYear, branch
+}
+
+// DatePillars are the year, month and day pillars of a whole civil date in loc, the way an almanac
+// reads a day (lunar-go's default sect): the year and month are the ones in force at the end of the
+// date, so a term date is the new month from 00:00, and every moment of one date gives the same pillars.
+// A natal chart uses PillarsAt, the exact moment, instead.
+func DatePillars(y int, m time.Month, d int, loc *time.Location) (year, month, day Pillar) {
+	end := time.Date(y, m, d+1, 0, 0, 0, 0, loc).Add(-time.Nanosecond)
+	year, month, _, _, _ = PillarsAt(end, false)
+	return year, month, dayPillar(y, m, d)
+}
+
+// TermOn reports whether a month-starting term (절기) falls on the civil date in loc, and the branch
+// of the month it starts (2 is 입춘, which also starts the year). Without a birth time, a birth on such a
+// date has an uncertain month pillar (and on 입춘 an uncertain year pillar).
+func TermOn(y int, m time.Month, d int, loc *time.Location) (branch int, ok bool) {
+	from := time.Date(y, m, d, 0, 0, 0, 0, loc)
+	to := time.Date(y, m, d+1, 0, 0, 0, 0, loc)
+	for _, year := range []int{from.UTC().Year(), to.UTC().Year()} {
+		for _, j := range jieOf(year) {
+			if !j.at.Before(from) && j.at.Before(to) {
+				return j.branch, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // lichun is the moment of 입춘 in a Gregorian year.

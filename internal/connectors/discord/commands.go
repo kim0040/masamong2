@@ -241,12 +241,12 @@ func Commands() []Command {
 			Name: "fortune", Desc: "Today's fortune, detailed, this month or year; your subscription", Action: "fortune.query",
 			Ephemeral: true, DiscordOnly: true,
 			Options: []*discordgo.ApplicationCommandOption{
-				choiceOption("what", "What to see or do", false, "today", "detail", "month", "year", "status", "subscribe", "unsubscribe", "delete"),
+				choiceOption("what", "What to see or do", false, "today", "detail", "month", "year", "animals", "status", "subscribe", "unsubscribe", "delete"),
 				option(str, "time", "Briefing time HH:MM (with subscribe)", false),
 			},
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
 				verb, rest := splitVerb(o["what"], o["time"], wordsFor("fortune", "verb",
-					"today", "detail", "month", "year", "status", "subscribe", "unsubscribe", "delete", "register"))
+					"today", "detail", "month", "year", "animals", "status", "subscribe", "unsubscribe", "delete", "register"))
 				return fortuneRequest(verb, rest)
 			},
 		},
@@ -523,7 +523,7 @@ func noticeRequest(kind, verb, rest string) (string, map[string]any) {
 func fortuneRequest(verb, rest string) (string, map[string]any) {
 	rest = strings.TrimSpace(rest)
 	switch verb {
-	case "", "today", "detail", "month", "year":
+	case "", "today", "detail", "month", "year", "animals": // animals: the twelve 띠, the same for everyone
 		if verb == "" {
 			verb = "today"
 		}

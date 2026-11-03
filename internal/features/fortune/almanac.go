@@ -3,6 +3,7 @@ package fortune
 import (
 	"container/list"
 	"slices"
+	"sync"
 
 	"github.com/6tail/lunar-go/LunarUtil"
 )
@@ -66,6 +67,21 @@ const ActivityLimit = 4
 // Activities are the day's good and avoid groups (at most ActivityLimit each, in lunar-go's order). A
 // group that lunar-go puts on both sides that day (修造 good but 动土 to avoid) is left off both.
 func Activities(month, day Pillar) (yi, ji []string) {
+	key := [2]Pillar{month, day}
+	if v, ok := activityCache.Load(key); ok {
+		c := v.([2][]string)
+		return slices.Clone(c[0]), slices.Clone(c[1])
+	}
+	yi, ji = activities(month, day)
+	activityCache.Store(key, [2][]string{yi, ji})
+	return slices.Clone(yi), slices.Clone(ji)
+}
+
+// activityCache keeps each (month, day) 간지 pair's groups: lunar-go scans its whole table for each
+// lookup, and there are at most 60×60 pairs.
+var activityCache sync.Map
+
+func activities(month, day Pillar) (yi, ji []string) {
 	yiAll := groups(LunarUtil.GetDayYi(hanzi(month), hanzi(day)))
 	jiAll := groups(LunarUtil.GetDayJi(hanzi(month), hanzi(day)))
 	in := func(gs []string, g string) bool { return slices.Contains(gs, g) }

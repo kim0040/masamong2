@@ -31,9 +31,10 @@ func SunSign(month, day int) int {
 	return sign
 }
 
-// julianDay of a UTC moment.
+// julianDay of a moment. Whole seconds and the fraction are added apart: UnixNano overflows an int64
+// outside 1678–2262, and a birth date or a library caller may be anywhere.
 func julianDay(t time.Time) float64 {
-	return float64(t.UTC().UnixNano())/86400e9 + 2440587.5
+	return float64(t.Unix())/86400 + float64(t.Nanosecond())/86400e9 + 2440587.5
 }
 
 func deg(r float64) float64 { return r * 180 / math.Pi }
@@ -161,6 +162,21 @@ func PillarsAt(t time.Time, hasHour bool) (year, month, day, hourP Pillar, ok bo
 		hourP, ok = Pillar{Stem: mod(stem%5*2+b, 10), Branch: b}, true
 	}
 	return
+}
+
+// BirthMoment is the moment of a birth wall clock in loc. A wall time that does not exist there (it
+// falls in a summer-time gap, such as 1987-05-10 02:30 in Seoul) is read at the offset in force just
+// before the gap, in a fixed zone of that offset: the date and the hour the person gave stay as given,
+// where time.Date would move them by the gap (03:30, or the previous day in a zone whose gap is at
+// midnight).
+func BirthMoment(y int, m time.Month, d, h, mi int, loc *time.Location) time.Time {
+	t := time.Date(y, m, d, h, mi, 0, 0, loc)
+	if ty, tm, td := t.Date(); ty == y && tm == m && td == d && t.Hour() == h && t.Minute() == mi {
+		return t
+	}
+	// twelve hours before the wall time is before the gap (no zone has two changes that close)
+	name, off := t.Add(-12 * time.Hour).Zone()
+	return time.Date(y, m, d, h, mi, 0, 0, time.FixedZone(name, off))
 }
 
 // dayPillar of a civil date, from its Julian day number (2000-01-01 is 무오).

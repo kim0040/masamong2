@@ -53,7 +53,7 @@ func Stage(s, b int) int {
 // Branch relations, in the order a reading names them.
 const (
 	RelSixHarmony = iota // 육합: 자축 인해 묘술 진유 사신 오미
-	RelHalfTriad         // 삼합 (two of 신자진, 해묘미, 인오술, 사유축)
+	RelHalfTriad         // 반합: two of 신자진, 해묘미, 인오술, 사유축, one of them the cardinal 자·오·묘·유
 	RelClash             // 충: branches six apart
 	RelPunish            // 형: 인사신, 축술미, 자묘, and 진·오·유·해 with themselves
 	RelBreak             // 파: 자유 축진 인해 묘오 사신 미술
@@ -67,7 +67,9 @@ func Relate(a, b int) []int {
 	if mod(a+b, 12) == 1 && a != b { // 자축(0+1) 인해(2+11) 묘술 진유 사신 오미 all sum to 1 (mod 12)
 		out = append(out, RelSixHarmony)
 	}
-	if a != b && a%4 == b%4 { // 신자진 8,0,4 · 사유축 5,9,1 · 인오술 2,6,10 · 해묘미 11,3,7
+	// 신자진 8,0,4 · 사유축 5,9,1 · 인오술 2,6,10 · 해묘미 11,3,7; the cardinals 자0 묘3 오6 유9 are the
+	// multiples of three. Two branches of a triad without its cardinal (인술, 사축, 신진, 해미) are not a 반합.
+	if a != b && a%4 == b%4 && (a%3 == 0 || b%3 == 0) {
 		out = append(out, RelHalfTriad)
 	}
 	if mod(a-b, 12) == 6 {
@@ -194,7 +196,8 @@ type Day struct {
 	StemClash  bool
 	Stars      []int
 	Elements   [Elements]int // natal counts over 6 or 8 characters
-	Weakest    int
+	Weakest    int           // the weakest natal element
+	LuckyElem  int           // the day's lucky element: the weakest of the natal counts plus today's two characters
 	Officer    int
 	Spirit     int
 	Yi, Ji     []string // activity ids (fortune.saju.act.<id>), at most four each
@@ -211,11 +214,14 @@ const (
 	ScoreMax  = 95
 )
 
-// Analyze is the day of the person with natal chart n, for the moment at (read in its own zone: today's
-// month pillar is the one in force at that moment, the day pillar the local date's).
+// Analyze is the day of the person with natal chart n for the civil date of at in its own zone. Only
+// the date counts, not the clock: the month pillar is the date's (DatePillars, the almanac's reading: a
+// term date is the new month from 00:00), so a morning briefing and an evening question on one date get
+// the same facts, and the officer, spirit and yi/ji agree with lunar-go's day almanac.
 func Analyze(n Natal, at time.Time) Day {
-	_, month, day, _, _ := PillarsAt(at, false)
-	return AnalyzeDay(n, month, day, JDN(at.Year(), at.Month(), at.Day()))
+	y, m, d := at.Date()
+	_, month, day := DatePillars(y, m, d, at.Location())
+	return AnalyzeDay(n, month, day, JDN(y, m, d))
 }
 
 // AnalyzeDay is Analyze from today's month and day pillars; jdn (the date's Julian day number) only turns
@@ -242,10 +248,14 @@ func AnalyzeDay(n Natal, month, day Pillar, jdn int) Day {
 	}
 	d.Stars = stars(n, day.Branch)
 	d.Weakest = weakest(d.Elements, stemElement(dm))
+	withToday := d.Elements
+	withToday[stemElement(day.Stem)]++
+	withToday[branchElement[day.Branch]]++
+	d.LuckyElem = weakest(withToday, stemElement(dm))
 	d.Yi, d.Ji = Activities(month, day)
 	d.BestHours = bestHours(day.Branch, n.Day.Branch)
 	d.Scores = score(d)
-	d.Lucky = lucky(d.Weakest, jdn, dm)
+	d.Lucky = lucky(d.LuckyElem, jdn, day.Stem)
 	return d
 }
 
@@ -283,7 +293,7 @@ func weakest(counts [Elements]int, dmElement int) int {
 
 // bestHours are up to two daytime hours (묘 05:00 … 술 21:00) under a 황도 spirit, leaving out an hour
 // that clashes with the natal day branch; an hour in 육합 with the natal day branch comes first, then one
-// in 삼합, then the earlier.
+// in 반합 (Relate: only with the cardinal), then the earlier.
 func bestHours(dayBranch, natalDay int) []int {
 	type cand struct{ b, rank int }
 	var cs []cand
@@ -327,8 +337,9 @@ func bestHours(dayBranch, natalDay int) []int {
 //     godArea: wealth → money, officer → work, output → expression and love, resource → study and
 //     health, companion → social support but money shared;
 //   - the 12운성 of the natal day stem at today's branch (×2) on overall and health;
-//   - each relation of today's branch with the natal day branch (×2) or another natal branch (×1), by
-//     relArea: 합 up, 충·형·파·해 down;
+//   - each kind of relation of today's branch with the natal branches, once (×2 when the natal day
+//     branch is among them, otherwise ×1), by relArea: 합 up, 충·형·파·해 down. Two natal 오 on a 인 day
+//     are one 반합, not two (the basis line may still name both positions);
 //   - 천간합 / 천간충 with the natal day stem (×2), each star (×2), and a 황도 / 흑도 day (×2).
 //
 // The sum is halved (toward zero), added to ScoreBase and clamped to ScoreMin…ScoreMax. Areas are
@@ -382,12 +393,18 @@ func score(d Day) Scores {
 	add(godArea[d.BranchGod], 1)
 	st := stageStrength[d.Stage]
 	add([5]int{st, 0, 0, 0, st}, 2)
+	var relWeight [Relations]int
 	for _, h := range d.Hits {
 		w := 1
 		if h.Pos == PosDay {
 			w = 2
 		}
-		add(relArea[h.Rel], w)
+		relWeight[h.Rel] = max(relWeight[h.Rel], w)
+	}
+	for r, w := range relWeight {
+		if w > 0 {
+			add(relArea[r], w)
+		}
 	}
 	if d.StemHap {
 		add(stemHapArea, 2)
@@ -407,9 +424,13 @@ func score(d Day) Scores {
 	return Scores{Overall: v(0), Money: v(1), Love: v(2), Work: v(3), Health: v(4)}
 }
 
-// Lucky points from the weakest element (the 오행 colour, direction and numbers: 목 청록·동·3,8, 화 적·남·2,7,
-// 토 황·중앙·5,10, 금 백·서·4,9, 수 흑·북·1,6). Each element has three colours and three items (ids
-// e*3 … e*3+2); they turn over by one a day, so two days in a row never give the same one.
+// Lucky points from the day's lucky element (LuckyElem: the weakest of the natal characters and today's
+// day stem and branch, so it moves with the day and stays grounded in the chart; a tie goes the way
+// weakest breaks it). The 오행 colour, direction and numbers: 목 청록·동·3,8, 화 적·남·2,7, 토 황·중앙·5,10,
+// 금 백·서·4,9, 수 흑·북·1,6. Each element has three colours and three items (ids e*3 … e*3+2), picked by
+// the date and today's day stem: from one day to the next the pick moves on (two steps, one when the stem
+// wraps from 계 to 갑), so two days in a row with the same element never give the same one; the number
+// takes the element's pair in turn.
 var luckyNumbers = [Elements][2]int{{3, 8}, {2, 7}, {5, 10}, {4, 9}, {1, 6}}
 
 // LuckyChoices is how many colours (and items) each element has.

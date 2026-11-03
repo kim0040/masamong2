@@ -4,7 +4,7 @@ import "sort"
 
 // The twelve animals (띠) of a day, for a public line that needs no birth data: each animal is its year
 // branch (0 쥐 자 … 11 돼지 해), scored by how that branch meets today's day branch. Rule: from
-// ScoreBase, 육합 +15, 삼합 (half) +12, the same branch +5 (or −4 when it punishes itself: 진 오 유 해),
+// ScoreBase, 육합 +15, 반합 +12 (only with the cardinal 자·오·묘·유, as Relate gives it), the same branch +5 (or −4 when it punishes itself: 진 오 유 해),
 // 충 −15, 형 −8, 해 −6, 파 −5; clamped like the personal scores.
 var animalRel = [Relations]int{15, 12, -15, -8, -5, -6}
 

@@ -174,7 +174,7 @@ type Features struct {
 	FortuneDetailDay   string `json:"fortune_detail_day"`   // {data} {name} {gender} {sign}
 	FortuneDetailMonth string `json:"fortune_detail_month"` // {data} {name} {gender} {sign}
 	FortuneDetailYear  string `json:"fortune_detail_year"`  // {data} {name} {gender} {sign}
-	FortuneMorning     string `json:"fortune_morning"`      // {data} {name} {gender} {date}
+	FortuneMorning     string `json:"fortune_morning"`      // {data} {name} {gender} {date} {task} {greeting} (fortune.briefing.*: the send-time slot)
 	ZodiacSystem       string `json:"zodiac_system"`        // {bot}
 	ZodiacPublic       string `json:"zodiac_public"`        // {sky} {sign}
 	ZodiacPrivate      string `json:"zodiac_private"`       // {sky} {sign}

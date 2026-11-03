@@ -26,6 +26,9 @@ func TestParseReadingTakesTheKeyLines(t *testing.T) {
 	if _, has := r.Values["NOTE"]; has {
 		t.Fatal("unknown keys are not kept")
 	}
+	if r.Values["LUCKY_COLOR"] != "파랑" {
+		t.Fatalf("the unknown NOTE line and its continuation ran into LUCKY_COLOR: %q", r.Values["LUCKY_COLOR"])
+	}
 	if _, has := r.Values["SCORE"]; has {
 		t.Fatal("the score is a number, not a value")
 	}
@@ -104,5 +107,21 @@ func TestScoreBar(t *testing.T) {
 		if got := ScoreBar(score); got != want {
 			t.Errorf("ScoreBar(%d) = %q, want %q", score, got, want)
 		}
+	}
+}
+
+func TestParseReadingDropsUnknownKeyLines(t *testing.T) {
+	r := ParseReading("SUMMARY: 좋은 날\nLUCKY_COLOR: 파랑\nNOTE: 무시되는 키\n이어지는 줄\nLUCKY_DIRECTION: 북쪽")
+	if got := r.Values["LUCKY_COLOR"]; got != "파랑" {
+		t.Fatalf("an unknown key line ran into the value above: %q", got)
+	}
+	if got := r.Values["LUCKY_DIRECTION"]; got != "북쪽" {
+		t.Fatalf("LUCKY_DIRECTION: %q", got)
+	}
+	if _, has := r.Values["NOTE"]; has {
+		t.Fatal("unknown keys are not kept")
+	}
+	if strings.Contains(r.Values["LUCKY_COLOR"]+r.Values["SUMMARY"], "이어지는") {
+		t.Fatal("an unknown key's continuation goes nowhere")
 	}
 }

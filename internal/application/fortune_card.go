@@ -48,8 +48,8 @@ func (s *Service) fortuneCard(loc, kind string, base action.Card, head, footer s
 }
 
 // fortuneCardFor is fortuneCard with the computed day of a day's reading: its score, area scores, lucky
-// points and basis replace whatever the model wrote. A text that is not a reading keeps its words and gets
-// the computed points as fields.
+// points and basis replace whatever the model wrote. A text that is not a reading keeps its words (minus
+// SCORE and LUCKY_* key lines) and gets the computed points as fields and footer as its footer.
 func (s *Service) fortuneCardFor(loc, kind string, base action.Card, head, footer string, day *fortune.Day) action.Card {
 	if !fortuneComputed[kind] {
 		day = nil
@@ -59,6 +59,11 @@ func (s *Service) fortuneCardFor(loc, kind string, base action.Card, head, foote
 		if day == nil {
 			return base
 		}
+		// the words stay, without the model's own score and lucky lines when it wrote them as keys (a key
+		// in another language, "총점: 85", stays: it cannot be told from prose safely); the computed points
+		// and the basis footer are added as on a reading
+		base.Text = fortune.WithoutKeys(base.Text, "SCORE", "LUCKY_COLOR", "LUCKY_ITEM", "LUCKY_NUMBER", "LUCKY_DIRECTION", "LUCKY_TIME")
+		base.Footer = footer
 		lines := []string{s.scoreLine(day.Scores.Overall), s.areaScores(loc, day.Scores), "🧭 " + s.sajuBasis(loc, *day)}
 		base.Fields = append(append(base.Fields, action.CardField{Name: "📊 " + s.I18n.T(loc, "fortune.card.scores"), Value: strings.Join(lines, "\n")}),
 			s.luckyFields(loc, s.computedLucky(loc, *day, map[string]string{}))...)
@@ -369,6 +374,7 @@ func (s *Service) factsText(loc string, d fortune.Day) string {
 		"yi", list(acts(d.Yi)), "ji", list(acts(d.Ji)), "hours", list(hours),
 		"overall", d.Scores.Overall, "money", d.Scores.Money, "love", d.Scores.Love, "work", d.Scores.Work, "health", d.Scores.Health,
 		"color", lucky["LUCKY_COLOR"], "item", lucky["LUCKY_ITEM"], "number", lucky["LUCKY_NUMBER"], "direction", lucky["LUCKY_DIRECTION"],
+		"lucky_element", s.I18n.T(loc, fmt.Sprintf("fortune.saju.element.%d", d.LuckyElem)),
 		"elements", strings.Join(elements, " "), "weakest", s.I18n.T(loc, fmt.Sprintf("fortune.saju.element.%d", d.Weakest)),
 		"hour_note", noHour)
 }

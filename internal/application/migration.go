@@ -149,7 +149,7 @@ func (s *Service) migrateV1(old *sql.DB, apply bool) (migrationPlan, error) {
 		rows.Close()
 		for _, p := range list {
 			switch {
-			case !dateRE.MatchString(p.date):
+			case !birthDateOK(p.date): // not on the calendar, or before 1900 (a yearless 0000-MM-DD)
 				plan.Skipped["fortune_no_birthday"]++
 				continue
 			case !allowed(privacy.Fortune, p.user):
