@@ -43,7 +43,6 @@ type Adapter struct {
 	// Price remains the conservative fallback for callers that do not provide request context.
 	ContextPrice ContextPricer
 
-	shapes sync.Map // model → shape: optional request fields that model refused (shape.go)
 	// shapeSeen marks models whose plain chat request (no tools) succeeded once, so their shape is known
 	// even when it refused nothing (ShapeLearned); model → true
 	shapeSeen sync.Map
@@ -787,12 +786,12 @@ func (a *Adapter) chat(ctx context.Context, req ChatRequest) (ChatResult, error)
 	// output limit its callers asked for.
 	sh := a.shapeOf(req)
 	sh.Headroom = true
-	a.shapes.Store(shapeKey(req), sh)
+	a.caps().setShape(shapeKey(req), sh)
 	next, err := a.chatOnce(ctx, req, false)
 	if err != nil || thoughtAway(next) {
 		sh = a.shapeOf(req)
 		sh.Headroom = false
-		a.shapes.Store(shapeKey(req), sh)
+		a.caps().setShape(shapeKey(req), sh)
 	}
 	if err != nil {
 		out.Elapsed += next.Elapsed

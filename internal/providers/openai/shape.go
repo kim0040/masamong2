@@ -42,6 +42,10 @@ type shape struct {
 	NoOutputConfig bool
 	// MaxHigh: the model refused a level above "high" (xhigh, max), so those are sent as "high"
 	MaxHigh bool
+	// Budgeted: on Anthropic the model refused adaptive thinking, and its capabilities were unknown (or
+	// list "enabled" too), so it thinks with a fixed budget ({"type":"enabled","budget_tokens":…}): Claude
+	// Haiku 4.5 answers 400 to type "adaptive". Only a refusal of that too leaves the field out (NoEffort)
+	Budgeted bool
 }
 
 // thinkingHeadroom is the output room added for a model that thinks before every answer. Only the
@@ -59,13 +63,14 @@ func shapeKey(req ChatRequest) string {
 }
 
 // shapeOf is the shape learned for req's kind; a tool request without one of its own starts from the
-// model's plain shape.
+// model's plain shape. Shapes are kept in the capability cache (CapsCache), which the application shares
+// across a provider's adapters.
 func (a *Adapter) shapeOf(req ChatRequest) shape {
-	if v, ok := a.shapes.Load(shapeKey(req)); ok {
-		return v.(shape)
+	if sh, ok := a.caps().shape(shapeKey(req)); ok {
+		return sh
 	}
-	if v, ok := a.shapes.Load(req.Model); ok {
-		return v.(shape)
+	if sh, ok := a.caps().shape(req.Model); ok {
+		return sh
 	}
 	return shape{}
 }
@@ -190,7 +195,8 @@ func (a *Adapter) byokRoute(p map[string]any, model string) {
 	p["provider"] = route
 }
 
-// postShaped posts a chat request, retrying at most twice when the model refuses an optional field, and
+// postShaped posts a chat request, retrying at most twice when the model refuses an optional field (three
+// times on Anthropic, whose effort, adaptive thinking and budgeted thinking may each be refused), and
 // keeps the shape that worked for the model's later requests. What a request asking effort "none" (a
 // quick classifier, or the no-thinking retry in Chat, which passes learn false) learns about the effort
 // field holds for "none" only: a model that refuses "none" may take "low", so that part is not kept,
@@ -205,6 +211,10 @@ func (a *Adapter) postShaped(ctx context.Context, req ChatRequest, learn bool) (
 	sh := a.shapeOf(req)
 	caps := a.knownCaps(req.Model)
 	var sent []byte
+	retries := 2
+	if a.API == APIAnthropic {
+		retries = 3
+	}
 	for attempt := 0; ; attempt++ {
 		addr, headers := a.BaseURL+"/chat/completions", a.headers()
 		if a.API == APIAnthropic {
@@ -225,7 +235,7 @@ func (a *Adapter) postShaped(ctx context.Context, req ChatRequest, learn bool) (
 				}
 			}
 			if keep != old {
-				a.shapes.Store(shapeKey(req), keep)
+				a.caps().setShape(shapeKey(req), keep)
 			}
 			if len(req.Tools) == 0 {
 				a.shapeSeen.Store(req.Model, true)
@@ -239,7 +249,7 @@ func (a *Adapter) postShaped(ctx context.Context, req ChatRequest, learn bool) (
 			return resp, &visionError{err: err}
 		}
 		next, ok := refusedField(a.API, err, req, sh, caps)
-		if ok && attempt < 2 {
+		if ok && attempt < retries {
 			// the same bytes would be refused the same way: a learned flag that changes nothing on the
 			// wire (a list that disagrees with the route) ends the call instead of spending two more
 			if again, berr := a.shapedBody(req, next, caps); berr == nil && !bytes.Equal(again, sent) {
@@ -290,7 +300,7 @@ func (a *Adapter) LearnRefusal(req ChatRequest, err error) bool {
 		next.NoEffort = a.shapeOf(req).NoEffort
 	}
 	if cur := a.shapeOf(req); next != cur {
-		a.shapes.Store(shapeKey(req), next)
+		a.caps().setShape(shapeKey(req), next)
 	}
 	return true
 }

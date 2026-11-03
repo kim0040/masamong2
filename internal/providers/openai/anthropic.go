@@ -116,8 +116,9 @@ func thinkingRoom(effort string) int {
 //	                 + the effort clamped to the levels it takes
 //
 // Learned: BetweenTools turns disabled into between_tools, NoThinkingOff makes the model one that cannot
-// stop thinking, NoOutputConfig leaves the effort field out, MaxHigh sends xhigh and max as high, and
-// NoEffort leaves the thinking field out (the model's default). A model the list says does not think
+// stop thinking, NoOutputConfig leaves the effort field out, MaxHigh sends xhigh and max as high,
+// Budgeted sends adaptive as enabled with a budget, and NoEffort leaves the thinking field out (the
+// model's default). A model the list says does not think
 // gets neither field. "" (a key probe) leaves both out.
 func anthropicEffort(effort string, caps Caps, sh shape, tools bool) (thinking map[string]any, level string, thinks bool) {
 	if effort == "" {
@@ -148,6 +149,8 @@ func anthropicEffort(effort string, caps Caps, sh shape, tools bool) (thinking m
 	switch {
 	case sh.NoEffort:
 		// the model or host refused the thinking field: its default
+	case sh.Budgeted:
+		thinking = map[string]any{"type": "enabled", "budget_tokens": thinkingRoom(effort)}
 	case known && slices.Contains(caps.Thinking, "adaptive"):
 		thinking = map[string]any{"type": "adaptive"}
 	case known && slices.Contains(caps.Thinking, "enabled"):
@@ -650,8 +653,13 @@ func anthropicRefusal(m string, req ChatRequest, sh shape, caps Caps) (shape, bo
 		sh.MaxHigh = true // a level above high refused: high is the most it takes
 	case level != "" && (strings.Contains(m, "output_config") || strings.Contains(m, "effort") && !strings.Contains(m, "thinking")):
 		sh.NoOutputConfig = true
+	case typ == "adaptive" && !sh.Budgeted && (caps.Thinking == nil || slices.Contains(caps.Thinking, "enabled")) &&
+		(strings.Contains(m, "adaptive") || strings.Contains(m, "thinking.type")):
+		// "thinking.type: Input tag 'adaptive' found using 'type' does not match any of the expected tags"
+		// (a model with a fixed thinking budget, Claude Haiku 4.5): it may take type "enabled"
+		sh.Budgeted = true
 	case sentOn && (strings.Contains(m, "thinking") || strings.Contains(m, "adaptive")):
-		sh.NoEffort = true // the model or host takes no adaptive thinking: its default
+		sh.NoEffort = true // the model or host takes no thinking of the kind sent: its default
 	case strings.Contains(m, "invalid argument") || strings.Contains(m, "unsupported") || strings.Contains(m, "unrecognized") ||
 		strings.Contains(m, "unknown field") || strings.Contains(m, "extra inputs"):
 		// a host that does not name the field: drop the optional ones one at a time

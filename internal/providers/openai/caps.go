@@ -199,13 +199,17 @@ func clampEffort(effort string, levels []string) (string, bool) {
 	return levels[0], true
 }
 
-// CapsCache keeps the capabilities model lists gave, per model. The application shares one per provider
-// across the adapters it builds (they are made per turn); an adapter without one keeps its own.
+// CapsCache keeps the capabilities model lists gave, per model, and the request shapes learned from the
+// models' refusals (shape.go). The application shares one per provider across the adapters it builds
+// (they are made per turn), so a refusal learned in one turn holds in the next; an adapter without one
+// keeps its own. A model's learned shapes are dropped when its capabilities change (Put): a refusal read
+// while they were unknown or different may be wrong for what is known now.
 type CapsCache struct {
 	mu      sync.Mutex
 	entries map[string]capsEntry
-	noted   map[string]bool // clamps already logged (model, asked, sent)
-	looking map[string]bool // Anthropic lookups in flight
+	noted   map[string]bool  // clamps already logged (model, asked, sent)
+	looking map[string]bool  // Anthropic lookups in flight
+	shapes  map[string]shape // shapeKey → the optional fields that model refused
 }
 
 type capsEntry struct {
@@ -223,17 +227,53 @@ const (
 
 // NewCapsCache is an empty cache.
 func NewCapsCache() *CapsCache {
-	return &CapsCache{entries: map[string]capsEntry{}, noted: map[string]bool{}, looking: map[string]bool{}}
+	return &CapsCache{entries: map[string]capsEntry{}, noted: map[string]bool{}, looking: map[string]bool{}, shapes: map[string]shape{}}
 }
 
 // Put records what a list said about model. A list that says nothing does not erase an earlier answer.
+// Capabilities other than the ones known before drop the model's learned shapes.
 func (c *CapsCache) Put(model string, caps Caps) {
 	if c == nil || !caps.Known() {
 		return
 	}
 	c.mu.Lock()
-	c.entries[model] = capsEntry{caps: caps, at: now()}
+	c.replace(model, caps)
 	c.mu.Unlock()
+}
+
+// replace stores caps for model, dropping the model's learned shapes when they differ from the caps known
+// before (an unchanged list read again keeps them: the route's refusals still hold). c.mu is held.
+func (c *CapsCache) replace(model string, caps Caps) {
+	if old, ok := c.entries[model]; !ok || old.miss || !sameCaps(old.caps, caps) {
+		delete(c.shapes, model)
+		delete(c.shapes, model+"\x00tools")
+	}
+	c.entries[model] = capsEntry{caps: caps, at: now()}
+}
+
+// sameCaps reports equal capabilities, an unknown (nil) list differing from a known-empty one.
+func sameCaps(x, y Caps) bool {
+	same := func(a, b []string) bool { return (a == nil) == (b == nil) && slices.Equal(a, b) }
+	return (x.Reasoning == nil) == (y.Reasoning == nil) && (x.Reasoning == nil || *x.Reasoning == *y.Reasoning) &&
+		same(x.Efforts, y.Efforts) && same(x.Thinking, y.Thinking)
+}
+
+// shape is the shape learned for key (shapeKey); ok is false when none is.
+func (c *CapsCache) shape(key string) (shape, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	sh, ok := c.shapes[key]
+	return sh, ok
+}
+
+// setShape keeps the shape learned for key (shapeKey).
+func (c *CapsCache) setShape(key string, sh shape) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.shapes == nil {
+		c.shapes = map[string]shape{}
+	}
+	c.shapes[key] = sh
 }
 
 // Get is what is known about model; ok is false when nothing is.
@@ -281,7 +321,7 @@ func (c *CapsCache) done(model string, caps Caps, miss bool) {
 		c.entries[model] = capsEntry{at: now(), miss: true}
 		return
 	}
-	c.entries[model] = capsEntry{caps: caps, at: now()}
+	c.replace(model, caps)
 }
 
 // note reports whether key is seen for the first time (a clamp is logged once, not per call).
