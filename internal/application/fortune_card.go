@@ -38,6 +38,22 @@ var fortuneLucky = []struct{ key, emoji string }{{"LUCKY_COLOR", "🎨"}, {"LUCK
 // and the card shows those whatever the model wrote.
 var fortuneComputed = map[string]bool{"today": true, "detail": true, "morning": true}
 
+// computedKeys are the reading keys whose values Go computes for a day's reading: the model's own lines
+// for them are dropped from a text shown or returned as written.
+var computedKeys = []string{"SCORE", "LUCKY_COLOR", "LUCKY_ITEM", "LUCKY_NUMBER", "LUCKY_DIRECTION", "LUCKY_TIME"}
+
+// computedOutput is the action output of a day's computed points: the scores, and the lucky points in
+// loc's words (the same values the card shows).
+func (s *Service) computedOutput(loc string, d fortune.Day) (scores map[string]any, lucky map[string]any) {
+	sc := d.Scores
+	scores = map[string]any{"overall": sc.Overall, "money": sc.Money, "love": sc.Love, "work": sc.Work, "health": sc.Health}
+	lucky = map[string]any{}
+	for k, v := range s.computedLucky(loc, d, nil) {
+		lucky[strings.ToLower(strings.TrimPrefix(k, "LUCKY_"))] = v
+	}
+	return scores, lucky
+}
+
 // luckyInlineMax is the longest lucky value (runes) that still sits in a column of its own.
 const luckyInlineMax = 14
 
@@ -62,7 +78,7 @@ func (s *Service) fortuneCardFor(loc, kind string, base action.Card, head, foote
 		// the words stay, without the model's own score and lucky lines when it wrote them as keys (a key
 		// in another language, "총점: 85", stays: it cannot be told from prose safely); the computed points
 		// and the basis footer are added as on a reading
-		base.Text = fortune.WithoutKeys(base.Text, "SCORE", "LUCKY_COLOR", "LUCKY_ITEM", "LUCKY_NUMBER", "LUCKY_DIRECTION", "LUCKY_TIME")
+		base.Text = fortune.WithoutKeys(base.Text, computedKeys...)
 		base.Footer = footer
 		lines := []string{s.scoreLine(day.Scores.Overall), s.areaScores(loc, day.Scores), "🧭 " + s.sajuBasis(loc, *day)}
 		base.Fields = append(append(base.Fields, action.CardField{Name: "📊 " + s.I18n.T(loc, "fortune.card.scores"), Value: strings.Join(lines, "\n")}),
@@ -240,11 +256,12 @@ func (s *Service) shortDate(loc string, t time.Time) string {
 	return s.I18n.T(loc, "date.short", "month", int(t.Month()), "day", t.Day())
 }
 
-// fortuneBasis is the footer of a personal fortune: today's day pillar and the person's sign, the facts the
-// reading was written from.
+// fortuneBasis is the footer of a personal fortune: the reading date's day pillar (as Analyze takes it,
+// from at's civil date) and the person's sign, the facts the reading was written from.
 func (s *Service) fortuneBasis(loc string, p fortuneProfile, at time.Time) string {
 	birth, _ := time.Parse("2006-01-02", p.BirthDate)
-	_, _, day, _, _ := fortune.Pillars(at, -1)
+	y, m, d := at.Date()
+	_, _, day := fortune.DatePillars(y, m, d, at.Location())
 	return s.I18n.T(loc, "fortune.card.basis", "day", s.pillarText(loc, day),
 		"sign", s.I18n.T(loc, fmt.Sprintf("fortune.sign.%d", fortune.SunSign(int(birth.Month()), birth.Day()))))
 }

@@ -139,14 +139,11 @@ func Pillars(date time.Time, hour int) (year, month, day, hourP Pillar, hasHour 
 //     as absolute moments, so the boundary is exact to the minute in any zone.
 //   - The day pillar follows the local civil date (Julian day number). It does not roll over at 23:00:
 //     23:00–23:59 keeps the date's day pillar (the 야자시 convention, lunar-go's default "sect 2").
-//   - The hour pillar is the two-hour 시진 of the local wall clock (자시 23:00–00:59). Its stem follows
-//     the day it starts: 23:00–23:59 is the 자시 that begins the next day, so its stem is counted from
-//     the next day's stem (a 무 day's 23:30 is 갑자, its 00:30 is 임자). Both 자시 conventions agree on
-//     this; they differ only in the day pillar.
+//   - The hour pillar is HourPillar of the local wall clock, uncorrected. A natal chart takes it in
+//     local solar time instead (NatalAt).
 //
-// Local mean solar time is not corrected for (Seoul's clock runs about 30 minutes ahead of the sun);
-// a zone with historical offsets (Asia/Seoul's 1950s UTC+8:30 and summer time) is applied as the
-// time package knows it.
+// A zone with historical offsets (Asia/Seoul's 1954–61 UTC+8:30 and its summer time) is applied as the
+// time package's tzdata knows it, so the instant, and with it the year and month, is right.
 func PillarsAt(t time.Time, hasHour bool) (year, month, day, hourP Pillar, ok bool) {
 	gy, branch := solarMonth(t)
 	year = Pillar{Stem: mod(gy-4, 10), Branch: mod(gy-4, 12)}
@@ -154,14 +151,53 @@ func PillarsAt(t time.Time, hasHour bool) (year, month, day, hourP Pillar, ok bo
 	month = Pillar{Stem: mod(year.Stem%5*2+2+m, 10), Branch: branch}
 	day = dayPillar(t.Year(), t.Month(), t.Day())
 	if hasHour {
-		b := mod((t.Hour()+1)/2, 12) // 자시 23:00–00:59
-		stem := day.Stem
-		if t.Hour() == 23 {
-			stem = (stem + 1) % 10 // the 자시 that starts the next day
-		}
-		hourP, ok = Pillar{Stem: mod(stem%5*2+b, 10), Branch: b}, true
+		hourP, ok = HourPillar(t), true
 	}
 	return
+}
+
+// HourPillar is the two-hour 시진 of t's wall clock in its own Location (자시 23:00–00:59). Its stem
+// follows the day the 시진 starts: 23:00–23:59 is the 자시 that begins the next day, so its stem is
+// counted from the next day's stem (a 무 day's 23:30 is 갑자, its 00:30 is 임자). Both 자시 conventions
+// agree on this; they differ only in the day pillar.
+func HourPillar(t time.Time) Pillar {
+	b := mod((t.Hour()+1)/2, 12)
+	stem := dayPillar(t.Year(), t.Month(), t.Day()).Stem
+	if t.Hour() == 23 {
+		stem = (stem + 1) % 10 // the 자시 that starts the next day
+	}
+	return Pillar{Stem: mod(stem%5*2+b, 10), Branch: b}
+}
+
+// SolarHourZone is the fixed zone whose clock is local solar time for a birth read in loc: loc's
+// standard offset (the smaller of its January and July offsets in 2020, so summer time is not solar
+// time) minus correction. Seoul with the usual 30 minutes is UTC+8:30 (Seoul lies at 127°E, about 30
+// minutes of the sun behind its UTC+9 meridian of 135°E; 자시 is then 23:30–01:30 on the clock).
+//
+// Reading the birth instant in this zone rather than subtracting from the wall clock keeps the
+// historical offsets right: a 1955 birth (the clock was UTC+8:30 then) needs no further correction,
+// and a 1987 summer-time birth (UTC+10) is 90 minutes ahead of the sun, as 만세력 tables count them.
+func SolarHourZone(loc *time.Location, correction time.Duration) *time.Location {
+	_, jan := time.Date(2020, 1, 1, 12, 0, 0, 0, loc).Zone()
+	_, jul := time.Date(2020, 7, 1, 12, 0, 0, 0, loc).Zone()
+	return time.FixedZone("solar", min(jan, jul)-int(correction/time.Second))
+}
+
+// NatalAt is the natal chart of a birth moment (BirthMoment in zone). The year, month and day pillars
+// are those of the exact instant and the birth's own wall-clock date (PillarsAt); the hour pillar, when
+// the time is known, is HourPillar of the instant in local solar time (SolarHourZone of zone).
+//
+// The day pillar is not moved by the correction: with the 야자시 convention (23:00–23:59 keeps the
+// date's day pillar) a birth at 23:30–23:59 keeps its date, as most Korean 만세력 apps do. A birth whose
+// solar time falls on the day before (00:00–00:29 with the usual 30 minutes) takes the 자시 that begins
+// its own date, so its hour stem agrees with its day pillar.
+func NatalAt(birth time.Time, zone *time.Location, hasHour bool, correction time.Duration) Natal {
+	y, m, d, _, _ := PillarsAt(birth, false)
+	n := Natal{Year: y, Month: m, Day: d}
+	if hasHour {
+		n.Hour, n.HasHour = HourPillar(birth.In(SolarHourZone(zone, correction))), true
+	}
+	return n
 }
 
 // BirthMoment is the moment of a birth wall clock in loc. A wall time that does not exist there (it

@@ -164,7 +164,9 @@ func Builtins() []Builtin {
 		{ID: "polls.close", Feature: "polls", Implemented: true, Scoped: true, Writes: true, Inputs: []Input{{Name: "id", Type: "text", Required: true}}},
 		{ID: "polls.result", Feature: "polls", Implemented: true, Inputs: []Input{{Name: "id", Type: "text", Required: true}}},
 		{ID: "fortune.query", Feature: "fortune", Command: true, Uses: "model", Role: "response", Implemented: true,
-			Inputs: []Input{{Name: "what", Type: "select", Options: []string{"today", "detail", "month", "year", "zodiac", "ranking", "animals"}}}},
+			Inputs: []Input{{Name: "what", Type: "select", Options: []string{"today", "detail", "month", "year", "zodiac", "ranking", "animals"}},
+				// the natal hour pillar's solar-time correction in minutes (application/fortune.go hourCorrection)
+				{Name: "hour_correction_minutes", Type: "number", Min: -120, Max: 120, Example: "30", Operator: true}}},
 		{ID: "fortune.subscribe", Feature: "fortune", Command: true, Uses: "model", Role: "response", Implemented: true, Writes: true,
 			Inputs: []Input{{Name: "op", Type: "select", Options: subscribe}, {Name: "time", Type: "text", Example: "08:00"}}},
 		{ID: "notices.status", Feature: "notices", Command: true, Uses: "web", Implemented: true,

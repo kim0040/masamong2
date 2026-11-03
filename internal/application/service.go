@@ -125,6 +125,10 @@ type Service struct {
 	// it concurrently while an operator applies a change, so it is swapped whole, never edited in place.
 	cfg atomic.Pointer[configSnapshot]
 
+	// animalsPosted is when each public channel last got the twelve-animal card (fortune.go animals)
+	animalsOnce   sync.Once
+	animalsPosted *ttlCache[struct{}]
+
 	pendingMsgs pendingMessageCount // the console's count of messages waiting for a vector (pending_count.go)
 	// cfgMu serializes config writers so two changes based on the same revision cannot both commit.
 	cfgMu             sync.Mutex

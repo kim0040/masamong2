@@ -3043,6 +3043,8 @@
   "toolp.allow_multiselect": "Permitir varias opciones",
   "toolp.images.generate.async": "Dibujar en segundo plano al pedirlo en el chat",
   "toolp.hint.images.generate.async": "Activado (por defecto): cuando alguien pide una imagen en el chat, el bot responde enseguida que la está dibujando y la publica como respuesta a la petición cuando termina. Desactivado: la respuesta espera a la imagen. El comando /image siempre espera.",
+  "toolp.fortune.query.hour_correction_minutes": "Pilar de la hora: corrección a la hora solar (minutos)",
+  "toolp.hint.fortune.query.hour_correction_minutes": "Minutos que se restan a la hora estándar cuando la hora de nacimiento fija el pilar de la hora. El valor por defecto, 30, es la convención de los almanaques coreanos manseryeok (el sol llega a Seúl unos 30 minutos después que al meridiano de su huso), con la que la primera hora doble (zi) va de 23:30 a 01:30. Con 0 se usa la hora estándar tal cual (el horario de verano siempre se descuenta). Los pilares del año, el mes y el día no cambian, y los avisos diarios usan el mismo valor.",
   "toolp.aspect_ratio": "Relación de aspecto",
   "toolp.base": "Moneda base",
   "toolp.day_offset": "Día",
