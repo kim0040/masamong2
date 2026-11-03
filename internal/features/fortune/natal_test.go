@@ -189,3 +189,106 @@ func TestLichunInstants(t *testing.T) {
 		}
 	}
 }
+
+// The day pillar and the hour pillar come from one solar clock. 1987-08-01 00:20 on the summer-time
+// clock (UTC+10) is 22:50 solar on 07-31: a 辛巳 day with a 己亥 hour. KST 23:20 on 07-31 would give the
+// same (the 야자시 rule), where the wall date's 壬午 day with a 辛-day hour is no chart a 만세력 can show.
+// Day pillars from Python date arithmetic anchored on 2000-01-01 (戊午); the hour by 시두법 (辛 day: 戊子 start).
+func TestNatalSummerTimeAfterMidnight(t *testing.T) {
+	seoul := seoulZone(t)
+	if _, off := time.Date(1987, 7, 20, 12, 0, 0, 0, seoul).Zone(); off != 10*3600 {
+		t.Skipf("tzdata without Seoul's 1987 summer time (%d)", off)
+	}
+	p := func(stem, branch int) Pillar { return Pillar{Stem: stem, Branch: branch} }
+	n := NatalAt(time.Date(1987, 8, 1, 0, 20, 0, 0, seoul), seoul, true, 30*time.Minute)
+	if n.Day != p(7, 5) || n.Hour != p(5, 11) { // 辛巳, 己亥
+		t.Fatalf("1987-08-01 00:20 KDT: day %v hour %v, want 辛巳 己亥", n.Day, n.Hour)
+	}
+	// the year and month are those of the instant; only the day moved
+	if y, m, _, _, _ := PillarsAt(time.Date(1987, 8, 1, 0, 20, 0, 0, seoul), false); n.Year != y || n.Month != m {
+		t.Fatalf("year/month moved: %+v", n)
+	}
+	// the same birth at 22:50 solar on the 07-31 clock (UTC+8:30) is the same chart
+	solar := time.FixedZone("solar", 8*3600+1800)
+	if n2 := NatalAt(time.Date(1987, 7, 31, 22, 50, 0, 0, solar), seoul, true, 30*time.Minute); n2.Day != n.Day || n2.Hour != n.Hour {
+		t.Fatalf("same instant, other clock: %+v vs %+v", n2, n)
+	}
+}
+
+// Whatever the correction (the console allows -120…120) and the clock, the chart is one a 만세력 can show:
+// the hour stem is the 시두법 pair of the day stem, or of the next day's stem for the 자시 that starts
+// the next day (solar 23:00–23:59 on the wall date). The day pillar is the solar date's (lunar-go on that
+// date), except that a solar 23:xx on the day before the wall date keeps the wall date (야자시).
+func TestNatalDayHourPairs(t *testing.T) {
+	seoul := seoulZone(t)
+	ok := func(stem, branch int, h Pillar) bool { return h.Branch == branch && h.Stem == mod(stem%5*2+branch, 10) }
+	checked := 0
+	check := func(at time.Time, corr time.Duration) {
+		n := NatalAt(at, seoul, true, corr)
+		solar := at.In(SolarHourZone(seoul, corr))
+		branch := mod((solar.Hour()+1)/2, 12)
+		late := solar.Hour() == 23
+		if !ok(n.Day.Stem, branch, n.Hour) && !(late && ok((n.Day.Stem+1)%10, branch, n.Hour)) {
+			t.Fatalf("%s corr %v (solar %s): day %v hour %v is no 시두법 pair", at.Format("2006-01-02 15:04 MST"), corr, solar.Format("01-02 15:04"), n.Day, n.Hour)
+		}
+		wantDay := solar
+		if late && solar.Day() != at.Day() {
+			wantDay = at // 야자시 of the wall date
+		}
+		oracle := fromHanzi(t, wallOracle(time.Date(wantDay.Year(), wantDay.Month(), wantDay.Day(), 12, 0, 0, 0, time.UTC)).GetDay())
+		if n.Day != oracle {
+			t.Fatalf("%s corr %v (solar %s): day %v, lunar-go %v", at.Format("2006-01-02 15:04 MST"), corr, solar.Format("01-02 15:04"), n.Day, oracle)
+		}
+		checked++
+	}
+	corrs := []time.Duration{-120, -90, -60, -30, -1, 0, 1, 30, 45, 60, 90, 119, 120}
+	// ordinary days, every 20 minutes of a month; the summer-time years' edges; a leap day
+	for _, start := range []time.Time{
+		time.Date(2000, 2, 27, 0, 0, 0, 0, seoul), time.Date(1987, 7, 30, 0, 0, 0, 0, seoul),
+		time.Date(1988, 5, 7, 0, 0, 0, 0, seoul), time.Date(1955, 7, 7, 0, 0, 0, 0, seoul),
+	} {
+		for at := start; at.Before(start.AddDate(0, 0, 4)); at = at.Add(20 * time.Minute) {
+			for _, c := range corrs {
+				check(at, c*time.Minute)
+			}
+		}
+	}
+	// the whole of 1987 and 1988 around midnight, every 10 minutes from 21:50 to 02:10
+	for day := time.Date(1987, 1, 1, 0, 0, 0, 0, seoul); day.Year() < 1989; day = day.AddDate(0, 0, 9) {
+		for m := -130; m <= 130; m += 10 {
+			for _, c := range []time.Duration{-120, -60, 0, 30, 60, 120} {
+				check(day.Add(time.Duration(m)*time.Minute), c*time.Minute)
+			}
+		}
+	}
+	if checked < 10000 {
+		t.Fatalf("only %d charts checked", checked)
+	}
+}
+
+// Charts on day stems other than 갑, checked without the implementation or lunar-go. Day pillars: Python
+// date arithmetic anchored on 2000-01-01 being a 戊午 day (1995-06-15 is 丁丑); years by the 60-year cycle
+// (1999 己卯, 1995 乙亥); months by 년상기월법 (갑·기 years start 병인, 을·경 years start 무인); hours by
+// 시두법 (무·계 days start 임자, 정·임 days start 경자) from the solar clock (KST less 30 minutes).
+func TestPublishedNatalChartsOtherDayStems(t *testing.T) {
+	seoul := seoulZone(t)
+	p := func(stem, branch int) Pillar { return Pillar{Stem: stem, Branch: branch} }
+	for _, c := range []struct {
+		name                   string
+		at                     time.Time
+		year, month, day, hour Pillar
+	}{
+		// 기묘년 병자월 (대설 1999-12-07, 소한 2000-01-06) 무오일; 01:10 KST = 00:40 solar: 자시 from 무 = 임자
+		{"2000-01-01 01:10", time.Date(2000, 1, 1, 1, 10, 0, 0, seoul), p(5, 3), p(2, 0), p(4, 6), p(8, 0)},
+		// 23:40 KST = 23:10 solar: the late 자시 counted from the next day 기미's 기 = 갑자; the day stays 무오 (야자시)
+		{"2000-01-01 23:40", time.Date(2000, 1, 1, 23, 40, 0, 0, seoul), p(5, 3), p(2, 0), p(4, 6), p(0, 0)},
+		// 을해년 임오월 (망종 1995-06-06, 소서 1995-07-07) 정축일; 13:10 KST = 12:40 solar: 오시 from 정 = 병오
+		// (the clock alone would say 미시, 정미)
+		{"1995-06-15 13:10", time.Date(1995, 6, 15, 13, 10, 0, 0, seoul), p(1, 11), p(8, 6), p(3, 1), p(2, 6)},
+	} {
+		n := NatalAt(c.at, seoul, true, 30*time.Minute)
+		if n.Year != c.year || n.Month != c.month || n.Day != c.day || n.Hour != c.hour {
+			t.Errorf("%s: %v %v %v %v, want %v %v %v %v", c.name, n.Year, n.Month, n.Day, n.Hour, c.year, c.month, c.day, c.hour)
+		}
+	}
+}

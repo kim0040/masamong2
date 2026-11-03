@@ -2,7 +2,9 @@ package application_test
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -84,5 +86,72 @@ func TestFortuneAnimalsChannelCooldown(t *testing.T) {
 	}
 	if calls.Load() != 0 {
 		t.Fatalf("model calls %d", calls.Load())
+	}
+}
+
+// barrierClock is a fixed clock whose Now, when called from the animals card, makes the callers of one
+// round wait for each other (spinning, so they leave together): it lines the asks up at the entrance of
+// the cooldown check, where a check-then-set gap would let more than one through.
+type barrierClock struct {
+	t       time.Time
+	arrived *atomic.Int32
+	want    int32
+}
+
+func (c barrierClock) Now() time.Time {
+	pcs := make([]uintptr, 12)
+	frames := runtime.CallersFrames(pcs[:runtime.Callers(2, pcs)])
+	for {
+		f, more := frames.Next()
+		if strings.HasSuffix(f.Function, "(*Service).animals") {
+			c.arrived.Add(1)
+			for deadline := time.Now().Add(time.Second); c.arrived.Load() < c.want && time.Now().Before(deadline); {
+			}
+			break
+		}
+		if !more {
+			break
+		}
+	}
+	return c.t
+}
+
+// The cooldown check and its set are one step: N asks that reach the check together in a fresh channel
+// post exactly one card, however the goroutines interleave (repeated, so a check-then-set gap shows).
+func TestFortuneAnimalsCooldownIsAtomic(t *testing.T) {
+	var calls atomic.Int32
+	svc := fortuneSvc(t, &calls)
+	applyDoc(t, svc, func(d *config.Document) { d.I18n.Timezone = "Asia/Seoul" })
+	serveAnyServer(t, svc)
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	asks := min(8, runtime.GOMAXPROCS(0))
+	if asks < 2 {
+		t.Skip("one CPU: the asks cannot overlap")
+	}
+	const rounds = 300
+	for round := 0; round < rounds; round++ {
+		var arrived atomic.Int32
+		svc.Clock = barrierClock{t: time.Date(2026, 10, 15, 21, 0, 0, 0, seoul), arrived: &arrived, want: int32(asks)}
+		var wg sync.WaitGroup
+		var cards, notes atomic.Int32
+		for i := 0; i < asks; i++ {
+			inv := person(fmt.Sprintf("u%d", i), false)
+			inv.ChannelID = fmt.Sprintf("c%d", round)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				r := asIn(svc, "ko", "fortune.query", map[string]any{"what": "animals"}, inv)
+				switch r.Output["status"] {
+				case "ok":
+					cards.Add(1)
+				case "recent":
+					notes.Add(1)
+				}
+			}()
+		}
+		wg.Wait()
+		if cards.Load() != 1 || notes.Load() != int32(asks)-1 {
+			t.Fatalf("round %d: %d cards and %d notes from %d simultaneous asks", round, cards.Load(), notes.Load(), asks)
+		}
 	}
 }

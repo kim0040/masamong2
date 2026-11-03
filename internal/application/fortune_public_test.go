@@ -56,7 +56,8 @@ func promptRecorder(t *testing.T, text string) (url string, last func() string) 
 // A public channel's summary is written from the sun sign and the day only: the person's birth date,
 // birth time, birthplace and natal pillars are not in the prompt (the model's text is posted as written).
 // 1995-06-15 23:40 in Seoul is 을해년 임오월 정축일 (lunar-go at 22:40 Beijing time, 야자시); the private
-// prompt has them, the public one in Korean and English does not.
+// prompt has them, the public one in Korean and English does not. The registered gender is private too:
+// the public template has no {gender}.
 func TestFortunePublicPromptHasNoBirthData(t *testing.T) {
 	url, last := promptRecorder(t, "SUMMARY: 좋아요\nWORK: 집중")
 	svc := routedSvc(t, url, url)
@@ -78,16 +79,17 @@ func TestFortunePublicPromptHasNoBirthData(t *testing.T) {
 	}
 	natal := map[string][]string{"ko": {"을해", "임오", "정축", "타고난 사주"}, "en": {"Yi-Hai", "Ren-Wu", "Ding-Chou", "Natal pillars"}}
 	personal := []string{"1995-06-15", "23:40", "부산광역시"}
+	gender := map[string]string{"ko": "남성", "en": "male"}
 	for _, loc := range []string{"ko", "en"} {
 		if r := asIn(svc, loc, "fortune.query", map[string]any{"what": "today"}, dm); r.Output["status"] != "ok" {
 			t.Fatalf("%s private: %+v", loc, r)
 		}
-		wantAll(t, loc+" private prompt", last(), append(append([]string{}, personal...), natal[loc]...)...)
+		wantAll(t, loc+" private prompt", last(), append(append(append([]string{}, personal...), natal[loc]...), gender[loc])...)
 		if r := asIn(svc, loc, "fortune.query", map[string]any{"what": "today"}, person("u1", false)); r.Output["status"] != "ok" {
 			t.Fatalf("%s public: %+v", loc, r)
 		}
 		p := last()
-		wantNone(t, loc+" public prompt", p, append(append([]string{}, personal...), natal[loc]...)...)
+		wantNone(t, loc+" public prompt", p, append(append(append([]string{}, personal...), natal[loc]...), gender[loc])...)
 		wantAll(t, loc+" public prompt", p, map[string]string{"ko": "쌍둥이자리", "en": "Gemini"}[loc], "2026-10-15")
 	}
 }

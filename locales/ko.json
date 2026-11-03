@@ -528,7 +528,7 @@
   "fortune.planet.saturn": "토성",
   "fortune.data.block": "[운세 데이터]\n기준 시각: {date}\n생년월일시: {birth} {birth_time}\n출생지: {place}\n타고난 사주: {natal}\n기준일의 간지: {today}\n별자리: {sign}\n기준 시각의 천체 배치: {sky}",
   "fortune.data.public_block": "[운세 데이터]\n기준 시각: {date}\n기준일의 간지: {today}\n별자리: {sign}\n기준 시각의 천체 배치: {sky}",
-  "fortune.data.hour_corrected": "시주는 태양시 기준(표준시에서 {minutes}분 보정)으로 계산했어요.",
+  "fortune.data.hour_corrected": "시주는 지역 태양시(UTC{offset}) 기준으로 계산했어요.",
   "fortune.data.pillars": "{year}년 {month}월 {day}일",
   "fortune.data.hour_pillar": "{hour}시",
   "fortune.data.not_given": "미제공",

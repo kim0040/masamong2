@@ -528,7 +528,7 @@
   "fortune.planet.saturn": "Saturno",
   "fortune.data.block": "[Datos de fortuna]\nFecha de la lectura: {date}\nNacimiento: {birth} {birth_time}\nLugar de nacimiento: {place}\nPilares natales: {natal}\nPilares del día de la lectura: {today}\nSigno solar: {sign}\nCielo en la fecha de la lectura: {sky}",
   "fortune.data.public_block": "[Datos de fortuna]\nFecha de la lectura: {date}\nPilares del día de la lectura: {today}\nSigno solar: {sign}\nCielo en la fecha de la lectura: {sky}",
-  "fortune.data.hour_corrected": "El pilar de la hora usa la hora solar local (la hora estándar menos {minutes} minutos).",
+  "fortune.data.hour_corrected": "El pilar de la hora usa la hora solar local (UTC{offset}).",
   "fortune.data.pillars": "año {year}, mes {month}, día {day}",
   "fortune.data.hour_pillar": "hora {hour}",
   "fortune.data.not_given": "no indicado",

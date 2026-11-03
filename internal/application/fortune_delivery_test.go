@@ -41,7 +41,8 @@ type briefingRig struct {
 	svc     *application.Service
 	mu      sync.Mutex
 	prompts []string
-	failing bool // the model answers 500 (recorded all the same)
+	failing bool   // the model answers 500 (recorded all the same)
+	onCall  func() // runs inside a model call, after it is recorded and before it answers (a crash point)
 }
 
 func (r *briefingRig) setFailing(v bool) {
@@ -79,8 +80,11 @@ func newBriefingRig(t *testing.T, start time.Time, subTime string, quiet []strin
 		b, _ := io.ReadAll(r.Body)
 		rig.mu.Lock()
 		rig.prompts = append(rig.prompts, string(b))
-		failing := rig.failing
+		failing, onCall := rig.failing, rig.onCall
 		rig.mu.Unlock()
+		if onCall != nil {
+			onCall()
+		}
 		if failing {
 			http.Error(w, `{"error":{"message":"down"}}`, http.StatusInternalServerError)
 			return
@@ -306,4 +310,117 @@ func TestEveningPromptDoesNotSayToday(t *testing.T) {
 	p := rig.prompt(0)
 	wantAll(t, "prompt", p, "내일(2026-10-16)", "기준 시각: 2026-10-16 21:00", "기준일의 간지", "기준 시각의 천체 배치", "SUMMARY: 하루의")
 	wantNone(t, "prompt", p, "SUMMARY: 오늘", "현재 천체", "오늘의 간지", "오늘 일간", "오늘 채울")
+}
+
+// jobJSON is the stored briefing job of u1, as a restart would find it.
+func (r *briefingRig) jobJSON(t *testing.T) string {
+	t.Helper()
+	var raw string
+	if err := r.svc.Store.DB.QueryRow(`SELECT job FROM fortune_profiles WHERE user_id='u1'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func (r *briefingRig) setJobJSON(t *testing.T, raw string) {
+	t.Helper()
+	if _, err := r.svc.Store.DB.Exec(`UPDATE fortune_profiles SET job=? WHERE user_id='u1'`, raw); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A process that stops in the middle of the one rewrite must not lose the text that was written: the job
+// as it is stored during the model call still holds the old text, and after a restart that state sends it
+// neutrally, once, with no further model call. (The job saved at the moment of the call is what a crash
+// leaves; the rest of the run is thrown away by restoring it.)
+func TestCrashDuringRewriteKeepsTheWrittenText(t *testing.T) {
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	rig := newBriefingRig(t, time.Date(2026, 10, 15, 5, 0, 0, 0, seoul), "07:00", nil, nil)
+	gw := &dmGateway{}
+	rig.svc.Discord = gw
+	rig.runAt(time.Date(2026, 10, 15, 6, 52, 0, 0, seoul)) // written for the morning, then the host is down
+	var during string
+	rig.mu.Lock()
+	rig.onCall = func() { during = rig.jobJSON(t) } // the one call of this run is the rewrite
+	rig.mu.Unlock()
+	rig.runAt(time.Date(2026, 10, 15, 15, 0, 0, 0, seoul)) // the catch-up rewrite and send
+	if during == "" || len(gw.sent) != 1 {
+		t.Fatalf("rewrite call not seen (%q) or sent %d", during, len(gw.sent))
+	}
+	var job struct {
+		Content   string `json:"content"`
+		Generated int    `json:"generated"`
+		Slot      string `json:"slot"`
+		Rewritten bool   `json:"rewritten"`
+	}
+	if err := json.Unmarshal([]byte(during), &job); err != nil {
+		t.Fatal(err)
+	}
+	if job.Content == "" || job.Slot != "morning" || !job.Rewritten || job.Generated != 2 {
+		t.Fatalf("stored during the rewrite call: %s", during)
+	}
+	// the restart: the process died inside the call, so the stored job is the one saved before it
+	rig.setJobJSON(t, during)
+	if _, err := rig.svc.Store.DB.Exec(`UPDATE fortune_profiles SET last_sent=''`); err != nil {
+		t.Fatal(err)
+	}
+	gw2 := &dmGateway{}
+	rig.svc.Discord = gw2
+	rig.mu.Lock()
+	rig.onCall = nil
+	rig.mu.Unlock()
+	n := rig.count()
+	rig.runAt(time.Date(2026, 10, 15, 15, 30, 0, 0, seoul)) // after the retry wait
+	if len(gw2.sent) != 1 || rig.count() != n {
+		t.Fatalf("after the restart: sent %d, prompts %d (was %d)", len(gw2.sent), rig.count(), n)
+	}
+	m := gw2.sent[0]
+	wantAll(t, "title", m.Title, "🔮", "10월 15일", "운세")
+	wantNone(t, "title", m.Title, "아침", "오늘의")
+	wantAll(t, "card", m.Text, "흐름", "집중") // the text written before the crash
+	wantNone(t, "card", m.Text, "좋은 아침")
+}
+
+// The scheduler ticks once a minute and takes subscribers one after another: a briefing planned for
+// 10:59 and sent at 11:02 is still the morning one, not written again for the daytime. Five minutes past
+// the boundary (and an evening briefing past midnight, which is no longer "tomorrow's") it is.
+func TestBriefingSlotGraceAfterTheBoundary(t *testing.T) {
+	seoul, _ := time.LoadLocation("Asia/Seoul")
+	run := func(t *testing.T, sub string, planned time.Time, fail int, late time.Duration) (prompts int, sent []action.Card) {
+		rig := newBriefingRig(t, planned.Add(-3*time.Hour), sub, nil, nil)
+		gw := &flakyDM{fail: fail}
+		rig.svc.Discord = gw
+		rig.runAt(planned.Add(-8 * time.Minute)) // written within the lead
+		if fail > 0 {
+			rig.runAt(planned) // not delivered, retried in two minutes
+		}
+		rig.runAt(planned.Add(late))
+		return rig.count(), gw.sent
+	}
+	morning := time.Date(2026, 10, 15, 10, 59, 0, 0, seoul)
+	if n, sent := run(t, "10:59", morning, 0, 3*time.Minute); n != 1 || len(sent) != 1 {
+		t.Fatalf("3 minutes past: prompts %d, sent %d", n, len(sent))
+	} else {
+		wantAll(t, "title", sent[0].Title, "☀️", "아침 운세")
+	}
+	if n, sent := run(t, "10:59", morning, 0, 4*time.Minute); n != 1 || len(sent) != 1 {
+		t.Fatalf("4 minutes past: prompts %d, sent %d", n, len(sent))
+	}
+	if n, sent := run(t, "10:59", morning, 0, 5*time.Minute); n != 2 || len(sent) != 1 {
+		t.Fatalf("5 minutes past: prompts %d, sent %d", n, len(sent))
+	} else {
+		wantAll(t, "title", sent[0].Title, "🌤️", "오늘의 운세")
+	}
+	// 23:58 evening for tomorrow, retried at 00:01: tomorrow's reading is now today's: written again
+	evening := time.Date(2026, 10, 15, 23, 58, 0, 0, seoul)
+	if n, sent := run(t, "23:58", evening, 1, 3*time.Minute); n != 2 || len(sent) != 1 {
+		t.Fatalf("evening past midnight: prompts %d, sent %d", n, len(sent))
+	} else {
+		wantAll(t, "title", sent[0].Title, "🌙", "10월 16일", "오늘의 운세")
+	}
+	// 16:59 daytime into 17:00: the reading's date changes (tomorrow's), so it is written again
+	day := time.Date(2026, 10, 15, 16, 59, 0, 0, seoul)
+	if n, sent := run(t, "16:59", day, 0, 2*time.Minute); n != 2 || len(sent) != 1 {
+		t.Fatalf("day into evening: prompts %d, sent %d", n, len(sent))
+	}
 }

@@ -3044,7 +3044,7 @@
   "toolp.images.generate.async": "在聊天中后台绘制",
   "toolp.hint.images.generate.async": "开启（默认）：有人在聊天中要图时，机器人立刻回答“正在画”，画完后作为对该请求的回复发出。关闭：回答会等到图片完成。/image 命令始终等待。",
   "toolp.fortune.query.hour_correction_minutes": "时柱：太阳时校正（分钟）",
-  "toolp.hint.fortune.query.hour_correction_minutes": "用出生时间定时柱时，从标准时间减去的分钟数。默认 30 分钟是韩国万岁历的惯例（首尔的太阳比其时区子午线晚约 30 分钟到达正南），这样子时为 23:30–01:30。设为 0 则直接使用标准时间（夏令时总会扣除）。年柱、月柱、日柱不变，每日运势推送也使用同一个值。",
+  "toolp.hint.fortune.query.hour_correction_minutes": "用出生时间定时柱时，从标准时间减去的分钟数。留空时，首尔和平壤时区为 30 分钟（韩国万岁历的惯例：首尔的太阳比其时区子午线晚约 30 分钟到达正南，子时为 23:30–01:30），其他时区为 0；填写的值适用于所有时区。夏令时总会扣除。年柱和月柱不变；日柱只有在太阳时落在另一个日期时才会随之改变（例如夏令时钟刚过午夜的出生）。每日运势推送也使用同一个值。",
   "toolp.aspect_ratio": "宽高比",
   "toolp.base": "基准货币",
   "toolp.day_offset": "日期",

@@ -187,15 +187,30 @@ func SolarHourZone(loc *time.Location, correction time.Duration) *time.Location 
 // are those of the exact instant and the birth's own wall-clock date (PillarsAt); the hour pillar, when
 // the time is known, is HourPillar of the instant in local solar time (SolarHourZone of zone).
 //
-// The day pillar is not moved by the correction: with the 야자시 convention (23:00–23:59 keeps the
-// date's day pillar) a birth at 23:30–23:59 keeps its date, as most Korean 만세력 apps do. A birth whose
-// solar time falls on the day before (00:00–00:29 with the usual 30 minutes) takes the 자시 that begins
-// its own date, so its hour stem agrees with its day pillar.
+// The day and the hour are read from the same solar clock, so the pair is one a 만세력 can show:
+//   - solar time on the wall date: the day is the wall date's (23:00–23:59 keeps it, the 야자시
+//     convention, and the 자시 takes the next day's stem);
+//   - solar time on another date (the clock is more than the correction ahead of the sun at 00:xx, or
+//     a negative correction pushes 23:xx past midnight): the day is the solar date's, with one
+//     exception, a solar 23:xx on the day before the wall date. That is the 야자시 of the wall date as
+//     the person gave it (most Korean 만세력 apps keep the clock's date), and its 자시 stem is counted
+//     from the next day of the solar date, which is the wall date itself.
+//
+// The year and month pillars are those of the exact instant. A wall time whose solar time is on the
+// day before can differ from the wall date by one day at most: the correction is at most two hours
+// and summer time one.
 func NatalAt(birth time.Time, zone *time.Location, hasHour bool, correction time.Duration) Natal {
 	y, m, d, _, _ := PillarsAt(birth, false)
 	n := Natal{Year: y, Month: m, Day: d}
 	if hasHour {
-		n.Hour, n.HasHour = HourPillar(birth.In(SolarHourZone(zone, correction))), true
+		solar := birth.In(SolarHourZone(zone, correction))
+		n.Hour, n.HasHour = HourPillar(solar), true
+		wy, wm, wd := birth.Date()
+		sy, sm, sd := solar.Date()
+		wj, sj := JDN(wy, wm, wd), JDN(sy, sm, sd)
+		if sj != wj && !(sj < wj && solar.Hour() == 23) {
+			n.Day = dayPillar(sy, sm, sd)
+		}
 	}
 	return n
 }

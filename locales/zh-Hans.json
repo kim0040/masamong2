@@ -528,7 +528,7 @@
   "fortune.planet.saturn": "土星",
   "fortune.data.block": "[运势数据]\n解读时间：{date}\n出生：{birth} {birth_time}\n出生地：{place}\n本命四柱：{natal}\n解读日四柱：{today}\n太阳星座：{sign}\n解读时间的天象：{sky}",
   "fortune.data.public_block": "[运势数据]\n解读时间：{date}\n解读日四柱：{today}\n太阳星座：{sign}\n解读时间的天象：{sky}",
-  "fortune.data.hour_corrected": "时柱按当地太阳时计算（标准时间减 {minutes} 分钟）。",
+  "fortune.data.hour_corrected": "时柱按当地太阳时（UTC{offset}）计算。",
   "fortune.data.pillars": "年 {year}、月 {month}、日 {day}",
   "fortune.data.hour_pillar": "时 {hour}",
   "fortune.data.not_given": "未提供",
