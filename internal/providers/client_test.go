@@ -274,3 +274,29 @@ func TestDeadlineDuringRetryWaitIsATimeout(t *testing.T) {
 		t.Fatalf("cancel kind: %v", err)
 	}
 }
+
+// A caller's WithFinal test stops the retries of an answer no retry can change (a used-up balance,
+// an unknown model); other 429s and 5xx are retried as before.
+func TestWithFinalStopsLastingRetries(t *testing.T) {
+	var hits int32
+	var body atomic.Value
+	body.Store(`{"error":{"code":"credit_balance_exhausted"}}`)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.WriteHeader(429)
+		_, _ = w.Write([]byte(body.Load().(string)))
+	}))
+	defer srv.Close()
+	c := NewClient(time.Second, nil)
+	c.Sleep = noSleep
+	final := func(status int, b []byte) bool { return strings.Contains(string(b), "credit_balance_exhausted") }
+	resp, err := c.Get(WithFinal(context.Background(), final), srv.URL, nil)
+	var pe *Error
+	if !errors.As(err, &pe) || pe.Status != 429 || pe.Attempts != 1 || atomic.LoadInt32(&hits) != 1 || resp == nil || !strings.Contains(string(resp.Body), "credit_balance") {
+		t.Fatalf("one attempt, the body kept: %v hits=%d", err, hits)
+	}
+	body.Store(`{"error":{"code":"rate_limit_exceeded"}}`)
+	if _, err := c.Get(WithFinal(context.Background(), final), srv.URL, nil); !errors.As(err, &pe) || pe.Attempts != 3 || atomic.LoadInt32(&hits) != 4 {
+		t.Fatalf("a rate limit is retried: %v hits=%d", err, hits)
+	}
+}

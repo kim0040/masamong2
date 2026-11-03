@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -553,70 +552,6 @@ func TestThinkingAtTheLowestEffortGetsHeadroom(t *testing.T) {
 	}
 	if _, err := a.Chat(context.Background(), req); err != nil || len(rec.bodies) != 3 || rec.bodies[2]["max_tokens"].(float64) != 40+thinkingHeadroom {
 		t.Fatalf("the room is kept: %d %v", len(rec.bodies), err)
-	}
-}
-
-// Anthropic's own endpoint ignores reasoning_effort and Claude 5 thinks by default, so a low level turns
-// thinking off with its "thinking" field. Each model turns it off its own way, and the refusal names
-// the way (seen live 2026-10-31): Haiku 5.5 takes "disabled", Sonnet 5.5 wants "between_tools", Opus
-// 5.5 cannot stop thinking. What a "none" request learns about that field holds for "low" too.
-func TestAnthropicTurnsThinkingOffPerModel(t *testing.T) {
-	var rec recorded
-	a := testAdapter(t, APIAnthropic, func(w http.ResponseWriter, r *http.Request) {
-		body := rec.add(r)
-		if _, ok := body["reasoning_effort"]; ok {
-			t.Errorf("reasoning_effort is ignored there and must not be sent: %v", body)
-		}
-		if r.Header.Get("anthropic-version") == "" {
-			t.Errorf("no anthropic-version header")
-		}
-		th, _ := body["thinking"].(map[string]any)
-		model, _ := body["model"].(string)
-		refuse := func(msg string) {
-			w.WriteHeader(400)
-			_, _ = w.Write([]byte(`{"error":{"message":` + strconv.Quote(msg) + `,"type":"invalid_request_error"}}`))
-		}
-		switch {
-		case body["temperature"] != nil:
-			t.Errorf("no temperature goes to Anthropic: %v", body)
-			refuse("`temperature` is deprecated for this model.")
-		case model == "claude-sonnet-5-5" && th != nil && th["type"] == "disabled":
-			refuse(`To turn thinking off on this model, send "thinking": {"type": "between_tools"} instead of {"type": "disabled"}.`)
-		case model == "claude-opus-5-5" && th != nil:
-			refuse(`"thinking.type.disabled" is not supported for this model. Use "thinking.type.adaptive" and "output_config.effort" to control thinking behavior.`)
-		default:
-			_, _ = w.Write([]byte(`{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}],"usage":{"prompt_tokens":10,"completion_tokens":2}}`))
-		}
-	})
-	temp := 0.2
-	thinking := func(i int) any {
-		th, _ := rec.bodies[i]["thinking"].(map[string]any)
-		if th == nil {
-			return nil
-		}
-		return th["type"]
-	}
-	for _, c := range []struct {
-		model string
-		off   any // what "off" is written as, once learned
-		calls int // calls the first "none" request takes
-	}{{"claude-haiku-5-5", "disabled", 1}, {"claude-sonnet-5-5", "between_tools", 2}, {"claude-opus-5-5", nil, 2}} {
-		rec.bodies = nil
-		req := ChatRequest{Model: c.model, Messages: []Message{{Role: "user", Content: "x"}}, MaxTokens: 40, Effort: "none", Temperature: &temp}
-		if _, err := a.Chat(context.Background(), req); err != nil || len(rec.bodies) != c.calls || thinking(len(rec.bodies)-1) != c.off {
-			t.Fatalf("%s none: %v after %d calls, thinking %v", c.model, err, len(rec.bodies), rec.bodies)
-		}
-		low := req
-		low.Effort = "low"
-		n := len(rec.bodies)
-		if _, err := a.Chat(context.Background(), low); err != nil || len(rec.bodies) != n+1 || thinking(n) != c.off {
-			t.Fatalf("%s low goes out learned at once: %v, %d calls, thinking %v", c.model, err, len(rec.bodies)-n, thinking(n))
-		}
-		high := req
-		high.Effort = "high"
-		if _, err := a.Chat(context.Background(), high); err != nil || thinking(n+1) != nil {
-			t.Fatalf("%s high keeps the model's own thinking: %v %v", c.model, err, rec.bodies[n+1])
-		}
 	}
 }
 

@@ -23,7 +23,7 @@ func TestMessageVectorDoctorShowsMixedAndShortProviderWidthWaits(t *testing.T) {
 	t.Setenv("MASAMONG_OPENROUTER_KEY", "synthetic-test-key")
 	applyDoc(t, svc, func(d *config.Document) {
 		m := d.Models["embed"]
-		m.Model, m.Dimensions = "gemini-embedding-2", 1024
+		m.Model, m.Dimensions = "baai/bge-m3", 1024
 		d.Models["embed"] = m
 	})
 	eng, err := svc.MemoryEngine()
@@ -213,7 +213,7 @@ func TestMessageVectorTruncationUsesTheMRLCatalog(t *testing.T) {
 	}
 	applyDoc(t, svc, func(d *config.Document) {
 		m := d.Models["embed"]
-		m.Model, m.Dimensions = "gemini-embedding-2", 0
+		m.Model, m.Dimensions = "baai/bge-m3", 0
 		d.Models["embed"] = m
 	})
 	nonMRL, err := svc.MemoryEngine()
@@ -230,7 +230,7 @@ func TestMessageVectorNonMRLExplicitDimensionsAreWired(t *testing.T) {
 	for _, dims := range []int{256, 1024, 4096} {
 		applyDoc(t, svc, func(d *config.Document) {
 			m := d.Models["embed"]
-			m.Model, m.Dimensions = "gemini-embedding-2", dims
+			m.Model, m.Dimensions = "baai/bge-m3", dims
 			d.Models["embed"] = m
 		})
 		eng, err := svc.MemoryEngine()
@@ -244,7 +244,7 @@ func TestMessageVectorNonMRLExplicitDimensionsAreWired(t *testing.T) {
 		if eng.Models.EmbedTruncatable || eng.Models.EmbedDims != want || eng.MessageVectorDims() != want {
 			t.Fatalf("non-MRL leaf and message dimensions must agree: want=%d leaf=%d message=%d", want, eng.Models.EmbedDims, eng.MessageVectorDims())
 		}
-		if dims == 4096 && (eng.EmbedSpace() != "gemini-embedding-2:0:l2" || eng.MessageSpace() != "") {
+		if dims == 4096 && (eng.EmbedSpace() != "baai/bge-m3:0:l2" || eng.MessageSpace() != "") {
 			t.Fatal("explicit 4096 must preserve the legacy full-width leaf space and wait for actual message width")
 		}
 	}

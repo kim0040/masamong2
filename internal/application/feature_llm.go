@@ -1,6 +1,7 @@
 package application
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"strings"
@@ -39,19 +40,30 @@ func (s *Service) featureText(ctx context.Context, role, kind, system, prompt st
 	}
 	msgs = append(msgs, openai.Message{Role: "user", Content: prompt})
 	t := temperature
-	// the summary role does extraction and short write-ups under a tight token cap: a thinking model spends
-	// that cap on reasoning and hands back cut JSON (postmortem 0005), so it is asked not to think
-	effort := "low"
-	if role == "summary" { // the job decides, not the model it falls back to
+	// the role's effort (config.Model.Effort), else low. The summary role does extraction and short
+	// write-ups under a tight token cap: a thinking model spends that cap on reasoning and hands back cut
+	// JSON (postmortem 0005), so it is a Quick call, asked not to think unless models.summary.effort is
+	// set. A fortune is a short write-up under a 700–1800 token cap: thinking spent most of it and cut the
+	// reading off mid-sentence (ops 2026-10-14: 3 of 5 ended at finish_reason=length), so it is one too.
+	effort := cmp.Or(m.Effort, "low")
+	quick := role == "summary" || kind == "fortune"
+	if quick {
 		effort = "none"
-	}
-	if kind == "fortune" {
-		// a fortune is a short write-up under a 700–1800 token cap: thinking spent most of it and cut the
-		// reading off mid-sentence (ops 2026-10-14: 3 of 5 ended at finish_reason=length)
-		effort = "none"
+		// the job decides, not the model it falls back to: a summary on the response model thinks only
+		// when the summary role's own effort is set, and so do that model's fallbacks unless one has an
+		// effort of its own (models.<role>.fallbacks[].effort)
+		job := quickEffort(role, doc.Models[role].Effort)
+		a.RoleEffort = job
+		if f := a.Failover; f != nil {
+			for _, fb := range f.Fallbacks {
+				if fb.Effort == "" && fb.A != nil {
+					fb.A.RoleEffort = job
+				}
+			}
+		}
 	}
 	began := time.Now()
-	res, err := a.Chat(ctx, openai.ChatRequest{Model: m.Model, Messages: msgs, MaxTokens: maxTokens, Temperature: &t, Effort: effort})
+	res, err := a.Chat(ctx, openai.ChatRequest{Model: m.Model, Messages: msgs, MaxTokens: maxTokens, Temperature: &t, Effort: effort, Quick: quick})
 	cost := 0.0
 	if res.CostUSD != nil {
 		cost = *res.CostUSD

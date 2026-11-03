@@ -34,10 +34,13 @@ type Models struct {
 	Embed            string
 	EmbedDims        int  // 0 = model default; smaller keeps the first dims (MRL)
 	EmbedTruncatable bool // the model is listed as Matryoshka/MRL and may be cut safely
-	Rerank           string
-	Summary          string
-	Response         string
-	Planner          string
+	// EmbedKeepsMessageWidth: an MRL model listed late (openai.EmbedKeepsMessageWidth), whose message
+	// vectors an install may already hold at its leaf width; that width stays (keptMessageWidth)
+	EmbedKeepsMessageWidth bool
+	Rerank                 string
+	Summary                string
+	Response               string
+	Planner                string
 }
 
 // Settings are the runtime knobs (config.yaml `memory`).
@@ -97,10 +100,14 @@ type Engine struct {
 	leafReturnDims                             atomic.Int64
 	messageWidthMu                             sync.Mutex
 	messageShortExpected, messageShortReturned int
-	qmu                                        sync.Mutex
-	qcache                                     map[string][]float32
-	qorder                                     []string
-	dirtyRoom                                  sync.Map
+	// keptMessageDims is the message width an installation already stored for an MRL model under another
+	// rule (keptMessageWidth), once read: 0 none; keptMessageRead marks it read (under messageWidthMu)
+	keptMessageDims int
+	keptMessageRead bool
+	qmu             sync.Mutex
+	qcache          map[string][]float32
+	qorder          []string
+	dirtyRoom       sync.Map
 	// OnDirty, when set, is called once when a captured message queues a room that was not waiting
 	// yet, so the queue can outlive the process (set it before the engine is shared).
 	OnDirty func(room string)
@@ -944,6 +951,10 @@ func (r reranker) Rerank(ctx context.Context, q string, docs []string, topN int)
 		r.e.recordCall(ctx, "rerank", r.e.Models.Rerank, r.e.CallProviders.Rerank, eCost, 0.0005, latency, tokens, 0, 0, err)
 	}
 	if err != nil {
+		if res.CostUSD != nil {
+			// a rerank in parts whose later part failed: the parts that answered were billed
+			r.e.spend("rerank", res.CostUSD, 0)
+		}
 		return search.RerankResult{}, err
 	}
 	r.e.spend("rerank", res.CostUSD, 0.0005)

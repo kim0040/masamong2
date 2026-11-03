@@ -1775,7 +1775,15 @@ func (e *Engine) applySummaries(_ context.Context, plan *BatchPlan, g *BatchGrou
 			} else {
 				allRefused = false
 			}
-			acct.call(e, "summary", plan.SummaryModel, g.Provider.ID, nil, 0, 0, 0, 0, 0, err)
+			if res := o.Chat; res != nil {
+				// an answer that is still an error (the model declined: stop_reason refusal) was billed
+				acct.call(e, "summary", plan.SummaryModel, g.Provider.ID, res.CostUSD, 0, res.Elapsed,
+					res.PromptTokens, res.CompletionTokens, res.CachedTokens, err)
+				acct.spend("summary", res.CostUSD, 0)
+				out.SpentUSD += costOf(res.CostUSD, 0)
+			} else {
+				acct.call(e, "summary", plan.SummaryModel, g.Provider.ID, nil, 0, 0, 0, 0, 0, err)
+			}
 			out.Failed++
 			continue
 		}

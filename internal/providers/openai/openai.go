@@ -10,7 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -41,7 +43,6 @@ type Adapter struct {
 	// Price remains the conservative fallback for callers that do not provide request context.
 	ContextPrice ContextPricer
 
-	shapes sync.Map // model → shape: optional request fields that model refused (shape.go)
 	// shapeSeen marks models whose plain chat request (no tools) succeeded once, so their shape is known
 	// even when it refused nothing (ShapeLearned); model → true
 	shapeSeen sync.Map
@@ -62,6 +63,14 @@ type Adapter struct {
 	// checks or model lists): the operator's daily call limit for this provider. Its error ends the
 	// call; with a Failover the next model is asked.
 	Gate func() error
+	// Caps keeps what model lists said about the models' reasoning (caps.go). The application shares one
+	// per provider across the adapters it builds; nil makes one for this adapter on first use.
+	Caps     *CapsCache
+	capsOnce sync.Once
+	// RoleEffort is the effort configured for the role this adapter serves (models.<role>.effort, or a
+	// fallback's own effort); "" when none is set. A Quick request (a call the code makes thinking-free on
+	// purpose) asks for "none" unless this is set, and then asks for this level with room for the thinking.
+	RoleEffort string
 }
 
 func (a *Adapter) gate() error {
@@ -95,6 +104,15 @@ func (a *Adapter) estimateCached(cost **float64, estimated *bool, model string, 
 }
 
 func (a *Adapter) estimateCachedAt(cost **float64, estimated *bool, model string, in, cached, out int, at time.Time) {
+	a.estimateWrittenAt(cost, estimated, model, in, cached, 0, out, at)
+}
+
+// cacheWriteFactor is the price of an input token written to the prompt cache as a share of the input
+// price (Anthropic's five-minute cache write: 1.25×). Only Anthropic reports such tokens.
+const cacheWriteFactor = 1.25
+
+// estimateWrittenAt is estimateCachedAt with written of the in tokens written to the prompt cache.
+func (a *Adapter) estimateWrittenAt(cost **float64, estimated *bool, model string, in, cached, written, out int, at time.Time) {
 	if *cost != nil || (a.Price == nil && a.ContextPrice == nil) || in+out == 0 {
 		return
 	}
@@ -120,7 +138,8 @@ func (a *Adapter) estimateCachedAt(cost **float64, estimated *bool, model string
 		pc = pin
 	}
 	cached = min(max(cached, 0), in)
-	v := float64(in-cached)*pin + float64(cached)*pc + float64(out)*pout
+	written = min(max(written, 0), in-cached)
+	v := float64(in-cached-written)*pin + float64(cached)*pc + float64(written)*pin*cacheWriteFactor + float64(out)*pout
 	*cost, *estimated = &v, true
 }
 
@@ -163,7 +182,21 @@ type Model struct {
 	// ImageInput is whether the host's list says the model reads pictures (OpenRouter's
 	// architecture.input_modalities holds "image"); nil when the list does not say (name-based lists).
 	ImageInput *bool
-	Overrides  []PricingOverride
+	// Reasoning, Efforts and Thinking are what the list says about the model's reasoning (caps.go): whether
+	// it thinks, the effort levels it takes, and (Anthropic) the thinking types it takes, which say how
+	// thinking is turned off. nil when the list does not say.
+	Reasoning *bool
+	Efforts   []string
+	Thinking  []string
+	Overrides []PricingOverride
+	// paramsNoReasoning marks a Reasoning false read from a supported_parameters list without a
+	// reasoning parameter (OpenRouter's way of saying so; ListModels keeps it for OpenRouter only)
+	paramsNoReasoning bool
+	// ignoredPrices are override price names this code does not know, skipped (pricingOverrides)
+	ignoredPrices []string
+	// PriceUntil is when the listed price stops applying (OpenGateway's pricing.until: a scheduled
+	// promotion, its next price taking over); zero when the list gives no end
+	PriceUntil time.Time
 }
 
 // PricingOverride is one OpenRouter conditional rate entry. A missing price inherits the base rate.
@@ -211,20 +244,44 @@ func (a *Adapter) ListModels(ctx context.Context) ([]Model, error) {
 	if !a.Configured() {
 		return nil, providers.ErrNoCredential
 	}
-	url := a.BaseURL + "/models"
+	url, headers := a.BaseURL+"/models", a.headers()
 	switch a.API {
 	case APIOpenRouter:
 		url += "?output_modalities=all" // embedding and rerank models are listed only with this
 	case APICompatible:
-		url += "?detailed=true" // NanoGPT lists prices only then; other hosts ignore the parameter
+		url += "?detailed=true" // NanoGPT lists prices (and capabilities) only then; other hosts ignore it
 	case APIAnthropic:
-		url += "?limit=1000" // its list comes in pages of 20 by default
+		url, headers = a.anthropicBase()+"/models?limit=1000", a.anthropicHeaders() // pages of 20 by default
 	}
-	resp, err := a.Client.Get(ctx, url, a.headers())
+	resp, err := a.Client.Get(ctx, url, headers)
 	if err != nil {
-		return nil, mapErr(err, resp)
+		err = mapErr(err, resp)
+		if a.API == APIAnthropic && listRouteMissing(err, resp, a.BaseURL) {
+			return nil, fmt.Errorf("%w: %v", ErrNoModelList, err)
+		}
+		return nil, err
 	}
 	models, err := ParseModels(resp.ContentType, resp.Body)
+	if err != nil && a.API == APIAnthropic && noModelList(err) {
+		return nil, fmt.Errorf("%w: %v", ErrNoModelList, err)
+	}
+	if a.API != APIOpenRouter {
+		for i := range models {
+			if models[i].paramsNoReasoning {
+				// a parameter list without "reasoning" says "does not think" on OpenRouter only: another host
+				// may name the field otherwise (reasoning_effort), and unknown stays unknown
+				models[i].Reasoning = nil
+			}
+		}
+	}
+	for _, m := range models {
+		a.caps().Put(a.API.trimModelID(m.ID), m.Caps())
+		for _, k := range m.ignoredPrices {
+			if a.caps().note("price\x00"+m.ID+"\x00"+k) && a.Client != nil && a.Client.Log != nil {
+				a.Client.Log.Warn("model list: an unknown price in a pricing override is ignored", "model", m.ID, "key", k)
+			}
+		}
+	}
 	if err != nil || a.API == APIOpenRouter {
 		return models, err
 	}
@@ -369,6 +426,10 @@ func ParseModels(contentType string, body []byte) ([]Model, error) {
 		if id == "" {
 			continue
 		}
+		// OpenGateway lists models it no longer serves too (status active|deprecated|inactive|retired)
+		if st := decode.Str(it["status"]); st == "inactive" || st == "retired" {
+			continue
+		}
 		m := Model{ID: id, Name: decode.Str(it["name"]), Kind: "unknown"}
 		if m.Name == "" {
 			m.Name = decode.Str(it["display_name"]) // Gemini
@@ -380,6 +441,8 @@ func ParseModels(contentType string, body []byte) ([]Model, error) {
 			m.ContextLength = int(n)
 		} else if n, ok := decode.Number(it["max_input_tokens"]); ok {
 			m.ContextLength = int(n) // Anthropic
+		} else if n, ok := decode.Number(it["context_window"]); ok {
+			m.ContextLength = int(n) // OpenGateway
 		}
 		if p, ok := it["pricing"]; ok {
 			var pr map[string]json.RawMessage
@@ -387,7 +450,8 @@ func ParseModels(contentType string, body []byte) ([]Model, error) {
 				m.PromptPrice = priceStr(pr["prompt"])
 				m.CompletionPrice = priceStr(pr["completion"])
 				m.CachedPrice = priceStr(pr["input_cache_read"])
-				m.Overrides = parsePricingOverrides(pr["overrides"])
+				m.Overrides, m.ignoredPrices = pricingOverrides(pr["overrides"])
+				m.PriceUntil = listedTime(pr["until"])
 				// NanoGPT's detailed list: numbers per million tokens, {"unit":"per_million_tokens"}
 				if strings.Contains(strings.ToLower(decode.Str(pr["unit"])), "million") {
 					m.PromptPrice, m.CompletionPrice = perToken(m.PromptPrice), perToken(m.CompletionPrice)
@@ -423,6 +487,19 @@ func ParseModels(contentType string, body []byte) ([]Model, error) {
 				}
 			}
 		}
+		if md, ok := it["modalities"]; ok && it["architecture"] == nil { // OpenGateway: {input, output}
+			var mods struct {
+				Input  []string `json:"input"`
+				Output []string `json:"output"`
+			}
+			if json.Unmarshal(md, &mods) == nil {
+				m.ImageOutput = slices.Contains(mods.Output, "image")
+				if mods.Input != nil {
+					has := slices.Contains(mods.Input, "image")
+					m.ImageInput = &has
+				}
+			}
+		}
 		if sp, ok := it["supported_parameters"]; ok {
 			var params []string
 			if json.Unmarshal(sp, &params) == nil {
@@ -430,6 +507,7 @@ func ParseModels(contentType string, body []byte) ([]Model, error) {
 				m.SupportsTools = &has
 			}
 		}
+		parseCaps(it, &m)
 		arch := decode.Str(it["object"])
 		if strings.Contains(id, "embed") {
 			m.Kind = "embedding"
@@ -441,6 +519,23 @@ func ParseModels(contentType string, body []byte) ([]Model, error) {
 		out = append(out, m)
 	}
 	return out, nil
+}
+
+// listedTime reads a list's point in time: an RFC 3339 string or Unix seconds (milliseconds when that
+// large); zero when absent or unreadable.
+func listedTime(raw json.RawMessage) time.Time {
+	if s := decode.Str(raw); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			return t
+		}
+	}
+	if n, ok := decode.Number(raw); ok && n > 0 {
+		if n > 1e12 {
+			return time.UnixMilli(int64(n))
+		}
+		return time.Unix(int64(n), 0)
+	}
+	return time.Time{}
 }
 
 // perToken turns a price per million tokens into one per token ("" stays unknown).
@@ -460,29 +555,81 @@ func priceStr(raw json.RawMessage) string {
 	return s
 }
 
+// otherPrices are the override keys that are another price, not a condition (OpenRouter's pricing
+// object; input_cache_write_1h, audio and input_audio_cache seen live 2026-11-03). They are ignored.
+var otherPrices = map[string]bool{
+	"request": true, "image": true, "image_token": true, "input_image": true, "web_search": true, "internal_reasoning": true,
+	"input_cache_write_5m": true, "input_cache_write_1h": true, "audio": true, "input_audio_cache": true, "output_audio": true,
+}
+
+// extraPrice reports an override key that is another price this code does not use: a decimal string
+// under a name otherPrices lists.
+func extraPrice(key string, value json.RawMessage) bool {
+	return otherPrices[key] && decimalValue(value)
+}
+
+// decimalValue reports a value that reads as a price: a non-negative decimal, as a string or a number.
+func decimalValue(value json.RawMessage) bool {
+	s := decode.Str(value)
+	if s == "" {
+		s = strings.TrimSpace(string(value))
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	return err == nil && f >= 0 && !math.IsInf(f, 0)
+}
+
+// priceName reports an override key named like a price (prompt_audio, input_cache_write_1h, web_fetch,
+// a *_price or *_cost): an unknown one with a decimal value is skipped and its entry kept. Any other
+// unknown key drops the entry: a threshold (context_over, above_tokens "200000"), a tier or an hour read
+// as a price, or skipped, would make the entry apply to every request.
+func priceName(key string) bool {
+	if strings.Contains(key, "price") || strings.Contains(key, "cost") {
+		return true
+	}
+	for _, p := range []string{"input_", "output_", "cache", "audio", "image", "web_", "internal_", "request", "prompt_", "completion_"} {
+		if strings.HasPrefix(key, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func parsePricingOverrides(raw json.RawMessage) []PricingOverride {
+	out, _ := pricingOverrides(raw)
+	return out
+}
+
+// pricingOverrides reads a pricing.overrides list. Each entry's keys are the conditions it applies under
+// and the prices it sets. A condition this code does not know drops the entry. A key named like a price
+// (priceName), with a decimal value, is a price this code does not use (OpenRouter adds price names, input_cache_write_1h
+// and audio among them): it is skipped, the entry kept, and its name returned in ignored (logged once
+// per model by ListModels), so a surcharge entry is not lost for one new price name.
+func pricingOverrides(raw json.RawMessage) (out []PricingOverride, ignored []string) {
 	if len(raw) == 0 || string(raw) == "null" {
-		return nil
+		return nil, nil
 	}
 	var entries []json.RawMessage
 	if json.Unmarshal(raw, &entries) != nil {
-		return nil
+		return nil, nil
 	}
 	known := map[string]bool{
 		"min_prompt_tokens": true, "utc_start": true, "utc_end": true, "utc_days": true,
 		"prompt": true, "completion": true, "input_cache_read": true, "input_cache_write": true, "image_output": true,
 	}
-	var out []PricingOverride
 	for _, entry := range entries {
 		var fields map[string]json.RawMessage
 		if json.Unmarshal(entry, &fields) != nil || fields == nil {
 			continue
 		}
 		valid := true
-		for key := range fields {
-			if !known[key] {
+		var skipped []string
+		for key, value := range fields {
+			switch {
+			case known[key] || extraPrice(key, value):
+			case priceName(key) && decimalValue(value):
+				skipped = append(skipped, key)
+			default:
 				valid = false // unknown condition fields must not make an override apply too broadly.
-				break
 			}
 		}
 		if !valid {
@@ -541,9 +688,15 @@ func parsePricingOverrides(raw json.RawMessage) []PricingOverride {
 		}
 		if valid {
 			out = append(out, override)
+			for _, k := range skipped {
+				if !slices.Contains(ignored, k) {
+					ignored = append(ignored, k)
+				}
+			}
 		}
 	}
-	return out
+	sort.Strings(ignored)
+	return out, ignored
 }
 
 func validHHMM(value int) bool {
@@ -580,6 +733,15 @@ type ChatRequest struct {
 	// stop, or none sent) is an answer, not a failure for a fallback to retry. A tool round is one: the model needs
 	// no more tools, and the reply is written by another call.
 	EmptyOK bool
+	// Quick marks a call the code makes thinking-free on purpose (a classifier of tens of tokens, a
+	// one-line summary): Effort should be "none". When the role behind the adapter has an effort of its
+	// own (Adapter.RoleEffort), that level is asked instead, with output room for the thinking.
+	Quick bool
+	// thinkRoom adds thinkingHeadroom to the output limit (a Quick call asked to think)
+	thinkRoom bool
+	// bareToolTurn (Anthropic) marks a request whose last assistant turn calls a tool without a thinking
+	// block (one stripped after a failover, or an answer of another host): see anthropicThinking
+	bareToolTurn bool
 }
 
 type ChatResult struct {
@@ -591,7 +753,13 @@ type ChatResult struct {
 	// CachedTokens is the part of PromptTokens the host served from its prompt cache
 	// (usage.prompt_tokens_details.cached_tokens; DeepSeek: usage.prompt_cache_hit_tokens)
 	CachedTokens int
-	Elapsed      time.Duration
+	// CacheWriteTokens is the part of PromptTokens written to the prompt cache (Anthropic
+	// cache_creation_input_tokens), billed above the input price
+	CacheWriteTokens int
+	// ReasoningTokens is the part of CompletionTokens spent thinking, when the host says
+	// (Anthropic output_tokens_details.thinking_tokens)
+	ReasoningTokens int
+	Elapsed         time.Duration
 	// CostUSD is the provider-reported usage.cost (OpenRouter), else tokens × Price; nil when neither is known.
 	CostUSD       *float64
 	CostEstimated bool
@@ -602,6 +770,10 @@ type ChatResult struct {
 	// continue a tool loop: provider-only fields (DeepSeek reasoning_content, Gemini thought signatures)
 	// must come back unchanged.
 	Message json.RawMessage
+	// ThinkingBound is true for an answer of an Anthropic-format host (a fallback's included): the thinking
+	// blocks it carries are valid in a later request only while the system prompt and the tools offered
+	// stay as they were sent (BindsThinking)
+	ThinkingBound bool
 	// Provider is the config provider that answered and Fallback is true when it was a fallback; both
 	// are set only when the adapter has a Failover. Attempts lists every model asked, in order.
 	Provider string
@@ -633,11 +805,12 @@ func (a *Adapter) chat(ctx context.Context, req ChatRequest) (ChatResult, error)
 	if hasImages(req) && a.VisionUnsupported(req.Model) {
 		return ChatResult{}, fmt.Errorf("%w: %s", ErrVisionUnsupported, req.Model)
 	}
+	req = a.resolveQuick(req)
 	out, err := a.chatOnce(ctx, req, true)
 	if err != nil || !thoughtAway(out) || req.MaxTokens == 1 { // a 1-token probe (ProbeChat) wants no answer
 		return out, err
 	}
-	// on Anthropic every level up to "low" already went out with thinking off (shape.go)
+	// on Anthropic "minimal" already went out with thinking off, as "none" does (anthropic.go)
 	if req.Effort != "none" && !(a.API == APIAnthropic && thinkingOff(req.Effort)) {
 		// A reasoning model can spend the whole output budget thinking and return no text (DeepSeek V4.1
 		// Flash thinks 120+ tokens at "low"). Ask once more without thinking; both calls are charged.
@@ -661,14 +834,12 @@ func (a *Adapter) chat(ctx context.Context, req ChatRequest) (ChatResult, error)
 	// field. Ask once more with room past the thinking, and keep the room for the model's later calls.
 	// The room is kept only when it helped, so a model that answers empty for another reason keeps the
 	// output limit its callers asked for.
-	sh := a.shapeOf(req)
-	sh.Headroom = true
-	a.shapes.Store(shapeKey(req), sh)
-	next, err := a.chatOnce(ctx, req, false)
-	if err != nil || thoughtAway(next) {
-		sh = a.shapeOf(req)
-		sh.Headroom = false
-		a.shapes.Store(shapeKey(req), sh)
+	_, gen := a.shapeAt(req)
+	roomy := req
+	roomy.thinkRoom = true // the room Headroom gives
+	next, err := a.chatOnce(ctx, roomy, false)
+	if err == nil && !thoughtAway(next) {
+		a.caps().updateShape(shapeKey(req), gen, func(old shape) shape { old.Headroom = true; return old })
 	}
 	if err != nil {
 		out.Elapsed += next.Elapsed
@@ -677,11 +848,28 @@ func (a *Adapter) chat(ctx context.Context, req ChatRequest) (ChatResult, error)
 	return addUsage(next, out), nil
 }
 
+// resolveQuick applies the effort precedence to a Quick request: "none", unless the role this adapter
+// serves has an explicit effort (RoleEffort), which then applies with output room for the thinking.
+// Every other request keeps the effort its caller set (the role's, else "low").
+func (a *Adapter) resolveQuick(req ChatRequest) ChatRequest {
+	if !req.Quick {
+		return req
+	}
+	req.Effort = "none"
+	if a.RoleEffort != "" {
+		req.Effort = a.RoleEffort
+	}
+	req.thinkRoom = !thinkingOff(req.Effort) && req.MaxTokens > 0
+	return req
+}
+
 // addUsage is next with out's tokens, time and cost added: both calls are charged.
 func addUsage(next, out ChatResult) ChatResult {
 	next.PromptTokens += out.PromptTokens
 	next.CompletionTokens += out.CompletionTokens
 	next.CachedTokens += out.CachedTokens
+	next.CacheWriteTokens += out.CacheWriteTokens
+	next.ReasoningTokens += out.ReasoningTokens
 	next.Elapsed += out.Elapsed
 	next.CostEstimated = next.CostEstimated || out.CostEstimated
 	if out.CostUSD != nil {
@@ -700,10 +888,19 @@ func (a *Adapter) chatOnce(ctx context.Context, req ChatRequest, learn bool) (Ch
 	if err != nil {
 		return ChatResult{}, err
 	}
-	out, err := ParseChat(resp.ContentType, resp.Body)
+	parse := ParseChat
+	if a.API == APIAnthropic {
+		parse = ParseAnthropicChat
+	}
+	out, err := parse(resp.ContentType, resp.Body)
 	out.Elapsed = resp.Elapsed
-	if err == nil {
-		a.estimateCachedAt(&out.CostUSD, &out.CostEstimated, req.Model, out.PromptTokens, out.CachedTokens, out.CompletionTokens, requestedAt)
+	if a.API == APIAnthropic && len(out.Message) > 0 {
+		out.Message = withOrigin(out.Message, a.thinkingOrigin(req.Model))
+		out.ThinkingBound = true
+	}
+	// a refused answer or a provider's failure inside a 200 answer is still billed
+	if err == nil || errors.Is(err, ErrRefused) || out.PromptTokens+out.CompletionTokens > 0 {
+		a.estimateWrittenAt(&out.CostUSD, &out.CostEstimated, req.Model, out.PromptTokens, out.CachedTokens, out.CacheWriteTokens, out.CompletionTokens, requestedAt)
 	}
 	return out, err
 }
@@ -727,6 +924,7 @@ func ParseChat(contentType string, body []byte) (ChatResult, error) {
 	var choices []struct {
 		Message      json.RawMessage `json:"message"`
 		FinishReason string          `json:"finish_reason"`
+		Error        json.RawMessage `json:"error"`
 	}
 	if err := json.Unmarshal(obj["choices"], &choices); err != nil || len(choices) == 0 {
 		return ChatResult{}, fmt.Errorf("%w: choices missing", decode.ErrUnexpected)
@@ -781,7 +979,22 @@ func ParseChat(contentType string, body []byte) (ChatResult, error) {
 			out.CostUSD = usageCost(usage)
 		}
 	}
+	// OpenRouter: "the error is embedded in the final response alongside any partial content" with
+	// finish_reason "error" when the provider failed mid-answer. That is the provider's failure, not a
+	// cut answer: it goes to the fallback, its tokens still counted.
+	if e := choices[0].Error; choiceError(e) {
+		return out, apiError(e, 0)
+	}
+	if out.FinishReason == "error" {
+		return out, &APIError{Type: "provider_error", Message: "the provider stopped the answer (finish_reason=error)"}
+	}
 	return out, nil
+}
+
+// choiceError reports a choice-level error with something in it (null and {} are no error).
+func choiceError(raw json.RawMessage) bool {
+	var e map[string]json.RawMessage
+	return len(raw) > 0 && json.Unmarshal(raw, &e) == nil && len(e) > 0
 }
 
 // cachedTokens reads the prompt-cache hits: OpenAI, OpenRouter and Gemini's OpenAI endpoint report
@@ -845,7 +1058,7 @@ func (a *Adapter) Embed(ctx context.Context, model string, inputs []string) (Emb
 	}
 	requestedAt := time.Now()
 	body, _ := json.Marshal(map[string]any{"model": model, "input": inputs})
-	resp, err := a.Client.PostJSON(ctx, a.BaseURL+"/embeddings", a.headers(), body)
+	resp, err := a.Client.PostJSON(final(ctx), a.BaseURL+"/embeddings", a.headers(), body)
 	if err != nil {
 		return EmbedResult{}, mapErr(err, resp)
 	}
@@ -1002,9 +1215,61 @@ func (a *Adapter) Rerank(ctx context.Context, model, query string, docs []string
 	if model == "" || strings.TrimSpace(query) == "" || len(docs) == 0 || topN < 1 || topN > len(docs) {
 		return RerankResult{}, fmt.Errorf("openai: bad rerank request")
 	}
+	h, _ := HostByURL(a.BaseURL)
+	limit := h.RerankMaxDocs
+	if limit <= 0 || len(docs) <= limit {
+		out, err := a.rerankOnce(ctx, model, query, docs, topN)
+		h.normalize(out.Scores)
+		return out, err
+	}
+	// more documents than the host takes in one call: rerank them in parts and keep the best topN of
+	// all (the scores of one model are comparable across calls). A part that fails ends the call, and
+	// what the parts before it spent (billed calls) comes back with the error: cost, tokens and time,
+	// without a ranking.
+	var all RerankResult
+	for start := 0; start < len(docs); start += limit {
+		part := docs[start:min(start+limit, len(docs))]
+		res, err := a.rerankOnce(ctx, model, query, part, min(topN, len(part)))
+		if err != nil {
+			spent := all
+			spent.Indices, spent.Scores = nil, nil
+			spent.Elapsed += res.Elapsed
+			return spent, err
+		}
+		for i, idx := range res.Indices {
+			all.Indices = append(all.Indices, start+idx)
+			all.Scores = append(all.Scores, res.Scores[i])
+		}
+		all.Model, all.Elapsed, all.TotalTokens = res.Model, all.Elapsed+res.Elapsed, all.TotalTokens+res.TotalTokens
+		all.CostEstimated = all.CostEstimated || res.CostEstimated
+		if res.CostUSD != nil {
+			c := *res.CostUSD
+			if all.CostUSD != nil {
+				c += *all.CostUSD
+			}
+			all.CostUSD = &c
+		}
+	}
+	order := make([]int, len(all.Indices))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(x, y int) bool { return all.Scores[order[x]] > all.Scores[order[y]] })
+	out := all
+	out.Indices, out.Scores = nil, nil
+	for _, i := range order[:min(topN, len(order))] {
+		out.Indices = append(out.Indices, all.Indices[i])
+		out.Scores = append(out.Scores, all.Scores[i])
+	}
+	h.normalize(out.Scores)
+	return out, nil
+}
+
+// rerankOnce is one /rerank call.
+func (a *Adapter) rerankOnce(ctx context.Context, model, query string, docs []string, topN int) (RerankResult, error) {
 	requestedAt := time.Now()
 	body, _ := json.Marshal(map[string]any{"model": model, "query": query, "documents": docs, "top_n": topN})
-	resp, err := a.Client.PostJSON(ctx, a.BaseURL+"/rerank", a.headers(), body)
+	resp, err := a.Client.PostJSON(final(ctx), a.BaseURL+"/rerank", a.headers(), body)
 	if err != nil {
 		return RerankResult{}, mapErr(err, resp)
 	}
@@ -1057,6 +1322,11 @@ type APIError struct {
 	// BYOK: OpenRouter ran the request on the operator's own provider key (error.metadata.is_byok),
 	// so a refusal is about that key, not the OpenRouter one.
 	BYOK bool
+	// LimitSource is OpenRouter's error.metadata.limit_source on a 403 a budget blocked
+	// (openrouter_key_limit, openrouter_workspace_budget, openrouter_guardrail_budget): class Quota
+	LimitSource string
+	// MetaType is OpenRouter's error.metadata.error_type (content_policy_violation, refusal, …)
+	MetaType string
 }
 
 func (e *APIError) Error() string {
@@ -1071,8 +1341,13 @@ func apiError(raw json.RawMessage, status int) error {
 		Status  json.RawMessage `json:"status"` // Google: "INVALID_ARGUMENT"; NanoGPT: 401
 		Code    json.RawMessage `json:"code"`
 		Meta    struct {
-			BYOK bool `json:"is_byok"`
+			BYOK        bool   `json:"is_byok"`
+			LimitSource string `json:"limit_source"`
+			ErrorType   string `json:"error_type"`
 		} `json:"metadata"`
+		// Anthropic's error.details {error_code} (enforced_spend_limit_reached on the monthly cap's 429);
+		// Google's details are a list
+		Details json.RawMessage `json:"details"`
 	}
 	if json.Unmarshal(raw, &e) != nil {
 		var s string
@@ -1084,7 +1359,15 @@ func apiError(raw json.RawMessage, status int) error {
 	if st := decode.Str(e.Status); e.Type == "" && st != "" && (st[0] < '0' || st[0] > '9') {
 		e.Type = st
 	}
-	return &APIError{Status: status, Type: e.Type, Code: decode.Str(e.Code), Message: e.Message, BYOK: e.Meta.BYOK}
+	code := decode.Str(e.Code)
+	var details struct {
+		ErrorCode string `json:"error_code"`
+	}
+	if code == "" && json.Unmarshal(e.Details, &details) == nil {
+		code = details.ErrorCode
+	}
+	return &APIError{Status: status, Type: e.Type, Code: code, Message: e.Message, BYOK: e.Meta.BYOK,
+		LimitSource: e.Meta.LimitSource, MetaType: e.Meta.ErrorType}
 }
 
 // errorField finds the error object in a failed response: {"error":{...}} or, from Gemini's
@@ -1108,6 +1391,13 @@ func errorField(contentType string, body []byte) (json.RawMessage, bool) {
 // rejectedKey reports a refused credential. Most hosts answer 401/403; Gemini answers 400 with
 // "API key not valid" / "Please pass a valid API key".
 func rejectedKey(status int, e *APIError) bool {
+	if status == 403 && e != nil {
+		// a 403 is not always the key: a spent budget (Quota) or a content filter (about this request)
+		// must not rest the provider as a refused key
+		if c := classify(e); c == errclass.Quota || c == errclass.Empty {
+			return false
+		}
+	}
 	if status == 401 || status == 403 {
 		return true
 	}
@@ -1117,6 +1407,51 @@ func rejectedKey(status int, e *APIError) bool {
 	m := strings.ToLower(e.Message + " " + e.Code)
 	return strings.Contains(m, "api key") || strings.Contains(m, "api_key_invalid")
 }
+
+// finalAnswer is the client's test for a 429 or 5xx answer no retry can change (providers.WithFinal): a
+// used-up balance or spending cap (class Quota: OpenAI credit_balance_exhausted, NanoGPT
+// api_key_usd_limit, OpenGateway budget_exceeded, …) or a model the host cannot route (NotFound:
+// CometAPI's 503 model_not_found). Retrying those only spent two more calls.
+func finalAnswer(status int, body []byte) bool {
+	raw, ok := errorField("application/json", body)
+	if !ok {
+		return false
+	}
+	ae, _ := apiError(raw, status).(*APIError)
+	if ae == nil {
+		return false
+	}
+	if shortRetry(body) {
+		return false
+	}
+	c := classify(ae)
+	return c == errclass.Quota || c == errclass.NotFound || c == errclass.Auth
+}
+
+// retryHint finds a wait an error body names: Gemini's RetryInfo "retryDelay": "41s" and its message
+// "Please retry in 41.6s" (or 300ms).
+var retryHint = regexp.MustCompile(`(?i)(?:"retryDelay"\s*:\s*"|retry in )(\d+(?:\.\d+)?)(ms|s)\b`)
+
+// shortRetry reports a body that asks for a retry soon: a per-minute limit, or a named wait of two
+// minutes or less. Gemini words its per-minute 429 as "You exceeded your current quota" (class Quota),
+// and that one must still be retried.
+func shortRetry(body []byte) bool {
+	m := strings.ToLower(string(body))
+	if strings.Contains(m, "perminute") || strings.Contains(m, "per_minute") || strings.Contains(m, "per minute") {
+		return true
+	}
+	if g := retryHint.FindSubmatch(body); g != nil {
+		n, err := strconv.ParseFloat(string(g[1]), 64)
+		if err == nil && strings.EqualFold(string(g[2]), "ms") {
+			n /= 1000
+		}
+		return err == nil && n <= 120
+	}
+	return false
+}
+
+// final marks ctx so the client does not retry a lasting answer (finalAnswer).
+func final(ctx context.Context) context.Context { return providers.WithFinal(ctx, finalAnswer) }
 
 func mapErr(err error, resp *providers.Response) error {
 	var pe *providers.Error

@@ -777,9 +777,21 @@ type Model struct {
 	// asked (planner and response only; 0 = 30 s for the planner, 90 s for the answer). Raise it for a
 	// model that thinks before it answers.
 	TimeoutSeconds int `yaml:"timeout_seconds,omitempty" json:"timeout_seconds,omitempty"`
-	// Effort is how much a reasoning model thinks on this role's calls (planner and response only;
-	// one of ModelEfforts, empty = low). Short classifier calls (name call, reference, follow-up) always
-	// ask for none. A model that takes no reasoning field ignores it.
+	// Effort is how much a reasoning model thinks on this role's calls (the chat roles, FallbackRoles;
+	// one of ModelEfforts, empty = low). Precedence:
+	//   - the role's calls ask for this level (empty: low);
+	//   - calls the code makes thinking-free on purpose (the name-call, reference and follow-up
+	//     classifiers, fortunes) ask for none while this is empty; once it is set they ask for it capped
+	//     at low (a planner at high or max does not make a 40-token classifier think hard), with output
+	//     room for the thinking;
+	//   - the summary role's own effort is the level of the job itself and applies as set; a summary on
+	//     another role's model (no summary model) asks for none while models.summary.effort is empty;
+	//   - a fallback with an effort of its own uses that instead (ModelFallback.Effort); a fallback
+	//     without one follows the same rules for the role it answers, whatever model it borrows.
+	// The adapter writes the level the way the host takes it and clamps it to what the model's list says
+	// it takes (xhigh and max become high where the host has no such level); a model known not to reason
+	// gets no field. On Anthropic, low means adaptive thinking at effort low (it may think a little; a
+	// model with a fixed thinking budget, such as Claude Haiku 4.5, gets the smallest budget, 1024 tokens).
 	Effort string `yaml:"effort,omitempty" json:"effort,omitempty"`
 	// Fallbacks are asked in order when this model fails (FallbackRoles only): another key or host for
 	// the same model, or another model. See internal/providers/openai/failover.go for what counts as a
@@ -796,12 +808,16 @@ type ModelFallback struct {
 	PriceOutPerMTok      float64 `yaml:"price_out_per_mtok,omitempty" json:"price_out_per_mtok,omitempty"`
 	PriceCachedInPerMTok float64 `yaml:"price_cached_in_per_mtok,omitempty" json:"price_cached_in_per_mtok,omitempty"`
 	TimeoutSeconds       int     `yaml:"timeout_seconds,omitempty" json:"timeout_seconds,omitempty"`
+	// Effort replaces the role's effort on this model (one of ModelEfforts; empty = the role's)
+	Effort string `yaml:"effort,omitempty" json:"effort,omitempty"`
 }
 
-// ModelEfforts are the values of models.<role>.effort.
-var ModelEfforts = []string{"none", "minimal", "low", "medium", "high"}
+// ModelEfforts are the values of models.<role>.effort and models.<role>.fallbacks[].effort, least
+// thinking first. xhigh and max exist on some hosts only (Anthropic, OpenAI and OpenRouter take xhigh):
+// elsewhere they are clamped at call time, never refused here.
+var ModelEfforts = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
-// FallbackRoles are the roles whose model may have fallbacks: the ones that chat. Embeddings are left
+// FallbackRoles are the roles whose model may have fallbacks and an effort: the ones that chat. Embeddings are left
 // out on purpose (vectors from another model do not match the stored ones), and rerank and image
 // generation have no fallback path.
 var FallbackRoles = []string{"response", "planner", "summary", "vision"}
@@ -1306,8 +1322,8 @@ func parse(raw []byte, problems *[]Problem) (Document, error) {
 		if m.TimeoutSeconds != 0 && (m.TimeoutSeconds < 5 || m.TimeoutSeconds > 600) {
 			return Document{}, fmt.Errorf("models.%s.timeout_seconds must be 5–600 (or 0 for the default)", role)
 		}
-		if m.Effort != "" && (!slices.Contains(ModelEfforts, m.Effort) || (role != "planner" && role != "response")) {
-			return Document{}, fmt.Errorf("models.%s.effort %q: only planner and response take one of %v", role, m.Effort, ModelEfforts)
+		if m.Effort != "" && (!slices.Contains(ModelEfforts, m.Effort) || !slices.Contains(FallbackRoles, role)) {
+			return Document{}, fmt.Errorf("models.%s.effort %q: only the chat roles %v take one of %v", role, m.Effort, FallbackRoles, ModelEfforts)
 		}
 		if m.Provider != "" {
 			if _, ok := d.Providers[m.Provider]; !ok {
@@ -1560,6 +1576,9 @@ func validFallbacks(d Document, role string, m Model) error {
 		}
 		if f.TimeoutSeconds != 0 && (f.TimeoutSeconds < 5 || f.TimeoutSeconds > 600) {
 			return fmt.Errorf("%s.timeout_seconds must be 5–600 (or 0 for the role's default)", at)
+		}
+		if f.Effort != "" && !slices.Contains(ModelEfforts, f.Effort) {
+			return fmt.Errorf("%s.effort %q must be one of %v (or empty for the role's)", at, f.Effort, ModelEfforts)
 		}
 	}
 	return nil

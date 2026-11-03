@@ -1,9 +1,12 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
+	"slices"
 	"strings"
 
 	"masamong/internal/errclass"
@@ -32,6 +35,18 @@ type shape struct {
 	// BetweenTools turns thinking off on Anthropic with {"type":"between_tools"}: the model refuses
 	// "disabled" and names that type instead (Claude Sonnet 5.5)
 	BetweenTools bool
+	// NoThinkingOff: on Anthropic the model refused every way to turn thinking off (Claude Opus 5.5), so
+	// "none" is sent as its lowest effort level instead (anthropic.go). NoEffort there means the model
+	// or host takes no adaptive thinking (its default is used)
+	NoThinkingOff bool
+	// NoOutputConfig: the Anthropic-format host refused output_config (the effort level)
+	NoOutputConfig bool
+	// MaxHigh: the model refused a level above "high" (xhigh, max), so those are sent as "high"
+	MaxHigh bool
+	// Budgeted: on Anthropic the model refused adaptive thinking, and its capabilities were unknown (or
+	// list "enabled" too), so it thinks with a fixed budget ({"type":"enabled","budget_tokens":…}): Claude
+	// Haiku 4.5 answers 400 to type "adaptive". Only a refusal of that too leaves the field out (NoEffort)
+	Budgeted bool
 }
 
 // thinkingHeadroom is the output room added for a model that thinks before every answer. Only the
@@ -49,18 +64,61 @@ func shapeKey(req ChatRequest) string {
 }
 
 // shapeOf is the shape learned for req's kind; a tool request without one of its own starts from the
-// model's plain shape.
+// model's plain shape. Shapes are kept in the capability cache (CapsCache), which the application shares
+// across a provider's adapters.
 func (a *Adapter) shapeOf(req ChatRequest) shape {
-	if v, ok := a.shapes.Load(shapeKey(req)); ok {
-		return v.(shape)
-	}
-	if v, ok := a.shapes.Load(req.Model); ok {
-		return v.(shape)
-	}
-	return shape{}
+	sh, _ := a.shapeAt(req)
+	return sh
 }
 
-// payload writes a chat request for the host family and the model's known shape.
+// shapeAt is shapeOf and the generation a lesson of this call is kept under (keepLesson).
+func (a *Adapter) shapeAt(req ChatRequest) (shape, uint64) {
+	sh, gen, _ := a.caps().shape(shapeKey(req))
+	return sh, gen
+}
+
+// keepLesson adds to req's stored shape the flags next has and start had not (what this call learned),
+// under the generation the call started in (CapsCache.updateShape): a lesson of another call is never
+// written over, and one from before the shapes were dropped is not kept. learnEffort false keeps the
+// effort flags out (postShaped). A bare tool turn sends a budget as thinking off (anthropicThinking), so
+// Budgeted learned there is used for the call only: no request with a budget has been seen to work.
+func (a *Adapter) keepLesson(req ChatRequest, gen uint64, start, next shape, learnEffort bool) {
+	learned := learnedFlags(start, next)
+	if !learnEffort {
+		learned.NoEffort, learned.EffortNone = false, false
+	}
+	if req.bareToolTurn {
+		learned.Budgeted = false
+	}
+	if learned == (shape{}) {
+		return
+	}
+	a.caps().updateShape(shapeKey(req), gen, func(old shape) shape { return withFlags(old, learned) })
+}
+
+// learnedFlags is the flags set in next and not in start. Every field of shape is a flag (bool).
+func learnedFlags(start, next shape) shape {
+	var out shape
+	o, s, n := reflect.ValueOf(&out).Elem(), reflect.ValueOf(start), reflect.ValueOf(next)
+	for i := range o.NumField() {
+		o.Field(i).SetBool(n.Field(i).Bool() && !s.Field(i).Bool())
+	}
+	return out
+}
+
+// withFlags is sh with every flag of add set as well.
+func withFlags(sh, add shape) shape {
+	o, n := reflect.ValueOf(&sh).Elem(), reflect.ValueOf(add)
+	for i := range o.NumField() {
+		if n.Field(i).Bool() {
+			o.Field(i).SetBool(true)
+		}
+	}
+	return sh
+}
+
+// payload writes a chat-completions request for the host family and the model's known shape (an
+// Anthropic-format host is written by anthropicPayload instead).
 func (a *Adapter) payload(req ChatRequest, sh shape) map[string]any {
 	p := map[string]any{"model": req.Model, "messages": req.Messages}
 	if req.MaxTokens > 0 {
@@ -76,7 +134,7 @@ func (a *Adapter) payload(req ChatRequest, sh shape) map[string]any {
 			}
 		}
 		p[field] = req.MaxTokens
-		if sh.Headroom {
+		if sh.Headroom || req.thinkRoom {
 			p[field] = req.MaxTokens + thinkingHeadroom
 		}
 	}
@@ -85,28 +143,24 @@ func (a *Adapter) payload(req ChatRequest, sh shape) map[string]any {
 	if req.Temperature != nil && !sh.NoTemperature && a.API != APIAnthropic {
 		p["temperature"] = *req.Temperature
 	}
-	effort := req.Effort
-	if sh.EffortNone {
-		effort = "none"
-	} else if effort == "none" && sh.NoneAsMinimal {
-		effort = "minimal"
-	}
-	if a.API == APIAnthropic {
-		// reasoning_effort is ignored there and the model thinks by default; a low level turns thinking
-		// off, a higher one leaves the model's own default (NoEffort: it cannot be turned off, Claude
-		// Opus 5.5, whose short limits the headroom retry in Chat covers)
-		if thinkingOff(effort) && !sh.NoEffort {
-			off := "disabled"
-			if sh.BetweenTools {
-				off = "between_tools"
-			}
-			p["thinking"] = map[string]any{"type": off}
+	caps := a.knownCaps(req.Model)
+	if effort := writtenEffort(a.API, req, sh, caps); effort != "" {
+		if effort != req.Effort && !sh.EffortNone && !(req.Effort == "none" && sh.NoneAsMinimal) && !sh.MaxHigh {
+			a.noteClamp(req.Model, req.Effort, effort)
 		}
-	} else if effort != "" && !sh.NoEffort {
 		if a.API == APIOpenRouter {
 			p["reasoning"] = map[string]any{"effort": effort}
 		} else {
 			p["reasoning_effort"] = effort
+		}
+		// asked not to think, but the model has no level that does not (GPT-6 Sol, Gemini 3.x/4, an
+		// OpenRouter model that must reason): its thinking gets room, or a short answer is all thinking
+		if req.MaxTokens > 0 && !sh.Headroom && !req.thinkRoom && thinkingOff(req.Effort) && !thinkingOff(effort) {
+			for _, f := range []string{"max_tokens", "max_completion_tokens"} {
+				if n, ok := p[f].(int); ok {
+					p[f] = n + thinkingHeadroom
+				}
+			}
 		}
 	}
 	a.toolFields(p, req, sh)
@@ -114,9 +168,53 @@ func (a *Adapter) payload(req ChatRequest, sh shape) map[string]any {
 	return p
 }
 
-// thinkingOff reports the levels that turn thinking off where only on and off can be asked (Anthropic).
-func thinkingOff(effort string) bool {
-	return effort == "none" || effort == "minimal" || effort == "low"
+// writtenEffort is the reasoning level a chat-completions request carries ("" leaves the field out):
+// the level asked, unless the model refused the field (NoEffort) or its list says it does not reason;
+// clamped to the levels its list names, and to the highest level the host family takes (topEffort).
+func writtenEffort(api API, req ChatRequest, sh shape, caps Caps) string {
+	if sh.NoEffort || caps.NoReasoning() {
+		return ""
+	}
+	if sh.EffortNone {
+		return "none"
+	}
+	effort := req.Effort
+	switch {
+	case effort == "":
+		return ""
+	case effort == "none" && sh.NoneAsMinimal:
+		return "minimal"
+	}
+	if caps.Efforts != nil {
+		l, ok := clampEffort(effort, caps.Efforts)
+		if !ok {
+			return ""
+		}
+		effort = l
+	}
+	// the family's top level only when the list said nothing: OpenRouter lists max for some models
+	if top := api.topEffort(); top != "" && caps.Efforts == nil && effortRank(effort) > effortRank(top) {
+		effort = top
+	}
+	if sh.MaxHigh && effortRank(effort) > effortRank("high") {
+		effort = "high"
+	}
+	return effort
+}
+
+func effortRank(effort string) int { return slices.Index(EffortLevels, effort) }
+
+// topEffort is the highest reasoning level a host family takes; "" lets every level through (a
+// compatible host, whose models differ: a refused level is learned, MaxHigh). OpenAI and OpenRouter take
+// up to xhigh, Gemini's OpenAI endpoint up to high; Anthropic's levels come from each model's list entry.
+func (a API) topEffort() string {
+	switch a {
+	case APIOpenAI, APIOpenRouter:
+		return "xhigh"
+	case APIGemini:
+		return "high"
+	}
+	return ""
 }
 
 // byokRoute pins an OpenRouter request for a ByokOnly model family to its one upstream provider, with
@@ -139,28 +237,45 @@ func (a *Adapter) byokRoute(p map[string]any, model string) {
 	p["provider"] = route
 }
 
-// postShaped posts a chat request, retrying at most twice when the model refuses an optional field, and
-// keeps the shape that worked for the model's later requests. What a request asking effort "none" (a
+// postShaped posts a chat request, retrying at most twice when the model refuses an optional field (four
+// times on Anthropic, whose effort level above high, effort field, adaptive thinking and budgeted thinking
+// may each be refused), and keeps each refusal it learns for the model's later requests (keepLesson), also
+// when the call runs out of retries, so the next call goes on from there. What a request asking effort "none" (a
 // quick classifier, or the no-thinking retry in Chat, which passes learn false) learns about the effort
 // field holds for "none" only: a model that refuses "none" may take "low", so that part is not kept,
-// except on Anthropic, where "none" and "low" write the same field. Every other field it learns is kept,
-// so a refused temperature costs one extra call per model, not one per classifier call.
+// except on Anthropic, where each way of turning thinking on or off has a flag of its own. Every other
+// field it learns is kept, so a refused temperature costs one extra call per model, not one per
+// classifier call. An Anthropic-format host is sent the Messages format (anthropic.go).
+//
+// The capabilities used are the ones already known (a model list, the host's docs): a chat call never
+// asks the host about the model first. A refusal that would not change the request sent is not retried.
 func (a *Adapter) postShaped(ctx context.Context, req ChatRequest, learn bool) (*providers.Response, error) {
-	learnEffort := learn && req.Effort != "none" || a.API == APIAnthropic && thinkingOff(req.Effort)
-	sh := a.shapeOf(req)
+	learnEffort := learn && req.Effort != "none" || a.API == APIAnthropic
+	if a.API == APIAnthropic {
+		req.bareToolTurn = a.bareToolTurn(req) // what anthropicPayload sends, for reading a refusal
+	}
+	start, gen := a.shapeAt(req)
+	sh := start
+	caps := a.knownCaps(req.Model)
+	var sent []byte
+	retries := 2
+	if a.API == APIAnthropic {
+		retries = 4
+	}
 	for attempt := 0; ; attempt++ {
-		body, _ := json.Marshal(a.payload(req, sh))
-		resp, err := a.Client.PostJSON(ctx, a.BaseURL+"/chat/completions", a.headers(), body)
+		addr, headers := a.BaseURL+"/chat/completions", a.headers()
+		if a.API == APIAnthropic {
+			addr, headers = a.anthropicBase()+"/messages", a.anthropicHeaders()
+		}
+		body, err := a.shapedBody(req, sh, caps)
+		if err != nil {
+			return nil, err
+		}
+		sent = body
+		resp, err := a.Client.PostJSON(final(ctx), addr, headers, body)
 		if err == nil {
-			old, keep := a.shapeOf(req), sh
-			if !learnEffort {
-				keep.NoEffort, keep.EffortNone = old.NoEffort, old.EffortNone
-				if req.Effort == "none" && sh.NoEffort && !old.NoEffort {
-					a.noneOff.Store(shapeKey(req), true) // for batch items only (batchShapeOf)
-				}
-			}
-			if keep != old {
-				a.shapes.Store(shapeKey(req), keep)
+			if !learnEffort && req.Effort == "none" && sh.NoEffort && !start.NoEffort {
+				a.noneOff.Store(shapeKey(req), true) // for batch items only (batchShapeOf)
 			}
 			if len(req.Tools) == 0 {
 				a.shapeSeen.Store(req.Model, true)
@@ -173,15 +288,35 @@ func (a *Adapter) postShaped(ctx context.Context, req ChatRequest, learn bool) (
 			a.visionOff.Store(req.Model, now())
 			return resp, &visionError{err: err}
 		}
-		next, ok := refusedField(a.API, err, req, sh)
-		if !ok || attempt >= 2 {
-			if len(req.Tools) > 0 && errclass.Of(err) == errclass.Unsupported {
-				a.toolsOff.Store(req.Model, true) // later tool requests for this model fail fast (tools.go)
+		next, ok := refusedField(a.API, err, req, sh, caps)
+		if ok {
+			// the same bytes would be refused the same way: a learned flag that changes nothing on the
+			// wire (a list that disagrees with the route) ends the call instead of spending two more
+			if again, berr := a.shapedBody(req, next, caps); berr == nil && !bytes.Equal(again, sent) {
+				a.keepLesson(req, gen, start, next, learnEffort)
+				if attempt < retries {
+					sh = next
+					continue
+				}
 			}
-			return resp, err
 		}
-		sh = next
+		if len(req.Tools) > 0 && errclass.Of(err) == errclass.Unsupported {
+			a.toolsOff.Store(req.Model, true) // later tool requests for this model fail fast (tools.go)
+		}
+		return resp, err
 	}
+}
+
+// shapedBody is the request body postShaped sends for req with shape sh.
+func (a *Adapter) shapedBody(req ChatRequest, sh shape, caps Caps) ([]byte, error) {
+	if a.API == APIAnthropic {
+		p, err := a.anthropicPayload(req, sh, caps)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(p)
+	}
+	return json.Marshal(a.payload(req, sh))
 }
 
 // ShapeLearned reports whether model's plain chat shape is known: a live request for it succeeded (with
@@ -197,18 +332,22 @@ func (a *Adapter) ShapeLearned(model string) bool {
 // refused effort learned from an effort "none" request holds for "none" only (batchShapeOf), so a live
 // request at another level keeps its effort. It reports whether anything was learned.
 func (a *Adapter) LearnRefusal(req ChatRequest, err error) bool {
+	if a.API == APIAnthropic {
+		req.bareToolTurn = a.bareToolTurn(req) // the item was written this way (anthropicPayload)
+	}
+	_, gen := a.shapeAt(req)
 	sh := a.batchShapeOf(req)
-	next, ok := refusedField(a.API, err, req, sh)
+	caps := a.knownCaps(req.Model)
+	next, ok := refusedField(a.API, err, req, sh, caps)
 	if !ok || next == sh {
 		return false
 	}
-	if req.Effort == "none" && a.API != APIAnthropic && next.NoEffort && !sh.NoEffort {
+	learned := learnedFlags(sh, next)
+	if req.Effort == "none" && a.API != APIAnthropic && learned.NoEffort {
 		a.noneOff.Store(shapeKey(req), true)
-		next.NoEffort = a.shapeOf(req).NoEffort
+		learned.NoEffort = false
 	}
-	if cur := a.shapeOf(req); next != cur {
-		a.shapes.Store(shapeKey(req), next)
-	}
+	a.caps().updateShape(shapeKey(req), gen, func(old shape) shape { return withFlags(old, learned) })
 	return true
 }
 
@@ -228,17 +367,21 @@ func (a *Adapter) batchShapeOf(req ChatRequest) shape {
 // refusedField decides whether err is a model refusing one optional field of req, sent to a host of
 // family api, and returns the shape without it. Only a 400/422 about the request qualifies; a refused
 // key never does.
-func refusedField(api API, err error, req ChatRequest, sh shape) (shape, bool) {
+func refusedField(api API, err error, req ChatRequest, sh shape, caps Caps) (shape, bool) {
 	var ae *APIError
 	if !errors.As(err, &ae) || errors.Is(err, ErrAuth) {
 		return sh, false
 	}
 	m := strings.ToLower(ae.Message + " " + ae.Code)
-	sentEffort := req.Effort != "" && !sh.NoEffort
 	if api == APIAnthropic {
-		sentEffort = thinkingOff(req.Effort) && !sh.NoEffort // only these write a field there (payload)
+		if ae.Status != 400 && ae.Status != 422 {
+			return sh, false
+		}
+		return anthropicRefusal(m, req, sh, caps)
 	}
-	sentTemp := req.Temperature != nil && !sh.NoTemperature && api != APIAnthropic
+	written := writtenEffort(api, req, sh, caps)
+	sentEffort := written != ""
+	sentTemp := req.Temperature != nil && !sh.NoTemperature
 	if ae.Status == 404 && len(req.Tools) > 0 && strings.Contains(m, "requested parameters") {
 		// OpenRouter with require_parameters (tools.go) found no endpoint taking every field sent and
 		// names none (seen live for openai/gpt-6-luna and anthropic/claude-haiku-5.5, which list
@@ -258,11 +401,9 @@ func refusedField(api API, err error, req ChatRequest, sh shape) (shape, bool) {
 	if ae.Status != 400 && ae.Status != 422 {
 		return sh, false
 	}
-	if api == APIAnthropic && sentEffort && !sh.BetweenTools && strings.Contains(m, "between_tools") {
-		// Anthropic: 'To turn thinking off on this model, send "thinking": {"type": "between_tools"}
-		// instead of {"type": "disabled"}' (Claude Sonnet 5.5). Another refusal of the thinking field
-		// ("not supported for this model", Claude Opus 5.5) leaves it out below (NoEffort)
-		sh.BetweenTools = true
+	if sentEffort && !sh.MaxHigh && effortRank(written) > effortRank("high") && (strings.Contains(m, "reasoning") || strings.Contains(m, "effort")) {
+		// a level above high (xhigh, max) the model does not have: it may take high
+		sh.MaxHigh = true
 		return sh, true
 	}
 	if len(req.Tools) > 0 {
@@ -287,7 +428,7 @@ func refusedField(api API, err error, req ChatRequest, sh shape) (shape, bool) {
 		}
 	}
 	switch {
-	case api != APIAnthropic && sentEffort && req.Effort == "none" && !sh.EffortNone && !sh.NoneAsMinimal && strings.Contains(m, "reasoning") &&
+	case sentEffort && req.Effort == "none" && !sh.EffortNone && !sh.NoneAsMinimal && strings.Contains(m, "reasoning") &&
 		(strings.Contains(m, "mandatory") || strings.Contains(m, "cannot be disabled")):
 		// leaving the field out would think at the model's default; its lowest level thinks least
 		sh.NoneAsMinimal = true

@@ -97,6 +97,11 @@ func (m Message) MarshalJSON() ([]byte, error) {
 		if !json.Valid(m.Raw) {
 			return nil, fmt.Errorf("openai: raw message is not valid JSON")
 		}
+		// an Anthropic answer (native content blocks) going to a chat-completions host, after a failover
+		// in a tool loop: its text and tool calls in this format (anthropic.go)
+		if raw, err := rawMessage(m.Raw); err == nil && raw.native != nil {
+			return chatFromNative(raw.native, raw.msg.Role)
+		}
 		return m.Raw, nil
 	}
 	if len(m.Images) > 0 {
@@ -143,6 +148,9 @@ var ErrToolsUnsupported error = classedError{msg: "openai: model takes no tools"
 // process. The memory is per adapter and not persisted: a model that gains tools, or a route that was
 // down, is tried again after the next start.
 func (a *Adapter) ToolsUnsupported(model string) bool {
+	if noChatTools(a.BaseURL, model) {
+		return true
+	}
 	_, ok := a.toolsOff.Load(model)
 	return ok
 }

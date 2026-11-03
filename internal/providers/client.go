@@ -426,7 +426,7 @@ func (c *Client) do(ctx context.Context, method, rawURL string, headers map[stri
 		out := &Response{Status: resp.StatusCode, ContentType: resp.Header.Get("Content-Type"), Body: data, URL: redacted, Attempts: attempt, Elapsed: time.Since(start), Header: resp.Header}
 		if resp.StatusCode == 429 || resp.StatusCode >= 500 {
 			last = &Error{Kind: "status", Status: resp.StatusCode, URL: redacted, Attempts: attempt}
-			if attempt == attempts {
+			if attempt == attempts || lasting(ctx, resp.StatusCode, data) {
 				return out, last
 			}
 			delay := c.backoff(attempt)
@@ -444,6 +444,22 @@ func (c *Client) do(ctx context.Context, method, rawURL string, headers map[stri
 		return out, nil
 	}
 	return nil, last
+}
+
+// finalKey carries the caller's test for answers no retry can change (WithFinal).
+type finalKey struct{}
+
+// WithFinal marks the requests made with ctx: a 429 or 5xx answer that final reports as lasting (a
+// used-up balance or spending cap, a model the host cannot route) is returned at once instead of being
+// retried. A real rate limit still waits its Retry-After. Each caller knows its hosts' bodies; the
+// client stays generic.
+func WithFinal(ctx context.Context, final func(status int, body []byte) bool) context.Context {
+	return context.WithValue(ctx, finalKey{}, final)
+}
+
+func lasting(ctx context.Context, status int, body []byte) bool {
+	f, _ := ctx.Value(finalKey{}).(func(int, []byte) bool)
+	return f != nil && f(status, body)
 }
 
 // attempt holds one slot only for the HTTP attempt. Defers release it and close a received body on

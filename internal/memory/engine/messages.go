@@ -76,7 +76,58 @@ func (e *Engine) messageVectorState() (int, string, error) {
 	if d := e.Models.EmbedDims; d > 0 && d <= defaultMaxMessageDims {
 		return d, "", nil
 	}
+	if e.Models.EmbedKeepsMessageWidth {
+		kept, err := e.keptMessageWidth()
+		if err != nil {
+			return 0, "", err
+		}
+		if kept > 0 {
+			return kept, "", nil
+		}
+	}
 	return defaultMaxMessageDims, "", nil
+}
+
+// keptMessageWidth is the width message vectors of an MRL model listed late (Models.EmbedKeepsMessageWidth,
+// gemini-embedding-2 since 2026-11) already have in an installation that made them under the rule for a
+// model not listed, when no vector of the model is in the default space yet: 0 otherwise. Those messages
+// were embedded at the leaf width; moving them to 512 would start a new space, leave the old rows
+// unsearched and pay to embed every message again. The kept width is the one most rows have, above 512
+// (a narrower one comes only from explicit dimensions, which win above) and at most the leaf width set
+// now (a narrower leaf width cannot serve wider message vectors). Other MRL models keep the decided move
+// to 512 (MSG-512). Read once per engine: the engine is built again when the embedding settings change.
+func (e *Engine) keptMessageWidth() (int, error) {
+	e.messageWidthMu.Lock()
+	defer e.messageWidthMu.Unlock()
+	if e.keptMessageRead {
+		return e.keptMessageDims, nil
+	}
+	if e.Store == nil {
+		return 0, nil
+	}
+	spaces, err := e.Store.MessageVectorSpaces()
+	if err != nil {
+		return 0, err
+	}
+	best, most := 0, 0
+	for space, n := range spaces {
+		model, d, ok := splitSpace(space)
+		if !ok || model != e.Models.Embed {
+			continue
+		}
+		if d == defaultMaxMessageDims {
+			best, most = 0, -1 // the default space is in use: it stays
+			break
+		}
+		if lw := e.Models.EmbedDims; lw > 0 && d > lw {
+			continue
+		}
+		if d > defaultMaxMessageDims && (n > most || n == most && d > best) {
+			best, most = d, n
+		}
+	}
+	e.keptMessageDims, e.keptMessageRead = max(best, 0), true
+	return e.keptMessageDims, nil
 }
 
 // MessageVectorWaitReason explains why messages are not embedded; it contains only widths and codes.

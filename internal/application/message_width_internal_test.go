@@ -8,7 +8,7 @@ import (
 
 func TestMessageVectorDoctorUnknownWidthAndQueryError(t *testing.T) {
 	s := privacyService(t)
-	widthConfig(t, s, "gemini-embedding-2", 4096)
+	widthConfig(t, s, "baai/bge-m3", 4096)
 	e, err := s.MemoryEngine()
 	if err != nil {
 		t.Fatal(err)

@@ -87,12 +87,18 @@
     const r = await call('providers.test', { id })
     testing[id] = false
     // a host whose model list opens without a key (NanoGPT) could not show the key works yet
-    if (r.ok && r.output?.key_check === 'unverified') toast('warn', t('conn.key_unverified', { id: provName(id) }), t('conn.key_unverified_body'))
+    if (r.ok && r.output?.model_list === 'unavailable' && r.output?.key_check !== 'chat') toast('warn', t('conn.no_list_test', { id: provName(id) }), t('conn.no_list_test_body'))
+    else if (r.ok && r.output?.key_check === 'unverified') toast('warn', t('conn.key_unverified', { id: provName(id) }), t('conn.key_unverified_body'))
     else if (r.ok) toast('ok', t('conn.test_ok', { id: provName(id) }), r.output?.latency_ms ? ms(r.output.latency_ms) : undefined)
     else toast('error', t('conn.test_fail', { id: provName(id) }), r.error?.message)
     void providers.refresh()
+    // the host is asked about its role models' reasoning after the test answers: read the Models
+    // table's source again while that lookup is likely running (it takes up to 20 s)
+    if (r.ok && r.output?.caps_pending) for (const at of [2000, 5000, 10000]) capsTimers.push(setTimeout(() => void providers.refresh(), at))
     return r.ok
   }
+  let capsTimers: ReturnType<typeof setTimeout>[] = []
+  $effect(() => () => capsTimers.forEach(clearTimeout))
   // what the server says about hosts, so this page knows none of them by name
   const modelCaps = $derived((providers.data?.model_providers ?? {}) as Record<string, { api: string; rerank: boolean; host?: string }>)
   const webKinds = $derived(((providers.data?.web_hosts ?? []) as any[]).map((h) => h.kind))
@@ -123,6 +129,8 @@
   let addSel = $state('')
   let addId = $state('')
   let addURL = $state('')
+  // the request format of a custom address: OpenAI chat completions, or Anthropic's Messages API
+  let addAPI = $state<'compatible' | 'anthropic'>('compatible')
   let addErr = $state('')
   let addBusy = $state(false)
   const present = (sel: string) => {
@@ -134,6 +142,7 @@
     addSel = ''
     addId = ''
     addURL = ''
+    addAPI = 'compatible'
     addErr = ''
     addOpen = true
   }
@@ -145,7 +154,7 @@
     else if (kind === 'kind') input = { kind: v }
     else {
       if (!addId.trim() || !/^https:\/\//.test(addURL.trim())) return void (addErr = t('conn.add_custom_invalid'))
-      input = { api: 'compatible', id: addId.trim(), base_url: addURL.trim() }
+      input = { api: addAPI, id: addId.trim(), base_url: addURL.trim() }
     }
     addBusy = true
     const r = await call('providers.add', input)
@@ -317,10 +326,24 @@
   // how long a chat model may take before the other chat model answers (planner and response only)
   let timeoutSecs = $state('')
   let timeoutErr = $state('')
-  // how much a reasoning model thinks on the role's calls (models.<role>.effort; '' = low)
+  // how much a reasoning model thinks on the role's calls (models.<role>.effort; '' = low); every chat
+  // role takes one (the server's config.FallbackRoles), a fallback may name its own
   let effort = $state('')
-  const efforts = ['none', 'minimal', 'low', 'medium', 'high']
+  const efforts = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
   const chatRole = (role: string) => role === 'planner' || role === 'response'
+  const effortRole = (role: string) => chatRole(role) || role === 'summary' || role === 'vision'
+  // what the server knows about a model's reasoning ({reasoning, efforts, thinking_off}; empty: unknown)
+  const reasoningOf = (provider: string, model: string): any => providers.data?.model_reasoning?.[`${provider}/${model}`] ?? {}
+  // the capability label: thinks / does not think / not known (a list that says nothing)
+  const reasonKey = (r: any) => (r?.reasoning === true ? 'conn.reason_yes' : r?.reasoning === false ? 'conn.reason_no' : 'conn.reason_unknown')
+  // the effort choices; levels the model's list says it lacks stay visible but cannot be picked (a level
+  // already saved stays pickable, so the dialog never shows a value it cannot hold)
+  // which calls the level covers: the summary role's job is thinking-free unless set, the others low
+  const effortHintKey = (role: string) => (role === 'summary' ? 'conn.effort_hint_summary' : 'conn.effort_hint')
+  const effortOptions = (r: any, current: string) => [
+    { value: '', label: t('conn.effort_default') },
+    ...efforts.map((e) => ({ value: e, label: t(`conn.effort.${e}`), disabled: e !== current && (r?.reasoning === false ? e !== 'none' : Array.isArray(r?.efforts) && !r.efforts.includes(e)) })),
+  ]
   // roles whose call has a time limit: the chat roles and the picture describer
   const timeoutRole = (role: string) => chatRole(role) || role === 'vision'
   function openPrice(role: string) {
@@ -344,7 +367,7 @@
     const ops: any[] = [a ? { path: [...base, 'price_in_per_mtok'], value: a } : { path: [...base, 'price_in_per_mtok'], op: 'unset' }, b ? { path: [...base, 'price_out_per_mtok'], value: b } : { path: [...base, 'price_out_per_mtok'], op: 'unset' },
       c ? { path: [...base, 'price_cached_in_per_mtok'], value: c } : { path: [...base, 'price_cached_in_per_mtok'], op: 'unset' }]
     if (timeoutRole(priceFor)) ops.push(secs ? { path: [...base, 'timeout_seconds'], value: secs } : { path: [...base, 'timeout_seconds'], op: 'unset' })
-    if (chatRole(priceFor)) ops.push(effort ? { path: [...base, 'effort'], value: effort } : { path: [...base, 'effort'], op: 'unset' })
+    if (effortRole(priceFor)) ops.push(effort ? { path: [...base, 'effort'], value: effort } : { path: [...base, 'effort'], op: 'unset' })
     const r = await patchConfig(ops, { success: t('conn.price_saved') })
     if (r.ok) {
       priceFor = ''
@@ -360,25 +383,30 @@
   // config.FallbackRoles and MaxFallbacks
   const fallbackRoles = ['response', 'planner', 'summary', 'vision']
   const maxFallbacks = 3
-  type FB = { provider: string; model: string; price_in: string; price_out: string; timeout: string }
+  type FB = { provider: string; model: string; price_in: string; price_out: string; timeout: string; effort: string }
   let fbFor = $state('')
   let fbRows = $state<FB[]>([])
   let fbErr = $state('')
   let fbBusy = $state(false)
-  let fbModels = $state<Record<string, string[]>>({})
+  let fbModels = $state<Record<string, any[]>>({})
+  // a fallback's reasoning: what its provider's list says, else what the server knows of a saved one
+  const fbReasoning = (r: FB) => {
+    const m = (fbModels[r.provider] ?? []).find((x) => x.id === r.model.trim())
+    return m && (m.reasoning !== undefined || m.efforts) ? m : reasoningOf(r.provider, r.model.trim())
+  }
   const resting = $derived(Object.fromEntries(((providers.data?.resting_models ?? []) as any[]).map((r) => [r.key, r])))
   const modelProviderIds = $derived(Object.keys(modelCaps).sort())
   function openFallbacks(role: string) {
     fbFor = role
     fbErr = ''
     fbRows = ((cfg.doc?.models?.[role]?.fallbacks ?? []) as any[]).map((f) => ({ provider: f.provider, model: f.model,
-      price_in: f.price_in_per_mtok ? String(f.price_in_per_mtok) : '', price_out: f.price_out_per_mtok ? String(f.price_out_per_mtok) : '', timeout: f.timeout_seconds ? String(f.timeout_seconds) : '' }))
+      price_in: f.price_in_per_mtok ? String(f.price_in_per_mtok) : '', price_out: f.price_out_per_mtok ? String(f.price_out_per_mtok) : '', timeout: f.timeout_seconds ? String(f.timeout_seconds) : '', effort: f.effort ?? '' }))
     for (const r of fbRows) void loadFbModels(r.provider)
   }
   function addFallback() {
     const used = new Set([cfg.doc?.models?.[fbFor]?.provider, ...fbRows.map((r) => r.provider)])
     const provider = modelProviderIds.find((id) => !used.has(id)) ?? modelProviderIds[0] ?? ''
-    fbRows = [...fbRows, { provider, model: cfg.doc?.models?.[fbFor]?.model ?? '', price_in: '', price_out: '', timeout: '' }]
+    fbRows = [...fbRows, { provider, model: cfg.doc?.models?.[fbFor]?.model ?? '', price_in: '', price_out: '', timeout: '', effort: '' }]
     void loadFbModels(provider)
   }
   function moveFallback(i: number, d: number) {
@@ -389,7 +417,7 @@
   async function loadFbModels(provider: string) {
     if (!provider || fbModels[provider]) return
     const r = await call('models.list', { provider, role: '' })
-    if (r.ok) fbModels = { ...fbModels, [provider]: ((r.output.models ?? []) as any[]).map((m) => m.id).filter(Boolean) }
+    if (r.ok) fbModels = { ...fbModels, [provider]: ((r.output.models ?? []) as any[]).filter((m) => m.id) }
   }
   async function saveFallbacks() {
     const m = cfg.doc?.models?.[fbFor]
@@ -409,6 +437,7 @@
       if (pin) f.price_in_per_mtok = pin
       if (pout) f.price_out_per_mtok = pout
       if (secs) f.timeout_seconds = secs
+      if (r.effort) f.effort = r.effort
       list.push(f)
     }
     fbBusy = true
@@ -453,13 +482,19 @@
     modelFilter = ''
     modelSort = 'list'
     modelList = []
+    noList = false
+    typedModel = ''
     if (!provider) return
     loadingModels = true
     const r = await call('models.list', { provider, role: role === 'embed' ? 'embedding' : role === 'image' ? 'image' : '' })
     loadingModels = false
     modelList = r.ok ? r.output.models ?? [] : []
+    noList = r.ok && r.output?.status === 'no_list'
     if (!r.ok) toast('error', t('conn.models_failed'), r.error?.message)
   }
+  // an Anthropic-format host that answers /messages only has no list: the model ID is typed
+  let noList = $state(false)
+  let typedModel = $state('')
   // an indexed embedding model is only switched after the operator confirms the re-index it implies:
   // the server refuses (with the estimate) until the request carries include_embed
   let embedAsk = $state<(EmbedAsk & { provider: string; model: string }) | null>(null)
@@ -766,8 +801,9 @@
 
 <!-- what the model list says a model can do; nothing is shown for what it does not say -->
 {#snippet capTags(m: any, chat: boolean, vision = false)}
-  {#if m.image_input || m.supports_tools || m.known_family || (chat && m.supports_tools === false) || m.price_source === 'published' || m.price_source === 'reference' || (vision && m.image_input === undefined)}
+  {#if m.image_input || m.supports_tools || m.known_family || (chat && m.supports_tools === false) || m.price_source === 'published' || m.price_source === 'reference' || (vision && m.image_input === undefined) || m.reasoning !== undefined}
     <div class="tags">
+      {#if m.reasoning !== undefined}<span class="tag" class:dim={!m.reasoning}>{t(reasonKey(m))}</span>{/if}
       {#if m.image_input}<span class="tag ok">{t('conn.tag_image_in')}</span>{:else if vision && m.image_input === undefined}<span class="tag dim">{t('conn.tag_image_unknown')}</span>{/if}
       {#if m.supports_tools}<span class="tag">{t('conn.tag_tools')}</span>{:else if chat && m.supports_tools === false}<span class="tag warn">{t('conn.tag_no_tools')}</span>{/if}
       {#if m.known_family}<span class="tag">{t('conn.tag_known')}</span>{/if}
@@ -883,10 +919,11 @@
             <td class="c-model"><span class="mono small break">{m?.model ?? '–'}</span>
               {#if m?.provider}<div class="xs muted">{provName(m.provider)}{#if st === 'no_key' || st === 'rejected'} · <span class="warn-text">{st === 'rejected' ? t('conn.badge_rejected') : t('tools.state.no_key')}</span>{/if}</div>{/if}
               {#if m?.provider && resting[`${m.provider}/${m.model}`]}<div class="xs warn-text">{t('conn.fb_resting', { when: relative(resting[`${m.provider}/${m.model}`].until) })}</div>{/if}
+              {#if effortRole(role) && m?.model}<div class="xs muted">{t(reasonKey(reasoningOf(m.provider, m.model)))} · {t('conn.effort_now', { level: m.effort ? t(`conn.effort.${m.effort}`) : t('conn.effort_default') })}</div>{/if}
               {#if fallbackRoles.includes(role) && m?.fallbacks?.length}
                 <ol class="fb-list xs">
                   {#each m.fallbacks as f, i (i)}
-                    <li><span class="muted">{t('conn.fb_line', { n: i + 1 })}</span> <span class="mono break">{f.model}</span> <span class="muted">· {provName(f.provider)}</span>{#if resting[`${f.provider}/${f.model}`]} <span class="warn-text">· {t('conn.fb_resting', { when: relative(resting[`${f.provider}/${f.model}`].until) })}</span>{/if}</li>
+                    <li><span class="muted">{t('conn.fb_line', { n: i + 1 })}</span> <span class="mono break">{f.model}</span> <span class="muted">· {provName(f.provider)} · {t(reasonKey(reasoningOf(f.provider, f.model)))}{#if f.effort} · {t('conn.effort_now', { level: t(`conn.effort.${f.effort}`) })}{/if}</span>{#if resting[`${f.provider}/${f.model}`]} <span class="warn-text">· {t('conn.fb_resting', { when: relative(resting[`${f.provider}/${f.model}`].until) })}</span>{/if}</li>
                   {/each}
                 </ol>
               {/if}
@@ -969,8 +1006,10 @@
     {#if timeoutRole(priceFor)}
       <Field id="ptimeout" label={t('conn.timeout')} hint={t('conn.timeout_hint')} error={timeoutErr || undefined}>{#snippet children({ id, invalid })}<Input {id} {invalid} bind:value={timeoutSecs} inputmode="numeric" placeholder={priceFor === 'planner' || priceFor === 'vision' ? '30' : '90'} />{/snippet}</Field>
     {/if}
-    {#if chatRole(priceFor)}
-      <Field id="peffort" label={t('conn.effort')} hint={t('conn.effort_hint')}>{#snippet children({ id })}<Select {id} bind:value={effort} options={[{ value: '', label: t('conn.effort_default') }, ...efforts.map((e) => ({ value: e, label: t(`conn.effort.${e}`) }))]} />{/snippet}</Field>
+    {#if effortRole(priceFor)}
+      {@const pm = cfg.doc?.models?.[priceFor]}
+      {@const pr = reasoningOf(pm?.provider ?? '', pm?.model ?? '')}
+      <Field id="peffort" label={t('conn.effort')} hint={`${t(effortHintKey(priceFor))} ${t(`${reasonKey(pr)}_hint`)}`}>{#snippet children({ id, describedby })}<Select {id} aria-describedby={describedby} bind:value={effort} options={effortOptions(pr, effort)} />{/snippet}</Field>
     {/if}
   </div>
   {#snippet footer()}
@@ -994,10 +1033,11 @@
           <div class="fb-grid">
             <Field id={`fbp${i}`} label={t('conn.fb_provider')}>{#snippet children({ id })}<Select {id} bind:value={r.provider} onchange={() => loadFbModels(r.provider)} options={modelProviderIds.map((p) => ({ value: p, label: provName(p) }))} />{/snippet}</Field>
             <Field id={`fbm${i}`} label={t('conn.fb_model')} hint={t('conn.fb_model_hint')}>{#snippet children({ id, describedby })}<Input {id} aria-describedby={describedby} bind:value={r.model} mono list={`fbl${i}`} autocomplete="off" />{/snippet}</Field>
-            <datalist id={`fbl${i}`}>{#each fbModels[r.provider] ?? [] as mid (mid)}<option value={mid}></option>{/each}</datalist>
+            <datalist id={`fbl${i}`}>{#each fbModels[r.provider] ?? [] as fm (fm.id)}<option value={fm.id}></option>{/each}</datalist>
             <Field id={`fbi${i}`} label={t('conn.price_in')}>{#snippet children({ id })}<Input {id} bind:value={r.price_in} inputmode="decimal" placeholder={t('conn.fb_price_auto')} />{/snippet}</Field>
             <Field id={`fbo${i}`} label={t('conn.price_out')}>{#snippet children({ id })}<Input {id} bind:value={r.price_out} inputmode="decimal" placeholder={t('conn.fb_price_auto')} />{/snippet}</Field>
             <Field id={`fbt${i}`} label={t('conn.timeout')}>{#snippet children({ id })}<Input {id} bind:value={r.timeout} inputmode="numeric" placeholder={fbFor === 'response' ? '90' : fbFor === 'summary' ? '60' : '30'} />{/snippet}</Field>
+            <Field id={`fbe${i}`} label={t('conn.effort')} hint={t(reasonKey(fbReasoning(r)))}>{#snippet children({ id, describedby })}<Select {id} aria-describedby={describedby} bind:value={r.effort} options={[{ value: '', label: t('conn.fb_effort_role') }, ...effortOptions(fbReasoning(r), r.effort).slice(1)]} />{/snippet}</Field>
           </div>
         </li>
       {/each}
@@ -1043,7 +1083,13 @@
       <div class="grow"><Input type="search" bind:value={modelFilter} placeholder={t('conn.model_search')} aria-label={t('conn.model_search')} /></div>
       <Select aria-label={t('conn.sort')} bind:value={modelSort} options={[{ value: 'list', label: t('conn.sort_list') }, { value: 'price_asc', label: t('conn.sort_price_asc') }, { value: 'price_desc', label: t('conn.sort_price_desc') }, { value: 'ctx', label: t('conn.sort_ctx') }]} />
     </div>
-    {#if loadingModels}<p class="small muted">{t('common.loading')}</p>{:else if !filteredModels.length}<p class="small muted">{t('conn.no_models')}</p>{:else}
+    {#if noList}
+      <div class="callout"><span class="ic"><I.Info size={16} /></span><span class="small">{t('conn.no_list_note')}</span></div>
+      <div class="browse-bar">
+        <div class="grow"><Field id="typedm" label={t('conn.typed_model')} hint={t('conn.fb_model_hint')}>{#snippet children({ id, describedby })}<Input {id} aria-describedby={describedby} bind:value={typedModel} mono autocomplete="off" />{/snippet}</Field></div>
+        <Button variant="primary" disabled={!typedModel.trim()} onclick={() => pickModel(modelsFor, typedModel.trim())}>{t('conn.use')}</Button>
+      </div>
+    {:else if loadingModels}<p class="small muted">{t('common.loading')}</p>{:else if !filteredModels.length}<p class="small muted">{t('conn.no_models')}</p>{:else}
       <div use:scrollable class="table-scroll models">
         <table class="table">
           <thead><tr><th>{t('conn.model')}</th><th class="r">{t('conn.ctx')}</th><th class="r">{t('conn.col_in')}</th><th class="r">{t('conn.col_out')}</th><th class="r">{t('conn.col_cached')}</th><th><span class="sr-only">{t('common.actions')}</span></th></tr></thead>
@@ -1106,9 +1152,11 @@
       </div>
     {/each}
     {#if addSel === 'custom'}
+      <Segmented label={t('conn.custom_api')} bind:value={addAPI} options={[{ value: 'compatible', label: t('conn.api.compatible') }, { value: 'anthropic', label: t('conn.api.anthropic') }]} />
+      <p class="xs muted">{t(`conn.custom_api_hint.${addAPI}`)}</p>
       <div class="form-grid">
         <Field id="aid" label={t('conn.custom_id')} hint={t('conn.custom_id_hint')}>{#snippet children({ id, describedby })}<Input {id} aria-describedby={describedby} bind:value={addId} placeholder="deepseek" mono />{/snippet}</Field>
-        <Field id="aurl" label={t('conn.custom_url')} hint={t('conn.custom_url_hint')}>{#snippet children({ id, describedby })}<Input {id} aria-describedby={describedby} bind:value={addURL} placeholder="https://api.deepseek.com/v1" mono type="url" />{/snippet}</Field>
+        <Field id="aurl" label={t('conn.custom_url')} hint={t(addAPI === 'anthropic' ? 'conn.custom_url_hint_anthropic' : 'conn.custom_url_hint')}>{#snippet children({ id, describedby })}<Input {id} aria-describedby={describedby} bind:value={addURL} placeholder={addAPI === 'anthropic' ? 'https://api.example.com/anthropic' : 'https://api.deepseek.com/v1'} mono type="url" />{/snippet}</Field>
       </div>
     {/if}
     {#if addErr}<p class="small err" role="alert">{addErr}</p>{/if}

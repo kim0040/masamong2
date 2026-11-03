@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -65,7 +66,7 @@ func (s *Service) providers(ctx context.Context, req action.Request) action.Resu
 		}
 		return action.OK(req, map[string]any{"providers": out, "kinds": config.ProviderKinds, "credential_values_included": false, "health": s.providerHealth(),
 			"model_prices": prices, "keychain": secrets.KeychainSupported(), "hosts": openai.Hosts(), "web_hosts": websearch.Hosts, "model_providers": caps,
-			"search_order": s.searchOrder(), "embed_width": s.embedWidthInfo(), "resting_models": s.restingModels()})
+			"search_order": s.searchOrder(), "embed_width": s.embedWidthInfo(), "resting_models": s.restingModels(), "model_reasoning": s.modelReasoning()})
 	case "providers.add":
 		return s.providerAdd(req, in)
 	case "providers.remove":
@@ -112,6 +113,7 @@ func (s *Service) providers(ctx context.Context, req action.Request) action.Resu
 		if !st.Configured {
 			return action.Fail(req, errcode.ProviderUnconfigured, "provider.unconfigured", s.msg(req, "provider.unconfigured", "provider", id), map[string]any{"provider": id, "credential_ref": st.CredentialRef})
 		}
+		s.resetShapes(id) // the test and the calls after it learn the route's refusals again
 		out, err := s.Registry().Probe(ctx, id)
 		if err == nil {
 			err = s.proveModelKey(ctx, id, out)
@@ -120,6 +122,13 @@ func (s *Service) providers(ctx context.Context, req action.Request) action.Resu
 			return s.providerFail(req, id, err)
 		}
 		s.noteProvider(id, nil)
+		// the one time the host is asked about its role models' reasoning: after the answer, not before it
+		// (one GET per model, up to 20 s in all). caps_pending tells the console to read providers.list
+		// again shortly, when the lookup has had time to finish
+		s.ownedGo("providers.test model caps", func(ctx context.Context) { s.lookupModelCaps(ctx, id) })
+		if p, ok := s.Doc().Providers[id]; ok && s.looksUpCaps(p) {
+			out["caps_pending"] = true
+		}
 		out["ok"] = true
 		out["live"] = true
 		out["credential_ref"] = st.CredentialRef
@@ -147,6 +156,7 @@ func (s *Service) providers(ctx context.Context, req action.Request) action.Resu
 			res.Output["value_echoed"] = false
 			res.Output["credential_ref"] = ref
 			s.credentialsChanged() // the same reference may now hold another key
+			s.resetShapes(id)      // and another account's route
 		}
 		return res
 	case "models.list":
@@ -170,6 +180,11 @@ func (s *Service) providers(ctx context.Context, req action.Request) action.Resu
 			return s.providerFail(req, id, err)
 		}
 		models, err := a.ListModels(ctx)
+		if errors.Is(err, openai.ErrNoModelList) {
+			// an Anthropic-format host that takes /messages only: the operator types the model ID (the
+			// console offers a field for it); its reasoning is then learned from its answers
+			return action.OK(req, map[string]any{"provider": id, "status": "no_list", "models": []any{}, "total": 0, "list_is_not_inference": true})
+		}
 		if err != nil {
 			return s.providerFail(req, id, err)
 		}
@@ -264,7 +279,8 @@ func (s *Service) modelListPrice(provider string) openai.PriceFunc {
 // completion_price; "unknown" when the list has none) and also come as numbers per million tokens
 // (in_per_mtok, out_per_mtok, cached_per_mtok, price_source), resolved by modelListPrice. Each is absent
 // when unknown: never 0 for "unknown", and a model whose output price is unknown has no out_per_mtok.
-// image_input and supports_tools are true/false when the list says and absent when it does not.
+// image_input and supports_tools are true/false when the list says and absent when it does not, and so
+// are reasoning, efforts and thinking_off (reasoningRow).
 func modelRow(m openai.Model, pr openai.ModelPrice, priced bool) map[string]any {
 	price := "unknown"
 	if m.PromptPrice != "" {
@@ -276,6 +292,9 @@ func modelRow(m openai.Model, pr openai.ModelPrice, priced bool) map[string]any 
 	}
 	if m.SupportsTools != nil {
 		row["supports_tools"] = *m.SupportsTools
+	}
+	for k, v := range reasoningRow(m.Caps()) {
+		row[k] = v
 	}
 	if priced {
 		row["in_per_mtok"], row["price_source"] = pr.In, pr.Source
@@ -357,7 +376,11 @@ func (s *Service) providerAdd(req action.Request, in map[string]any) action.Resu
 	if listed {
 		api = host.API // a listed host (CometAPI, NanoGPT) brings its family, address and key variable
 	} else if h, ok := openai.HostFor(api); ok {
-		host, listed = h, true
+		// the family's own host, unless the address is another one: an Anthropic-format endpoint of
+		// another company must not inherit Anthropic's key variable (that key would go to that host)
+		if b := strings.TrimRight(strings.TrimSpace(strVal(in, "base_url", "")), "/"); b == "" || b == strings.TrimRight(h.BaseURL, "/") {
+			host, listed = h, true
+		}
 	}
 	if !openai.ValidAPI(string(api)) || api == "" {
 		return action.Fail(req, errcode.InvalidInput, "generic.error", fmt.Sprintf("api must be one of %v, or host one of the listed hosts", openai.APIs), nil)
@@ -795,14 +818,15 @@ func (s *Service) stats(req action.Request) action.Result {
 // proveModelKey: a model host whose list opens without a key (NanoGPT) accepted a wrong key in the
 // connection test. There the chat model a role uses on it is asked for one token; out["key_check"]
 // says how the key was proven (list | chat), or that it could not be yet (unverified: no role uses the
-// host, the first real call will show).
+// host, the first real call will show). A host without a model list is proven the same way.
 func (s *Service) proveModelKey(ctx context.Context, id string, out map[string]any) error {
 	a := s.Registry().LLM[id]
 	p := s.Doc().Providers[id]
 	if a == nil || p.Kind != config.KindOpenAI || a.API == openai.APIOpenRouter {
 		return nil
 	}
-	if !a.ListIsPublic(ctx) {
+	// a host without a model list (an Anthropic-format endpoint taking /messages only) proved nothing yet
+	if out["model_list"] != "unavailable" && !a.ListIsPublic(ctx) {
 		out["key_check"] = "list"
 		return nil
 	}

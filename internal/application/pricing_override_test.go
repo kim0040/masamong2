@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"masamong/internal/action"
+	"masamong/internal/clock"
 	"masamong/internal/providers/openai"
 )
 
@@ -51,5 +52,36 @@ func TestConditionalPricingOverridesPersistAndApplyPerRequest(t *testing.T) {
 	conservativeIn, conservativeOut, ok := svc.pricer("test-provider")("tier-model")
 	if !ok || conservativeIn != 2e-6 || conservativeOut != 5e-6 {
 		t.Fatalf("context-free estimate should use the conservative listed bound: %g %g %v", conservativeIn, conservativeOut, ok)
+	}
+}
+
+// OpenGateway's prices are scheduled promotions that end at pricing.until: the list is read again then,
+// not up to a day later; a list without an end keeps the daily refresh.
+func TestPriceListStaleAtListedPriceEnd(t *testing.T) {
+	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	fetched := now.Add(-time.Hour).Format(time.RFC3339)
+	ends := &priceList{FetchedAt: fetched, Until: now.Add(time.Hour).Format(time.RFC3339)}
+	if ends.stale(now) || !ends.stale(now.Add(time.Hour)) {
+		t.Fatal("stale from the listed end on")
+	}
+	daily := &priceList{FetchedAt: fetched}
+	if daily.stale(now) || !daily.stale(now.Add(24*time.Hour)) {
+		t.Fatal("a list without an end lasts a day")
+	}
+	// Sonnet 19: a host whose list always ends a promotion a few minutes ahead is not read again after
+	// every end: at most once an hour (priceListMinAge)
+	rolling := &priceList{FetchedAt: now.Add(-10 * time.Minute).Format(time.RFC3339), Until: now.Add(-5 * time.Minute).Format(time.RFC3339)}
+	if rolling.stale(now) || !rolling.stale(now.Add(50*time.Minute)) {
+		t.Fatal("an ended price is read again, but not within an hour of the last read")
+	}
+	// storePrices keeps the first end still ahead
+	s := &Service{Clock: clock.Fixed{T: now}}
+	s.storePrices("og", []openai.Model{
+		{ID: "a", PromptPrice: "0.000001", PriceUntil: now.Add(48 * time.Hour)},
+		{ID: "b", PromptPrice: "0.000001", PriceUntil: now.Add(6 * time.Hour)},
+		{ID: "c", PromptPrice: "0.000001", PriceUntil: now.Add(-time.Hour)},
+	})
+	if l := s.prices().lists["og"]; l == nil || l.Until != now.Add(6*time.Hour).Format(time.RFC3339) {
+		t.Fatalf("stored list %+v", l)
 	}
 }

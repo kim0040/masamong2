@@ -412,7 +412,7 @@ func TestSubmitOpenAIWireShape(t *testing.T) {
 func TestSubmitUsesLearnedShape(t *testing.T) {
 	f := newFake(t)
 	a := f.adapter(APIOpenAI, "/v1")
-	a.shapes.Store("m", shape{NoTemperature: true, NoEffort: true})
+	a.caps().updateShape("m", 0, func(shape) shape { return shape{NoTemperature: true, NoEffort: true} })
 	f.reply("POST", "/v1/files", 200, `{"id":"file-in"}`)
 	f.reply("POST", "/v1/batches", 200, `{"id":"b1","status":"validating"}`)
 	it := chatItem("a", "m")
@@ -547,7 +547,9 @@ func TestSubmitAnthropicNativeTranslation(t *testing.T) {
 		t.Fatalf("ref %+v", ref)
 	}
 	r := f.must("POST", "/v1/messages/batches")
-	if r.Header.Get("x-api-key") != "test-key" || r.Header.Get("anthropic-version") != "2023-06-01" || r.Header.Get("Authorization") != "" {
+	// a test address is not Anthropic's own host, so the key also goes as a bearer token
+	// (TestAnthropicFormatOnAnyHost: x-api-key alone on api.anthropic.com)
+	if r.Header.Get("x-api-key") != "test-key" || r.Header.Get("anthropic-version") != "2023-06-01" || r.Header.Get("Authorization") != "Bearer test-key" {
 		t.Fatalf("headers %v", r.Header)
 	}
 	var sent struct {
@@ -561,19 +563,20 @@ func TestSubmitAnthropicNativeTranslation(t *testing.T) {
 	}
 	p := sent.Requests[0].Params
 	msgs := p["messages"].([]any)
-	if p["model"] != "claude-x" || p["max_tokens"] != float64(50) || p["system"] != "be brief\n\nin Korean" || len(msgs) != 3 ||
+	if p["model"] != "claude-x" || p["system"] != "be brief\n\nin Korean" || len(msgs) != 3 ||
 		msgs[0].(map[string]any)["role"] != "user" || msgs[1].(map[string]any)["role"] != "assistant" {
 		t.Fatalf("params %v", p)
 	}
-	if th, _ := p["thinking"].(map[string]any); th["type"] != "disabled" {
-		t.Fatalf("effort low turns thinking off: %v", p)
+	// the live Messages request: effort low thinks adaptively at low, with room for the thinking
+	if th, _ := p["thinking"].(map[string]any); th["type"] != "adaptive" || p["output_config"].(map[string]any)["effort"] != "low" || p["max_tokens"] != float64(50+thinkingHeadroom) {
+		t.Fatalf("effort low: adaptive thinking at low with headroom: %v", p)
 	}
 	if _, ok := p["temperature"]; ok {
 		t.Fatalf("Anthropic gets no temperature live, so none here: %v", p)
 	}
 	hp := sent.Requests[1].Params
-	if _, ok := hp["thinking"]; ok {
-		t.Fatalf("a high effort leaves thinking at the model's default: %v", hp)
+	if th, _ := hp["thinking"].(map[string]any); th["type"] != "adaptive" || hp["output_config"].(map[string]any)["effort"] != "high" || hp["max_tokens"] != float64(50+4096) {
+		t.Fatalf("a high effort thinks adaptively at high: %v", hp)
 	}
 	if _, ok := hp["system"]; ok {
 		t.Fatalf("no system, no field: %v", hp)
@@ -581,7 +584,8 @@ func TestSubmitAnthropicNativeTranslation(t *testing.T) {
 	// translation errors
 	ctx := context.Background()
 	bad := chatItem("c", "claude-x")
-	bad.Chat.Messages = []Message{{Role: "assistant", Content: "first"}, {Role: "user", Content: "x"}}
+	// the bot's line a conversation starts with is left out (as live); one with no user turn is refused
+	bad.Chat.Messages = []Message{{Role: "system", Content: "s"}, {Role: "assistant", Content: "first"}}
 	if _, err := a.SubmitBatch(ctx, BatchChat, "claude-x", []BatchItem{{ID: "c", Chat: &ChatRequest{Model: "claude-x", MaxTokens: 5, Messages: bad.Chat.Messages}}}, ""); err == nil || !strings.Contains(err.Error(), "user message") {
 		t.Fatalf("first message must be the user's: %v", err)
 	}

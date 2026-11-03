@@ -75,9 +75,30 @@ func (p modelPrice) conservative() modelPrice {
 type priceList struct {
 	FetchedAt string                `json:"fetched_at"`
 	Models    map[string]modelPrice `json:"models"`
+	// Caps is what the list said about the models' reasoning (model_caps.go seeds a provider's cache from
+	// it after a restart); only models it said something about
+	Caps map[string]openai.Caps `json:"caps,omitempty"`
+	// Until is the first time a listed price stops applying (OpenGateway's scheduled promotions): the
+	// list is read again then, not a day later
+	Until string `json:"until,omitempty"`
 }
 
-const priceListTTL = 24 * time.Hour
+// stale reports a list older than a day or past a listed price's end.
+func (l *priceList) stale(now time.Time) bool {
+	at, err := time.Parse(time.RFC3339, l.FetchedAt)
+	if err != nil || now.Sub(at) > priceListTTL {
+		return true
+	}
+	until, err := time.Parse(time.RFC3339, l.Until)
+	// a price that ended is fetched again, but not more than once in priceListMinAge: a host whose list
+	// always ends a promotion a few minutes ahead would otherwise be asked again after every end
+	return err == nil && !now.Before(until) && now.Sub(at) >= priceListMinAge
+}
+
+const (
+	priceListTTL    = 24 * time.Hour
+	priceListMinAge = time.Hour
+)
 
 type priceState struct {
 	mu         sync.Mutex
@@ -201,11 +222,7 @@ func (s *Service) priceList(provider string) *priceList {
 			st.lists[provider] = l
 		}
 	}
-	stale := l == nil
-	if l != nil {
-		at, err := time.Parse(time.RFC3339, l.FetchedAt)
-		stale = err != nil || s.Clock.Now().Sub(at) > priceListTTL
-	}
+	stale := l == nil || l.stale(s.Clock.Now())
 	if stale && !st.refreshing[provider] && s.canListModels(provider) {
 		st.refreshing[provider] = true
 		s.ownedGo("model price refresh", func(ctx context.Context) {
@@ -294,6 +311,21 @@ func (s *Service) storePrices(provider string, models []openai.Model) {
 			mp.Cached = c
 		}
 		l.Models[m.ID] = mp
+		if u := m.PriceUntil; !u.IsZero() && u.After(s.Clock.Now()) {
+			if old, err := time.Parse(time.RFC3339, l.Until); err != nil || u.Before(old) {
+				l.Until = u.UTC().Format(time.RFC3339)
+			}
+		}
+	}
+	if provider != referenceList {
+		for _, m := range models {
+			if c := m.Caps(); c.Known() {
+				if l.Caps == nil {
+					l.Caps = map[string]openai.Caps{}
+				}
+				l.Caps[m.ID] = c
+			}
+		}
 	}
 	// a list without prices (CometAPI) is kept too, empty: its date stops a refetch on every lookup
 	st := s.prices()
@@ -312,6 +344,7 @@ func (s *Service) priceAdapters(reg *Registry, doc config.Document) {
 	for id, a := range reg.LLM {
 		if p, ok := doc.Providers[id]; ok && p.Kind == config.KindOpenAI {
 			a.Price, a.CachedPrice, a.ContextPrice = s.pricer(id), s.cachedPricer(id), s.contextPricer(id)
+			s.shareCaps(a, id, p)
 			s.priceList(id) // loads the stored list; refreshes it in the background when stale
 			reference = reference || openai.ResolveAPI(p.API, p.BaseURL) == openai.APICompatible
 		}

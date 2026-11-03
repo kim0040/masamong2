@@ -43,8 +43,21 @@ func (e *APIError) ErrClass() errclass.Class { return classify(e) }
 var (
 	contextMarks = []string{"context_length_exceeded", "maximum context length", "context length", "context window",
 		"exceeds the maximum number of tokens", "input token count", "prompt is too long", "reduce the length of the messages"}
-	authMarks   = []string{"invalid api key", "incorrect api key", "api key not valid", "invalid_api_key", "api_key_invalid", "no auth credentials", "authentication fail"}
-	quotaStrong = []string{"insufficient_quota", "exceeded your current quota"}
+	authMarks = []string{"invalid api key", "incorrect api key", "api key not valid", "invalid_api_key", "api_key_invalid", "no auth credentials", "authentication fail"}
+	// a used-up balance or spending cap: these reset in hours to months, so they win over the 429 they
+	// come with (OpenAI credit_balance_exhausted and the spend limits, OpenGateway budget_exceeded, NanoGPT
+	// api_key_usd_limit, api_key_weekly_usd_limit, api_account_monthly_usd_limit and the
+	// *_subscription_token_limit codes)
+	// Anthropic: a spend limit the operator set answers 400 "You have reached your specified API usage
+	// limits" (or "specified workspace API usage limits"), the tier's monthly cap 429 "You have reached your
+	// API usage limits" with error_code enforced_spend_limit_reached and no retry-after (rate-limits page,
+	// read 2026-11-03), and a prepaid account without credit "Your credit balance is too low"
+	quotaStrong = []string{"insufficient_quota", "exceeded your current quota", "credit_balance_exhausted", "organization_spend_limit_exceeded",
+		"project_spend_limit_exceeded", "organization_usage_limit_exceeded", "budget_exceeded", "_usd_limit", "_subscription_token_limit",
+		"reached your specified api usage limits", "reached your specified workspace api usage limits", "reached your api usage limits",
+		"enforced_spend_limit_reached", "credit balance is too low"}
+	// a request the host's content filter stopped: about this request, not the key or the model
+	policyMarks = []string{"content_policy_violation"}
 	rateMarks   = []string{"rate limit", "rate_limit", "too many requests", "tokens per min", "requests per min", "resource_exhausted", "resource has been exhausted"}
 	quotaWeak   = []string{"insufficient credits", "insufficient balance", "out of credits", "billing", "payment required", "credit balance"}
 	overMarks   = []string{"overloaded", "server is busy", "temporarily unavailable"}
@@ -54,6 +67,12 @@ var (
 	toolNotTaken  = []string{"support", "no endpoints found", "not enabled", "not allowed", "not available"}
 	toolSchemaish = []string{"schema", "tools[", "function_declarations", "parameters."}
 )
+
+// policyRefusal reports a content filter's refusal: OpenRouter's 403 content_policy_violation, or its
+// error.metadata.error_type "content_policy_violation" / "refusal".
+func policyRefusal(e *APIError, m string) bool {
+	return hasAny(m, policyMarks) || e.MetaType == "content_policy_violation" || e.MetaType == "refusal"
+}
 
 func hasAny(m string, marks []string) bool {
 	for _, k := range marks {
@@ -82,12 +101,24 @@ func classify(e *APIError) errclass.Class {
 	m := strings.ToLower(e.Type + " " + e.Code + " " + e.Message)
 	reqStatus := status == 0 || status == 400 || status == 404 || status == 422
 	switch {
+	case e.LimitSource != "":
+		// OpenRouter's 403 for a spent key, workspace or guardrail budget (error.metadata.limit_source)
+		return errclass.Quota
+	case policyRefusal(e, m):
+		// a content filter's 403: the fallback model may answer it; neither key nor model is at fault
+		return errclass.Empty
+	case strings.Contains(m, "authentication_rate_limited"):
+		// NanoGPT's 429 after failed key attempts: the same key waits it out, like a refused key
+		return errclass.Auth
 	case status == 401:
 		return errclass.Auth
 	case (status == 0 || status == 400 || status == 403) && hasAny(m, authMarks):
 		return errclass.Auth
 	case hasAny(m, contextMarks):
 		return errclass.ContextLength
+	case strings.Contains(m, "model_not_found"):
+		// at any status: CometAPI answers a model it cannot route with 503 model_not_found
+		return errclass.NotFound
 	case hasAny(m, quotaStrong):
 		return errclass.Quota
 	case status == 429 || hasAny(m, rateMarks):

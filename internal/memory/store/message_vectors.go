@@ -281,6 +281,25 @@ func (s *Store) MessageVectorCounts(space string) (total, inSpace int, err error
 	return total, inSpace, err
 }
 
+// MessageVectorSpaces lists the embedding spaces message vectors are stored in, with how many each holds.
+func (s *Store) MessageVectorSpaces() (map[string]int, error) {
+	rows, err := s.DB.Reader().Query(`SELECT embed_space, COUNT(*) FROM memory_message_vectors GROUP BY embed_space`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var space string
+		var n int
+		if err := rows.Scan(&space, &n); err != nil {
+			return nil, err
+		}
+		out[space] = n
+	}
+	return out, rows.Err()
+}
+
 // SaveMessageVectors stores message vectors (search.EncodeQuantizedRow bytes), replacing a message's
 // earlier one. They go only to this table, never to the embedding cache. A vector is kept only
 // if its message still exists and still reads as the text it was made from: one edited, erased or
