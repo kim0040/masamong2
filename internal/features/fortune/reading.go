@@ -2,6 +2,7 @@ package fortune
 
 import (
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -12,7 +13,9 @@ import (
 // reader's language. The card is built from the keys, so the layout does not depend on how the model
 // felt like formatting that day. A text that is not in this shape is shown as written (Parsed is false).
 
-// Keys a reading may carry. Unknown keys are ignored; a line without a key continues the value above it.
+// Keys a reading may carry. A line without a key continues the value above it. A line that looks like
+// a key this list does not have ("NOTE: …", two or more capitals) is dropped, and so are the lines that
+// continue it: it never runs into the value above.
 var readingKeys = map[string]bool{
 	"SCORE": true, "GREETING": true, "SUMMARY": true, "ONELINE": true,
 	"WORK": true, "MONEY": true, "LOVE": true, "HEALTH": true,
@@ -21,7 +24,7 @@ var readingKeys = map[string]bool{
 	"Q1": true, "Q2": true, "Q3": true, "Q4": true,
 	"BEST_TIME": true, "CAUTION_TIME": true, "DATES": true,
 	"DO": true, "AVOID": true, "CHECKLIST": true,
-	"LUCKY_COLOR": true, "LUCKY_ITEM": true, "LUCKY_TIME": true, "LUCKY_NUMBER": true,
+	"LUCKY_COLOR": true, "LUCKY_ITEM": true, "LUCKY_TIME": true, "LUCKY_NUMBER": true, "LUCKY_DIRECTION": true,
 	"RANK": true,
 }
 
@@ -61,7 +64,12 @@ func ParseReading(text string) (r Reading) {
 			continue
 		}
 		line = listMark.ReplaceAllString(line, "")
-		if m := keyLine.FindStringSubmatch(line); m != nil && readingKeys[m[1]] {
+		m := keyLine.FindStringSubmatch(line)
+		if m != nil && !readingKeys[m[1]] && len(m[1]) >= 2 {
+			last = "" // an unknown key: the line and its continuation go nowhere
+			continue
+		}
+		if m != nil && readingKeys[m[1]] {
 			key, value := m[1], clean(m[2])
 			if key == "RANK" {
 				if rk, good := parseRank(value); good {
@@ -101,6 +109,21 @@ func ParseReading(text string) (r Reading) {
 	}
 	r.Ranks = orderRanks(r.Ranks)
 	return r
+}
+
+// WithoutKeys is text without its lines that start with one of keys ("SCORE: 85"), for a text shown as
+// written whose points are computed elsewhere.
+func WithoutKeys(text string, keys ...string) string {
+	lines := strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n")
+	out := lines[:0]
+	for _, raw := range lines {
+		line := listMark.ReplaceAllString(strings.TrimSpace(raw), "")
+		if m := keyLine.FindStringSubmatch(line); m != nil && slices.Contains(keys, m[1]) {
+			continue
+		}
+		out = append(out, raw)
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
 }
 
 // Structured reports whether the text was a reading: a SUMMARY and at least one more known key.

@@ -169,12 +169,12 @@ type Features struct {
 	// Fortune prompts ({bot} {data} {name} {gender} {sign} {sky} {date}); the system text holds the
 	// persona and the Discord-safe formatting rules.
 	FortuneSystem      string `json:"fortune_system"`       // {bot}
-	FortunePublic      string `json:"fortune_public"`       // {data} {name} {gender}
+	FortunePublic      string `json:"fortune_public"`       // {data} {name} (no gender: it is posted in public)
 	FortuneToday       string `json:"fortune_today"`        // {data} {name} {gender}
 	FortuneDetailDay   string `json:"fortune_detail_day"`   // {data} {name} {gender} {sign}
 	FortuneDetailMonth string `json:"fortune_detail_month"` // {data} {name} {gender} {sign}
 	FortuneDetailYear  string `json:"fortune_detail_year"`  // {data} {name} {gender} {sign}
-	FortuneMorning     string `json:"fortune_morning"`      // {data} {name} {gender} {date}
+	FortuneMorning     string `json:"fortune_morning"`      // {data} {name} {gender} {date} {task} {greeting} (fortune.briefing.*: the send-time slot)
 	ZodiacSystem       string `json:"zodiac_system"`        // {bot}
 	ZodiacPublic       string `json:"zodiac_public"`        // {sky} {sign}
 	ZodiacPrivate      string `json:"zodiac_private"`       // {sky} {sign}

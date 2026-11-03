@@ -35,7 +35,8 @@ import (
 // only gets a three-line summary, and personal readings are limited per day including failed ones.
 //
 // Knobs (tools.fortune.query.defaults / tools.fortune.subscribe.defaults): daily_limit (3),
-// zodiac_cooldown_sec (30), lead_min (10), generation_attempts (3), send_attempts (5), max_tokens.
+// zodiac_cooldown_sec (30), animals_cooldown_sec (60), hour_correction_minutes (30, fortune.query only;
+// hourCorrection), lead_min (10), generation_attempts (3), send_attempts (5), max_tokens.
 
 func init() {
 	featureDDL = append(featureDDL,
@@ -151,8 +152,7 @@ func (s *Service) skyText(loc string, at time.Time) string {
 	return strings.Join(parts, ", ")
 }
 
-func (s *Service) pillarsText(loc string, date time.Time, hour int) string {
-	y, m, d, h, hasHour := fortune.Pillars(date, hour)
+func (s *Service) pillarsText(loc string, y, m, d, h fortune.Pillar, hasHour bool) string {
 	text := s.I18n.T(loc, "fortune.data.pillars", "year", s.pillarText(loc, y), "month", s.pillarText(loc, m), "day", s.pillarText(loc, d))
 	if hasHour {
 		text += " " + s.I18n.T(loc, "fortune.data.hour_pillar", "hour", s.pillarText(loc, h))
@@ -160,13 +160,122 @@ func (s *Service) pillarsText(loc string, date time.Time, hour int) string {
 	return text
 }
 
-// fortuneData is the fact sheet a fortune is written from, in loc's words.
-func (s *Service) fortuneData(loc string, p fortuneProfile, at time.Time) string {
-	birth, _ := time.Parse("2006-01-02", p.BirthDate)
-	hour := -1
-	if t, err := time.Parse("15:04", p.BirthTime); err == nil {
-		hour = t.Hour()
+// validBirthDate is the one check of a birth date, for registration (parseProfile), a stored profile
+// (fortuneChart) and a V1 import (migration.go): YYYY-MM-DD on the calendar, from 1900, not after today.
+// Today is the date on now's own clock, so callers pass now in the birth zone (s.birthNow): a baby born
+// this morning in Seoul is not "in the future" until 09:00 UTC. A V1 profile may carry a yearless
+// "0000-05-15" or a "1990-02-30"; such a profile gets no chart.
+func validBirthDate(v string, now time.Time) (time.Time, bool) {
+	d, err := time.Parse("2006-01-02", v)
+	y, m, day := now.Date()
+	return d, err == nil && dateRE.MatchString(v) && d.Year() >= 1900 && !d.After(time.Date(y, m, day, 0, 0, 0, 0, time.UTC))
+}
+
+// birthNow is now on the birth zone's clock, for validBirthDate.
+func (s *Service) birthNow() time.Time { return s.Clock.Now().In(s.birthZone()) }
+
+// birthZone is the zone a birth date and time are read in: the instance's configured zone (i18n.timezone),
+// else Asia/Seoul, as V1 read every birth as Korean time. It is not the person's display zone: a natal
+// chart is fixed at birth, and moving one's notifications to another zone must not change it.
+func (s *Service) birthZone() *time.Location {
+	if z := s.Doc().I18n.Timezone; z != "" {
+		if loc, err := time.LoadLocation(z); err == nil {
+			return loc
+		}
 	}
+	if loc, err := time.LoadLocation("Asia/Seoul"); err == nil {
+		return loc
+	}
+	return time.FixedZone("KST", 9*3600) // a system without tzdata
+}
+
+// Uncertain natal pillars: no birth time, and a 절기 falls on the birth date (fortuneChart.uncertain).
+const (
+	natalCertain = iota
+	natalMonthUncertain
+	natalYearUncertain // 입춘: the year and the month
+)
+
+// fortuneChart is a person's chart for one reading, computed once and passed along: the natal pillars
+// and, for a day's reading, the computed day (docs/plan-fortune.md §8).
+type fortuneChart struct {
+	natal     fortune.Natal
+	valid     bool // the birth date is a real date from 1900 on; otherwise nothing is computed
+	uncertain int  // natalCertain, natalMonthUncertain or natalYearUncertain
+	// solar is the UTC offset of the local solar time the hour pillar was read in ("+8:30"), set only when
+	// it differs from the offset of the birth's own wall clock (never without a birth time)
+	solar string
+	day   *fortune.Day
+}
+
+// hourCorrection is tools.fortune.query.defaults.hour_correction_minutes (-120…120): how far the birth
+// zone's standard clock runs ahead of local solar time. The hour pillar of a natal chart is taken in
+// solar time (fortune.NatalAt): with the Korean 만세력 convention of 30 minutes, 자시 is 23:30–01:30 on a
+// Seoul clock. 0 reads the standard clock as it is (summer time is still taken off).
+//
+// Unset, it is 30 in Seoul's own zone (Asia/Seoul, Asia/Pyongyang), where the 30 minutes is Seoul's
+// distance from its 135°E meridian, and 0 in any other zone, where that figure means nothing; a value the
+// operator set is used in every zone. It is one setting for every reading, the briefings included: a chart
+// is the same wherever it is shown.
+func (s *Service) hourCorrection() int {
+	def := 0
+	if z := s.birthZone().String(); z == "Asia/Seoul" || z == "Asia/Pyongyang" {
+		def = 30
+	}
+	return max(-120, min(120, s.toolDefault("fortune.query", "hour_correction_minutes", def)))
+}
+
+// utcOffset is a zone offset in seconds as "+8:30" or "-5:00" (the "UTC" is in the catalog line).
+func utcOffset(sec int) string {
+	sign := "+"
+	if sec < 0 {
+		sign, sec = "-", -sec
+	}
+	return fmt.Sprintf("%s%d:%02d", sign, sec/3600, sec%3600/60)
+}
+
+// fortuneChart reads the birth in birthZone. Without a birth time the year and month are taken at noon
+// and there is no hour pillar; withDay adds the computed day of at's civil date (the same birth data and
+// date always give the same scores and lucky points).
+func (s *Service) fortuneChart(p fortuneProfile, at time.Time, withDay bool) fortuneChart {
+	birth, ok := validBirthDate(p.BirthDate, s.birthNow())
+	if !ok {
+		return fortuneChart{}
+	}
+	zone := s.birthZone()
+	h, m, has := 12, 0, false
+	if t, err := time.Parse("15:04", p.BirthTime); err == nil {
+		h, m, has = t.Hour(), t.Minute(), true
+	}
+	corr := s.hourCorrection()
+	moment := fortune.BirthMoment(birth.Year(), birth.Month(), birth.Day(), h, m, zone)
+	natal := fortune.NatalAt(moment, zone, has, time.Duration(corr)*time.Minute)
+	c := fortuneChart{natal: natal, valid: true}
+	if has {
+		_, wall := moment.Zone()
+		if _, solar := moment.In(fortune.SolarHourZone(zone, time.Duration(corr)*time.Minute)).Zone(); solar != wall {
+			c.solar = utcOffset(solar)
+		}
+	}
+	if !has {
+		if branch, on := fortune.TermOn(birth.Year(), birth.Month(), birth.Day(), zone); on {
+			c.uncertain = natalMonthUncertain
+			if branch == 2 {
+				c.uncertain = natalYearUncertain
+			}
+		}
+	}
+	if withDay {
+		day := fortune.Analyze(c.natal, at)
+		c.day = &day
+	}
+	return c
+}
+
+// fortuneData is the fact sheet a fortune is written from, in loc's words. A chart with a day adds the
+// computed facts the reading must keep (a day's reading: today, detail, morning).
+func (s *Service) fortuneData(loc string, p fortuneProfile, at time.Time, c fortuneChart) string {
+	birth, _ := time.Parse("2006-01-02", p.BirthDate)
 	unknown := s.I18n.T(loc, "fortune.data.not_given")
 	orUnknown := func(v string) string {
 		if v == "" {
@@ -174,10 +283,43 @@ func (s *Service) fortuneData(loc string, p fortuneProfile, at time.Time) string
 		}
 		return v
 	}
-	return s.I18n.T(loc, "fortune.data.block",
+	natal := unknown
+	if c.valid {
+		natal = s.pillarsText(loc, c.natal.Year, c.natal.Month, c.natal.Day, c.natal.Hour, c.natal.HasHour)
+	}
+	y, mo, d := at.Date()
+	ty, tm, td := fortune.DatePillars(y, mo, d, at.Location())
+	text := s.I18n.T(loc, "fortune.data.block",
 		"date", at.Format("2006-01-02 15:04"),
 		"birth", p.BirthDate, "birth_time", orUnknown(p.BirthTime), "place", orUnknown(p.BirthPlace),
-		"natal", s.pillarsText(loc, birth, hour), "today", s.pillarsText(loc, at, -1),
+		"natal", natal, "today", s.pillarsText(loc, ty, tm, td, fortune.Pillar{}, false),
+		"sign", s.I18n.T(loc, fmt.Sprintf("fortune.sign.%d", fortune.SunSign(int(birth.Month()), birth.Day()))),
+		"sky", s.skyText(loc, at))
+	if c.solar != "" {
+		text += "\n" + s.I18n.T(loc, "fortune.data.hour_corrected", "offset", c.solar)
+	}
+	switch c.uncertain {
+	case natalMonthUncertain:
+		text += "\n" + s.I18n.T(loc, "fortune.data.term_month")
+	case natalYearUncertain:
+		text += "\n" + s.I18n.T(loc, "fortune.data.term_year")
+	}
+	if c.day != nil {
+		text += "\n\n" + s.factsText(loc, *c.day)
+	}
+	return text
+}
+
+// fortunePublicData is the fact sheet of a public channel's three-line summary: the date, the day's
+// pillars, the sun sign and the sky. The birth date, time and place and the natal pillars stay out: the
+// model's text is posted as written, and they are the person's own (the prompt asking it not to name them
+// is not a guard).
+func (s *Service) fortunePublicData(loc string, p fortuneProfile, at time.Time) string {
+	birth, _ := time.Parse("2006-01-02", p.BirthDate)
+	y, mo, d := at.Date()
+	ty, tm, td := fortune.DatePillars(y, mo, d, at.Location())
+	return s.I18n.T(loc, "fortune.data.public_block", "date", at.Format("2006-01-02 15:04"),
+		"today", s.pillarsText(loc, ty, tm, td, fortune.Pillar{}, false),
 		"sign", s.I18n.T(loc, fmt.Sprintf("fortune.sign.%d", fortune.SunSign(int(birth.Month()), birth.Day()))),
 		"sky", s.skyText(loc, at))
 }
@@ -382,6 +524,8 @@ func (s *Service) fortuneQuery(ctx context.Context, req action.Request) action.R
 	switch what {
 	case "zodiac", "ranking":
 		return s.zodiac(ctx, req, in, what == "ranking")
+	case "animals":
+		return s.animals(req)
 	case "today", "detail", "month", "year":
 	default:
 		return action.Fail(req, errcode.InvalidInput, "generic.error", s.msg(req, "generic.error"), nil)
@@ -413,8 +557,20 @@ func (s *Service) fortuneQuery(ctx context.Context, req action.Request) action.R
 		name = s.msg(req, "fortune.someone")
 	}
 	birth, _ := time.Parse("2006-01-02", p.BirthDate)
-	vars := []string{"data", s.fortuneData(loc, p, now), "name", name, "gender", s.genderText(loc, p.Gender),
+	// a day's reading in private gets computed scores and lucky points (month and year are the model's).
+	// A public channel's three-line summary gets only the sun sign and the day (fortunePublicData).
+	chart := s.fortuneChart(p, now, private && (what == "today" || what == "detail"))
+	data := s.fortunePublicData(loc, p, now)
+	if private {
+		data = s.fortuneData(loc, p, now, chart)
+	}
+	vars := []string{"data", data, "name", name, "gender", s.genderText(loc, p.Gender),
 		"sign", s.I18n.T(loc, fmt.Sprintf("fortune.sign.%d", fortune.SunSign(int(birth.Month()), birth.Day())))}
+	if !private {
+		// the text is posted as written: the registered gender stays out of the prompt (fortune_public has no
+		// {gender}); the sign is in the data block already
+		vars = []string{"data", data, "name", name}
+	}
 	tpl := map[string]string{"today": pack.Features.FortuneToday, "detail": pack.Features.FortuneDetailDay,
 		"month": pack.Features.FortuneDetailMonth, "year": pack.Features.FortuneDetailYear}[what]
 	if !private {
@@ -439,9 +595,15 @@ func (s *Service) fortuneQuery(ctx context.Context, req action.Request) action.R
 		footer := s.msg(req, "fortune.left", "n", left)
 		card.Footer, card.Ephemeral = footer, true
 		head := s.msg(req, "fortune.card.head", "name", name, "date", s.dayLabel(loc, now))
-		card = s.fortuneCard(loc, what, card, head, s.fortuneBasis(loc, p, now)+" · "+footer)
+		card = s.fortuneCardFor(loc, what, card, head, s.fortuneBasis(loc, p, now)+" · "+footer, chart.day)
 	}
-	return action.WithCard(action.OK(req, map[string]any{"status": "ok", "what": what, "text": text, "cost_usd": cost, "left_today": left}), card)
+	out := map[string]any{"status": "ok", "what": what, "text": text, "cost_usd": cost, "left_today": left}
+	if chart.day != nil {
+		// the computed points, not the model's: its own SCORE and LUCKY_* lines are left out of the text
+		out["text"] = fortune.WithoutKeys(text, computedKeys...)
+		out["scores"], out["lucky"] = s.computedOutput(loc, *chart.day)
+	}
+	return action.WithCard(action.OK(req, out), card)
 }
 
 // packFor is the language pack of a locale (the instance's languages as fallback).
@@ -535,6 +697,60 @@ func (s *Service) zodiac(ctx context.Context, req action.Request, in map[string]
 		card = s.fortuneCard(loc, "sign", card, s.dayLabel(loc, now), footer)
 	}
 	return action.WithCard(action.OK(req, map[string]any{"status": "ok", "sign": signName, "ranking": ranking, "cached": cached, "text": text}), card)
+}
+
+// animals is today's twelve-animal (띠) reading: the same for everyone, so it needs no profile, no
+// consent and no model call. Each animal is scored by its branch's relation with today's day branch
+// (fortune.AnimalScores, docs/plan-fortune.md §8) on the instance's local date, and gets one catalog
+// phrase by its score band.
+//
+// In a public channel the card is posted once per animals_cooldown_sec (60) per channel: a second ask
+// within it gets a short note that only the asker sees (where the connector can show it so) instead of
+// a second fourteen-line card.
+func (s *Service) animals(req action.Request) action.Result {
+	loc := req.Locale
+	now := s.Clock.Now().In(s.instanceZone())
+	if inv := req.Invoker; inv != nil && !inv.Private && inv.ChannelID != "" {
+		cd := min(time.Duration(s.toolDefault("fortune.query", "animals_cooldown_sec", 60))*time.Second, time.Hour) // the cache keeps an hour
+		// in memory: a restart forgets it, which at worst posts the card once more
+		s.animalsOnce.Do(func() { s.animalsPosted = newTTLCache[struct{}](zodiacCooldownMax, time.Hour) })
+		key := inv.GuildID + "\x00" + inv.ChannelID
+		// check and set in one step: two asks in the same few milliseconds are two goroutines
+		if last, first := s.animalsPosted.putUnlessWithin(key, struct{}{}, now, cd); !first {
+			wait := int((cd - now.Sub(last)).Seconds()) + 1
+			return action.WithCard(action.OK(req, map[string]any{"status": "recent", "what": "animals", "retry_in_sec": wait}),
+				action.Card{Text: s.msg(req, "fortune.animals.recent", "seconds", wait), Tone: "neutral", Ephemeral: true})
+		}
+	}
+	y, m, d := now.Date()
+	_, _, day := fortune.DatePillars(y, m, d, now.Location())
+	scores := fortune.AnimalScores(day.Branch)
+	lines := make([]string, 0, 12)
+	ranking := make([]map[string]any, 0, 12)
+	for i, b := range fortune.AnimalRanking(day.Branch) {
+		lines = append(lines, s.msg(req, "fortune.animals.line", "rank", i+1, "animal", s.msg(req, fmt.Sprintf("fortune.animal.%d", b)),
+			"score", scores[b], "phrase", s.msg(req, "fortune.animals.band."+animalBand(scores[b]))))
+		ranking = append(ranking, map[string]any{"branch": b, "score": scores[b]})
+	}
+	card := action.Card{Title: s.msg(req, "fortune.animals_title", "date", s.dayLabel(loc, now)),
+		Text:   s.msg(req, "fortune.animals.head", "day", s.pillarText(loc, day)) + "\n\n" + strings.Join(lines, "\n"),
+		Footer: s.msg(req, "fortune.animals.footer"), Tone: "fortune"}
+	return action.WithCard(action.OK(req, map[string]any{"status": "ok", "what": "animals", "date": now.Format("2006-01-02"),
+		"day": s.pillarText(loc, day), "ranking": ranking}), card)
+}
+
+// animalBand is the phrase band of an animal's score: high (a 육합 or 반합 day, 70 and up), good (the
+// same branch, 61–69), plain (no relation, 56–60) or low (a clash, punishment, harm or break, 55 and below).
+func animalBand(score int) string {
+	switch {
+	case score >= 70:
+		return "high"
+	case score > 60:
+		return "good"
+	case score > 55:
+		return "plain"
+	}
+	return "low"
 }
 
 func (s *Service) signList(loc string) string {
@@ -667,8 +883,7 @@ func (s *Service) parseProfile(req action.Request, in map[string]any) (fortunePr
 	if len(p.BirthDate) == 8 && !strings.Contains(p.BirthDate, "-") { // 19900101
 		p.BirthDate = p.BirthDate[:4] + "-" + p.BirthDate[4:6] + "-" + p.BirthDate[6:]
 	}
-	d, err := time.Parse("2006-01-02", p.BirthDate)
-	if !dateRE.MatchString(p.BirthDate) || err != nil || d.Year() < 1900 || d.After(s.Clock.Now()) {
+	if _, ok := validBirthDate(p.BirthDate, s.birthNow()); !ok {
 		return p, s.msg(req, "fortune.bad_date")
 	}
 	unknown := map[string]string{}
@@ -799,6 +1014,20 @@ type morningJob struct {
 	Sends     int    `json:"sends"`     // attempts to send it
 	NextAt    string `json:"next_at,omitempty"`
 	Error     string `json:"error,omitempty"`
+	// Slot and Target are what the text was written for (briefingSlot of the planned delivery moment, and
+	// the moment its reading is for, RFC 3339). A send in another slot writes it again once (Rewritten).
+	Slot      string `json:"slot,omitempty"`
+	Target    string `json:"target,omitempty"`
+	Rewritten bool   `json:"rewritten,omitempty"`
+}
+
+// targetDate is the local date the job's reading is for ("" before it has one).
+func (j morningJob) targetDate(zone *time.Location) string {
+	t, err := time.Parse(time.RFC3339, j.Target)
+	if err != nil {
+		return ""
+	}
+	return t.In(zone).Format("2006-01-02")
 }
 
 var morningRunning atomic.Bool
@@ -840,6 +1069,57 @@ func (s *Service) runFortuneMorning(ctx context.Context) {
 		s.morningFor(ctx, sender, u)
 	}
 }
+
+// briefingSlot is the wording slot of a briefing delivered at the local moment at, and the moment its
+// reading is for. The moment is the planned delivery (the subscription time, or the end of quiet hours
+// that hold it; writing it lead_min early does not count) or, when a send is late, the actual one:
+//   - 04:00–10:59 morning: today's reading, a morning greeting ("아침 운세");
+//   - 11:00–16:59 day: today's reading, a neutral daytime greeting ("오늘의 운세");
+//   - 17:00–23:59 evening: TOMORROW's reading, as commercial apps do for an evening send: the computed
+//     facts, scores and lucky points are the next local date's ("내일 운세", dated tomorrow);
+//   - 00:00–03:59 night: the coming day, which is the same calendar date, with a night greeting.
+func briefingSlot(at time.Time) (slot string, target time.Time) {
+	switch h := at.Hour(); {
+	case h >= 4 && h < 11:
+		return "morning", at
+	case h >= 11 && h < 17:
+		return "day", at
+	case h >= 17:
+		return "evening", at.AddDate(0, 0, 1)
+	}
+	return "night", at
+}
+
+// briefingTarget is the local date the briefing of now's own date is for: its slot is taken at the
+// planned delivery, the subscription time on that date or the end of the quiet hours that hold it.
+func (s *Service) briefingTarget(prefs UserPrefs, now, subTime time.Time) string {
+	due := time.Date(now.Year(), now.Month(), now.Day(), subTime.Hour(), subTime.Minute(), 0, 0, now.Location())
+	_, target := briefingSlot(s.quietUntil(prefs, due))
+	return target.Format("2006-01-02")
+}
+
+// slotGrace is how far past a slot boundary a briefing planned before it still counts as being in its
+// own slot: the scheduler ticks once a minute and takes subscribers one after another, each with a model
+// call, so a 10:59 briefing can be sent at 11:02.
+const slotGrace = 5 * time.Minute
+
+// slotGraceHolds is true when a job whose slot looks changed at now is in fact a send planned inside its
+// own slot (sendAt) and made less than slotGrace after it. It does not hold when the reading's date
+// relative to the delivery changes: an evening briefing is tomorrow's reading, and past midnight it is
+// today's (the night slot), which needs different words.
+func slotGraceHolds(job morningJob, sendAt, now time.Time, zone *time.Location) bool {
+	if d := now.Sub(sendAt); d < 0 || d >= slotGrace {
+		return false
+	}
+	_, nowTarget := briefingSlot(now)
+	plannedSlot, plannedTarget := briefingSlot(sendAt)
+	return plannedSlot == job.Slot && job.Slot != "evening" && nowTarget.Format("2006-01-02") == job.targetDate(zone) &&
+		plannedTarget.Format("2006-01-02") == job.targetDate(zone)
+}
+
+// briefingNeutral is the title and greeting slot of a briefing sent outside the slot it was written for
+// when it cannot be written again: it names the date and claims no time of day.
+const briefingNeutral = "neutral"
 
 func (s *Service) morningFor(ctx context.Context, sender DiscordSender, userID string) {
 	p, ok := s.fortuneProfile(userID)
@@ -905,38 +1185,98 @@ func (s *Service) morningFor(ctx context.Context, sender DiscordSender, userID s
 	if loc == "" {
 		loc = s.Doc().I18n.DefaultLocale
 	}
-	if job.Content == "" {
-		if job.Generated >= s.toolDefault("fortune.subscribe", "generation_attempts", 3) {
-			job.State, job.NextAt = "failed", ""
-			save()
-			return
+	genCap := s.toolDefault("fortune.subscribe", "generation_attempts", 3)
+	plan := func(at time.Time) {
+		slot, target := briefingSlot(at)
+		job.Slot, job.Target = slot, target.Format(time.RFC3339)
+	}
+	sendAt := s.quietUntil(prefs, due) // the planned delivery: the due time, or the end of quiet hours
+	if job.Slot == "" {
+		if job.Content != "" {
+			plan(due) // written before slots were stored: it was worded from the due time
+		} else {
+			plan(sendAt)
 		}
+	}
+	name := p.DisplayName
+	if name == "" {
+		name = s.I18n.T(loc, "fortune.someone")
+	}
+	// write returns the text for a slot and the moment its reading is for; false when it could not (retried
+	// later). It counts the attempt and saves that before the call, but never touches the stored Content,
+	// Slot or Target: a process that stops mid-call leaves whatever text was written before it, which can
+	// still go out. The caller swaps the new text in once it has it.
+	write := func(slot string, target time.Time) (string, bool) {
+		target = target.In(zone)
 		job.Generated++
 		job.NextAt = retry(job.Generated) // kept if the process stops mid-call
 		save()
 		pack := s.packFor(loc)
-		name := p.DisplayName
-		if name == "" {
-			name = s.I18n.T(loc, "fortune.someone")
-		}
-		prompt := lang.Fill(pack.Features.FortuneMorning, "data", s.fortuneData(loc, p, due), "name", name, "gender", s.genderText(loc, p.Gender), "date", date)
+		day := target.Format("2006-01-02")
+		chart := s.fortuneChart(p, target, true)
+		prompt := lang.Fill(pack.Features.FortuneMorning, "data", s.fortuneData(loc, p, target, chart), "name", name, "gender", s.genderText(loc, p.Gender), "date", day,
+			"task", s.I18n.T(loc, "fortune.briefing.task."+slot, "date", day), "greeting", s.I18n.T(loc, "fortune.briefing.greeting."+slot, "name", name))
 		text, _, err := s.featureText(ctx, "response", "fortune", lang.Fill(pack.Features.FortuneSystem, "bot", s.Doc().BotNames()[0]), prompt,
 			s.toolDefault("fortune.subscribe", "max_tokens", 900), 0.8)
 		if err != nil {
 			job.Error = clip(err.Error(), 200)
 			save()
 			s.Log.Warn("fortune: briefing not written", "attempt", job.Generated, "err", err)
+			return "", false
+		}
+		return text, true
+	}
+	if job.Content == "" {
+		if job.Generated >= genCap {
+			job.State, job.NextAt = "failed", ""
+			save()
+			return
+		}
+		target, _ := time.Parse(time.RFC3339, job.Target)
+		text, ok := write(job.Slot, target)
+		if !ok {
 			return
 		}
 		job.Content, job.State, job.Error, job.NextAt = text, "written", "", ""
 		save()
 	}
-	sendAt := s.quietUntil(prefs, due)
 	if now.Before(sendAt) {
 		return
 	}
 	if !s.ConsentAllows(userID, privacy.Fortune) {
 		return
+	}
+	// a send in another slot than the text was written for (a catch-up after downtime, a retry past a
+	// slot boundary) writes it again once for the moment it goes out; with the cap spent, or when that
+	// one rewrite fails, it goes as it was written, under a title and greeting that claim no time of day
+	// (the reading still holds for its own date)
+	when := job.Slot
+	nowSlot, nowTarget := briefingSlot(now)
+	changed := nowSlot != job.Slot || nowTarget.Format("2006-01-02") != job.targetDate(zone)
+	if changed && slotGraceHolds(job, sendAt, now, zone) {
+		changed = false // a tick a minute or two past the boundary the briefing was planned before
+	}
+	if changed {
+		if date != today && nowTarget.Format("2006-01-02") == s.briefingTarget(prefs, now, t) {
+			// a day-old job would be rewritten for the date today's own briefing is for: today's goes instead
+			job.State, job.NextAt, job.Error = "failed", "", "superseded by the next day's briefing"
+			save()
+			return
+		}
+		if !job.Rewritten && job.Generated < genCap {
+			// the old text stays in the job until the new one is in hand: a failed call, or a process that
+			// stops in the middle of it, leaves a briefing that goes out as it is, neutrally, at the next try
+			job.Rewritten = true // saved with the attempt, so it is the one rewrite either way
+			text, ok := write(nowSlot, nowTarget)
+			if !ok {
+				return
+			}
+			job.Content, job.Slot, job.Target, job.State, job.Error, job.NextAt = text, nowSlot, nowTarget.Format(time.RFC3339), "written", "", ""
+			save()
+			when = job.Slot
+		} else {
+			when = briefingNeutral
+		}
 	}
 	if job.Sends >= s.toolDefault("fortune.subscribe", "send_attempts", 5) {
 		job.State, job.NextAt = "failed", ""
@@ -946,14 +1286,17 @@ func (s *Service) morningFor(ctx context.Context, sender DiscordSender, userID s
 	job.Sends++
 	job.State, job.NextAt = "sending", ""
 	save()
-	basis := s.fortuneBasis(loc, p, due)
-	card := action.Card{Title: s.I18n.T(loc, "fortune.morning_title", "date", s.dayLabel(loc, due)), Text: job.Content, Footer: basis, Tone: "fortune",
-		Buttons: []action.CardButton{{ID: "fortune:unsub", Label: s.I18n.T(loc, "fortune.card.unsubscribe"), Style: "secondary"}}}
-	name := p.DisplayName
-	if name == "" {
-		name = s.I18n.T(loc, "fortune.someone")
+	target, _ := time.Parse(time.RFC3339, job.Target)
+	target = target.In(zone)
+	chart := s.fortuneChart(p, target, true)
+	text := job.Content
+	if when == briefingNeutral {
+		text = fortune.WithoutKeys(text, "GREETING") // the card's head line (name and date) takes its place
 	}
-	card = s.fortuneCard(loc, "morning", card, s.I18n.T(loc, "fortune.card.head", "name", name, "date", s.dayLabel(loc, due)), basis)
+	basis := s.fortuneBasis(loc, p, target)
+	card := action.Card{Title: s.I18n.T(loc, "fortune.briefing_title."+when, "date", s.dayLabel(loc, target)), Text: text, Footer: basis, Tone: "fortune",
+		Buttons: []action.CardButton{{ID: "fortune:unsub", Label: s.I18n.T(loc, "fortune.card.unsubscribe"), Style: "secondary"}}}
+	card = s.fortuneCardFor(loc, "morning", card, s.I18n.T(loc, "fortune.card.head", "name", name, "date", s.dayLabel(loc, target)), basis, chart.day)
 	sendCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	err = sender.SendDM(sendCtx, userID, card, "")
 	cancel()

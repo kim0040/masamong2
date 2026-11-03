@@ -7,6 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.9
 	charm.land/lipgloss/v2 v2.0.6
 	fyne.io/systray v1.12.2
+	github.com/6tail/lunar-go v1.4.6
 	github.com/PuerkitoBio/goquery v1.13.0
 	github.com/bwmarrin/discordgo v0.29.0
 	github.com/go-sql-driver/mysql v1.10.1

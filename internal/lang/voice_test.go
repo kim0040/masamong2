@@ -112,8 +112,10 @@ func TestFortuneAndDefaultPersonaShareTheChatRegister(t *testing.T) {
 	if strings.Contains(ko.Chat.DefaultPersona, "반말로") {
 		t.Errorf("the Korean default persona must not be 반말: %q", ko.Chat.DefaultPersona)
 	}
-	if !strings.Contains(ko.Features.FortuneMorning, "님, 좋은 아침이에요") {
-		t.Errorf("the morning greeting must stay 해요체: %q", ko.Features.FortuneMorning)
+	// the briefing's task and greeting example follow its send time (catalog fortune.briefing.*, whose
+	// Korean examples are 해요체: internal/application TestBriefingGreetingsArePolite)
+	if !strings.Contains(ko.Features.FortuneMorning, "{task}") || !strings.Contains(ko.Features.FortuneMorning, "GREETING: {greeting}") {
+		t.Errorf("the briefing takes its task and greeting from the catalog: %q", ko.Features.FortuneMorning)
 	}
 }
 

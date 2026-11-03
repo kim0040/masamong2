@@ -58,9 +58,14 @@ func TestPillars(t *testing.T) {
 	if y != (Pillar{0, 4}) || m != (Pillar{2, 2}) {
 		t.Fatalf("2024-02-10: %+v %+v", y, m)
 	}
-	// hour: 23:30 is 자시; a 무 day's 자시 is 임자
-	_, _, _, h, ok := Pillars(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC), 23)
+	// hour (rule 五鼠遁: a 무/계 day starts at 임자): 00:00 on a 무 day is 임자; 23:00 is the 자시 that
+	// starts the next (기) day, so 갑자, while the day pillar stays 무오
+	_, _, _, h, ok := Pillars(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC), 0)
 	if !ok || h != (Pillar{8, 0}) {
 		t.Fatalf("hour %+v", h)
+	}
+	_, _, d, h, ok = Pillars(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC), 23)
+	if !ok || h != (Pillar{0, 0}) || d != (Pillar{4, 6}) {
+		t.Fatalf("23:00: day %+v hour %+v", d, h)
 	}
 }

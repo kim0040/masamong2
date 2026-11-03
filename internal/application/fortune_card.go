@@ -32,7 +32,27 @@ var fortuneFlows = []struct {
 	{"flow_year", "🗓️", []string{"Q1", "Q2", "Q3", "Q4"}},
 }
 
-var fortuneLucky = []struct{ key, emoji string }{{"LUCKY_COLOR", "🎨"}, {"LUCKY_ITEM", "🎁"}, {"LUCKY_NUMBER", "🔢"}, {"LUCKY_TIME", "⏰"}}
+var fortuneLucky = []struct{ key, emoji string }{{"LUCKY_COLOR", "🎨"}, {"LUCKY_ITEM", "🎁"}, {"LUCKY_NUMBER", "🔢"}, {"LUCKY_DIRECTION", "🧭"}, {"LUCKY_TIME", "⏰"}}
+
+// fortuneComputed kinds are a day's readings: their score and lucky points are computed (fortune.Analyze),
+// and the card shows those whatever the model wrote.
+var fortuneComputed = map[string]bool{"today": true, "detail": true, "morning": true}
+
+// computedKeys are the reading keys whose values Go computes for a day's reading: the model's own lines
+// for them are dropped from a text shown or returned as written.
+var computedKeys = []string{"SCORE", "LUCKY_COLOR", "LUCKY_ITEM", "LUCKY_NUMBER", "LUCKY_DIRECTION", "LUCKY_TIME"}
+
+// computedOutput is the action output of a day's computed points: the scores, and the lucky points in
+// loc's words (the same values the card shows).
+func (s *Service) computedOutput(loc string, d fortune.Day) (scores map[string]any, lucky map[string]any) {
+	sc := d.Scores
+	scores = map[string]any{"overall": sc.Overall, "money": sc.Money, "love": sc.Love, "work": sc.Work, "health": sc.Health}
+	lucky = map[string]any{}
+	for k, v := range s.computedLucky(loc, d, nil) {
+		lucky[strings.ToLower(strings.TrimPrefix(k, "LUCKY_"))] = v
+	}
+	return scores, lucky
+}
 
 // luckyInlineMax is the longest lucky value (runes) that still sits in a column of its own.
 const luckyInlineMax = 14
@@ -40,12 +60,37 @@ const luckyInlineMax = 14
 // fortuneCard lays the text of base out as a reading of kind; head is the line under the title (who and
 // when) and footer replaces base's footer. When the text is not a reading, base is returned unchanged.
 func (s *Service) fortuneCard(loc, kind string, base action.Card, head, footer string) action.Card {
+	return s.fortuneCardFor(loc, kind, base, head, footer, nil)
+}
+
+// fortuneCardFor is fortuneCard with the computed day of a day's reading: its score, area scores, lucky
+// points and basis replace whatever the model wrote. A text that is not a reading keeps its words (minus
+// SCORE and LUCKY_* key lines) and gets the computed points as fields and footer as its footer.
+func (s *Service) fortuneCardFor(loc, kind string, base action.Card, head, footer string, day *fortune.Day) action.Card {
+	if !fortuneComputed[kind] {
+		day = nil
+	}
 	r := fortune.ParseReading(base.Text)
 	if !r.Structured() {
+		if day == nil {
+			return base
+		}
+		// the words stay, without the model's own score and lucky lines when it wrote them as keys (a key
+		// in another language, "총점: 85", stays: it cannot be told from prose safely); the computed points
+		// and the basis footer are added as on a reading
+		base.Text = fortune.WithoutKeys(base.Text, computedKeys...)
+		base.Footer = footer
+		lines := []string{s.scoreLine(day.Scores.Overall), s.areaScores(loc, day.Scores), "🧭 " + s.sajuBasis(loc, *day)}
+		base.Fields = append(append(base.Fields, action.CardField{Name: "📊 " + s.I18n.T(loc, "fortune.card.scores"), Value: strings.Join(lines, "\n")}),
+			s.luckyFields(loc, s.computedLucky(loc, *day, map[string]string{}))...)
 		return base
 	}
 	label := func(key string) string { return s.I18n.T(loc, "fortune.card."+strings.ToLower(key)) }
 	v := r.Values
+	if day != nil {
+		r.Score = day.Scores.Overall
+		v = s.computedLucky(loc, *day, v)
+	}
 	var desc []string
 	add := func(lines ...string) {
 		for _, l := range lines {
@@ -66,7 +111,10 @@ func (s *Service) fortuneCard(loc, kind string, base action.Card, head, footer s
 	}
 	gap()
 	if r.Score >= 0 {
-		add(fmt.Sprintf("%s  **%d**/100", fortune.ScoreBar(r.Score), r.Score))
+		add(s.scoreLine(r.Score))
+	}
+	if day != nil {
+		add(s.areaScores(loc, day.Scores), "🧭 "+s.sajuBasis(loc, *day))
 	}
 	add(v["SUMMARY"])
 	var fields []action.CardField
@@ -208,11 +256,142 @@ func (s *Service) shortDate(loc string, t time.Time) string {
 	return s.I18n.T(loc, "date.short", "month", int(t.Month()), "day", t.Day())
 }
 
-// fortuneBasis is the footer of a personal fortune: today's day pillar and the person's sign, the facts the
-// reading was written from.
+// fortuneBasis is the footer of a personal fortune: the reading date's day pillar (as Analyze takes it,
+// from at's civil date) and the person's sign, the facts the reading was written from.
 func (s *Service) fortuneBasis(loc string, p fortuneProfile, at time.Time) string {
 	birth, _ := time.Parse("2006-01-02", p.BirthDate)
-	_, _, day, _, _ := fortune.Pillars(at, -1)
+	y, m, d := at.Date()
+	_, _, day := fortune.DatePillars(y, m, d, at.Location())
 	return s.I18n.T(loc, "fortune.card.basis", "day", s.pillarText(loc, day),
 		"sign", s.I18n.T(loc, fmt.Sprintf("fortune.sign.%d", fortune.SunSign(int(birth.Month()), birth.Day()))))
+}
+
+func (s *Service) scoreLine(score int) string {
+	return fmt.Sprintf("%s  **%d**/100", fortune.ScoreBar(score), score)
+}
+
+// areaScores is the computed score of each area in one line ("💼 일·학업 65 · 💰 재물 70 …").
+func (s *Service) areaScores(loc string, sc fortune.Scores) string {
+	scores := map[string]int{"WORK": sc.Work, "MONEY": sc.Money, "LOVE": sc.Love, "HEALTH": sc.Health}
+	parts := make([]string, 0, len(fortuneAreas))
+	for _, a := range fortuneAreas {
+		parts = append(parts, fmt.Sprintf("%s %s %d", a.emoji, s.I18n.T(loc, "fortune.card."+strings.ToLower(a.key)), scores[a.key]))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// computedLucky puts the day's computed lucky points into a reading's values (a copy), over the model's.
+func (s *Service) computedLucky(loc string, d fortune.Day, values map[string]string) map[string]string {
+	v := make(map[string]string, len(values)+5)
+	for k, x := range values {
+		v[k] = x
+	}
+	v["LUCKY_COLOR"] = s.I18n.T(loc, fmt.Sprintf("fortune.lucky.color.%d", d.Lucky.Color))
+	v["LUCKY_ITEM"] = s.I18n.T(loc, fmt.Sprintf("fortune.lucky.item.%d", d.Lucky.Item))
+	v["LUCKY_NUMBER"] = strconv.Itoa(d.Lucky.Number)
+	v["LUCKY_DIRECTION"] = s.I18n.T(loc, fmt.Sprintf("fortune.lucky.direction.%d", d.Lucky.Direction))
+	delete(v, "LUCKY_TIME")
+	if len(d.BestHours) > 0 {
+		v["LUCKY_TIME"] = s.hourLabel(loc, d.BestHours[0])
+	}
+	return v
+}
+
+// hourLabel is a two-hour 시진 with its clock times ("사시(09~11시)").
+func (s *Service) hourLabel(loc string, branch int) string {
+	return s.I18n.T(loc, "fortune.saju.hour", "branch", s.I18n.T(loc, fmt.Sprintf("fortune.branch.%d", branch)),
+		"from", fmt.Sprintf("%02d", (branch*2+23)%24), "to", fmt.Sprintf("%02d", branch*2+1))
+}
+
+// sajuRelations are the day's relations with the natal chart, in loc's words.
+func (s *Service) sajuRelations(loc string, d fortune.Day) []string {
+	rel := func(with, r string) string {
+		return s.I18n.T(loc, "fortune.saju.rel_with", "with", s.I18n.T(loc, "fortune.saju.with."+with), "rel", s.I18n.T(loc, "fortune.saju.rel."+r))
+	}
+	var out []string
+	for _, h := range d.Hits {
+		out = append(out, rel(strconv.Itoa(h.Pos), strconv.Itoa(h.Rel)))
+	}
+	if d.StemHap {
+		out = append(out, rel("day_stem", "stem_hap"))
+	}
+	if d.StemClash {
+		out = append(out, rel("day_stem", "stem_clash"))
+	}
+	return out
+}
+
+// sajuBasis is the one-line why of a day's reading: its ten god, one relation and its first star
+// ("정재일 · 일지와 육합 · 천을귀인"). A harmony (육합, 삼합, 천간합) is named before a clash, so the card
+// does not lead with a warning on a day that has both.
+func (s *Service) sajuBasis(loc string, d fortune.Day) string {
+	parts := []string{s.I18n.T(loc, "fortune.saju.day_of", "god", s.I18n.T(loc, fmt.Sprintf("fortune.saju.god.%d", d.StemGod)))}
+	harmony := fortune.Day{StemHap: d.StemHap}
+	for _, h := range d.Hits {
+		if h.Rel == fortune.RelSixHarmony || h.Rel == fortune.RelHalfTriad {
+			harmony.Hits = append(harmony.Hits, h)
+		}
+	}
+	if rels := s.sajuRelations(loc, harmony); len(rels) > 0 {
+		parts = append(parts, rels[0])
+	} else if rels := s.sajuRelations(loc, d); len(rels) > 0 {
+		parts = append(parts, rels[0])
+	}
+	if len(d.Stars) > 0 {
+		parts = append(parts, s.I18n.T(loc, fmt.Sprintf("fortune.saju.star.%d", d.Stars[0])))
+	}
+	return strings.Join(parts, " · ")
+}
+
+// factsText is the computed-facts block of a day's fortune data (about a hundred tokens).
+func (s *Service) factsText(loc string, d fortune.Day) string {
+	none := s.I18n.T(loc, "fortune.saju.none")
+	list := func(items []string) string {
+		if len(items) == 0 {
+			return none
+		}
+		return strings.Join(items, ", ")
+	}
+	name := func(prefix string, ids []int) []string {
+		out := make([]string, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, s.I18n.T(loc, fmt.Sprintf("%s.%d", prefix, id)))
+		}
+		return out
+	}
+	acts := func(ids []string) []string {
+		out := make([]string, 0, len(ids))
+		for _, id := range ids {
+			out = append(out, s.I18n.T(loc, "fortune.saju.act."+id))
+		}
+		return out
+	}
+	var hours, elements []string
+	for _, b := range d.BestHours {
+		hours = append(hours, s.hourLabel(loc, b))
+	}
+	for e, n := range d.Elements {
+		elements = append(elements, s.I18n.T(loc, "fortune.saju.element_count", "element", s.I18n.T(loc, fmt.Sprintf("fortune.saju.element.%d", e)), "n", n))
+	}
+	spirit := "black"
+	if fortune.Yellow(d.Spirit) {
+		spirit = "yellow"
+	}
+	noHour := ""
+	if !d.HasHour {
+		noHour = s.I18n.T(loc, "fortune.data.no_hour")
+	}
+	lucky := s.computedLucky(loc, d, nil)
+	return s.I18n.T(loc, "fortune.data.facts",
+		"stem_god", s.I18n.T(loc, fmt.Sprintf("fortune.saju.god.%d", d.StemGod)),
+		"branch_god", s.I18n.T(loc, fmt.Sprintf("fortune.saju.god.%d", d.BranchGod)),
+		"stage", s.I18n.T(loc, fmt.Sprintf("fortune.saju.stage.%d", d.Stage)),
+		"relations", list(s.sajuRelations(loc, d)), "stars", list(name("fortune.saju.star", d.Stars)),
+		"officer", s.I18n.T(loc, fmt.Sprintf("fortune.saju.officer.%d", d.Officer)), "spirit", s.I18n.T(loc, "fortune.saju.spirit."+spirit),
+		"yi", list(acts(d.Yi)), "ji", list(acts(d.Ji)), "hours", list(hours),
+		"overall", d.Scores.Overall, "money", d.Scores.Money, "love", d.Scores.Love, "work", d.Scores.Work, "health", d.Scores.Health,
+		"color", lucky["LUCKY_COLOR"], "item", lucky["LUCKY_ITEM"], "number", lucky["LUCKY_NUMBER"], "direction", lucky["LUCKY_DIRECTION"],
+		"lucky_element", s.I18n.T(loc, fmt.Sprintf("fortune.saju.element.%d", d.LuckyElem)),
+		"elements", strings.Join(elements, " "), "weakest", s.I18n.T(loc, fmt.Sprintf("fortune.saju.element.%d", d.Weakest)),
+		"hour_note", noHour)
 }

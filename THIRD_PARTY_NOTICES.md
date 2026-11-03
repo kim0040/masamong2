@@ -4,11 +4,11 @@ Masamong의 자체 코드와 문서는 루트 [MIT License](LICENSE)로 배포�
 
 ## Go release binaries
 
-`masamong`과 `masamongd`를 10개 배포 대상(darwin/arm64·amd64, linux/amd64·arm64·armv7·riscv64, windows/amd64·arm64, freebsd/amd64·arm64)별로 `go list -deps`한 합집합에는 39개 외부 모듈이 포함됩니다. 대상에 따라 일부 모듈만 링크됩니다.
+`masamong`과 `masamongd`를 10개 배포 대상(darwin/arm64·amd64, linux/amd64·arm64·armv7·riscv64, windows/amd64·arm64, freebsd/amd64·arm64)별로 `go list -deps`한 합집합에는 40개 외부 모듈이 포함됩니다. 대상에 따라 일부 모듈만 링크됩니다.
 
 | 라이선스 | 구성 요소 |
 |---|---|
-| MIT | Charmbracelet UI 모듈, displaywidth/uax29, go-humanize, go-colorful, isatty/runewidth, cancelreader, strftime, uniseg, terminfo |
+| MIT | Charmbracelet UI 모듈, displaywidth/uax29, go-humanize, go-colorful, isatty/runewidth, cancelreader, strftime, uniseg, terminfo, `github.com/6tail/lunar-go`(운세의 절기·택일 표) |
 | BSD 계열 | Go x/crypto·net·sync·sys·text, goquery·cascadia(공지 게시판 HTML 읽기), DiscordGo, WebSocket, UUID, dbus, edwards25519, modernc sqlite/libc/mathutil/memory 등 |
 | Apache-2.0 | `fyne.io/systray` |
 | MIT 또는 Apache-2.0 | `go.yaml.in/yaml/v3` (파일별 조건은 포함된 LICENSE와 NOTICE 참조) |
