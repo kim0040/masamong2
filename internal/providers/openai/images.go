@@ -84,7 +84,7 @@ func (a *Adapter) imageChat(ctx context.Context, model, prompt, aspectRatio stri
 		payload["image_config"] = map[string]any{"aspect_ratio": aspectRatio}
 	}
 	body, _ := json.Marshal(payload)
-	resp, err := a.Client.PostJSON(ctx, a.BaseURL+"/chat/completions", a.headers(), body)
+	resp, err := a.Client.PostJSON(final(ctx), a.BaseURL+"/chat/completions", a.headers(), body)
 	if err != nil {
 		return ImageResult{}, mapErr(err, resp)
 	}
@@ -231,7 +231,7 @@ func (a *Adapter) imageOpenAI(ctx context.Context, model, prompt, aspectRatio st
 		req["aspect_ratio"] = aspectRatio
 	}
 	body, _ := json.Marshal(req)
-	resp, err := a.Client.PostJSON(ctx, a.BaseURL+"/images/generations", a.headers(), body)
+	resp, err := a.Client.PostJSON(final(ctx), a.BaseURL+"/images/generations", a.headers(), body)
 	if err != nil {
 		return ImageResult{}, mapErr(err, resp)
 	}
@@ -285,7 +285,7 @@ func (a *Adapter) imageGemini(ctx context.Context, model, prompt, aspectRatio st
 	// the native API lives next to the OpenAI-compatible one: …/v1beta/openai → …/v1beta
 	base := strings.TrimSuffix(strings.TrimRight(a.BaseURL, "/"), "/openai")
 	url := base + "/models/" + a.API.trimModelID(model) + ":generateContent"
-	resp, err := a.Client.PostJSON(ctx, url, map[string]string{"x-goog-api-key": a.Cred.Value()}, body)
+	resp, err := a.Client.PostJSON(final(ctx), url, map[string]string{"x-goog-api-key": a.Cred.Value()}, body)
 	if err != nil {
 		return ImageResult{}, mapErr(err, resp)
 	}

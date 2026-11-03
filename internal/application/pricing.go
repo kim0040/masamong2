@@ -78,6 +78,19 @@ type priceList struct {
 	// Caps is what the list said about the models' reasoning (model_caps.go seeds a provider's cache from
 	// it after a restart); only models it said something about
 	Caps map[string]openai.Caps `json:"caps,omitempty"`
+	// Until is the first time a listed price stops applying (OpenGateway's scheduled promotions): the
+	// list is read again then, not a day later
+	Until string `json:"until,omitempty"`
+}
+
+// stale reports a list older than a day or past a listed price's end.
+func (l *priceList) stale(now time.Time) bool {
+	at, err := time.Parse(time.RFC3339, l.FetchedAt)
+	if err != nil || now.Sub(at) > priceListTTL {
+		return true
+	}
+	until, err := time.Parse(time.RFC3339, l.Until)
+	return err == nil && !now.Before(until)
 }
 
 const priceListTTL = 24 * time.Hour
@@ -204,11 +217,7 @@ func (s *Service) priceList(provider string) *priceList {
 			st.lists[provider] = l
 		}
 	}
-	stale := l == nil
-	if l != nil {
-		at, err := time.Parse(time.RFC3339, l.FetchedAt)
-		stale = err != nil || s.Clock.Now().Sub(at) > priceListTTL
-	}
+	stale := l == nil || l.stale(s.Clock.Now())
 	if stale && !st.refreshing[provider] && s.canListModels(provider) {
 		st.refreshing[provider] = true
 		s.ownedGo("model price refresh", func(ctx context.Context) {
@@ -297,6 +306,11 @@ func (s *Service) storePrices(provider string, models []openai.Model) {
 			mp.Cached = c
 		}
 		l.Models[m.ID] = mp
+		if u := m.PriceUntil; !u.IsZero() && u.After(s.Clock.Now()) {
+			if old, err := time.Parse(time.RFC3339, l.Until); err != nil || u.Before(old) {
+				l.Until = u.UTC().Format(time.RFC3339)
+			}
+		}
 	}
 	if provider != referenceList {
 		for _, m := range models {

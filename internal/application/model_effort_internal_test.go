@@ -183,6 +183,25 @@ func TestModelReasoningRows(t *testing.T) {
 	if r, _ := rows["host/m-response"].(map[string]any); len(r) != 0 {
 		t.Fatalf("an unknown model has an empty row: %v", r)
 	}
+	// outside Anthropic the list decides about none too: a model that must think offers no none
+	s.storePrices("host", []openai.Model{{ID: "m-planner", Reasoning: &yes, Efforts: []string{"low", "medium", "high", "xhigh", "max"}}})
+	capsStates.Delete(s)
+	got, _ = s.modelReasoning()["host/m-planner"].(map[string]any)
+	if strings.Join(got["efforts"].([]string), ",") != "low,medium,high,xhigh,max" || got["thinking_off"] != nil {
+		t.Fatalf("a model that must think: %v", got)
+	}
+}
+
+// GPT-6 Sol on OpenAI's own host: no list says anything, the docs say it takes no none.
+func TestReasoningRowFromHostDocs(t *testing.T) {
+	c := openai.Caps{Efforts: openai.HostEfforts("https://api.openai.com/v1", "gpt-6.1-sol")}
+	row := reasoningRow(c)
+	if strings.Join(row["efforts"].([]string), ",") != "low,medium,high,xhigh" {
+		t.Fatalf("row %v", row)
+	}
+	if openai.HostEfforts("https://api.example.com/v1", "gpt-6.1-sol") != nil {
+		t.Fatal("the docs are about OpenAI's own host")
+	}
 }
 
 // An Anthropic-format host of another company that answers /messages only: the provider test passes

@@ -148,6 +148,9 @@ var ErrToolsUnsupported error = classedError{msg: "openai: model takes no tools"
 // process. The memory is per adapter and not persisted: a model that gains tools, or a route that was
 // down, is tried again after the next start.
 func (a *Adapter) ToolsUnsupported(model string) bool {
+	if noChatTools(a.BaseURL, model) {
+		return true
+	}
 	_, ok := a.toolsOff.Load(model)
 	return ok
 }

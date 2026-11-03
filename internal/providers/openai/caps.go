@@ -17,8 +17,9 @@ import (
 //
 //	anthropic   capabilities.thinking {supported, types{adaptive,enabled,disabled,between_tools}}
 //	            and capabilities.effort {supported, low…max} (GET /v1/models and /v1/models/{id})
-//	openrouter  supported_parameters holds "reasoning" or "include_reasoning"
-//	nanogpt     capabilities.reasoning (its detailed list, ?detailed=true)
+//	openrouter  supported_parameters holds "reasoning" or "include_reasoning"; reasoning {mandatory,
+//	            supported_efforts} (live 2026-11-03: null for models that do not reason)
+//	nanogpt     capabilities.reasoning and reasoning_efforts (its detailed list, ?detailed=true)
 //	gemini      thinking (its native list; the OpenAI-compatible list this adapter reads names only)
 //	openai      nothing: unknown
 //
@@ -87,6 +88,26 @@ func parseCaps(it map[string]json.RawMessage, m *Model) {
 			m.Reasoning = &has
 		}
 	}
+	if raw, ok := it["reasoning"]; ok && string(raw) != "null" { // OpenRouter's reasoning object
+		var r struct {
+			Mandatory bool     `json:"mandatory"`
+			Efforts   []string `json:"supported_efforts"`
+		}
+		if json.Unmarshal(raw, &r) == nil {
+			yes := true
+			m.Reasoning = &yes
+			if r.Efforts != nil {
+				// a model that may stop thinking takes none even when its list leaves it out
+				m.Efforts = orderedEfforts(r.Efforts, !r.Mandatory)
+			}
+		}
+	}
+	if raw, ok := it["reasoning_efforts"]; ok && string(raw) != "null" { // NanoGPT's detailed list
+		var levels []string
+		if json.Unmarshal(raw, &levels) == nil && levels != nil {
+			m.Efforts = orderedEfforts(levels, false)
+		}
+	}
 	var b bool
 	if m.Reasoning == nil && json.Unmarshal(it["thinking"], &b) == nil { // Gemini's native model resource
 		m.Reasoning = &b
@@ -135,6 +156,17 @@ func parseAnthropicCaps(c map[string]json.RawMessage, m *Model) {
 			m.ImageInput = f.Supported
 		}
 	}
+}
+
+// orderedEfforts is levels in EffortLevels order, unknown names dropped; none added when withNone.
+func orderedEfforts(levels []string, withNone bool) []string {
+	out := []string{}
+	for _, l := range EffortLevels {
+		if slices.Contains(levels, l) || (withNone && l == "none") {
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 // clampEffort is the level of levels nearest to effort, rounding down first (a model without "xhigh"
@@ -273,15 +305,27 @@ func (a *Adapter) caps() *CapsCache {
 // capsLookupTimeout bounds the one-time model lookup a chat call may wait for.
 const capsLookupTimeout = 5 * time.Second
 
+// knownCaps is what is known about model without asking the host: what a list said, else the levels
+// the host's docs give (hosts.json model_efforts).
+func (a *Adapter) knownCaps(model string) Caps {
+	if c, ok := a.caps().Get(model); ok {
+		return c
+	}
+	if l := hostEfforts(a.BaseURL, model); l != nil {
+		return Caps{Efforts: l}
+	}
+	return Caps{}
+}
+
 // CapsOf is what is known about model's reasoning. On Anthropic a model nothing is known about is
 // looked up once (GET /models/{id}, free) and the answer kept for a day; elsewhere only what a model list
 // said is known.
 func (a *Adapter) CapsOf(ctx context.Context, model string) Caps {
 	cache := a.caps()
-	if c, ok := cache.Get(model); ok && a.API != APIAnthropic {
-		return c
+	if a.API != APIAnthropic {
+		return a.knownCaps(model)
 	}
-	if a.API != APIAnthropic || !a.Configured() || model == "" || !cache.due(model) {
+	if !a.Configured() || model == "" || !cache.due(model) {
 		c, _ := cache.Get(model)
 		return c
 	}

@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"slices"
 	"strconv"
@@ -21,8 +22,73 @@ type Host struct {
 	// Rerank false: the host has no /rerank although its family may (CometAPI and NanoGPT list no
 	// reranker); nil follows the family
 	Rerank *bool `json:"rerank,omitempty"`
+	// ModelEfforts are the reasoning levels some of the host's models take, from its docs, for when its
+	// model list does not say (caps.go): a level outside them is clamped up front instead of spending a
+	// refused call. Keys are model names; a dated snapshot of one (name-2026-…) matches too.
+	ModelEfforts map[string][]string `json:"model_efforts,omitempty"`
+	// NoChatTools are the host's models that take tools only on another API than /chat/completions
+	// (OpenAI's GPT-6 Astra and 6.1 Sol/Terra need the Responses API): the tool loop is skipped for them.
+	NoChatTools []string `json:"no_chat_tools,omitempty"`
+	// RerankMaxDocs is the most documents one /rerank call takes (0: no limit of its own); more are
+	// reranked in parts
+	RerankMaxDocs int `json:"rerank_max_docs,omitempty"`
+	// RerankScores "logit": the host returns raw reranker logits (any real number, negative too), mapped
+	// to 0..1 with the logistic function so score floors (rerank_min_score) mean what they mean elsewhere
+	RerankScores string `json:"rerank_scores,omitempty"`
 	// Batch describes the host's batch API; nil means it has none (batch.go)
 	Batch *BatchHost `json:"batch,omitempty"`
+}
+
+// modelNamed reports whether model is name or a dated snapshot of it (name-2026-01-01, name-20260101);
+// a "models/" prefix is ignored. Variants (name-lite, name-preview) are other models.
+func modelNamed(model, name string) bool {
+	model = strings.TrimPrefix(model, "models/")
+	if model == name {
+		return true
+	}
+	rest, ok := strings.CutPrefix(model, name+"-")
+	return ok && rest != "" && rest[0] >= '0' && rest[0] <= '9'
+}
+
+// HostEfforts is the levels the host's docs give for model (ModelEfforts), nil when they give none.
+func HostEfforts(baseURL, model string) []string { return hostEfforts(baseURL, model) }
+
+// hostEfforts is the levels the host's docs give for model (ModelEfforts), nil when they give none.
+func hostEfforts(baseURL, model string) []string {
+	h, ok := HostByURL(baseURL)
+	if !ok {
+		return nil
+	}
+	for name, levels := range h.ModelEfforts {
+		if modelNamed(model, name) {
+			return orderedEfforts(levels, false)
+		}
+	}
+	return nil
+}
+
+// noChatTools reports a model of the host at baseURL that takes tools on another API only.
+func noChatTools(baseURL, model string) bool {
+	h, ok := HostByURL(baseURL)
+	if !ok {
+		return false
+	}
+	for _, name := range h.NoChatTools {
+		if modelNamed(model, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// normalize maps a host's rerank scores to 0..1 in place (RerankScores); order is kept.
+func (h Host) normalize(scores []float64) {
+	if h.RerankScores != "logit" {
+		return
+	}
+	for i, x := range scores {
+		scores[i] = 1 / (1 + math.Exp(-x))
+	}
 }
 
 // BatchHost is what hosts.json knows about one host's batch API.

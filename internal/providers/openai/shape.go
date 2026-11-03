@@ -95,7 +95,7 @@ func (a *Adapter) payload(req ChatRequest, sh shape) map[string]any {
 	if req.Temperature != nil && !sh.NoTemperature && a.API != APIAnthropic {
 		p["temperature"] = *req.Temperature
 	}
-	caps, _ := a.caps().Get(req.Model)
+	caps := a.knownCaps(req.Model)
 	if effort := writtenEffort(a.API, req, sh, caps); effort != "" {
 		if effort != req.Effort && !sh.EffortNone && !(req.Effort == "none" && sh.NoneAsMinimal) && !sh.MaxHigh {
 			a.noteClamp(req.Model, req.Effort, effort)
@@ -104,6 +104,15 @@ func (a *Adapter) payload(req ChatRequest, sh shape) map[string]any {
 			p["reasoning"] = map[string]any{"effort": effort}
 		} else {
 			p["reasoning_effort"] = effort
+		}
+		// asked not to think, but the model has no level that does not (GPT-6 Sol, Gemini 3.x/4, an
+		// OpenRouter model that must reason): its thinking gets room, or a short answer is all thinking
+		if req.MaxTokens > 0 && !sh.Headroom && !req.thinkRoom && thinkingOff(req.Effort) && !thinkingOff(effort) {
+			for _, f := range []string{"max_tokens", "max_completion_tokens"} {
+				if n, ok := p[f].(int); ok {
+					p[f] = n + thinkingHeadroom
+				}
+			}
 		}
 	}
 	a.toolFields(p, req, sh)
@@ -135,7 +144,8 @@ func writtenEffort(api API, req ChatRequest, sh shape, caps Caps) string {
 		}
 		effort = l
 	}
-	if top := api.topEffort(); top != "" && effortRank(effort) > effortRank(top) {
+	// the family's top level only when the list said nothing: OpenRouter lists max for some models
+	if top := api.topEffort(); top != "" && caps.Efforts == nil && effortRank(effort) > effortRank(top) {
 		effort = top
 	}
 	if sh.MaxHigh && effortRank(effort) > effortRank("high") {
@@ -206,7 +216,7 @@ func (a *Adapter) postShaped(ctx context.Context, req ChatRequest, learn bool) (
 				return nil, err
 			}
 		}
-		resp, err := a.Client.PostJSON(ctx, addr, headers, body)
+		resp, err := a.Client.PostJSON(final(ctx), addr, headers, body)
 		if err == nil {
 			old, keep := a.shapeOf(req), sh
 			if !learnEffort {
@@ -254,7 +264,7 @@ func (a *Adapter) ShapeLearned(model string) bool {
 // request at another level keeps its effort. It reports whether anything was learned.
 func (a *Adapter) LearnRefusal(req ChatRequest, err error) bool {
 	sh := a.batchShapeOf(req)
-	caps, _ := a.caps().Get(req.Model)
+	caps := a.knownCaps(req.Model)
 	next, ok := refusedField(a.API, err, req, sh, caps)
 	if !ok || next == sh {
 		return false

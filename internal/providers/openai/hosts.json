@@ -17,6 +17,8 @@
       "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
       "key_env": "MASAMONG_GEMINI_KEY",
       "key_url": "https://aistudio.google.com/apikey",
+      "_about_model_efforts": "Gemini API thinking guide, thinking levels table (read 2026-11-02): no Gemini 3.x/4 model lists a 'none' level, so none is sent as the lowest listed level instead of spending a refused call.",
+      "model_efforts": {"gemini-3.8-flash": ["low", "medium", "high"], "gemini-4-argon": ["low", "medium", "high"], "gemini-3.6-flash": ["minimal", "low", "medium", "high"]},
       "batch": {"style": "gemini_files", "kinds": ["chat", "embed"], "max_items": 10000, "discount": 0.5}
     },
     {
@@ -26,6 +28,9 @@
       "base_url": "https://api.openai.com/v1",
       "key_env": "MASAMONG_OPENAI_KEY",
       "key_url": "https://platform.openai.com/api-keys",
+      "_about_gpt6": "OpenAI GPT-6 guide, Migration section (read 2026-11-02): 'GPT-6 Astra and GPT-6.1 Sol do not support none; use low instead.' and 'GPT-6 Astra, GPT-6.1 Sol, and GPT-6.1 Terra support Chat Completions, but tool calling requires Responses.' This adapter has no Responses path yet, so those models answer without the tool loop.",
+      "model_efforts": {"gpt-6-astra": ["low", "medium", "high", "xhigh"], "gpt-6.1-sol": ["low", "medium", "high", "xhigh"]},
+      "no_chat_tools": ["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra"],
       "batch": {"style": "openai_files", "kinds": ["chat", "embed"], "max_items": 50000, "max_inputs": 50000, "discount": 0.5, "reconcile": "metadata"}
     },
     {
@@ -53,7 +58,10 @@
       "base_url": "https://nano-gpt.com/api/v1",
       "key_env": "MASAMONG_NANOGPT_KEY",
       "key_url": "https://nano-gpt.com/api",
-      "rerank": false,
+      "rerank": true,
+      "rerank_max_docs": 1024,
+      "rerank_scores": "logit",
+      "_about_rerank": "https://docs.nano-gpt.com (Rerank, checked 2026-11-03): POST /api/v1/rerank takes 1-1,024 documents; relevance_score is a raw logit that can be negative, so it is mapped to 0..1. Models: GET /api/v1/rerank-models.",
       "batch": {"style": "openai_files", "base_url": "https://api.nano-gpt.com/api/v1", "kinds": ["chat"], "max_items": 10000, "require_max_tokens": true, "reconcile": "input_file",
         "_about": "https://docs.nano-gpt.com/api-reference/endpoint/batches (checked 2026-11-02): OpenAI, Claude and Gemini rows are billed at half the live price; open-source rows (gpt-oss included) run through normal routing at the normal price or less, so they are counted at the live price.",
         "discount": 0.5, "discount_models": ["gpt-", "openai/", "o1", "o3", "o4", "chatgpt-", "claude-", "anthropic/", "gemini-", "google/gemini-"], "discount_except": ["gpt-oss", "openai/gpt-oss"]}
@@ -216,13 +224,14 @@
       "summary": {"kind": "chat", "has": ["deepseek", "v4.1", "flash"]}
     }
   },
-  "_about_embed_widths": "Embedding models known to be trained so the leading part of a vector is a usable vector of its own (Matryoshka / MRL), with their full width. Only these are cut to a narrower width (models.embed.dimensions; the default for them is 1024, measured 2026-10-13 in docs/rag/embedding-width-2026-10.md). A model not listed keeps its full width: cutting a model that was not trained for it ruins its search quality. Keys are matched by ReferenceName (lower case, after the last '/', without ':variant'). Sources: the Qwen3-Embedding model card (MRL, 32 up to the full width), OpenAI's embeddings guide (text-embedding-3 'dimensions'), Google's Gemini embeddings guide (gemini-embedding-001 output_dimensionality).",
+  "_about_embed_widths": "Embedding models known to be trained so the leading part of a vector is a usable vector of its own (Matryoshka / MRL), with their full width. Only these are cut to a narrower width (models.embed.dimensions; the default for them is 1024, measured 2026-10-13 in docs/rag/embedding-width-2026-10.md). A model not listed keeps its full width: cutting a model that was not trained for it ruins its search quality. Keys are matched by ReferenceName (lower case, after the last '/', without ':variant'). Sources: the Qwen3-Embedding model card (MRL, 32 up to the full width), OpenAI's embeddings guide (text-embedding-3 'dimensions'), Google's Gemini embeddings guide (gemini-embedding-001 output_dimensionality; gemini-embedding-2: MRL, default 3072, truncated widths auto-normalized). The guide recommends task prefixes for gemini-embedding-2 text ('task: search result | query: …'); none are added, which would change retrieval and break sandbox parity.",
   "embed_widths": {
     "qwen3-embedding-8b": 4096,
     "qwen3-embedding-4b": 2560,
     "qwen3-embedding-0.6b": 1024,
     "text-embedding-3-large": 3072,
     "text-embedding-3-small": 1536,
-    "gemini-embedding-001": 3072
+    "gemini-embedding-001": 3072,
+    "gemini-embedding-2": 3072
   }
 }

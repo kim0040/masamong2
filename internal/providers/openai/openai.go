@@ -10,7 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -188,6 +190,9 @@ type Model struct {
 	Efforts   []string
 	Thinking  []string
 	Overrides []PricingOverride
+	// PriceUntil is when the listed price stops applying (OpenGateway's pricing.until: a scheduled
+	// promotion, its next price taking over); zero when the list gives no end
+	PriceUntil time.Time
 }
 
 // PricingOverride is one OpenRouter conditional rate entry. A missing price inherits the base rate.
@@ -403,6 +408,10 @@ func ParseModels(contentType string, body []byte) ([]Model, error) {
 		if id == "" {
 			continue
 		}
+		// OpenGateway lists models it no longer serves too (status active|deprecated|inactive|retired)
+		if st := decode.Str(it["status"]); st == "inactive" || st == "retired" {
+			continue
+		}
 		m := Model{ID: id, Name: decode.Str(it["name"]), Kind: "unknown"}
 		if m.Name == "" {
 			m.Name = decode.Str(it["display_name"]) // Gemini
@@ -414,6 +423,8 @@ func ParseModels(contentType string, body []byte) ([]Model, error) {
 			m.ContextLength = int(n)
 		} else if n, ok := decode.Number(it["max_input_tokens"]); ok {
 			m.ContextLength = int(n) // Anthropic
+		} else if n, ok := decode.Number(it["context_window"]); ok {
+			m.ContextLength = int(n) // OpenGateway
 		}
 		if p, ok := it["pricing"]; ok {
 			var pr map[string]json.RawMessage
@@ -422,6 +433,7 @@ func ParseModels(contentType string, body []byte) ([]Model, error) {
 				m.CompletionPrice = priceStr(pr["completion"])
 				m.CachedPrice = priceStr(pr["input_cache_read"])
 				m.Overrides = parsePricingOverrides(pr["overrides"])
+				m.PriceUntil = listedTime(pr["until"])
 				// NanoGPT's detailed list: numbers per million tokens, {"unit":"per_million_tokens"}
 				if strings.Contains(strings.ToLower(decode.Str(pr["unit"])), "million") {
 					m.PromptPrice, m.CompletionPrice = perToken(m.PromptPrice), perToken(m.CompletionPrice)
@@ -457,6 +469,19 @@ func ParseModels(contentType string, body []byte) ([]Model, error) {
 				}
 			}
 		}
+		if md, ok := it["modalities"]; ok && it["architecture"] == nil { // OpenGateway: {input, output}
+			var mods struct {
+				Input  []string `json:"input"`
+				Output []string `json:"output"`
+			}
+			if json.Unmarshal(md, &mods) == nil {
+				m.ImageOutput = slices.Contains(mods.Output, "image")
+				if mods.Input != nil {
+					has := slices.Contains(mods.Input, "image")
+					m.ImageInput = &has
+				}
+			}
+		}
 		if sp, ok := it["supported_parameters"]; ok {
 			var params []string
 			if json.Unmarshal(sp, &params) == nil {
@@ -478,6 +503,23 @@ func ParseModels(contentType string, body []byte) ([]Model, error) {
 	return out, nil
 }
 
+// listedTime reads a list's point in time: an RFC 3339 string or Unix seconds (milliseconds when that
+// large); zero when absent or unreadable.
+func listedTime(raw json.RawMessage) time.Time {
+	if s := decode.Str(raw); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			return t
+		}
+	}
+	if n, ok := decode.Number(raw); ok && n > 0 {
+		if n > 1e12 {
+			return time.UnixMilli(int64(n))
+		}
+		return time.Unix(int64(n), 0)
+	}
+	return time.Time{}
+}
+
 // perToken turns a price per million tokens into one per token ("" stays unknown).
 func perToken(perMillion string) string {
 	v, err := strconv.ParseFloat(perMillion, 64)
@@ -493,6 +535,23 @@ func priceStr(raw json.RawMessage) string {
 		return ""
 	}
 	return s
+}
+
+// extraPrice reports an override key that is another price (input_cache_write_1h, audio,
+// input_audio_cache, seen live 2026-11-03): a decimal string under a name that is not a condition
+// (min_*, max_*, utc_*). Such keys are ignored; a condition this code does not know drops the entry.
+func extraPrice(key string, value json.RawMessage) bool {
+	for _, p := range []string{"min_", "max_", "utc_"} {
+		if strings.HasPrefix(key, p) {
+			return false
+		}
+	}
+	var s string
+	if json.Unmarshal(value, &s) != nil {
+		return false
+	}
+	f, err := strconv.ParseFloat(s, 64)
+	return err == nil && f >= 0
 }
 
 func parsePricingOverrides(raw json.RawMessage) []PricingOverride {
@@ -514,8 +573,8 @@ func parsePricingOverrides(raw json.RawMessage) []PricingOverride {
 			continue
 		}
 		valid := true
-		for key := range fields {
-			if !known[key] {
+		for key, value := range fields {
+			if !known[key] && !extraPrice(key, value) {
 				valid = false // unknown condition fields must not make an override apply too broadly.
 				break
 			}
@@ -771,7 +830,8 @@ func (a *Adapter) chatOnce(ctx context.Context, req ChatRequest, learn bool) (Ch
 	}
 	out, err := parse(resp.ContentType, resp.Body)
 	out.Elapsed = resp.Elapsed
-	if err == nil || errors.Is(err, ErrRefused) { // a refused answer is still billed
+	// a refused answer or a provider's failure inside a 200 answer is still billed
+	if err == nil || errors.Is(err, ErrRefused) || out.PromptTokens+out.CompletionTokens > 0 {
 		a.estimateWrittenAt(&out.CostUSD, &out.CostEstimated, req.Model, out.PromptTokens, out.CachedTokens, out.CacheWriteTokens, out.CompletionTokens, requestedAt)
 	}
 	return out, err
@@ -796,6 +856,7 @@ func ParseChat(contentType string, body []byte) (ChatResult, error) {
 	var choices []struct {
 		Message      json.RawMessage `json:"message"`
 		FinishReason string          `json:"finish_reason"`
+		Error        json.RawMessage `json:"error"`
 	}
 	if err := json.Unmarshal(obj["choices"], &choices); err != nil || len(choices) == 0 {
 		return ChatResult{}, fmt.Errorf("%w: choices missing", decode.ErrUnexpected)
@@ -850,7 +911,22 @@ func ParseChat(contentType string, body []byte) (ChatResult, error) {
 			out.CostUSD = usageCost(usage)
 		}
 	}
+	// OpenRouter: "the error is embedded in the final response alongside any partial content" with
+	// finish_reason "error" when the provider failed mid-answer. That is the provider's failure, not a
+	// cut answer: it goes to the fallback, its tokens still counted.
+	if e := choices[0].Error; choiceError(e) {
+		return out, apiError(e, 0)
+	}
+	if out.FinishReason == "error" {
+		return out, &APIError{Type: "provider_error", Message: "the provider stopped the answer (finish_reason=error)"}
+	}
 	return out, nil
+}
+
+// choiceError reports a choice-level error with something in it (null and {} are no error).
+func choiceError(raw json.RawMessage) bool {
+	var e map[string]json.RawMessage
+	return len(raw) > 0 && json.Unmarshal(raw, &e) == nil && len(e) > 0
 }
 
 // cachedTokens reads the prompt-cache hits: OpenAI, OpenRouter and Gemini's OpenAI endpoint report
@@ -914,7 +990,7 @@ func (a *Adapter) Embed(ctx context.Context, model string, inputs []string) (Emb
 	}
 	requestedAt := time.Now()
 	body, _ := json.Marshal(map[string]any{"model": model, "input": inputs})
-	resp, err := a.Client.PostJSON(ctx, a.BaseURL+"/embeddings", a.headers(), body)
+	resp, err := a.Client.PostJSON(final(ctx), a.BaseURL+"/embeddings", a.headers(), body)
 	if err != nil {
 		return EmbedResult{}, mapErr(err, resp)
 	}
@@ -1071,9 +1147,56 @@ func (a *Adapter) Rerank(ctx context.Context, model, query string, docs []string
 	if model == "" || strings.TrimSpace(query) == "" || len(docs) == 0 || topN < 1 || topN > len(docs) {
 		return RerankResult{}, fmt.Errorf("openai: bad rerank request")
 	}
+	h, _ := HostByURL(a.BaseURL)
+	limit := h.RerankMaxDocs
+	if limit <= 0 || len(docs) <= limit {
+		out, err := a.rerankOnce(ctx, model, query, docs, topN)
+		h.normalize(out.Scores)
+		return out, err
+	}
+	// more documents than the host takes in one call: rerank them in parts and keep the best topN of
+	// all (the scores of one model are comparable across calls)
+	var all RerankResult
+	for start := 0; start < len(docs); start += limit {
+		part := docs[start:min(start+limit, len(docs))]
+		res, err := a.rerankOnce(ctx, model, query, part, min(topN, len(part)))
+		if err != nil {
+			return RerankResult{}, err
+		}
+		for i, idx := range res.Indices {
+			all.Indices = append(all.Indices, start+idx)
+			all.Scores = append(all.Scores, res.Scores[i])
+		}
+		all.Model, all.Elapsed, all.TotalTokens = res.Model, all.Elapsed+res.Elapsed, all.TotalTokens+res.TotalTokens
+		all.CostEstimated = all.CostEstimated || res.CostEstimated
+		if res.CostUSD != nil {
+			c := *res.CostUSD
+			if all.CostUSD != nil {
+				c += *all.CostUSD
+			}
+			all.CostUSD = &c
+		}
+	}
+	order := make([]int, len(all.Indices))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(x, y int) bool { return all.Scores[order[x]] > all.Scores[order[y]] })
+	out := all
+	out.Indices, out.Scores = nil, nil
+	for _, i := range order[:min(topN, len(order))] {
+		out.Indices = append(out.Indices, all.Indices[i])
+		out.Scores = append(out.Scores, all.Scores[i])
+	}
+	h.normalize(out.Scores)
+	return out, nil
+}
+
+// rerankOnce is one /rerank call.
+func (a *Adapter) rerankOnce(ctx context.Context, model, query string, docs []string, topN int) (RerankResult, error) {
 	requestedAt := time.Now()
 	body, _ := json.Marshal(map[string]any{"model": model, "query": query, "documents": docs, "top_n": topN})
-	resp, err := a.Client.PostJSON(ctx, a.BaseURL+"/rerank", a.headers(), body)
+	resp, err := a.Client.PostJSON(final(ctx), a.BaseURL+"/rerank", a.headers(), body)
 	if err != nil {
 		return RerankResult{}, mapErr(err, resp)
 	}
@@ -1126,6 +1249,11 @@ type APIError struct {
 	// BYOK: OpenRouter ran the request on the operator's own provider key (error.metadata.is_byok),
 	// so a refusal is about that key, not the OpenRouter one.
 	BYOK bool
+	// LimitSource is OpenRouter's error.metadata.limit_source on a 403 a budget blocked
+	// (openrouter_key_limit, openrouter_workspace_budget, openrouter_guardrail_budget): class Quota
+	LimitSource string
+	// MetaType is OpenRouter's error.metadata.error_type (content_policy_violation, refusal, …)
+	MetaType string
 }
 
 func (e *APIError) Error() string {
@@ -1140,7 +1268,9 @@ func apiError(raw json.RawMessage, status int) error {
 		Status  json.RawMessage `json:"status"` // Google: "INVALID_ARGUMENT"; NanoGPT: 401
 		Code    json.RawMessage `json:"code"`
 		Meta    struct {
-			BYOK bool `json:"is_byok"`
+			BYOK        bool   `json:"is_byok"`
+			LimitSource string `json:"limit_source"`
+			ErrorType   string `json:"error_type"`
 		} `json:"metadata"`
 	}
 	if json.Unmarshal(raw, &e) != nil {
@@ -1153,7 +1283,8 @@ func apiError(raw json.RawMessage, status int) error {
 	if st := decode.Str(e.Status); e.Type == "" && st != "" && (st[0] < '0' || st[0] > '9') {
 		e.Type = st
 	}
-	return &APIError{Status: status, Type: e.Type, Code: decode.Str(e.Code), Message: e.Message, BYOK: e.Meta.BYOK}
+	return &APIError{Status: status, Type: e.Type, Code: decode.Str(e.Code), Message: e.Message, BYOK: e.Meta.BYOK,
+		LimitSource: e.Meta.LimitSource, MetaType: e.Meta.ErrorType}
 }
 
 // errorField finds the error object in a failed response: {"error":{...}} or, from Gemini's
@@ -1177,6 +1308,13 @@ func errorField(contentType string, body []byte) (json.RawMessage, bool) {
 // rejectedKey reports a refused credential. Most hosts answer 401/403; Gemini answers 400 with
 // "API key not valid" / "Please pass a valid API key".
 func rejectedKey(status int, e *APIError) bool {
+	if status == 403 && e != nil {
+		// a 403 is not always the key: a spent budget (Quota) or a content filter (about this request)
+		// must not rest the provider as a refused key
+		if c := classify(e); c == errclass.Quota || c == errclass.Empty {
+			return false
+		}
+	}
 	if status == 401 || status == 403 {
 		return true
 	}
@@ -1186,6 +1324,51 @@ func rejectedKey(status int, e *APIError) bool {
 	m := strings.ToLower(e.Message + " " + e.Code)
 	return strings.Contains(m, "api key") || strings.Contains(m, "api_key_invalid")
 }
+
+// finalAnswer is the client's test for a 429 or 5xx answer no retry can change (providers.WithFinal): a
+// used-up balance or spending cap (class Quota: OpenAI credit_balance_exhausted, NanoGPT
+// api_key_usd_limit, OpenGateway budget_exceeded, …) or a model the host cannot route (NotFound:
+// CometAPI's 503 model_not_found). Retrying those only spent two more calls.
+func finalAnswer(status int, body []byte) bool {
+	raw, ok := errorField("application/json", body)
+	if !ok {
+		return false
+	}
+	ae, _ := apiError(raw, status).(*APIError)
+	if ae == nil {
+		return false
+	}
+	if shortRetry(body) {
+		return false
+	}
+	c := classify(ae)
+	return c == errclass.Quota || c == errclass.NotFound || c == errclass.Auth
+}
+
+// retryHint finds a wait an error body names: Gemini's RetryInfo "retryDelay": "41s" and its message
+// "Please retry in 41.6s" (or 300ms).
+var retryHint = regexp.MustCompile(`(?i)(?:"retryDelay"\s*:\s*"|retry in )(\d+(?:\.\d+)?)(ms|s)\b`)
+
+// shortRetry reports a body that asks for a retry soon: a per-minute limit, or a named wait of two
+// minutes or less. Gemini words its per-minute 429 as "You exceeded your current quota" (class Quota),
+// and that one must still be retried.
+func shortRetry(body []byte) bool {
+	m := strings.ToLower(string(body))
+	if strings.Contains(m, "perminute") || strings.Contains(m, "per_minute") || strings.Contains(m, "per minute") {
+		return true
+	}
+	if g := retryHint.FindSubmatch(body); g != nil {
+		n, err := strconv.ParseFloat(string(g[1]), 64)
+		if err == nil && strings.EqualFold(string(g[2]), "ms") {
+			n /= 1000
+		}
+		return err == nil && n <= 120
+	}
+	return false
+}
+
+// final marks ctx so the client does not retry a lasting answer (finalAnswer).
+func final(ctx context.Context) context.Context { return providers.WithFinal(ctx, finalAnswer) }
 
 func mapErr(err error, resp *providers.Response) error {
 	var pe *providers.Error

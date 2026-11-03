@@ -6,7 +6,7 @@
   {"model": "OPENAI/Text-Embedding-3-Large:free", "reference": "text-embedding-3-large", "width": 3072},
   {"model": "text-embedding-3-small", "reference": "text-embedding-3-small", "width": 1536},
   {"model": "\u3000GOOGLE/GEMINI-EMBEDDING-001:variant\u00a0", "reference": "gemini-embedding-001", "width": 3072},
-  {"model": "google/GEMINI-EMBEDDING-2:variant", "reference": "gemini-embedding-2", "width": 0},
+  {"model": "google/GEMINI-EMBEDDING-2:variant", "reference": "gemini-embedding-2", "width": 3072},
   {"model": " custom/Unknown-Embedding:variant ", "reference": "unknown-embedding", "width": 0},
   {"model": "qwen3-embedding-8b-extra", "reference": "qwen3-embedding-8b-extra", "width": 0},
   {"model": "QWEN3-EMBEDD\u0130NG-8B", "reference": "qwen3-embedding-8b", "width": 4096},

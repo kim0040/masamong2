@@ -71,8 +71,11 @@ func reasoningRow(c openai.Caps) map[string]any {
 	if c.Efforts != nil {
 		levels := []string{}
 		for _, l := range config.ModelEfforts {
-			// none and minimal are thinking off, which every model has one way or another
-			if l == "none" || l == "minimal" || slices.Contains(c.Efforts, l) {
+			// on Anthropic none and minimal are thinking off, which its models have one way or another;
+			// elsewhere the list says (an OpenRouter model that must think, GPT-6 Sol, Gemini 3.x/4 take
+			// no none: it is sent as their lowest level)
+			off := (l == "none" || l == "minimal") && c.Thinking != nil
+			if off || slices.Contains(c.Efforts, l) {
 				levels = append(levels, l)
 			}
 		}
@@ -98,6 +101,9 @@ func (s *Service) modelReasoning() map[string]any {
 		}
 		cache := s.modelCaps(provider, p)
 		c, known := cache.Get(model)
+		if l := openai.HostEfforts(p.BaseURL, model); !known && l != nil {
+			c = openai.Caps{Efforts: l} // what the host's docs give (GPT-6 Sol takes no none)
+		}
 		out[provider+"/"+model] = reasoningRow(c)
 		if !known && openai.ResolveAPI(p.API, p.BaseURL) == openai.APIAnthropic && !s.practice && s.Registry() != nil {
 			// the registry's adapter already shares this cache (priceAdapters)
