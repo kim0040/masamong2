@@ -214,6 +214,7 @@ func TestMRLCatalogUpgradeKeepsStoredMessageWidth(t *testing.T) {
 type capsHost struct {
 	mu   sync.Mutex
 	gets []string
+	hold chan struct{} // when set, the lookup of claude-x answers once it is closed
 }
 
 func (h *capsHost) start(t *testing.T) *httptest.Server {
@@ -233,6 +234,9 @@ func (h *capsHost) start(t *testing.T) *httptest.Server {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/models":
 			_, _ = w.Write([]byte(`{"data":[` + budget + `],"has_more":false}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/models/claude-x":
+			if h.hold != nil {
+				<-h.hold
+			}
 			_, _ = w.Write([]byte(adaptive))
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/messages":
 			_, _ = w.Write([]byte(`{"id":"msg_1","type":"message","role":"assistant","model":"claude-x","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":3,"output_tokens":1}}`))
@@ -294,7 +298,9 @@ func TestModelCapsComeFromListsAndTests(t *testing.T) {
 		if r := exec(svc, "providers.test", map[string]any{"id": "claude"}); !r.OK {
 			t.Fatalf("%+v", r.Error)
 		}
+		waitLookups(t, h, 1) // the lookup runs after the test's answer
 	}
+	time.Sleep(100 * time.Millisecond) // a second lookup would have run by now
 	if got := h.lookups(); !reflect.DeepEqual(got, []string{"/v1/models/claude-x"}) {
 		t.Fatalf("one lookup, for the role model the list did not cover: %v", got)
 	}
@@ -303,5 +309,60 @@ func TestModelCapsComeFromListsAndTests(t *testing.T) {
 	b, _ := status["claude/claude-budget"].(map[string]any)
 	if x["thinking_off"] != "disabled" || strings.Join(b["efforts"].([]string), ",") != "none,minimal,low,medium,high,xhigh,max" {
 		t.Fatalf("the status shows what the list and the test found: %v %v", x, b)
+	}
+}
+
+// waitLookups waits until h has answered n model lookups (they run in the background).
+func waitLookups(t *testing.T, h *capsHost, n int) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); len(h.lookups()) < n; {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d lookups, want %d", len(h.lookups()), n)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// Effort review round 2, finding 7: providers.test answers before the role models are looked up; the
+// lookup runs in the background and its result reaches the status afterwards.
+func TestProviderTestDoesNotWaitForTheCapsLookup(t *testing.T) {
+	h := &capsHost{hold: make(chan struct{})}
+	srv := h.start(t)
+	released := false
+	release := func() {
+		if !released {
+			released = true
+			close(h.hold)
+		}
+	}
+	t.Cleanup(release) // before the server closes (cleanups run last first)
+	svc := setupSvc(t)
+	t.Setenv("FAKE_CLAUDE_KEY", "k")
+	applyDoc(t, svc, func(d *config.Document) {
+		d.Providers["claude"] = config.Provider{Kind: config.KindOpenAI, API: "anthropic", BaseURL: srv.URL + "/v1", CredentialRef: "env:FAKE_CLAUDE_KEY"}
+		d.Models["planner"] = config.Model{Provider: "claude", Model: "claude-x"}
+	})
+	done := make(chan bool, 1)
+	go func() { done <- exec(svc, "providers.test", map[string]any{"id": "claude"}).OK }()
+	select {
+	case ok := <-done:
+		if !ok {
+			t.Fatal("providers.test failed")
+		}
+	case <-time.After(2 * time.Second):
+		release()
+		t.Fatal("providers.test waited for the model lookup")
+	}
+	waitLookups(t, h, 1) // asked, not answered yet
+	release()
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		status, _ := exec(svc, "providers.list", nil).Output["model_reasoning"].(map[string]any)
+		if x, _ := status["claude/claude-x"].(map[string]any); x["thinking_off"] == "disabled" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the lookup's answer reaches the status: %v", status)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

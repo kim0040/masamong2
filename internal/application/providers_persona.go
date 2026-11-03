@@ -121,7 +121,9 @@ func (s *Service) providers(ctx context.Context, req action.Request) action.Resu
 			return s.providerFail(req, id, err)
 		}
 		s.noteProvider(id, nil)
-		s.lookupModelCaps(ctx, id) // the one time the host is asked about its role models' reasoning
+		// the one time the host is asked about its role models' reasoning: after the answer, not before it
+		// (one GET per model, up to 20 s in all)
+		s.ownedGo("providers.test model caps", func(ctx context.Context) { s.lookupModelCaps(ctx, id) })
 		out["ok"] = true
 		out["live"] = true
 		out["credential_ref"] = st.CredentialRef

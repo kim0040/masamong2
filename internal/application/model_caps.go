@@ -15,8 +15,9 @@ import (
 // turns their thinking off) is kept here, one cache per provider shared by all of them. It starts from
 // the stored model list (storePrices keeps the capabilities next to the prices) and is filled by every
 // list request and, on Anthropic-format hosts, by a lookup of the role models a provider test runs
-// (lookupModelCaps). A chat call or a status read never asks the host: what is not known stays unknown,
-// and the request follows the shape learned from refusals.
+// (lookupModelCaps, in the background after the test answers). A chat call or a status read never asks
+// the host: what is not known stays unknown, and the request follows the shape learned from refusals
+// (kept in the same cache, so every adapter of the provider uses it).
 
 type capsSlot struct {
 	key   string // the provider's address and family: a provider pointed elsewhere starts empty
@@ -127,8 +128,9 @@ func (s *Service) modelReasoning() map[string]any {
 }
 
 // lookupModelCaps asks an Anthropic-format provider about the role models on it nothing is known about
-// yet (one GET /models/{id} each, free), when the operator tests the provider: a host whose list the test
-// read already answered for its listed models, and a host without a list may still answer per model.
+// yet (one GET /models/{id} each, free), when the operator tests the provider (in the background, after
+// the test's answer): a host whose list the test read already answered for its listed models, and a host
+// without a list may still answer per model.
 func (s *Service) lookupModelCaps(ctx context.Context, provider string) {
 	doc := s.Doc()
 	p, ok := doc.Providers[provider]
