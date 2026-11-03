@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -226,4 +227,30 @@ func TestPricingOverrideUnknownPriceIsSkipped(t *testing.T) {
 	if strings.Contains(got, "context_over") || strings.Contains(got, "tier") {
 		t.Fatalf("a dropped entry is not reported as a skipped price:\n%s", got)
 	}
+}
+
+// Finding 1: the shared store of learned shapes is safe for adapters calling at once (run with -race).
+func TestSharedShapesConcurrent(t *testing.T) {
+	h := &anthropicHost{chat: fixedBudgetHost()}
+	a := newAnthropicHost(t, "/v1", h)
+	shared := NewCapsCache()
+	a.Caps = shared
+	models, _ := ParseModels("application/json", []byte(`{"data":[`+capsHaiku45+`]}`))
+	var wg sync.WaitGroup
+	for i := range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			b := New(a.Client, a.BaseURL, a.Cred)
+			b.API, b.Caps = APIAnthropic, shared
+			if i%4 == 3 {
+				shared.Put("claude-haiku-4-5", models[0].Caps())
+			}
+			req := ChatRequest{Model: "claude-haiku-4-5", Messages: []Message{{Role: "user", Content: "x"}}, MaxTokens: 40, Effort: "high"}
+			if _, err := b.Chat(context.Background(), req); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
 }
