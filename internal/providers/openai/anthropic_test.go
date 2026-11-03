@@ -165,25 +165,26 @@ func TestAnthropicMessagesConversion(t *testing.T) {
 		}
 		got = append(got, turn.Role+":"+strings.Join(kinds, ","))
 	}
-	want := []string{"assistant:text", "user:text,image,text", "assistant:thinking,text,tool_use,tool_use", "user:tool_result,tool_result",
+	// the bot's own line a cut history starts with is left out: the API takes a user turn first
+	want := []string{"user:text,image,text", "assistant:thinking,text,tool_use,tool_use", "user:tool_result,tool_result",
 		"assistant:tool_use", "user:tool_result", "assistant:tool_use", "user:tool_result"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("turns\n got %v\nwant %v", got, want)
 	}
-	if string(p.Messages[2].Content[0]) != `{"type":"thinking","thinking":"Two cities, one call each.","signature":"sig-test-1"}` {
-		t.Fatalf("the thinking block goes back byte for byte: %s", p.Messages[2].Content[0])
+	if string(p.Messages[1].Content[0]) != `{"type":"thinking","thinking":"Two cities, one call each.","signature":"sig-test-1"}` {
+		t.Fatalf("the thinking block goes back byte for byte: %s", p.Messages[1].Content[0])
 	}
 	var img struct {
 		Source map[string]string `json:"source"`
 	}
-	_ = json.Unmarshal(p.Messages[1].Content[1], &img)
+	_ = json.Unmarshal(p.Messages[0].Content[1], &img)
 	if img.Source["type"] != "base64" || img.Source["media_type"] != "image/png" || img.Source["data"] != "AQID" {
-		t.Fatalf("image block %s", p.Messages[1].Content[1])
+		t.Fatalf("image block %s", p.Messages[0].Content[1])
 	}
 	var tu, tr, empty map[string]any
-	_ = json.Unmarshal(p.Messages[4].Content[0], &tu)
-	_ = json.Unmarshal(p.Messages[3].Content[0], &tr)
-	_ = json.Unmarshal(p.Messages[7].Content[0], &empty)
+	_ = json.Unmarshal(p.Messages[3].Content[0], &tu)
+	_ = json.Unmarshal(p.Messages[2].Content[0], &tr)
+	_ = json.Unmarshal(p.Messages[6].Content[0], &empty)
 	if tu["id"] != "call_9" || tu["name"] != "time.now" || !reflect.DeepEqual(tu["input"], map[string]any{}) {
 		t.Fatalf("another host's tool call: %v", tu)
 	}
@@ -194,13 +195,13 @@ func TestAnthropicMessagesConversion(t *testing.T) {
 		t.Fatalf("an empty tool answer sends no empty content: %v", empty)
 	}
 	var broken map[string]any
-	_ = json.Unmarshal(p.Messages[6].Content[0], &broken)
+	_ = json.Unmarshal(p.Messages[5].Content[0], &broken)
 	if !reflect.DeepEqual(broken["input"], map[string]any{}) {
 		t.Fatalf("broken arguments become an empty object: %v", broken)
 	}
 	// a user text after the tool answers stays after them in the merged turn
 	_, turns, _ := anthropicMessages([]Message{{Role: "user", Content: "q"}, {Role: "assistant", ToolCalls: []ToolCall{{ID: "a", Function: ToolCallFunction{Name: "f"}}}},
-		{Role: "user", Content: "also this"}, {Role: "tool", ToolCallID: "a", Content: "x"}})
+		{Role: "user", Content: "also this"}, {Role: "tool", ToolCallID: "a", Content: "x"}}, "")
 	if blockType(turns[2].Content[0]) != "tool_result" || blockType(turns[2].Content[1]) != "text" {
 		t.Fatalf("tool_result first: %s", turns[2].Content)
 	}
@@ -452,20 +453,42 @@ func TestAnthropicLearnsThinkingOffWithoutCaps(t *testing.T) {
 	}
 }
 
-// Known capabilities decide at once: no refusal is needed to learn how a model turns thinking off, and a
-// model is looked up once (GET /models/{id}), not on every call.
+// Known capabilities decide at once: no refusal is needed to learn how a model turns thinking off. They
+// come from the model list or an explicit lookup (CapsOf: a provider test), never from the chat call:
+// a chat call never asks GET /models/{id}, and a model nothing is known about follows the defaults.
 func TestAnthropicCapsAreLookedUpOnce(t *testing.T) {
 	h := &anthropicHost{caps: map[string]string{"claude-sonnet-5-5": capsSonnet55, "claude-opus-5-5": capsOpus55}}
 	a := newAnthropicHost(t, "/v1", h)
+	none := func(model string) ChatRequest {
+		return ChatRequest{Model: model, Messages: []Message{{Role: "user", Content: "x"}}, MaxTokens: 40, Effort: "none"}
+	}
+	for _, model := range []string{"claude-sonnet-5-5", "claude-opus-5-5"} {
+		if _, err := a.Chat(context.Background(), none(model)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if h.lookups != 0 || thinkingType(h.bodies[0]) != "disabled" || thinkingType(h.bodies[1]) != "disabled" {
+		t.Fatalf("a chat call asks nothing, unknown caps write the default: %d lookups %v", h.lookups, h.bodies)
+	}
+	// the explicit lookup (the provider test) fills the cache, once per model, a missing one too
 	for i := 0; i < 2; i++ {
 		for _, model := range []string{"claude-sonnet-5-5", "claude-opus-5-5", "vendor-x"} {
-			if _, err := a.Chat(context.Background(), ChatRequest{Model: model, Messages: []Message{{Role: "user", Content: "x"}}, MaxTokens: 40, Effort: "none"}); err != nil {
+			a.CapsOf(context.Background(), model)
+		}
+	}
+	if h.lookups != 3 {
+		t.Fatalf("one lookup per model: %d", h.lookups)
+	}
+	h.bodies = nil
+	for i := 0; i < 2; i++ {
+		for _, model := range []string{"claude-sonnet-5-5", "claude-opus-5-5", "vendor-x"} {
+			if _, err := a.Chat(context.Background(), none(model)); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
 	if h.lookups != 3 || len(h.bodies) != 6 {
-		t.Fatalf("one lookup per model (a missing one too), one call per request: %d lookups, %d calls", h.lookups, len(h.bodies))
+		t.Fatalf("no lookup on the chat path, one call per request: %d lookups, %d calls", h.lookups, len(h.bodies))
 	}
 	if thinkingType(h.bodies[0]) != "between_tools" || thinkingType(h.bodies[1]) != nil || outputEffort(h.bodies[1]) != "low" || thinkingType(h.bodies[2]) != "disabled" {
 		t.Fatalf("sonnet between_tools, opus its lowest level, unknown disabled: %v", h.bodies[:3])
@@ -476,7 +499,7 @@ func TestAnthropicCapsAreLookedUpOnce(t *testing.T) {
 	if ms, err := b.ListModels(context.Background()); err != nil || len(ms) != 1 || h2.lookups != 1 {
 		t.Fatalf("list: %v %v", ms, err)
 	}
-	if _, err := b.Chat(context.Background(), ChatRequest{Model: "claude-haiku-5-5", Messages: []Message{{Role: "user", Content: "x"}}, MaxTokens: 40, Effort: "none"}); err != nil {
+	if _, err := b.Chat(context.Background(), none("claude-haiku-5-5")); err != nil {
 		t.Fatal(err)
 	}
 	if h2.lookups != 1 || thinkingType(h2.bodies[0]) != "disabled" {

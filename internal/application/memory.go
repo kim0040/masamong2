@@ -101,6 +101,18 @@ func (s *Service) llmAdapter(role string) (*openai.Adapter, error) {
 	return s.llmAdapterFor(s.Doc(), role)
 }
 
+// quickEffort is the level a Quick call on an adapter of role asks for (openai.Adapter.RoleEffort): a
+// call the code makes thinking-free on purpose (the name-call, reference and follow-up classifiers, a
+// fortune). "" (none) while the role sets no effort; once it does, that level capped at low, so a planner
+// at high or max does not make a 40-token classifier think hard. The summary role's own effort is the
+// level of the job itself (every summary call is Quick) and applies as set.
+func quickEffort(role, effort string) string {
+	if role == "summary" || effort == "" || slices.Index(config.ModelEfforts, effort) <= slices.Index(config.ModelEfforts, "low") {
+		return effort
+	}
+	return "low"
+}
+
 func (s *Service) llmAdapterFor(doc config.Document, role string) (*openai.Adapter, error) {
 	m, ok := modelOf(doc, role)
 	if !ok {
@@ -128,8 +140,8 @@ func (s *Service) llmAdapterFor(doc config.Document, role string) (*openai.Adapt
 	s.shareCaps(a, m.Provider, p)
 	if slices.Contains(config.FallbackRoles, role) {
 		// a Quick call of this role (a classifier, a one-line summary) thinks only when the operator set
-		// the role's effort (openai.Adapter.RoleEffort; the precedence is on config.Model.Effort)
-		a.RoleEffort = m.Effort
+		// the role's effort, and then at most at low (quickEffort; the precedence is on config.Model.Effort)
+		a.RoleEffort = quickEffort(role, m.Effort)
 	}
 	if len(m.Fallbacks) > 0 && slices.Contains(config.FallbackRoles, role) {
 		a.Failover = s.failoverFor(doc, role, m)
@@ -212,9 +224,9 @@ func (s *Service) failoverFor(doc config.Document, role string, m config.Model) 
 		a.Price, a.CachedPrice, a.ContextPrice = s.pricer(fb.Provider), s.cachedPricer(fb.Provider), s.contextPricer(fb.Provider)
 		a.Gate = s.llmGate(fb.Provider)
 		s.shareCaps(a, fb.Provider, p)
-		// the fallback's own effort, else the role's, for its Quick calls; its other calls take fb.Effort
-		// when set (openai.Fallback.Effort), else the role's level the request carries
-		a.RoleEffort = cmp.Or(fb.Effort, m.Effort)
+		// the fallback's own effort, else the role's, for its Quick calls (capped as the role's are); its
+		// other calls take fb.Effort when set (openai.Fallback.Effort), else the role's level the request carries
+		a.RoleEffort = quickEffort(role, cmp.Or(fb.Effort, m.Effort))
 		f.Fallbacks = append(f.Fallbacks, openai.Fallback{A: a, Provider: fb.Provider, Model: fb.Model, Timeout: roleTimeout(role, fb.TimeoutSeconds), Effort: fb.Effort})
 	}
 	return f
@@ -324,6 +336,7 @@ func (s *Service) MemoryEngine() (*engine.Engine, error) {
 	if m, ok := modelOf(doc, "embed"); ok {
 		models.Embed, models.EmbedDims = m.Model, m.Dimensions
 		_, models.EmbedTruncatable = openai.EmbedFullWidth(m.Model)
+		models.EmbedKeepsMessageWidth = openai.EmbedKeepsMessageWidth(m.Model)
 		if m.Dimensions == 4096 {
 			// The default is config.DefaultEmbedDimensions; only explicit 4096 uses the full-width space,
 			// whose name matches the sandbox space.
@@ -385,11 +398,13 @@ func (s *Service) MemoryEngine() (*engine.Engine, error) {
 	}
 	if st.eng.SummaryLLM != nil {
 		// the job decides, not the model it falls back to: the response model writing summaries keeps them
-		// thinking-free unless models.summary.effort is set
+		// thinking-free unless models.summary.effort is set, and so do its fallbacks; a fallback with an
+		// effort of its own uses it, capped as any Quick call of the role it belongs to (quickEffort), as
+		// featureText does
 		st.eng.SummaryLLM.RoleEffort = doc.Models["summary"].Effort
 		if st.eng.SummaryLLM.Failover != nil {
 			for _, fb := range st.eng.SummaryLLM.Failover.Fallbacks {
-				fb.A.RoleEffort = cmp.Or(fb.Effort, doc.Models["summary"].Effort)
+				fb.A.RoleEffort = cmp.Or(quickEffort(summaryRole, fb.Effort), doc.Models["summary"].Effort)
 			}
 		}
 	}

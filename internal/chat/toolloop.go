@@ -212,6 +212,16 @@ type LoopLLM interface {
 	ChatTools(ctx context.Context, role string, msgs []LoopMsg, tools []ToolSpec, maxTokens int) (LoopReply, error)
 }
 
+// StableToolsLLM is a LoopLLM that may report a role whose model binds the reasoning it sends back to the
+// exact tool list it was offered (Anthropic's preserved thinking: a signed thinking block is valid only
+// while the system prompt, the tools and the earlier messages are unchanged, and a changed list fails
+// the next round with a 400). For such a role the loop offers the first round's tools on every round
+// and answers a call to one that is not available any more with a tool result saying so (prepare),
+// instead of taking it off the menu.
+type StableToolsLLM interface {
+	StableTools(role string) bool
+}
+
 // ErrToolsUnsupported means the model or its route takes no tools; the turn falls back to the planner.
 var ErrToolsUnsupported = errors.New("chat: the model takes no tools")
 
@@ -350,6 +360,10 @@ func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message,
 			tr.Removed = append(tr.Removed, id)
 		}
 	}
+	stable := false
+	if s, ok := l.LLM.(StableToolsLLM); ok {
+		stable = s.StableTools(l.Role)
+	}
 	for round := 1; round <= MaxLoopRounds; round++ {
 		var offer []ToolSpec
 		for _, s := range specs {
@@ -361,6 +375,10 @@ func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message,
 		if len(offer) == 0 {
 			tr.Stop = "no_tools"
 			break
+		}
+		if stable {
+			// the wire list stays the first round's; prepare refuses what is closed now
+			offer = specs
 		}
 		reply, err := l.LLM.ChatTools(ctx, l.Role, msgs, offer, LoopMaxTokens)
 		tr.CostUSD += reply.CostUSD

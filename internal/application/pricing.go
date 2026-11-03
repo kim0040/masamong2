@@ -90,10 +90,15 @@ func (l *priceList) stale(now time.Time) bool {
 		return true
 	}
 	until, err := time.Parse(time.RFC3339, l.Until)
-	return err == nil && !now.Before(until)
+	// a price that ended is fetched again, but not more than once in priceListMinAge: a host whose list
+	// always ends a promotion a few minutes ahead would otherwise be asked again after every end
+	return err == nil && !now.Before(until) && now.Sub(at) >= priceListMinAge
 }
 
-const priceListTTL = 24 * time.Hour
+const (
+	priceListTTL    = 24 * time.Hour
+	priceListMinAge = time.Hour
+)
 
 type priceState struct {
 	mu         sync.Mutex

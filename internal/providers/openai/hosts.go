@@ -153,8 +153,14 @@ var hostsData = func() (d struct {
 		Models  map[string][]float64 `json:"models"` // [input, output] or [input, output, cached input] per million tokens
 		// ImageInput names the chat models of the family that accept pictures; its list does not say
 		ImageInput []string `json:"image_input"`
+		// Sampling names the chat models (an ID or the ID before a dated suffix) that take a temperature
+		// on a call without thinking; any other model of the family is sent none (anthropic.go)
+		Sampling []string `json:"sampling"`
 	} `json:"prices"`
 	EmbedWidths map[string]int `json:"embed_widths"`
+	// EmbedWidthsLate are the embed_widths models listed after installs had stored message vectors at
+	// their leaf width (EmbedKeepsMessageWidth)
+	EmbedWidthsLate []string `json:"embed_widths_late"`
 }) {
 	if err := json.Unmarshal(hostsJSON, &d); err != nil {
 		panic(fmt.Sprintf("openai: hosts.json: %v", err))
@@ -240,12 +246,31 @@ func PublishedImageInput(api API, model string) bool {
 	return slices.Contains(hostsData.Prices[api].ImageInput, api.trimModelID(model))
 }
 
+// PublishedSampling reports a model hosts.json names as taking a temperature (the family's sampling
+// list: the model's ID, or that ID with a dated suffix such as -20251001). false means "not known to".
+func PublishedSampling(api API, model string) bool {
+	id := strings.ToLower(api.trimModelID(model))
+	for _, name := range hostsData.Prices[api].Sampling {
+		if id == name || strings.HasPrefix(id, name+"-") {
+			return true
+		}
+	}
+	return false
+}
+
 // EmbedFullWidth is the full width of an embedding model hosts.json names as cuttable (trained so the
 // leading part of a vector is a vector of its own: Matryoshka / MRL). ok is false for any other model,
 // which means "not known to be cuttable": such a model always keeps its full width.
 func EmbedFullWidth(model string) (width int, ok bool) {
 	width, ok = hostsData.EmbedWidths[ReferenceName(model)]
 	return width, ok && width > 0
+}
+
+// EmbedKeepsMessageWidth reports an MRL model hosts.json listed late (embed_widths_late): an install
+// whose message vectors of the model were made at its leaf width before keeps that width rather than
+// moving them to the MRL default and embedding every message again.
+func EmbedKeepsMessageWidth(model string) bool {
+	return slices.Contains(hostsData.EmbedWidthsLate, ReferenceName(model))
 }
 
 type roleRule struct {

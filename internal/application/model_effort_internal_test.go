@@ -31,6 +31,11 @@ func (h *effortHost) server(t *testing.T) string {
 		raw, _ := io.ReadAll(r.Body)
 		var body map[string]any
 		_ = json.Unmarshal(raw, &body)
+		if body["model"] == "fail-primary" { // a primary that is down: its fallback answers
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":{"message":"upstream unavailable"}}`))
+			return
+		}
 		h.mu.Lock()
 		h.sent = append(h.sent, body)
 		h.mu.Unlock()
@@ -66,7 +71,8 @@ func effortService(t *testing.T, url string, edit func(d *config.Document)) *Ser
 }
 
 // The precedence of models.<role>.effort: a role's calls ask for its level (empty: low); a quick
-// classifier asks for none unless the level is set, and then for that level with room to think.
+// classifier asks for none unless the level is set, and then for that level capped at low, with room
+// to think.
 func TestRoleEffortPrecedenceOnChatCalls(t *testing.T) {
 	h := &effortHost{}
 	url := h.server(t)
@@ -74,7 +80,8 @@ func TestRoleEffortPrecedenceOnChatCalls(t *testing.T) {
 		effort           string
 		plain, quick     string
 		quickRoomAddedTo float64
-	}{{"", "low", "none", 0}, {"medium", "medium", "medium", 1024}, {"none", "none", "none", 0}, {"xhigh", "xhigh", "xhigh", 1024}} {
+	}{{"", "low", "none", 0}, {"low", "low", "low", 1024}, {"medium", "medium", "low", 1024}, {"none", "none", "none", 0}, {"minimal", "minimal", "minimal", 0},
+		{"xhigh", "xhigh", "low", 1024}, {"max", "max", "low", 1024}} {
 		s := effortService(t, url, func(d *config.Document) {
 			m := d.Models["planner"]
 			m.Effort = c.effort
@@ -100,7 +107,8 @@ func TestRoleEffortPrecedenceOnChatCalls(t *testing.T) {
 	}
 }
 
-// A fallback's own effort replaces the role's on that model; without one it keeps the role's.
+// A fallback's own effort replaces the role's on that model; without one it keeps the role's. Quick
+// calls (RoleEffort) take either capped at low; the summary role's own level is the job's and stays.
 func TestFallbackEffortIsWired(t *testing.T) {
 	h := &effortHost{}
 	url := h.server(t)
@@ -114,12 +122,21 @@ func TestFallbackEffortIsWired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.RoleEffort != "medium" || a.Failover == nil || len(a.Failover.Fallbacks) != 2 {
+	if a.RoleEffort != "low" || a.Failover == nil || len(a.Failover.Fallbacks) != 2 {
 		t.Fatalf("adapter %q %+v", a.RoleEffort, a.Failover)
 	}
 	fb := a.Failover.Fallbacks
-	if fb[0].Effort != "high" || fb[0].A.RoleEffort != "high" || fb[1].Effort != "" || fb[1].A.RoleEffort != "medium" {
+	if fb[0].Effort != "high" || fb[0].A.RoleEffort != "low" || fb[1].Effort != "" || fb[1].A.RoleEffort != "low" {
 		t.Fatalf("fallback efforts: %q/%q %q/%q", fb[0].Effort, fb[0].A.RoleEffort, fb[1].Effort, fb[1].A.RoleEffort)
+	}
+	s2 := effortService(t, url, func(d *config.Document) {
+		m := d.Models["summary"]
+		m.Effort = "high"
+		m.Fallbacks = []config.ModelFallback{{Provider: "spare", Model: "fb-s"}}
+		d.Models["summary"] = m
+	})
+	if e, err := s2.llmAdapterFor(s2.Doc(), "summary"); err != nil || e.RoleEffort != "high" || e.Failover.Fallbacks[0].A.RoleEffort != "high" {
+		t.Fatalf("the summary role's own level is the job's: %v %v", e, err)
 	}
 	if a.Caps == nil || a.Caps != s.modelCaps("host", s.Doc().Providers["host"]) || fb[0].A.Caps != s.modelCaps("spare", s.Doc().Providers["spare"]) {
 		t.Fatal("adapters share their provider's capability cache")
@@ -164,6 +181,67 @@ func TestFeatureTextEffort(t *testing.T) {
 	if h.last()["reasoning_effort"] != "low" || h.last()["max_tokens"] != float64(100+1024) {
 		t.Fatalf("models.summary.effort set: that level with room: %v", h.last())
 	}
+	// the response model fails and its fallback answers: a fallback without an effort of its own asks
+	// what the job asks (the summary role sets none: thinking-free; a fortune: the response role's level
+	// capped at low), not the response role's high; one with its own effort keeps it
+	s = effortService(t, url, func(d *config.Document) {
+		delete(d.Models, "summary")
+		m := d.Models["response"]
+		m.Model, m.Effort = "fail-primary", "high"
+		m.Fallbacks = []config.ModelFallback{{Provider: "spare", Model: "fb-inherit"}}
+		d.Models["response"] = m
+	})
+	for _, c := range []struct{ role, kind, want string }{{"summary", "summary", "none"}, {"response", "fortune", "low"}} {
+		if _, _, err := s.featureText(context.Background(), c.role, c.kind, "", "x", 100, 0); err != nil {
+			t.Fatal(err)
+		}
+		if got := h.last(); got["model"] != "fb-inherit" || got["reasoning_effort"] != c.want {
+			t.Fatalf("%s on the fallback: %v", c.kind, got)
+		}
+	}
+	s = effortService(t, url, func(d *config.Document) {
+		delete(d.Models, "summary")
+		m := d.Models["response"]
+		m.Model, m.Effort = "fail-primary", "high"
+		m.Fallbacks = []config.ModelFallback{{Provider: "spare", Model: "fb-own", Effort: "minimal"}}
+		d.Models["response"] = m
+	})
+	if _, _, err := s.featureText(context.Background(), "summary", "summary", "", "x", 100, 0); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.last(); got["model"] != "fb-own" || got["reasoning_effort"] != "minimal" {
+		t.Fatalf("a fallback's own effort stays: %v", got)
+	}
+}
+
+// F: the memory engine writes summaries on the response model when no summary model is set. Like a
+// summary through featureText, a response fallback without an effort of its own writes them at the
+// summary job's level (none while models.summary.effort is empty), not at the response role's high; one
+// with its own effort uses it capped at low (a Quick call of the response role).
+func TestEngineSummaryFallbackEffort(t *testing.T) {
+	h := &effortHost{}
+	url := h.server(t)
+	s := effortService(t, url, func(d *config.Document) {
+		delete(d.Models, "summary")
+		m := d.Models["response"]
+		m.Effort = "high"
+		m.Fallbacks = []config.ModelFallback{{Provider: "spare", Model: "fb-inherit"}, {Provider: "spare", Model: "fb-own", Effort: "max"}}
+		d.Models["response"] = m
+		if e := d.Models["embed"]; e.Provider == "host" {
+			t.Fatal("the summary adapter is the response model's only when embed is elsewhere")
+		}
+	})
+	eng, err := s.MemoryEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := eng.SummaryLLM
+	if a == nil || a.Failover == nil || len(a.Failover.Fallbacks) != 2 {
+		t.Fatalf("summary adapter %+v", a)
+	}
+	if fb := a.Failover.Fallbacks; a.RoleEffort != "" || fb[0].A.RoleEffort != "" || fb[1].A.RoleEffort != "low" {
+		t.Fatalf("summary efforts: primary %q, inheriting %q, own %q", a.RoleEffort, fb[0].A.RoleEffort, fb[1].A.RoleEffort)
+	}
 }
 
 // The status action lists what is known about each chat role's model; capabilities a list gave are kept
@@ -189,6 +267,46 @@ func TestModelReasoningRows(t *testing.T) {
 	got, _ = s.modelReasoning()["host/m-planner"].(map[string]any)
 	if strings.Join(got["efforts"].([]string), ",") != "low,medium,high,xhigh,max" || got["thinking_off"] != nil {
 		t.Fatalf("a model that must think: %v", got)
+	}
+}
+
+// E: a known-empty list (a Claude model that takes no effort field: Claude Haiku 4.5) survives the stored
+// price list, so after a restart the model still reads as "no effort field" (empty), not "unknown" (nil,
+// which would send a guessed effort field and need a refused call to learn); an unknown list stays unknown.
+func TestStoredCapsKeepKnownEmptyLists(t *testing.T) {
+	h := &effortHost{}
+	url := h.server(t)
+	s := effortService(t, url, func(d *config.Document) {})
+	yes := true
+	s.storePrices("host", []openai.Model{
+		{ID: "m-planner", Reasoning: &yes, Efforts: []string{}, Thinking: []string{"enabled", "disabled"}, PromptPrice: "0.000001", CompletionPrice: "0.000005"},
+		{ID: "m-response", Reasoning: &yes, PromptPrice: "0.000001", CompletionPrice: "0.000005"},
+	})
+	capsStates.Delete(s) // a new process: only the stored list is left
+	cache := s.modelCaps("host", s.Doc().Providers["host"])
+	c, known := cache.Get("m-planner")
+	if !known || c.Efforts == nil || len(c.Efforts) != 0 || strings.Join(c.Thinking, ",") != "enabled,disabled" {
+		t.Fatalf("restored capabilities: %+v (efforts nil: %v)", c, c.Efforts == nil)
+	}
+	if c, _ := cache.Get("m-response"); c.Efforts != nil || c.Thinking != nil || c.Reasoning == nil || !*c.Reasoning {
+		t.Fatalf("unknown lists stay unknown: %+v", c)
+	}
+}
+
+// D: the console offers what the application can send, not only the native effort field. A Claude model
+// that thinks with a fixed budget (Claude Haiku 4.5: no effort field, thinking enabled/disabled) gets
+// every level, low and up being budgets of their own (anthropic.go thinkingRoom); native_efforts keeps
+// what the model's own field takes (none here). A model with the effort field is unchanged.
+func TestBudgetModelRowOffersEveryLevel(t *testing.T) {
+	yes := true
+	row := reasoningRow(openai.Caps{Reasoning: &yes, Efforts: []string{}, Thinking: []string{"enabled", "disabled"}})
+	native, hasNative := row["native_efforts"].([]string)
+	if strings.Join(row["efforts"].([]string), ",") != "none,minimal,low,medium,high,xhigh,max" || !hasNative || native == nil || len(native) != 0 || row["thinking_off"] != "disabled" {
+		t.Fatalf("budget model row %v", row)
+	}
+	row = reasoningRow(openai.Caps{Reasoning: &yes, Efforts: []string{"low", "medium", "high"}, Thinking: []string{"adaptive", "disabled"}})
+	if strings.Join(row["efforts"].([]string), ",") != "none,minimal,low,medium,high" || strings.Join(row["native_efforts"].([]string), ",") != "low,medium,high" {
+		t.Fatalf("effort-field model row %v", row)
 	}
 }
 

@@ -584,7 +584,8 @@ func TestSubmitAnthropicNativeTranslation(t *testing.T) {
 	// translation errors
 	ctx := context.Background()
 	bad := chatItem("c", "claude-x")
-	bad.Chat.Messages = []Message{{Role: "assistant", Content: "first"}, {Role: "user", Content: "x"}}
+	// the bot's line a conversation starts with is left out (as live); one with no user turn is refused
+	bad.Chat.Messages = []Message{{Role: "system", Content: "s"}, {Role: "assistant", Content: "first"}}
 	if _, err := a.SubmitBatch(ctx, BatchChat, "claude-x", []BatchItem{{ID: "c", Chat: &ChatRequest{Model: "claude-x", MaxTokens: 5, Messages: bad.Chat.Messages}}}, ""); err == nil || !strings.Contains(err.Error(), "user message") {
 		t.Fatalf("first message must be the user's: %v", err)
 	}

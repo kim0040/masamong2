@@ -121,6 +121,7 @@ func (s *Service) providers(ctx context.Context, req action.Request) action.Resu
 			return s.providerFail(req, id, err)
 		}
 		s.noteProvider(id, nil)
+		s.lookupModelCaps(ctx, id) // the one time the host is asked about its role models' reasoning
 		out["ok"] = true
 		out["live"] = true
 		out["credential_ref"] = st.CredentialRef

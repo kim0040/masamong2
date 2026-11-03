@@ -48,8 +48,14 @@ var (
 	// come with (OpenAI credit_balance_exhausted and the spend limits, OpenGateway budget_exceeded, NanoGPT
 	// api_key_usd_limit, api_key_weekly_usd_limit, api_account_monthly_usd_limit and the
 	// *_subscription_token_limit codes)
+	// Anthropic: a spend limit the operator set answers 400 "You have reached your specified API usage
+	// limits" (or "specified workspace API usage limits"), the tier's monthly cap 429 "You have reached your
+	// API usage limits" with error_code enforced_spend_limit_reached and no retry-after (rate-limits page,
+	// read 2026-11-03), and a prepaid account without credit "Your credit balance is too low"
 	quotaStrong = []string{"insufficient_quota", "exceeded your current quota", "credit_balance_exhausted", "organization_spend_limit_exceeded",
-		"project_spend_limit_exceeded", "organization_usage_limit_exceeded", "budget_exceeded", "_usd_limit", "_subscription_token_limit"}
+		"project_spend_limit_exceeded", "organization_usage_limit_exceeded", "budget_exceeded", "_usd_limit", "_subscription_token_limit",
+		"reached your specified api usage limits", "reached your specified workspace api usage limits", "reached your api usage limits",
+		"enforced_spend_limit_reached", "credit balance is too low"}
 	// a request the host's content filter stopped: about this request, not the key or the model
 	policyMarks = []string{"content_policy_violation"}
 	rateMarks   = []string{"rate limit", "rate_limit", "too many requests", "tokens per min", "requests per min", "resource_exhausted", "resource has been exhausted"}

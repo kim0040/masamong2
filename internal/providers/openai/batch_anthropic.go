@@ -162,6 +162,9 @@ type anthropicRow struct {
 				OutputTokens        int `json:"output_tokens"`
 				CacheCreationTokens int `json:"cache_creation_input_tokens"`
 				CacheReadTokens     int `json:"cache_read_input_tokens"`
+				Details             struct {
+					Thinking int `json:"thinking_tokens"`
+				} `json:"output_tokens_details"`
 			} `json:"usage"`
 		} `json:"message"`
 		Error *struct {
@@ -215,9 +218,12 @@ func (a *Adapter) anthropicOutcome(ref BatchRef, r anthropicRow, discount float6
 		u := m.Usage
 		res := ChatResult{Content: text.String(), FinishReason: anthropicFinish(m.StopReason), Model: m.Model,
 			PromptTokens: u.InputTokens + u.CacheCreationTokens + u.CacheReadTokens, CompletionTokens: u.OutputTokens,
-			CachedTokens: u.CacheReadTokens, Message: msg}
+			CachedTokens: u.CacheReadTokens, CacheWriteTokens: u.CacheCreationTokens, ReasoningTokens: u.Details.Thinking, Message: msg}
 		a.batchChatCost(&res, ref.Model, ref.SubmittedAt, discount)
 		o.Chat = &res
+		if m.StopReason == "refusal" {
+			o.Err = ErrRefused // billed like a live refusal, and the item's caller treats it as no answer
+		}
 	case "errored":
 		e := r.Result.Error
 		if e == nil {

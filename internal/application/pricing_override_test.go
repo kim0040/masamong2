@@ -68,6 +68,12 @@ func TestPriceListStaleAtListedPriceEnd(t *testing.T) {
 	if daily.stale(now) || !daily.stale(now.Add(24*time.Hour)) {
 		t.Fatal("a list without an end lasts a day")
 	}
+	// Sonnet 19: a host whose list always ends a promotion a few minutes ahead is not read again after
+	// every end: at most once an hour (priceListMinAge)
+	rolling := &priceList{FetchedAt: now.Add(-10 * time.Minute).Format(time.RFC3339), Until: now.Add(-5 * time.Minute).Format(time.RFC3339)}
+	if rolling.stale(now) || !rolling.stale(now.Add(50*time.Minute)) {
+		t.Fatal("an ended price is read again, but not within an hour of the last read")
+	}
 	// storePrices keeps the first end still ahead
 	s := &Service{Clock: clock.Fixed{T: now}}
 	s.storePrices("og", []openai.Model{

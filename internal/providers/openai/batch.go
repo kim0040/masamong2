@@ -716,7 +716,7 @@ func (a *Adapter) batchChatCost(res *ChatResult, model string, at time.Time, dis
 	if res.CostUSD != nil {
 		return
 	}
-	a.estimateCachedAt(&res.CostUSD, &res.CostEstimated, model, res.PromptTokens, res.CachedTokens, res.CompletionTokens, at)
+	a.estimateWrittenAt(&res.CostUSD, &res.CostEstimated, model, res.PromptTokens, res.CachedTokens, res.CacheWriteTokens, res.CompletionTokens, at)
 	if res.CostUSD != nil {
 		v := *res.CostUSD * discount
 		res.CostUSD = &v

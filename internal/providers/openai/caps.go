@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -31,16 +32,18 @@ import (
 // EffortLevels are the reasoning levels a request may ask for, least thinking first.
 var EffortLevels = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
-// Caps is what a model list says about a model's reasoning. Nil and empty differ: nil is unknown.
+// Caps is what a model list says about a model's reasoning. Nil and empty differ: nil is unknown. The
+// lists are stored with the price list (JSON) without omitempty, so a known-empty list ([]) comes back
+// empty after a restart and an unknown one (null) comes back nil.
 type Caps struct {
 	// Reasoning is whether the model thinks (or takes a reasoning field); nil when the list does not say
 	Reasoning *bool `json:"reasoning,omitempty"`
 	// Efforts are the levels the model takes (Anthropic output_config.effort), least first; nil unknown,
 	// empty when the model takes no level at all
-	Efforts []string `json:"efforts,omitempty"`
+	Efforts []string `json:"efforts"`
 	// Thinking are the Anthropic thinking types the model takes ("adaptive", "enabled", "disabled",
 	// "between_tools"); nil unknown
-	Thinking []string `json:"thinking,omitempty"`
+	Thinking []string `json:"thinking"`
 }
 
 // Known reports whether the list said anything about the model's reasoning.
@@ -85,7 +88,7 @@ func parseCaps(it map[string]json.RawMessage, m *Model) {
 		var params []string
 		if json.Unmarshal(sp, &params) == nil {
 			has := slices.Contains(params, "reasoning") || slices.Contains(params, "include_reasoning")
-			m.Reasoning = &has
+			m.Reasoning, m.paramsNoReasoning = &has, !has
 		}
 	}
 	if raw, ok := it["reasoning"]; ok && string(raw) != "null" { // OpenRouter's reasoning object
@@ -95,7 +98,7 @@ func parseCaps(it map[string]json.RawMessage, m *Model) {
 		}
 		if json.Unmarshal(raw, &r) == nil {
 			yes := true
-			m.Reasoning = &yes
+			m.Reasoning, m.paramsNoReasoning = &yes, false
 			if r.Efforts != nil {
 				// a model that may stop thinking takes none even when its list leaves it out
 				m.Efforts = orderedEfforts(r.Efforts, !r.Mandatory)
@@ -302,7 +305,7 @@ func (a *Adapter) caps() *CapsCache {
 	return a.Caps
 }
 
-// capsLookupTimeout bounds the one-time model lookup a chat call may wait for.
+// capsLookupTimeout bounds one model lookup (CapsOf).
 const capsLookupTimeout = 5 * time.Second
 
 // knownCaps is what is known about model without asking the host: what a list said, else the levels
@@ -318,8 +321,9 @@ func (a *Adapter) knownCaps(model string) Caps {
 }
 
 // CapsOf is what is known about model's reasoning. On Anthropic a model nothing is known about is
-// looked up once (GET /models/{id}, free) and the answer kept for a day; elsewhere only what a model list
-// said is known.
+// looked up (GET /models/{id}, free) and the answer kept for a day; elsewhere only what a model list
+// said is known. Only an operator's explicit action asks (a provider test): a chat call and a status
+// read use what is known already (knownCaps) and leave the rest to the learned shapes.
 func (a *Adapter) CapsOf(ctx context.Context, model string) Caps {
 	cache := a.caps()
 	if a.API != APIAnthropic {
@@ -367,14 +371,31 @@ func (a *Adapter) anthropicModel(ctx context.Context, model string) (Model, erro
 // provider test reports the list as unavailable rather than failing.
 var ErrNoModelList = errors.New("openai: this host has no model list")
 
-// noModelList reports a list request a host without a list answers: 404/405, or a reply of another shape.
+// listRouteMissing reports an Anthropic-format host's answer to the list request that means "no list
+// here" (noModelList). A 403 is read as a refused key everywhere else, but a gateway that serves
+// /v1/messages only may refuse the list route with one: on a host other than Anthropic's own, a 403
+// without a key error's words is no list (the provider test then proves the key with a chat call).
+func listRouteMissing(err error, resp *providers.Response, baseURL string) bool {
+	if !errors.Is(err, ErrAuth) {
+		return noModelList(err)
+	}
+	if resp == nil || resp.Status != 403 || officialAnthropic(baseURL) {
+		return false
+	}
+	return !hasAny(strings.ToLower(string(resp.Body)), authMarks)
+}
+
+// noModelList reports a list request a host without a list answers: 400/403/404/405 (a gateway that
+// routes /v1/messages only refuses an unknown route in any of these ways), or a reply of another shape. A
+// refused key is not one of these (the caller checks ErrAuth first: a 400 or 403 with a key error's words).
 func noModelList(err error) bool {
+	gone := func(status int) bool { return status == 400 || status == 403 || status == 404 || status == 405 }
 	var pe *providers.Error
-	if errors.As(err, &pe) && (pe.Status == 404 || pe.Status == 405) {
+	if errors.As(err, &pe) && gone(pe.Status) {
 		return true
 	}
 	var ae *APIError
-	if errors.As(err, &ae) && (ae.Status == 404 || ae.Status == 405) {
+	if errors.As(err, &ae) && gone(ae.Status) {
 		return true
 	}
 	return errors.Is(err, decode.ErrUnexpected)

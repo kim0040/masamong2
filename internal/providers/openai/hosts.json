@@ -115,7 +115,9 @@
         "claude-haiku-5-5": [0.1, 0.5, 0.01],
         "claude-haiku-4-5-20251001": [1.0, 5.0, 0.1]
       },
-      "image_input": ["claude-fable-5-1", "claude-fable-5", "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5-20251101", "claude-sonnet-5-5", "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-5-5", "claude-haiku-4-5-20251001"]
+      "image_input": ["claude-fable-5-1", "claude-fable-5", "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5-20251101", "claude-sonnet-5-5", "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-5-5", "claude-haiku-4-5-20251001"],
+      "_about_sampling": "Release notes and model pages (read 2026-11-03): 'Setting the sampling parameters temperature, top_p, or top_k to a non-default value returns a 400 error on Claude Opus 4.8, same as on Claude Opus 4.7', and on every Claude 5 model; extended thinking is not compatible with a temperature either. Only these older models are sent a temperature, on a call without thinking.",
+      "sampling": ["claude-opus-4-6", "claude-opus-4-5", "claude-sonnet-4-6", "claude-sonnet-4-5", "claude-haiku-4-5"]
     },
     "openai": {
       "checked": "2026-09-30",
@@ -233,5 +235,7 @@
     "text-embedding-3-small": 1536,
     "gemini-embedding-001": 3072,
     "gemini-embedding-2": 3072
-  }
+  },
+  "_about_embed_widths_late": "Models added to embed_widths after installs had embedded their message vectors under the earlier rule for a model not listed: the stored leaf width (3072 for gemini-embedding-2 without models.embed.dimensions). An install that already holds message vectors of such a model in a space wider than 512 keeps that width (memory/engine keptMessageWidth): no new space and no paid embedding of every message again. A new install gets the MRL default (512).",
+  "embed_widths_late": ["gemini-embedding-2"]
 }

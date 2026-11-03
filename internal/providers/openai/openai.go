@@ -190,6 +190,9 @@ type Model struct {
 	Efforts   []string
 	Thinking  []string
 	Overrides []PricingOverride
+	// paramsNoReasoning marks a Reasoning false read from a supported_parameters list without a
+	// reasoning parameter (OpenRouter's way of saying so; ListModels keeps it for OpenRouter only)
+	paramsNoReasoning bool
 	// PriceUntil is when the listed price stops applying (OpenGateway's pricing.until: a scheduled
 	// promotion, its next price taking over); zero when the list gives no end
 	PriceUntil time.Time
@@ -252,7 +255,7 @@ func (a *Adapter) ListModels(ctx context.Context) ([]Model, error) {
 	resp, err := a.Client.Get(ctx, url, headers)
 	if err != nil {
 		err = mapErr(err, resp)
-		if a.API == APIAnthropic && !errors.Is(err, ErrAuth) && noModelList(err) {
+		if a.API == APIAnthropic && listRouteMissing(err, resp, a.BaseURL) {
 			return nil, fmt.Errorf("%w: %v", ErrNoModelList, err)
 		}
 		return nil, err
@@ -260,6 +263,15 @@ func (a *Adapter) ListModels(ctx context.Context) ([]Model, error) {
 	models, err := ParseModels(resp.ContentType, resp.Body)
 	if err != nil && a.API == APIAnthropic && noModelList(err) {
 		return nil, fmt.Errorf("%w: %v", ErrNoModelList, err)
+	}
+	if a.API != APIOpenRouter {
+		for i := range models {
+			if models[i].paramsNoReasoning {
+				// a parameter list without "reasoning" says "does not think" on OpenRouter only: another host
+				// may name the field otherwise (reasoning_effort), and unknown stays unknown
+				models[i].Reasoning = nil
+			}
+		}
 	}
 	for _, m := range models {
 		a.caps().Put(a.API.trimModelID(m.ID), m.Caps())
@@ -537,14 +549,19 @@ func priceStr(raw json.RawMessage) string {
 	return s
 }
 
-// extraPrice reports an override key that is another price (input_cache_write_1h, audio,
-// input_audio_cache, seen live 2026-11-03): a decimal string under a name that is not a condition
-// (min_*, max_*, utc_*). Such keys are ignored; a condition this code does not know drops the entry.
+// otherPrices are the override keys that are another price, not a condition (OpenRouter's pricing
+// object; input_cache_write_1h, audio and input_audio_cache seen live 2026-11-03). They are ignored.
+var otherPrices = map[string]bool{
+	"request": true, "image": true, "image_token": true, "input_image": true, "web_search": true, "internal_reasoning": true,
+	"input_cache_write_5m": true, "input_cache_write_1h": true, "audio": true, "input_audio_cache": true, "output_audio": true,
+}
+
+// extraPrice reports an override key that is another price this code does not use: a decimal string
+// under a name otherPrices lists. Any other key, a condition included (a context_over "200000" read as a
+// price would make the entry apply to every request), drops the entry.
 func extraPrice(key string, value json.RawMessage) bool {
-	for _, p := range []string{"min_", "max_", "utc_"} {
-		if strings.HasPrefix(key, p) {
-			return false
-		}
+	if !otherPrices[key] {
+		return false
 	}
 	var s string
 	if json.Unmarshal(value, &s) != nil {
@@ -830,6 +847,9 @@ func (a *Adapter) chatOnce(ctx context.Context, req ChatRequest, learn bool) (Ch
 	}
 	out, err := parse(resp.ContentType, resp.Body)
 	out.Elapsed = resp.Elapsed
+	if a.API == APIAnthropic && len(out.Message) > 0 {
+		out.Message = withOrigin(out.Message, a.thinkingOrigin(req.Model))
+	}
 	// a refused answer or a provider's failure inside a 200 answer is still billed
 	if err == nil || errors.Is(err, ErrRefused) || out.PromptTokens+out.CompletionTokens > 0 {
 		a.estimateWrittenAt(&out.CostUSD, &out.CostEstimated, req.Model, out.PromptTokens, out.CachedTokens, out.CacheWriteTokens, out.CompletionTokens, requestedAt)
@@ -1155,13 +1175,18 @@ func (a *Adapter) Rerank(ctx context.Context, model, query string, docs []string
 		return out, err
 	}
 	// more documents than the host takes in one call: rerank them in parts and keep the best topN of
-	// all (the scores of one model are comparable across calls)
+	// all (the scores of one model are comparable across calls). A part that fails ends the call, and
+	// what the parts before it spent (billed calls) comes back with the error: cost, tokens and time,
+	// without a ranking.
 	var all RerankResult
 	for start := 0; start < len(docs); start += limit {
 		part := docs[start:min(start+limit, len(docs))]
 		res, err := a.rerankOnce(ctx, model, query, part, min(topN, len(part)))
 		if err != nil {
-			return RerankResult{}, err
+			spent := all
+			spent.Indices, spent.Scores = nil, nil
+			spent.Elapsed += res.Elapsed
+			return spent, err
 		}
 		for i, idx := range res.Indices {
 			all.Indices = append(all.Indices, start+idx)
@@ -1272,6 +1297,9 @@ func apiError(raw json.RawMessage, status int) error {
 			LimitSource string `json:"limit_source"`
 			ErrorType   string `json:"error_type"`
 		} `json:"metadata"`
+		// Anthropic's error.details {error_code} (enforced_spend_limit_reached on the monthly cap's 429);
+		// Google's details are a list
+		Details json.RawMessage `json:"details"`
 	}
 	if json.Unmarshal(raw, &e) != nil {
 		var s string
@@ -1283,7 +1311,14 @@ func apiError(raw json.RawMessage, status int) error {
 	if st := decode.Str(e.Status); e.Type == "" && st != "" && (st[0] < '0' || st[0] > '9') {
 		e.Type = st
 	}
-	return &APIError{Status: status, Type: e.Type, Code: decode.Str(e.Code), Message: e.Message, BYOK: e.Meta.BYOK,
+	code := decode.Str(e.Code)
+	var details struct {
+		ErrorCode string `json:"error_code"`
+	}
+	if code == "" && json.Unmarshal(e.Details, &details) == nil {
+		code = details.ErrorCode
+	}
+	return &APIError{Status: status, Type: e.Type, Code: code, Message: e.Message, BYOK: e.Meta.BYOK,
 		LimitSource: e.Meta.LimitSource, MetaType: e.Meta.ErrorType}
 }
 

@@ -1,6 +1,7 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -196,26 +197,24 @@ func (a *Adapter) byokRoute(p map[string]any, model string) {
 // except on Anthropic, where each way of turning thinking on or off has a flag of its own. Every other
 // field it learns is kept, so a refused temperature costs one extra call per model, not one per
 // classifier call. An Anthropic-format host is sent the Messages format (anthropic.go).
+//
+// The capabilities used are the ones already known (a model list, the host's docs): a chat call never
+// asks the host about the model first. A refusal that would not change the request sent is not retried.
 func (a *Adapter) postShaped(ctx context.Context, req ChatRequest, learn bool) (*providers.Response, error) {
 	learnEffort := learn && req.Effort != "none" || a.API == APIAnthropic
 	sh := a.shapeOf(req)
-	caps := a.CapsOf(ctx, req.Model)
+	caps := a.knownCaps(req.Model)
+	var sent []byte
 	for attempt := 0; ; attempt++ {
 		addr, headers := a.BaseURL+"/chat/completions", a.headers()
-		var body []byte
 		if a.API == APIAnthropic {
-			p, err := a.anthropicPayload(req, sh, caps)
-			if err != nil {
-				return nil, err
-			}
-			body, _ = json.Marshal(p)
 			addr, headers = a.anthropicBase()+"/messages", a.anthropicHeaders()
-		} else {
-			var err error
-			if body, err = json.Marshal(a.payload(req, sh)); err != nil {
-				return nil, err
-			}
 		}
+		body, err := a.shapedBody(req, sh, caps)
+		if err != nil {
+			return nil, err
+		}
+		sent = body
 		resp, err := a.Client.PostJSON(final(ctx), addr, headers, body)
 		if err == nil {
 			old, keep := a.shapeOf(req), sh
@@ -240,14 +239,31 @@ func (a *Adapter) postShaped(ctx context.Context, req ChatRequest, learn bool) (
 			return resp, &visionError{err: err}
 		}
 		next, ok := refusedField(a.API, err, req, sh, caps)
-		if !ok || attempt >= 2 {
-			if len(req.Tools) > 0 && errclass.Of(err) == errclass.Unsupported {
-				a.toolsOff.Store(req.Model, true) // later tool requests for this model fail fast (tools.go)
+		if ok && attempt < 2 {
+			// the same bytes would be refused the same way: a learned flag that changes nothing on the
+			// wire (a list that disagrees with the route) ends the call instead of spending two more
+			if again, berr := a.shapedBody(req, next, caps); berr == nil && !bytes.Equal(again, sent) {
+				sh = next
+				continue
 			}
-			return resp, err
 		}
-		sh = next
+		if len(req.Tools) > 0 && errclass.Of(err) == errclass.Unsupported {
+			a.toolsOff.Store(req.Model, true) // later tool requests for this model fail fast (tools.go)
+		}
+		return resp, err
 	}
+}
+
+// shapedBody is the request body postShaped sends for req with shape sh.
+func (a *Adapter) shapedBody(req ChatRequest, sh shape, caps Caps) ([]byte, error) {
+	if a.API == APIAnthropic {
+		p, err := a.anthropicPayload(req, sh, caps)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(p)
+	}
+	return json.Marshal(a.payload(req, sh))
 }
 
 // ShapeLearned reports whether model's plain chat shape is known: a live request for it succeeded (with

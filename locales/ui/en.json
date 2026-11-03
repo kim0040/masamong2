@@ -607,7 +607,7 @@
   "conn.effort.none": "None",
   "conn.effort.xhigh": "Extra high",
   "conn.effort_default": "Default (low)",
-  "conn.effort_hint": "How long a reasoning model thinks before it answers. Lower is faster and cheaper. On the default, short checks such as name calls and follow-ups run without thinking; once you pick a level they think at it too. A level the model does not take is sent as the nearest one below.",
+  "conn.effort_hint": "How long a reasoning model thinks before it answers. Lower is faster and cheaper. On the default, short checks such as name calls and follow-ups run without thinking; once you pick a level they think too, at most at Low. A level the model does not take is sent as the nearest one below.",
   "conn.effort_hint_summary": "How much the summary model thinks. On the default, summaries run without thinking, so the short output limit is not spent on it. Pick a level and they think at it, with extra output room for the thinking.",
   "conn.effort_now": "Thinking: {level}",
   "conn.embed_change_note": "Changing the embedding model means indexing all memory again with the new model (it costs). Memory search pauses until then; Memory blocks shows the estimate first.",

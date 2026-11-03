@@ -1,6 +1,8 @@
 package openai
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -66,6 +68,7 @@ type anthropicRequest struct {
 	ToolChoice   map[string]any  `json:"tool_choice,omitempty"`
 	Thinking     map[string]any  `json:"thinking,omitempty"`
 	OutputConfig map[string]any  `json:"output_config,omitempty"`
+	Temperature  *float64        `json:"temperature,omitempty"`
 }
 
 type anthropicTurn struct {
@@ -102,16 +105,20 @@ func thinkingRoom(effort string) int {
 
 // anthropicEffort is how one effort level is written for an Anthropic model: the thinking field (nil:
 // left out), the output_config effort ("" left out), and whether the model may think on the call (it
-// then gets thinkingRoom). It follows the model's capabilities when known, else the shape learned from
-// refusals:
+// then gets thinkingRoom). It follows the model's capabilities when known, else the defaults below; a
+// refusal seen on the route (the learned shape) narrows either, because a gateway may refuse a field
+// the model's list says it takes:
 //
-//	level            capabilities known                              unknown (learned shape)
-//	none, minimal    thinking disabled; else between_tools; else     disabled (between_tools once named by a
-//	                 no thinking field and the lowest effort level   refusal); else the effort field at low
+//	level            capabilities known                              unknown
+//	none, minimal    thinking disabled; else between_tools; else     disabled; else the effort field at low
+//	                 no thinking field and the lowest effort level
 //	low … max        thinking adaptive (else enabled with a budget)  adaptive + the effort level
 //	                 + the effort clamped to the levels it takes
 //
-// A model the list says does not think gets neither field. "" (a key probe) leaves both out.
+// Learned: BetweenTools turns disabled into between_tools, NoThinkingOff makes the model one that cannot
+// stop thinking, NoOutputConfig leaves the effort field out, MaxHigh sends xhigh and max as high, and
+// NoEffort leaves the thinking field out (the model's default). A model the list says does not think
+// gets neither field. "" (a key probe) leaves both out.
 func anthropicEffort(effort string, caps Caps, sh shape, tools bool) (thinking map[string]any, level string, thinks bool) {
 	if effort == "" {
 		return nil, "", caps.ThinkingOff() == "never"
@@ -121,47 +128,50 @@ func anthropicEffort(effort string, caps Caps, sh shape, tools bool) (thinking m
 	}
 	known := caps.Thinking != nil
 	if thinkingOff(effort) {
-		off := ""
-		switch {
-		case known:
+		off := "disabled"
+		if known {
 			off = caps.ThinkingOff()
+		}
+		switch {
 		case sh.NoThinkingOff:
 			off = "never"
-		case sh.BetweenTools:
+		case sh.BetweenTools && off == "disabled":
 			off = "between_tools"
-		default:
-			off = "disabled"
 		}
 		if off != "never" {
 			return map[string]any{"type": off}, "", off == "between_tools" && tools
 		}
 		// the model cannot stop thinking: its lowest level thinks least
-		switch {
-		case caps.Efforts != nil:
-			level, _ = clampEffort("low", caps.Efforts)
-		case !sh.NoOutputConfig:
-			level = "low"
-		}
-		return nil, level, true
+		return nil, anthropicLevel("low", caps, sh), true
 	}
+	level = anthropicLevel(effort, caps, sh)
 	switch {
-	case caps.Efforts != nil:
-		level, _ = clampEffort(effort, caps.Efforts)
-	case !sh.NoOutputConfig:
-		level = effort
-		if sh.MaxHigh && slices.Index(EffortLevels, effort) > slices.Index(EffortLevels, "high") {
-			level = "high"
-		}
-	}
-	switch {
+	case sh.NoEffort:
+		// the model or host refused the thinking field: its default
 	case known && slices.Contains(caps.Thinking, "adaptive"):
 		thinking = map[string]any{"type": "adaptive"}
 	case known && slices.Contains(caps.Thinking, "enabled"):
 		thinking = map[string]any{"type": "enabled", "budget_tokens": thinkingRoom(effort)}
-	case !known && !sh.NoEffort:
+	case !known:
 		thinking = map[string]any{"type": "adaptive"}
 	}
 	return thinking, level, true
+}
+
+// anthropicLevel is the output_config effort sent for effort: clamped to the levels the model's list
+// names, at most high once the route refused a higher one, and none at all once it refused the field.
+func anthropicLevel(effort string, caps Caps, sh shape) string {
+	if sh.NoOutputConfig {
+		return ""
+	}
+	level := effort
+	if caps.Efforts != nil {
+		level, _ = clampEffort(effort, caps.Efforts)
+	}
+	if sh.MaxHigh && effortRank(level) > effortRank("high") {
+		level = "high"
+	}
+	return level
 }
 
 // thinkingOff reports the levels that ask for no thinking.
@@ -173,13 +183,31 @@ func (a *Adapter) anthropicPayload(req ChatRequest, sh shape, caps Caps) (anthro
 	if p.MaxTokens <= 0 {
 		p.MaxTokens = anthropicDefaultMaxTokens
 	}
-	system, turns, err := anthropicMessages(req.Messages)
+	system, turns, err := anthropicMessages(req.Messages, a.thinkingOrigin(req.Model))
 	if err != nil {
 		return p, err
+	}
+	// the API takes a conversation that starts with a user turn only (as a batch item, batch_anthropic.go),
+	// and a chat history cut to its last turns may start with the bot's own line: that context-only text
+	// is left out, so the window starts one turn later. An assistant turn with anything else (a tool call
+	// the next turn answers) cannot be left out, and a request with no turn at all says nothing: such a
+	// request is refused here, as the host would.
+	for len(turns) > 0 && turns[0].Role == "assistant" && textOnly(turns[0].Content) {
+		turns = turns[1:]
+	}
+	if len(turns) == 0 || turns[0].Role != "user" {
+		return p, classedError{msg: "openai: an Anthropic request must start with a user message", class: errclass.BadRequest}
 	}
 	p.System, p.Messages = system, turns
 	thinking, level, thinks := anthropicEffort(req.Effort, caps, sh, len(req.Tools) > 0)
 	p.Thinking = thinking
+	// Claude Opus 4.7 and every later model refuse a temperature (400 "deprecated for this model"), and
+	// the older ones take none while thinking ("Thinking isn't compatible with temperature"): it goes only
+	// to a model hosts.json names as taking one (Claude 4.6 and earlier), on a call that does not think
+	if req.Temperature != nil && !sh.NoTemperature && !thinks && PublishedSampling(APIAnthropic, req.Model) {
+		t := *req.Temperature
+		p.Temperature = &t
+	}
 	if level != "" {
 		p.OutputConfig = map[string]any{"effort": level}
 		if !thinkingOff(req.Effort) && level != req.Effort {
@@ -230,8 +258,59 @@ func (a *Adapter) noteClamp(model, asked, sent string) {
 	}
 }
 
-// anthropicMessages splits a chat into the top-level system text and alternating turns.
-func anthropicMessages(msgs []Message) (string, []anthropicTurn, error) {
+// thinkingOrigin names the model and host an answer of this adapter comes from. A thinking block's
+// signature is checked against the model reading it: Anthropic drops a block another model wrote, and a
+// host of another company cannot check Anthropic's signatures at all. The host is kept as a short hash.
+func (a *Adapter) thinkingOrigin(model string) string {
+	sum := sha256.Sum256([]byte(strings.ToLower(a.anthropicBase())))
+	return model + "@" + hex.EncodeToString(sum[:6])
+}
+
+// originField is where a native answer's Message (ChatResult.Message) records its thinkingOrigin. It is
+// never sent: only the content blocks go back to an Anthropic-format host, and a host of another format
+// gets the message translated (chatFromNative).
+const originField = "x_origin"
+
+// withOrigin is a native answer's message with its thinkingOrigin recorded.
+func withOrigin(msg json.RawMessage, origin string) json.RawMessage {
+	var m map[string]json.RawMessage
+	if json.Unmarshal(msg, &m) != nil || m == nil {
+		return msg
+	}
+	m[originField], _ = json.Marshal(origin)
+	out, err := json.Marshal(m)
+	if err != nil {
+		return msg
+	}
+	return out
+}
+
+// BindsThinking reports an adapter whose model, or a fallback of it, speaks the Anthropic format: the
+// thinking blocks its answers carry are valid in a later request only while the system prompt, the
+// tools and the earlier messages stay as they were sent (preserved thinking), so a tool loop keeps its
+// tool list unchanged across rounds.
+func (a *Adapter) BindsThinking() bool {
+	if a == nil {
+		return false
+	}
+	if a.API == APIAnthropic {
+		return true
+	}
+	if f := a.Failover; f != nil {
+		for _, fb := range f.Fallbacks {
+			if fb.A != nil && fb.A.API == APIAnthropic {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// anthropicMessages splits a chat into the top-level system text and alternating turns. A native answer
+// sent back keeps its blocks as they came, except that the thinking and redacted_thinking blocks of an
+// answer another model or host wrote (origin differs, after a failover) are left out: the model reading
+// them cannot use them, and the API reads that answer's text and tool calls without them.
+func anthropicMessages(msgs []Message, origin string) (string, []anthropicTurn, error) {
 	var system []string
 	var turns []anthropicTurn
 	add := func(role string, blocks []json.RawMessage) {
@@ -251,7 +330,11 @@ func anthropicMessages(msgs []Message) (string, []anthropicTurn, error) {
 				return "", nil, fmt.Errorf("openai: message %d: %w", i, err)
 			}
 			if raw.native != nil {
-				add(anthropicRole(raw.msg.Role), raw.native)
+				blocks := raw.native
+				if raw.origin != "" && raw.origin != origin {
+					blocks = withoutThinking(blocks)
+				}
+				add(anthropicRole(raw.msg.Role), blocks)
 				continue
 			}
 			m = raw.msg
@@ -303,6 +386,27 @@ func anthropicMessages(msgs []Message) (string, []anthropicTurn, error) {
 	return strings.Join(system, "\n\n"), turns, nil
 }
 
+// textOnly reports blocks that are all text.
+func textOnly(blocks []json.RawMessage) bool {
+	for _, b := range blocks {
+		if blockType(b) != "text" {
+			return false
+		}
+	}
+	return true
+}
+
+// withoutThinking is blocks without their thinking and redacted_thinking blocks.
+func withoutThinking(blocks []json.RawMessage) []json.RawMessage {
+	out := make([]json.RawMessage, 0, len(blocks))
+	for _, b := range blocks {
+		if t := blockType(b); t != "thinking" && t != "redacted_thinking" {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
 func boolRank(b bool) int {
 	if b {
 		return 1
@@ -349,6 +453,7 @@ var nativeBlockTypes = []string{"tool_use", "thinking", "redacted_thinking", "to
 type parsedRaw struct {
 	native []json.RawMessage
 	msg    Message
+	origin string // the model and host that wrote a native answer (originField); "" unknown
 }
 
 func rawMessage(raw json.RawMessage) (parsedRaw, error) {
@@ -358,11 +463,12 @@ func rawMessage(raw json.RawMessage) (parsedRaw, error) {
 		ToolCalls  []ToolCall      `json:"tool_calls"`
 		ToolCallID string          `json:"tool_call_id"`
 		Name       string          `json:"name"`
+		Origin     string          `json:"x_origin"`
 	}
 	if err := json.Unmarshal(raw, &w); err != nil {
 		return parsedRaw{}, fmt.Errorf("raw message is not valid JSON: %w", err)
 	}
-	out := parsedRaw{msg: Message{Role: w.Role, ToolCalls: w.ToolCalls, ToolCallID: w.ToolCallID, Name: w.Name}}
+	out := parsedRaw{msg: Message{Role: w.Role, ToolCalls: w.ToolCalls, ToolCallID: w.ToolCallID, Name: w.Name}, origin: w.Origin}
 	var blocks []json.RawMessage
 	if json.Unmarshal(w.Content, &blocks) == nil {
 		native := false
@@ -506,15 +612,32 @@ func ParseAnthropicChat(contentType string, body []byte) (ChatResult, error) {
 	return out, nil
 }
 
+// thinkingBlockError reports a 400 about the thinking blocks sent back, not about the thinking or effort
+// fields: a signature that does not verify or a block bound to another conversation ("Invalid
+// `signature` in `thinking` block"), a block of the latest assistant turn changed ("`thinking` or
+// `redacted_thinking` blocks in the latest assistant message cannot be modified"), a final assistant turn
+// without its thinking ("Expected `thinking` or `redacted_thinking`"). Nothing about the model's shape
+// may be learned from these: a request without the thinking field would fail the same way.
+func thinkingBlockError(m string) bool {
+	return strings.Contains(m, "signature") || strings.Contains(m, "redacted_thinking") || strings.Contains(m, "thinking block") ||
+		strings.Contains(m, "thinking` block") || strings.Contains(m, "cannot be modified")
+}
+
 // anthropicRefusal is refusedField for an Anthropic-format host: what a 400 says about the optional
 // fields anthropicEffort wrote (the thinking type, the output_config effort) and the shape without it.
 func anthropicRefusal(m string, req ChatRequest, sh shape, caps Caps) (shape, bool) {
-	thinking, level, _ := anthropicEffort(req.Effort, caps, sh, len(req.Tools) > 0)
+	if thinkingBlockError(m) {
+		return sh, false
+	}
+	thinking, level, thinks := anthropicEffort(req.Effort, caps, sh, len(req.Tools) > 0)
 	typ, _ := thinking["type"].(string)
 	sentOff := typ == "disabled" || typ == "between_tools"
 	sentOn := thinking != nil && !sentOff
 	high := slices.Index(EffortLevels, level) > slices.Index(EffortLevels, "high")
+	sentTemp := req.Temperature != nil && !sh.NoTemperature && !thinks && PublishedSampling(APIAnthropic, req.Model)
 	switch {
+	case sentTemp && strings.Contains(m, "temperature"):
+		sh.NoTemperature = true // a host serving the model refused the sampling field
 	case typ == "disabled" && !sh.BetweenTools && strings.Contains(m, "between_tools"):
 		// 'To turn thinking off on this model, send "thinking": {"type": "between_tools"} instead of
 		// {"type": "disabled"}' (Claude Sonnet 5.5)

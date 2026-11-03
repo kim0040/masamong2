@@ -26,6 +26,14 @@ func (c chatLLM) ToolsReady(role string) bool {
 	return !refused || !sinceWithin(time.Now(), at.(time.Time), toolsRefusedTTL)
 }
 
+// StableTools reports a role whose model (or a fallback of it) speaks the Anthropic Messages format: its
+// thinking blocks are bound to the tool list they were made with, so the loop keeps that list unchanged
+// across rounds (chat.StableToolsLLM).
+func (c chatLLM) StableTools(role string) bool {
+	r, ok := c.routes[role]
+	return ok && r.a != nil && r.a.BindsThinking()
+}
+
 // toolsRefusedTTL is how long a model's refusal of tools sends turns to the planner before the model
 // is asked again: a reseller can route one request to an upstream without tools (seen live on
 // cometapi), and a refusal kept until restart turned the loop off for every later turn.

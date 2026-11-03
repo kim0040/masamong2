@@ -50,8 +50,17 @@ func (s *Service) featureText(ctx context.Context, role, kind, system, prompt st
 	if quick {
 		effort = "none"
 		// the job decides, not the model it falls back to: a summary on the response model thinks only
-		// when the summary role's own effort is set
-		a.RoleEffort = doc.Models[role].Effort
+		// when the summary role's own effort is set, and so do that model's fallbacks unless one has an
+		// effort of its own (models.<role>.fallbacks[].effort)
+		job := quickEffort(role, doc.Models[role].Effort)
+		a.RoleEffort = job
+		if f := a.Failover; f != nil {
+			for _, fb := range f.Fallbacks {
+				if fb.Effort == "" && fb.A != nil {
+					fb.A.RoleEffort = job
+				}
+			}
+		}
 	}
 	began := time.Now()
 	res, err := a.Chat(ctx, openai.ChatRequest{Model: m.Model, Messages: msgs, MaxTokens: maxTokens, Temperature: &t, Effort: effort, Quick: quick})
