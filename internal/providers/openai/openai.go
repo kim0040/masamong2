@@ -727,6 +727,10 @@ type ChatResult struct {
 	// continue a tool loop: provider-only fields (DeepSeek reasoning_content, Gemini thought signatures)
 	// must come back unchanged.
 	Message json.RawMessage
+	// ThinkingBound is true for an answer of an Anthropic-format host (a fallback's included): the thinking
+	// blocks it carries are valid in a later request only while the system prompt and the tools offered
+	// stay as they were sent (BindsThinking)
+	ThinkingBound bool
 	// Provider is the config provider that answered and Fallback is true when it was a fallback; both
 	// are set only when the adapter has a Failover. Attempts lists every model asked, in order.
 	Provider string
@@ -851,6 +855,7 @@ func (a *Adapter) chatOnce(ctx context.Context, req ChatRequest, learn bool) (Ch
 	out.Elapsed = resp.Elapsed
 	if a.API == APIAnthropic && len(out.Message) > 0 {
 		out.Message = withOrigin(out.Message, a.thinkingOrigin(req.Model))
+		out.ThinkingBound = true
 	}
 	// a refused answer or a provider's failure inside a 200 answer is still billed
 	if err == nil || errors.Is(err, ErrRefused) || out.PromptTokens+out.CompletionTokens > 0 {

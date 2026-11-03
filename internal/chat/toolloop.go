@@ -203,6 +203,9 @@ type LoopReply struct {
 	Calls   []LoopCall
 	Raw     json.RawMessage
 	CostUSD float64
+	// BindsTools marks an answer whose reasoning, sent back, is valid only with the tool list it was
+	// offered (an Anthropic answer's signed thinking): see StableToolsLLM
+	BindsTools bool
 }
 
 // LoopLLM is the native tool calling port. The application adapts its OpenAI-compatible models.
@@ -215,9 +218,10 @@ type LoopLLM interface {
 // StableToolsLLM is a LoopLLM that may report a role whose model binds the reasoning it sends back to the
 // exact tool list it was offered (Anthropic's preserved thinking: a signed thinking block is valid only
 // while the system prompt, the tools and the earlier messages are unchanged, and a changed list fails
-// the next round with a 400). For such a role the loop offers the first round's tools on every round
-// and answers a call to one that is not available any more with a tool result saying so (prepare),
-// instead of taking it off the menu.
+// the next round with a 400). For such a role, once an answer of that kind is in the loop
+// (LoopReply.BindsTools: a fallback of another format may have answered so far), the loop offers the
+// list that answer was given on every later round and answers a call to a tool that is not available any
+// more with a tool result saying so (prepare), instead of taking it off the menu.
 type StableToolsLLM interface {
 	StableTools(role string) bool
 }
@@ -364,6 +368,7 @@ func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message,
 	if s, ok := l.LLM.(StableToolsLLM); ok {
 		stable = s.StableTools(l.Role)
 	}
+	var frozen []ToolSpec // the list a binding answer was given (stable roles)
 	for round := 1; round <= MaxLoopRounds; round++ {
 		var offer []ToolSpec
 		for _, s := range specs {
@@ -376,9 +381,9 @@ func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message,
 			tr.Stop = "no_tools"
 			break
 		}
-		if stable {
-			// the wire list stays the first round's; prepare refuses what is closed now
-			offer = specs
+		if frozen != nil {
+			// the wire list stays the one the binding answer saw; prepare refuses what is closed now
+			offer = frozen
 		}
 		reply, err := l.LLM.ChatTools(ctx, l.Role, msgs, offer, LoopMaxTokens)
 		tr.CostUSD += reply.CostUSD
@@ -394,6 +399,9 @@ func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message,
 		if len(reply.Calls) == 0 {
 			tr.Stop = "answered"
 			break
+		}
+		if stable && reply.BindsTools && frozen == nil {
+			frozen = offer
 		}
 		assistant := LoopMsg{Role: "assistant", Content: reply.Text, Calls: reply.Calls, Raw: reply.Raw}
 		calls := make([]*loopCall, len(reply.Calls))

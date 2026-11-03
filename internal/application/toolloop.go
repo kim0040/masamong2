@@ -27,8 +27,8 @@ func (c chatLLM) ToolsReady(role string) bool {
 }
 
 // StableTools reports a role whose model (or a fallback of it) speaks the Anthropic Messages format: its
-// thinking blocks are bound to the tool list they were made with, so the loop keeps that list unchanged
-// across rounds (chat.StableToolsLLM).
+// thinking blocks are bound to the tool list they were made with, so once such an answer is in the loop
+// (LoopReply.BindsTools) the loop keeps that list unchanged (chat.StableToolsLLM).
 func (c chatLLM) StableTools(role string) bool {
 	r, ok := c.routes[role]
 	return ok && r.a != nil && r.a.BindsThinking()
@@ -112,7 +112,7 @@ func (c chatLLM) ChatTools(ctx context.Context, role string, msgs []chat.LoopMsg
 	}
 	c.s.toolsTaken.Store(refusedKey(c.s, r), true)
 	c.s.toolsRefused.Delete(refusedKey(c.s, r))
-	out := chat.LoopReply{Text: res.Content, Raw: res.Message, CostUSD: cost}
+	out := chat.LoopReply{Text: res.Content, Raw: res.Message, CostUSD: cost, BindsTools: res.ThinkingBound}
 	for _, tc := range res.ToolCalls {
 		out.Calls = append(out.Calls, chat.LoopCall{ID: tc.ID, Name: tc.Function.Name, Arguments: tc.Function.Arguments})
 	}
