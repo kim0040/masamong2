@@ -673,6 +673,7 @@
     "seed_plain": "{mention} let's continue here! No need to tag me in here.",
     "bye": "That's it for now! Call me anytime 👋",
     "not_yours": "Only the person who started this conversation can use this button.",
+    "off": "This room is set not to use threads.",
     "recap": "🧵 {summary}",
     "summary_system": "You summarize {bot}'s conversations briefly. Use only what was said; never invent. Output a single JSON object only.",
     "summary": "Summarize the conversation below in 2–3 short lines.\n- Put what was decided first (dates, places, tasks, who does what); mark open points as 'undecided'.\n- Keep each line under 80 characters; lines may be joined with ' · '.\n- Set has_plan to true if at least one plan or decision was settled.\n\nConversation:\n{lines}\n\nOutput: {\"summary\": \"...\", \"has_plan\": true or false}",

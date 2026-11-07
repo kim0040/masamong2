@@ -313,7 +313,7 @@ type ChannelConversation struct {
 	// FollowWindowSec is how long the window stays open after a reply (0 = 90; a question from the bot
 	// adds 60).
 	FollowWindowSec int `yaml:"follow_window_sec,omitempty" json:"follow_window_sec,omitempty"`
-	// FollowMaxUntagged caps untagged replies in a row before the bot offers a thread (0 = 12).
+	// FollowMaxUntagged caps untagged replies in a row before the next one needs a tag (0 = 12).
 	FollowMaxUntagged int `yaml:"follow_max_untagged,omitempty" json:"follow_max_untagged,omitempty"`
 	// Thread: offer (a button under a long one-on-one exchange, default), auto_task (also opens one by
 	// itself for a multi-step task) or off.

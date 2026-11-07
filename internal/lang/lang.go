@@ -143,6 +143,7 @@ type Thread struct {
 	SeedPlain     string `json:"seed_plain"`     // {mention}: when no summary could be made
 	Bye           string `json:"bye"`            // the bot's last line when the thread ends
 	NotYours      string `json:"not_yours"`      // someone else pressed the caller's button
+	Off           string `json:"off"`            // a thread button pressed in a room whose threads are off
 	Recap         string `json:"recap"`          // {summary}: posted in the parent channel
 	SummarySystem string `json:"summary_system"` // {bot}
 	Summary       string `json:"summary"`        // {lines}: JSON {"summary": "...", "has_plan": bool}
@@ -454,7 +455,7 @@ func (p *Pack) missing() []string {
 		"conversation.follow_system": p.Conversation.FollowSystem, "conversation.follow": p.Conversation.Follow,
 		"thread.offer": p.Thread.Offer, "thread.open": p.Thread.Open, "thread.stay": p.Thread.Stay, "thread.stop": p.Thread.Stop,
 		"thread.name": p.Thread.Name, "thread.seed": p.Thread.Seed, "thread.seed_plain": p.Thread.SeedPlain, "thread.bye": p.Thread.Bye,
-		"thread.not_yours": p.Thread.NotYours, "thread.recap": p.Thread.Recap, "thread.summary_system": p.Thread.SummarySystem,
+		"thread.not_yours": p.Thread.NotYours, "thread.off": p.Thread.Off, "thread.recap": p.Thread.Recap, "thread.summary_system": p.Thread.SummarySystem,
 		"thread.summary": p.Thread.Summary, "shape.more": p.Shape.More,
 	}
 	for k, v := range map[string]int{"time.relative_days": len(p.Time.RelativeDays), "time.hours": len(p.Time.Hours),

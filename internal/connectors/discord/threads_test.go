@@ -2,12 +2,17 @@ package discord
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+
+	"masamong/internal/action"
+	"masamong/internal/config"
 )
 
 func TestThinMessage(t *testing.T) {
@@ -142,5 +147,111 @@ func TestThreadArchiveAndDeleteEventsReachTheApplication(t *testing.T) {
 	g.onThreadDelete(nil, &discordgo.ThreadDelete{Channel: thread(false)})
 	if _, ok := g.svc.ThreadFor("th-human", "u"); ok || g.channelKnown("th-human") {
 		t.Fatal("deleted thread is still known")
+	}
+}
+
+// threadRoom sets the thread mode of room c1 in guild g1 ("" leaves the default, offer).
+func threadRoom(t *testing.T, g *Gateway, mode string) {
+	t.Helper()
+	conv := map[string]any{}
+	if mode != "" {
+		conv["thread"] = mode
+	}
+	patch, _ := json.Marshal(map[string]any{"ops": []any{map[string]any{"path": []any{"guilds", "g1"}, "value": map[string]any{
+		"channels": map[string]any{"c1": map[string]any{"respond": "mention", "conversation": conv}}}}}})
+	if res := g.svc.Execute(context.Background(), action.Request{Action: "config.patch", Input: patch}); !res.OK {
+		t.Fatalf("room: %+v", res.Error)
+	}
+}
+
+// pressOpen presses the "open" button of a thread offer under a reply in room c1.
+func pressOpen(g *Gateway) {
+	offer := discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+		discordgo.Button{CustomID: "thr:open:turn1:owner"}, discordgo.Button{CustomID: "thr:stay:turn1:owner"}}}
+	i := &discordgo.InteractionCreate{Interaction: &discordgo.Interaction{ID: "i1", AppID: "app", Token: "tok", Type: discordgo.InteractionMessageComponent,
+		GuildID: "g1", ChannelID: "c1", Member: &discordgo.Member{User: &discordgo.User{ID: "owner"}},
+		Message: &discordgo.Message{ID: "m1", Content: "an answer\n-# let us move to a thread?", Components: []discordgo.MessageComponent{offer}},
+		Data:    discordgo.MessageComponentInteractionData{CustomID: "thr:open:turn1:owner"}}}
+	g.handleThreadComponent(g.sess, i, []string{"thr", "open", "turn1", "owner"})
+}
+
+// A thread offer that was already on screen when the room's threads were switched off makes no thread
+// when pressed: the one who pressed is told privately, and the buttons are gone.
+func TestThreadOpenButtonRefusedWhenThreadsAreOff(t *testing.T) {
+	g, fake := gatewayWithFakeDiscord(t)
+	g.ActionTimeout = 5 * time.Second // as below: a thread would be made if the check failed
+	threadRoom(t, g, "off")
+	pressOpen(g)
+	if !g.Wait(5 * time.Second) {
+		t.Fatal("thread work did not finish")
+	}
+	if _, ok := fake.find(http.MethodPost, "/messages/m1/threads"); ok {
+		t.Fatal("a thread was made in a room whose threads are off")
+	}
+	cb, ok := fake.find(http.MethodPost, "/callback")
+	if !ok || !strings.Contains(cb.body, `"type":7`) || !strings.Contains(cb.body, `"components":[]`) {
+		t.Fatalf("the offer's buttons were not removed: %+v", cb)
+	}
+	notice, ok := fake.find(http.MethodPost, "/webhooks/app/tok")
+	if !ok {
+		t.Fatalf("the one who pressed was told nothing: %+v", fake.calls)
+	}
+	var sent struct {
+		Content string `json:"content"`
+		Flags   int    `json:"flags"`
+	}
+	if err := json.Unmarshal([]byte(notice.body), &sent); err != nil {
+		t.Fatal(err)
+	}
+	want := g.svc.ThreadOffNotice("g1", "c1")
+	if want == "" || sent.Content != want || sent.Flags&int(discordgo.MessageFlagsEphemeral) == 0 {
+		t.Fatalf("notice %+v, want ephemeral %q", sent, want)
+	}
+	if _, ok := g.svc.ThreadFor("1", "owner"); ok {
+		t.Fatal("a thread was recorded")
+	}
+}
+
+// Regression: with threads on (the default), the same button still opens one.
+func TestThreadOpenButtonOpensWhenThreadsAreOffered(t *testing.T) {
+	g, fake := gatewayWithFakeDiscord(t)
+	g.ActionTimeout = 5 * time.Second // the helper's spent timeout would refuse every call of the work
+	threadRoom(t, g, "")
+	pressOpen(g)
+	if !g.Wait(5 * time.Second) {
+		t.Fatal("thread work did not finish")
+	}
+	if _, ok := fake.find(http.MethodPost, "/messages/m1/threads"); !ok {
+		t.Fatalf("no thread was made: %+v", fake.calls)
+	}
+	if _, ok := fake.find(http.MethodPost, "/webhooks/app/tok"); ok {
+		t.Fatal("the refusal was sent although threads are on")
+	}
+	if v, ok := g.svc.ThreadFor("1", "owner"); !ok || !v.BotOwned {
+		t.Fatalf("thread view %+v %v", v, ok)
+	}
+}
+
+// With threads off the bot does not answer untagged in a thread it opened earlier (the room's ordinary
+// respond rule applies); with them on it does. A thread a person made is not the bot's in either case.
+func TestThreadAnswerIsNotGivenWhenThreadsAreOff(t *testing.T) {
+	g, _ := gatewayWithFakeDiscord(t)
+	g.svc.ThreadOpened(context.Background(), "g1", "c1", "th1", "owner", "")
+	g.svc.NoteThread("g1", "th2", "c1", false)
+	msg := func(channel string) *discordgo.MessageCreate {
+		return &discordgo.MessageCreate{Message: &discordgo.Message{ID: "m1", GuildID: "g1", ChannelID: channel, Content: "what about the hotel then",
+			Author: &discordgo.User{ID: "owner"}}}
+	}
+	pol := func(mode string) config.ChannelPolicy {
+		return config.ChannelPolicy{Respond: "mention", Conversation: config.ChannelConversation{Thread: mode}}
+	}
+	if answer, ok := g.threadAnswer(msg("th1"), pol("offer"), true); !answer || !ok {
+		t.Fatalf("threads on: want an untagged answer in the bot's thread, got %v %v", answer, ok)
+	}
+	if answer, ok := g.threadAnswer(msg("th1"), pol("off"), true); answer || ok {
+		t.Fatalf("threads off: no thread rule applies, got %v %v", answer, ok)
+	}
+	if answer, ok := g.threadAnswer(msg("th2"), pol("offer"), true); answer || ok {
+		t.Fatalf("a person's thread is not the bot's: %v %v", answer, ok)
 	}
 }

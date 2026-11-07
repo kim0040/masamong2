@@ -578,6 +578,7 @@
     "seed_plain": "{mention} ¡sigamos aquí! Aquí no hace falta mencionarme.",
     "bye": "¡Eso es todo por ahora! Llámame cuando quieras 👋",
     "not_yours": "Solo quien empezó esta conversación puede usar este botón.",
+    "off": "Esta sala está configurada para no usar hilos.",
     "recap": "🧵 {summary}",
     "summary_system": "Resumes brevemente las conversaciones de {bot}. Usa solo lo que se dijo; nunca inventes. Responde solo con un objeto JSON.",
     "summary": "Resume la conversación de abajo en 2–3 líneas cortas.\n- Pon primero lo decidido (fechas, lugares, tareas, quién hace qué); marca lo pendiente como 'sin decidir'.\n- Cada línea con menos de 80 caracteres; puedes unirlas con ' · '.\n- Pon has_plan en true si se decidió al menos un plan o una decisión.\n\nConversación:\n{lines}\n\nSalida: {\"summary\": \"...\", \"has_plan\": true o false}",

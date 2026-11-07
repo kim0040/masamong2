@@ -224,7 +224,7 @@ func (s *Service) FollowUp(ctx context.Context, m ObservedMessage) bool {
 		decision = "classify" // what would have been asked; not spent where the feature is off
 	}
 	if win.untagged >= pol.Conversation.MaxUntagged() && decision == "answer" {
-		decision = "skip_cap" // a long untagged run: the next one needs a tag (and a thread is offered)
+		decision = "skip_cap" // a long untagged run: the next one needs a tag (a thread offer is decided separately, after each reply)
 	}
 	logged := decision
 	if mode != "window" {

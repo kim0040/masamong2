@@ -220,6 +220,12 @@ func (g *Gateway) offerThread(ctx context.Context, s *discordgo.Session, m *disc
 		return
 	}
 	last := replyIDs[len(replyIDs)-1]
+	// the decision was made at the start of the turn: the room may have been switched off since, and
+	// neither a button nor an automatic thread may appear there
+	if g.svc.ThreadsOff(m.GuildID, m.ChannelID) {
+		g.svc.ThreadOfferFailed(offer, "thread_off")
+		return
+	}
 	if !g.canThread(s, m.ChannelID) {
 		g.svc.ThreadOfferFailed(offer, "no_permission")
 		return
@@ -364,6 +370,15 @@ func (g *Gateway) handleThreadComponent(s *discordgo.Session, i *discordgo.Inter
 		}
 		if parts[1] == "stay" {
 			g.svc.DeclineThread(i.GuildID, i.ChannelID, caller)
+			return
+		}
+		// a button outlives the policy it was made under: when the room's threads have been switched off
+		// since, no thread is made. The buttons are already gone; only the one who pressed is told.
+		if g.svc.ThreadsOff(i.GuildID, i.ChannelID) {
+			if _, err := s.FollowupMessageCreate(i.Interaction, false, &discordgo.WebhookParams{Content: g.svc.ThreadOffNotice(i.GuildID, i.ChannelID),
+				Flags: discordgo.MessageFlagsEphemeral, AllowedMentions: noMentions}, discordgo.WithContext(ctx)); err != nil {
+				g.log.Debug("discord: thread off notice failed", "err", err)
+			}
 			return
 		}
 		name := interactionName(i.Interaction)

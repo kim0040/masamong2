@@ -1419,6 +1419,18 @@ func (s *Service) ThreadNotYours(guildID, channelID string) string {
 	return s.voiceFor(guildID, s.channelPolicy(guildID, channelID)).Pack.Thread.NotYours
 }
 
+// ThreadsOff reports whether the room's current policy has thread continuing turned off
+// (conversation.thread: off). The gateway asks again when it shows or answers a thread button, because a
+// button outlives the policy it was made under.
+func (s *Service) ThreadsOff(guildID, channelID string) bool {
+	return s.channelPolicy(guildID, channelID).Conversation.Thread == "off"
+}
+
+// ThreadOffNotice is the channel voice's line for a thread button pressed in a room whose threads are off.
+func (s *Service) ThreadOffNotice(guildID, channelID string) string {
+	return s.voiceFor(guildID, s.channelPolicy(guildID, channelID)).Pack.Thread.Off
+}
+
 // MoreLabel is the channel voice's word for the button under a trimmed reply.
 func (s *Service) MoreLabel(guildID, channelID string) string {
 	return s.voiceFor(guildID, s.channelPolicy(guildID, channelID)).Pack.Shape.More

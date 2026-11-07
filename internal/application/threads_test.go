@@ -135,6 +135,55 @@ func TestThreadOfferAndRecap(t *testing.T) {
 	}
 }
 
+// With conversation.thread: off a conversation that would have been offered a thread gets no offer and
+// no automatic thread, only the record that it would have: the same six turns offer one with offer.
+func TestThreadOffMakesNoOfferButRecordsIt(t *testing.T) {
+	run := func(mode string) (offered bool, rows []string) {
+		var plan, resp recordingServer
+		planURL := plan.start(t, func(string) string { return `{"memory_requirement":"none","tool_plan":[]}` })
+		respURL := resp.start(t, func(string) string { return strings.Repeat("길게 설명하는 답이야. ", 30) })
+		svc := routedSvc(t, planURL, respURL)
+		svc.Discord = &postGateway{}
+		applyDoc(t, svc, func(d *config.Document) {
+			if d.Guilds == nil {
+				d.Guilds = map[string]config.GuildSettings{}
+			}
+			d.Guilds["g"] = config.GuildSettings{Channels: map[string]config.ChannelPolicy{"c": {Respond: "mention",
+				Conversation: config.ChannelConversation{Thread: mode}}}}
+		})
+		for i := 1; i <= 6; i++ {
+			id := string(rune('0' + i))
+			svc.Observe(application.ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: id, AuthorID: "uc", AuthorName: "Chris",
+				Content: "@마사몽 제주 일정", At: time.Now(), Mentions: []string{"bot"}})
+			res, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: id,
+				Message: "@마사몽 제주 일정", Speaker: "Chris", SpeakerID: "uc",
+				Deliver: func(_ context.Context, r chat.Result) string { return r.Answer }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := svc.TakeThreadOffer(res.TurnID); ok {
+				offered = true
+			}
+		}
+		return offered, svc.ConversationLogForTest("thread")
+	}
+	if offered, rows := run("offer"); !offered || len(rows) == 0 || rows[0] != "offer" {
+		t.Fatalf("offer mode: offered=%v log=%v", offered, rows)
+	}
+	offered, rows := run("off")
+	if offered {
+		t.Fatal("thread off: an offer (or an automatic thread) was made")
+	}
+	if len(rows) == 0 || rows[0] != "would_offer" {
+		t.Fatalf("thread off should record what it would have done: %v", rows)
+	}
+	for _, r := range rows {
+		if r == "offer" || r == "auto" {
+			t.Fatalf("thread off logged %q", r)
+		}
+	}
+}
+
 // A closed bot thread the in-memory list let go of stays closed when it is seen again: the gateway's
 // NoteThread reads its row back instead of taking it for a new open thread.
 func TestForgottenClosedThreadStaysClosed(t *testing.T) {
