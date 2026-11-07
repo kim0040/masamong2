@@ -30,6 +30,12 @@ import (
 // auth failures are not. Every branch says what happened rather than folding into "error" (05장).
 func (s *Service) providerFail(req action.Request, provider string, err error) action.Result {
 	s.noteProvider(provider, err)
+	return s.providerResult(req, provider, err)
+}
+
+// providerResult is the failed result for err without noting it in the provider's health: for an error
+// that is not the provider's (the turn ended, our own time limit).
+func (s *Service) providerResult(req action.Request, provider string, err error) action.Result {
 	var pe *providers.Error
 	var ae *openai.APIError
 	args := map[string]any{"provider": provider}
@@ -687,9 +693,13 @@ func (s *Service) search(ctx context.Context, req action.Request) action.Result 
 	if depth == websearch.DepthDeep {
 		size = 8 // a deeper search is asked to look wider
 	}
-	fresh := strings.ToLower(strVal(in, "fresh", ""))
-	if fresh != "day" && fresh != "week" && fresh != "month" {
-		fresh = "" // a word the schema does not offer ("hour": Tavily answers 400 to it)
+	fresh := strings.ToLower(strings.TrimSpace(strVal(in, "fresh", "")))
+	switch fresh {
+	case "day", "week", "month":
+	case "hour", "hourly", "1h", "today", "24h", "1d", "now", "recent", "latest":
+		fresh = "day" // within the day: the narrowest window the services take ("hour": Tavily answers 400 to it)
+	default:
+		fresh = "" // a word the schema does not offer and that names no span of days
 	}
 	q := websearch.Query{Text: query, Max: intVal(in, "size", size), Fresh: fresh, Depth: depth, Topic: topic}
 	if topic == websearch.TopicNews && len(order) > 1 {
@@ -706,7 +716,13 @@ func (s *Service) search(ctx context.Context, req action.Request) action.Result 
 	var tried []any
 	var lastID string
 	var lastErr error
+	lastIsProviders := true // lastErr is the service's own answer (not a limit of ours or the end of the turn)
 	for _, id := range order {
+		if err := ctx.Err(); err != nil {
+			// the turn has ended: the services left are not asked, and none of them is to blame
+			lastID, lastErr, lastIsProviders = id, err, false
+			break
+		}
 		if err := s.Registry().reserve(id); err != nil {
 			tried = append(tried, map[string]any{"provider": id, "reason": "daily_limit"})
 			lastID, lastErr = id, err
@@ -715,16 +731,19 @@ func (s *Service) search(ctx context.Context, req action.Request) action.Result 
 		sr := s.Registry().Search[id]
 		callCtx, cancel := context.WithTimeout(ctx, searchTimeout(depth))
 		res, err := sr.Search(callCtx, q)
-		timedOut := callCtx.Err() != nil && ctx.Err() == nil // this service's limit, not the turn's
+		ours := callCtx.Err() != nil         // our limit for the depth ran out or the turn ended: not the service's error
+		timedOut := ours && ctx.Err() == nil // this service's limit, not the turn's
 		cancel()
-		s.noteProvider(id, err)
+		if err == nil || !ours {
+			s.noteProvider(id, err) // only what the service itself answered goes into its health
+		}
 		if err != nil {
 			reason := "error"
 			if timedOut {
 				reason = "timeout"
 			}
 			tried = append(tried, map[string]any{"provider": id, "reason": reason, "detail": clip(err.Error(), 200)})
-			lastID, lastErr = id, err
+			lastID, lastErr, lastIsProviders = id, err, !ours
 			continue
 		}
 		if res.CostUSD != nil {
@@ -757,6 +776,9 @@ func (s *Service) search(ctx context.Context, req action.Request) action.Result 
 			out["passed_over"] = tried
 		}
 		return action.OK(req, out)
+	}
+	if !lastIsProviders {
+		return s.providerResult(req, lastID, lastErr)
 	}
 	return s.providerFail(req, lastID, lastErr)
 }

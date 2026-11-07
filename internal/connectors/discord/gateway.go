@@ -130,9 +130,11 @@ const (
 	// A chat turn gets chatTurnTimeout once it has its place in the channel (a turn that draws a picture
 	// takes long on top of planning and answering). The wait for that place is bounded by chatQueueWait:
 	// a message that waited longer is stale and is answered with the "catching up" notice. chatTurnCeiling
-	// bounds the whole call, whatever happens in between.
+	// bounds the whole call, whatever happens in between. The wait is 120 s because a normal message
+	// can stand behind a picture turn (p90 88 s) or behind a turn that plans and answers (about 105 s)
+	// in the same channel, and must not end as the "catching up" notice only for that.
 	chatTurnTimeout = 180 * time.Second
-	chatQueueWait   = 90 * time.Second
+	chatQueueWait   = 120 * time.Second
 	chatTurnCeiling = chatQueueWait + chatTurnTimeout + 30*time.Second
 	// interactionAckTimeout: Discord drops an interaction that is not answered within 3 seconds.
 	interactionAckTimeout = 2500 * time.Millisecond
@@ -1922,7 +1924,12 @@ func (g *Gateway) sendCommandCard(base context.Context, s *discordgo.Session, m 
 // answer runs one chat turn and replies. Mentions stay disabled; long answers are split at 2000 chars.
 // Turns in different channels run in parallel; the application keeps each channel in arrival order.
 func (g *Gateway) answer(base context.Context, s *discordgo.Session, m *discordgo.MessageCreate, text string, call turnCall) {
-	addressed, nameOnly, followUp := call.addressed, call.nameOnly, call.followUp
+	nameOnly, followUp := call.nameOnly, call.followUp
+	// addressed: the person called the bot. A name alone is not a call until the name check says it was
+	// one (the Addressed callback below, which the turn calls from its own goroutine); a notice goes only
+	// to someone who called.
+	var addressed atomic.Bool
+	addressed.Store(call.addressed)
 	visionNotice := ""
 	// the turn's own time (chatTurnTimeout, the previous bot's pictures: p90 88 s) starts when it has its
 	// place in the channel, not while it waits (ChatInput.TurnTimeout)
@@ -1939,24 +1946,28 @@ func (g *Gateway) answer(base context.Context, s *discordgo.Session, m *discordg
 	if !nameOnly {
 		startTyping()
 	}
-	delivered, replied := false, false
+	// replied: something of the answer reached the channel (a part of the text or a post of a tool).
+	// unsent: there was an answer to post and none of it did.
+	delivered, replied, unsent := false, false, false
 	// the reply is posted inside the turn, so the channel's next turn starts after it and the
 	// conversation keeps only what reached Discord
 	_, err := g.svc.ChatTurn(ctx, application.ChatInput{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID, Message: text,
-		Speaker: displayName(m), SpeakerID: m.Author.ID, MaxWait: chatQueueWait, TurnTimeout: chatTurnTimeout, NameOnly: nameOnly, FollowUp: followUp, Addressed: startTyping,
+		Speaker: displayName(m), SpeakerID: m.Author.ID, MaxWait: chatQueueWait, TurnTimeout: chatTurnTimeout, NameOnly: nameOnly, FollowUp: followUp, Addressed: func() { addressed.Store(true); startTyping() },
 		Images: call.images, ImageOnly: call.imageOnly, ImageEarlier: call.imageEarlier, ImageTotal: call.imageTotal, ImageSkipped: call.imageSkipped,
 		OnVisionNotice: func(note string) { visionNotice = note },
 		Deliver: func(deliverCtx context.Context, res chat.Result) string {
 			typing.stop()
 			if deliverCtx.Err() != nil {
 				g.dropThreadOffer(res.TurnID, "not_sent")
+				unsent = strings.TrimSpace(res.Answer) != ""
 				return ""
 			}
-			replied = true // from here on the person has been answered, in whole or in part
-			g.postToolArtifacts(deliverCtx, s, m.GuildID, m.ChannelID, m.Reference(), res.Tools)
+			posted := g.postToolArtifacts(deliverCtx, s, m.GuildID, m.ChannelID, m.Reference(), res.Tools)
+			replied = posted
 			if strings.TrimSpace(res.Answer) == "" {
 				g.log.Warn("discord: chat turn produced no reply text", "tools", len(res.Tools))
 				delivered = true // nothing to say is not a cut-off reply
+				replied = true   // nor an answer that did not come: there was none to send
 				return ""
 			}
 			shape := g.svc.ChannelPolicyFor(m.GuildID, m.ChannelID).Conversation.ReplyShape
@@ -1964,6 +1975,10 @@ func (g *Gateway) answer(base context.Context, s *discordgo.Session, m *discordg
 			g.svc.NoteReplyMessages(res.TurnID, m.GuildID, m.ChannelID, ids)
 			g.svc.NoteDelivery(res.TurnID, m.GuildID, m.ChannelID, rep)
 			delivered = rep.Sent == rep.Parts && rep.Parts > 0
+			if sent != "" || rep.Sent > 0 {
+				replied = true // from here on the person has been answered, in whole or in part
+			}
+			unsent = !replied
 			if sent != "" && m.GuildID != "" {
 				g.offerThread(deliverCtx, s, m, res.TurnID, ids)
 			} else {
@@ -1996,26 +2011,36 @@ func (g *Gateway) answer(base context.Context, s *discordgo.Session, m *discordg
 		return
 	case errors.Is(err, application.ErrNoVision), errors.Is(err, application.ErrImageUnreadable):
 		// only a picture, and nothing could look at it: a short honest line instead of a guess
-		g.sendChatNotice(ctx, s, m, chatNoticeKey(err), addressed)
+		g.sendChatNotice(ctx, s, m, chatNoticeKey(err), addressed.Load())
 		return
 	case errors.Is(err, application.ErrChatLimited), errors.Is(err, application.ErrChatBusy),
 		errors.Is(err, application.ErrChatPaused):
 		g.log.Debug("discord: reply skipped", "reason", err)
-		g.sendChatNotice(ctx, s, m, chatNoticeKey(err), addressed)
+		g.sendChatNotice(ctx, s, m, chatNoticeKey(err), addressed.Load())
 		return
 	case base.Err() != nil && g.stopping.Load() && !delivered && (err == nil || errors.Is(err, context.Canceled)):
 		// the daemon is stopping and this turn ran out of grace — while thinking, or while its reply was
 		// going out: say so instead of going quiet
 		nctx, ncancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer ncancel()
-		g.sendChatNotice(nctx, s, m, "discord.chat.restarting", addressed)
+		g.sendChatNotice(nctx, s, m, "discord.chat.restarting", addressed.Load())
 		return
 	case errors.Is(err, context.Canceled) && base.Err() != nil:
 		return
 	case errors.Is(err, application.ErrChatBudget):
 		g.log.Warn("discord: reply skipped: monthly model budget reached")
-		g.sendChatNotice(ctx, s, m, chatNoticeKey(err), addressed)
+		g.sendChatNotice(ctx, s, m, chatNoticeKey(err), addressed.Load())
 		return
+	case err == nil && unsent && !replied:
+		// the answer was made and none of it reached the channel (the first send failed, or the turn's time
+		// ran out before it): the person called the bot and got nothing, so the same short line as for a turn
+		// that failed, on a context that does not carry the turn's own (possibly expired) deadline
+		g.log.Warn("discord: chat answer not delivered")
+		if key := chatFailureKey(errNothingDelivered, replied); key != "" && base.Err() == nil && !g.stopping.Load() {
+			nctx, ncancel := g.finalContext(base)
+			defer ncancel()
+			g.sendChatNotice(nctx, s, m, key, addressed.Load())
+		}
 	case err != nil:
 		g.log.Warn("discord: chat turn failed", "err", err)
 		// the person called the bot and got nothing: one short line, on a context that does not carry the
@@ -2023,10 +2048,13 @@ func (g *Gateway) answer(base context.Context, s *discordgo.Session, m *discordg
 		if key := chatFailureKey(err, replied); key != "" && base.Err() == nil && !g.stopping.Load() {
 			nctx, ncancel := g.finalContext(base)
 			defer ncancel()
-			g.sendChatNotice(nctx, s, m, key, addressed)
+			g.sendChatNotice(nctx, s, m, key, addressed.Load())
 		}
 	}
 }
+
+// errNothingDelivered stands for a turn that made its answer and could not post any of it.
+var errNothingDelivered = errors.New("discord: the answer reached no channel")
 
 // chatFailureKey is the notice for a turn that failed with an unexpected error (a model that timed out
 // included): none once the turn has answered, and none for a cancellation.
@@ -2264,11 +2292,12 @@ func (g *Gateway) commandFollowUp(base context.Context, s *discordgo.Session, re
 
 // postToolArtifacts sends what a chat-called tool produced that is more than text: a poll the
 // planner created is posted as a native Discord poll, exactly as the /poll command would, and a picture
-// asked for in conversation ("고양이 그려줘") is posted like the /image command's card.
-func (g *Gateway) postToolArtifacts(ctx context.Context, s *discordgo.Session, guildID, channelID string, ref *discordgo.MessageReference, results []chat.ToolResult) {
+// asked for in conversation ("고양이 그려줘") is posted like the /image command's card. It reports whether
+// any of it reached the channel.
+func (g *Gateway) postToolArtifacts(ctx context.Context, s *discordgo.Session, guildID, channelID string, ref *discordgo.MessageReference, results []chat.ToolResult) (posted bool) {
 	for _, t := range results {
 		if ctx.Err() != nil {
-			return
+			return posted
 		}
 		if t.Tool == "images.generate" && t.OK && t.Status != "dry_run" {
 			if c, ok := t.Data["card"].(action.Card); ok {
@@ -2291,12 +2320,13 @@ func (g *Gateway) postToolArtifacts(ctx context.Context, s *discordgo.Session, g
 					msg.Files = []*discordgo.File{f}
 					_, err := g.postRetryingRef(ctx, channelID, msg, true)
 					if err == nil {
+						posted = true
 						continue
 					}
 					g.log.Warn("discord: chat picture post failed", "err", err)
 					switch {
 					case ctx.Err() != nil:
-						return
+						return posted
 					case errors.Is(err, application.ErrReplyTargetGone):
 						continue
 					case classifyREST(err) == errclass.Permission:
@@ -2306,11 +2336,13 @@ func (g *Gateway) postToolArtifacts(ctx context.Context, s *discordgo.Session, g
 					}
 				}
 				if ctx.Err() != nil {
-					return
+					return posted
 				}
 				fail := &discordgo.MessageSend{Content: g.svc.Msg(g.locale(guildID), "image.failed"), AllowedMentions: noMentions, Reference: ref}
 				if _, err := g.postRetrying(ctx, channelID, fail); err != nil {
 					g.log.Warn("discord: chat picture failure line not posted", "err", err)
+				} else {
+					posted = true
 				}
 			}
 			continue
@@ -2322,6 +2354,8 @@ func (g *Gateway) postToolArtifacts(ctx context.Context, s *discordgo.Session, g
 				msg := &discordgo.MessageSend{Embeds: r.Embeds(), Components: r.Components, AllowedMentions: noMentions, Reference: ref}
 				if _, err := s.ChannelMessageSendComplex(channelID, msg, discordgo.WithContext(ctx)); err != nil {
 					g.log.Warn("discord: reminder proposal post failed", "err", err)
+				} else {
+					posted = true
 				}
 			}
 			continue
@@ -2333,13 +2367,15 @@ func (g *Gateway) postToolArtifacts(ctx context.Context, s *discordgo.Session, g
 		if r.Poll == nil {
 			continue
 		}
-		posted, err := s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Poll: r.Poll, AllowedMentions: noMentions}, discordgo.WithContext(ctx))
+		sentPoll, err := s.ChannelMessageSendComplex(channelID, &discordgo.MessageSend{Poll: r.Poll, AllowedMentions: noMentions}, discordgo.WithContext(ctx))
 		if err != nil {
 			g.log.Warn("discord: chat poll post failed", "err", err)
 			continue
 		}
-		g.svc.LinkPollMessage(pollIDOf(t.Data), channelID, posted.ID)
+		g.svc.LinkPollMessage(pollIDOf(t.Data), channelID, sentPoll.ID)
+		posted = true
 	}
+	return posted
 }
 
 // pictureFile is the file of a command result's generated picture. failed is true when the picture

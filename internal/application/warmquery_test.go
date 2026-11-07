@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -146,5 +147,45 @@ func TestWithdrawnConsentEmbedsOnlyWhenThePlanSearches(t *testing.T) {
 	warmTurn(t, svc, f, "동의 철회한 사람의 질문", false)
 	if n := f.asked.Load(); n != 0 {
 		t.Fatalf("embedded the message %d times", n)
+	}
+}
+
+// The embedding of the message started ahead of the plan is charged to the turn that asked for it: the
+// turn's cost is its ledger rows (the embedding's among them) and the same amount reaches the limits'
+// view of the turn's spending. A plan that searches too (the search joins the embedding) pays it once.
+func TestTurnCostIncludesTheEmbeddingAheadOfThePlan(t *testing.T) {
+	for _, tc := range []struct {
+		name, plan string
+	}{{"plan searches nothing", warmNone}, {"plan searches", warmSearch}} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, f := warmSvc(t, tc.plan)
+			f.holdPlan.Store(true)
+			msg := "미리 임베딩할 질문"
+			f.message.Store(&msg)
+			res, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m-" + tc.name, Message: msg,
+				Speaker: "영희", SpeakerID: "u1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			turn, ledger := turnLedger(t, svc, res.TurnID, 3, 0)
+			var sum, embed float64
+			embeds := 0
+			for _, r := range rows(ledger["llm_calls"]) {
+				if r["role"] == "rerank" {
+					continue // the fake provider has no rerank endpoint: its row is an estimate for a call that failed
+				}
+				sum += num(r["cost_usd"])
+				if r["role"] == "embed" {
+					embeds++
+					embed += num(r["cost_usd"])
+				}
+			}
+			if embeds != 1 || math.Abs(embed-0.000001) > 1e-12 {
+				t.Fatalf("embedding rows: %d costing %v, want one costing the provider's 0.000001: %+v", embeds, embed, ledger["llm_calls"])
+			}
+			if math.Abs(num(turn["cost_usd"])-sum) > 1e-9 || math.Abs(res.CostUSD-sum) > 1e-9 {
+				t.Fatalf("turn cost %v (result %v) != ledger rows %v", turn["cost_usd"], res.CostUSD, sum)
+			}
+		})
 	}
 }

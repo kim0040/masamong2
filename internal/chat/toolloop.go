@@ -522,12 +522,15 @@ func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message,
 				lc.step.State, lc.step.Reason = "not_run", "cancelled"
 				lc.result = &ToolResult{Tool: lc.id, Status: "cancelled"}
 			}
-			steps = append(steps, step{key: lc.id, reserved: true, cancel: cancel, pays: infos[lc.id].Pays, decide: func() bool {
+			hold := &paidHold{}
+			steps = append(steps, step{key: lc.id, reserved: true, cancel: cancel, pays: infos[lc.id].Pays, hold: hold, decide: func() bool {
 				if ctx.Err() != nil {
 					cancel()
 					return false
 				}
-				if !l.Guard.AllowContext(ctx, lc.id) {
+				allowed, endPaid := l.Guard.AllowPayingContext(ctx, lc.id, infos[lc.id].Pays)
+				hold.end = endPaid
+				if !allowed {
 					if ctx.Err() != nil {
 						cancel()
 						return false
