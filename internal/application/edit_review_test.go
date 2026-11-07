@@ -518,14 +518,17 @@ func TestAnEditKeepingTheWordsWaitsForAChangeNotYetInTheQueue(t *testing.T) {
 
 func captureLine(t *testing.T, svc *application.Service, id, author, words string) string {
 	t.Helper()
+	// before the turn that follows, also on a clock that ticks every 15 ms (Windows): a line of the same instant may sort
+	// after the call, and the caller's conversation leaves it out
+	at := time.Now().Add(-time.Second)
 	eng, err := svc.MemoryEngine()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := eng.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", MessageID: id, AuthorID: author, AuthorName: author, Content: words, At: time.Now()}); err != nil {
+	if _, err := eng.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", MessageID: id, AuthorID: author, AuthorName: author, Content: words, At: at}); err != nil {
 		t.Fatal(err)
 	}
-	svc.Observe(application.ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: id, AuthorID: author, AuthorName: author, Content: words, At: time.Now()})
+	svc.Observe(application.ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: id, AuthorID: author, AuthorName: author, Content: words, At: at})
 	return corpus.DiscordLiveObservationID(engine.RoomKey("g", "c"), id)
 }
 

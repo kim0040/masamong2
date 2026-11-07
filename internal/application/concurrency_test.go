@@ -260,13 +260,18 @@ func TestMemoryEngineSurvivesUnrelatedConfigChanges(t *testing.T) {
 // turn behind it with the given limits and returns the second turn's error and the first one's.
 func queuedTurn(t *testing.T, delay time.Duration, behind application.ChatInput) (second, first error) {
 	t.Helper()
-	svc, _ := slowChatSvc(t, delay, nil)
+	svc, llm := slowChatSvc(t, delay, nil)
 	done := make(chan error, 1)
 	go func() {
 		_, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "room", Message: "first", Speaker: "u", SpeakerID: "u1"})
 		done <- err
 	}()
-	time.Sleep(30 * time.Millisecond)
+	// its first model call: it holds the channel by then, however slow the machine (a fixed sleep lost that race under -race)
+	for deadline := time.Now().Add(30 * time.Second); llm.calls.Load() == 0; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the first turn never reached its model")
+		}
+	}
 	behind.GuildID, behind.ChannelID, behind.Message, behind.Speaker, behind.SpeakerID = "g", "room", "second", "u", "u2"
 	_, second = svc.ChatTurn(context.Background(), behind)
 	return second, <-done
@@ -276,9 +281,9 @@ func queuedTurn(t *testing.T, delay time.Duration, behind application.ChatInput)
 // another one still gets its whole share (it used to be spent in the queue, and the model call that
 // followed failed at once).
 func TestTurnTimeoutStartsAfterTheWait(t *testing.T) {
-	// a turn takes two model calls (about 160 ms); the second waits about as long as the first runs,
-	// so waiting and running together overrun 280 ms but running alone does not
-	second, first := queuedTurn(t, 80*time.Millisecond, application.ChatInput{TurnTimeout: 280 * time.Millisecond})
+	// a turn takes two model calls (about 600 ms); the second waits about as long as the first runs,
+	// so waiting and running together overrun 1 s but running alone does not, with room for a slow machine
+	second, first := queuedTurn(t, 300*time.Millisecond, application.ChatInput{TurnTimeout: time.Second})
 	if first != nil || second != nil {
 		t.Fatalf("first: %v, second: %v", first, second)
 	}
