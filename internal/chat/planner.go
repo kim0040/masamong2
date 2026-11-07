@@ -56,6 +56,7 @@ type ToolInfo struct {
 	Params  []ToolParam `json:"-"`
 	Writes  bool        `json:"-"` // creates state (a poll, a reminder, a picture)
 	Once    bool        `json:"-"` // a call that succeeded closes it for the turn's later rounds (tools.Builtin.Once)
+	Final   bool        `json:"-"` // its one result is the answer: see ToolLoop.Final (tools.Builtin.Final)
 	Web     bool        `json:"-"` // returns text from the open web, which may carry planted instructions
 	// Pays: the tool spends money of its own (a model call, a picture, a paid search), so under a money
 	// cap the turn's later steps wait for it to be decided (runSteps).

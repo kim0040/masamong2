@@ -46,6 +46,13 @@ const (
 	LoopMaxTokens = 600
 )
 
+// When the loop stops without asking the model once more (config chat.loop_final).
+const (
+	LoopFinalTools  = "tools"  // the default ("" too): after a round of tools whose one result is the answer
+	LoopFinalSearch = "search" // and after a web search that found enough (searchSettles)
+	LoopFinalOff    = "off"    // never: it always asks
+)
+
 // ToolParam is one parameter of a tool as the loop's function schema shows it.
 type ToolParam struct {
 	Name     string
@@ -250,9 +257,10 @@ type LoopTrace struct {
 	Steps   []LoopStep `json:"calls,omitempty"`
 	Refused int        `json:"refused,omitempty"`
 	Removed []string   `json:"removed,omitempty"` // tools taken off the menu during the turn
-	// Stop is why the loop ended: answered (the model called nothing more), max_rounds, error (a later
-	// round failed; earlier results are kept), no_tools (nothing to offer), prefilter (a message with no
-	// letters or digits), fallback (the planner chose the tools instead, see Fallback).
+	// Stop is why the loop ended: answered (the model called nothing more), final (a round settled the
+	// turn: ToolLoop.Final), max_rounds, error (a later round failed; earlier results are kept), no_tools
+	// (nothing to offer), prefilter (a message with no letters or digits), fallback (the planner chose the
+	// tools instead, see Fallback).
 	Stop     string  `json:"stop"`
 	Fallback string  `json:"fallback,omitempty"` // unsupported | no_tool_calling | error:<class>
 	CostUSD  float64 `json:"cost_usd"`
@@ -293,6 +301,68 @@ type ToolLoop struct {
 	Guard *Guard
 	// Record only notes what the model would have called (shadow mode): nothing is executed.
 	Record bool
+	// Final is config chat.loop_final (LoopFinalTools when empty). A round whose calls all settle the
+	// turn ends the loop: asking "anything more?" took 4 of the 7.3 seconds of a two-round loop. The model
+	// asks for independent things in one round, so those are all there. What it would have called in a next
+	// round because of a result (the weather first, then a place for that weather) is not asked for.
+	Final string
+}
+
+// finalRound reports whether the round's calls settle the turn: each ran and found what it looked for,
+// and each is of a tool whose one result is the answer. A call refused, held back or left without a value
+// means there is more to do, and so does a tool that came back empty (the model tries another source).
+func (l ToolLoop) finalRound(calls []*loopCall, infos map[string]ToolInfo, message string) bool {
+	if l.Final == LoopFinalOff || len(calls) == 0 {
+		return false
+	}
+	for _, lc := range calls {
+		if !lc.run || !foundIt(lc.result) {
+			return false
+		}
+		if !infos[lc.id].Final && !(l.Final == LoopFinalSearch && lc.id == "search.web" && searchSettles(lc, message)) {
+			return false
+		}
+	}
+	return true
+}
+
+// foundIt is a successful result with what was asked: no status but ok (a place not found, a partial quote,
+// a stale reading), and from the service itself. A quote answered by a web search (live false) is a
+// search's result, which a later round may well improve on.
+func foundIt(r *ToolResult) bool {
+	if r == nil || !r.OK || (r.Status != "" && r.Status != "ok") {
+		return false
+	}
+	if st, ok := r.Data["status"].(string); ok && st != "ok" {
+		return false
+	}
+	live, says := r.Data["live"].(bool)
+	return !says || live
+}
+
+// searchEnough is how many results with text a web search needs to settle a turn.
+const searchEnough = 3
+
+var linkRE = regexp.MustCompile(`(?i)https?://|\bwww\.`)
+
+// searchSettles is the web search's own test: enough results with text, not a search the model itself
+// asked to look wide (depth deep: a digest, a comparison), and not a message with a link in it, which asks
+// for that page to be read. Nothing here knows the words of a language, so a question that asks in words
+// to read on or search again is not seen, which is why this is off by default (LoopFinalSearch).
+func searchSettles(lc *loopCall, message string) bool {
+	if depth, _ := lc.params["depth"].(string); strings.EqualFold(strings.TrimSpace(depth), "deep") || linkRE.MatchString(message) {
+		return false
+	}
+	items, _ := lc.result.Data["results"].([]any)
+	found := 0
+	for _, it := range items {
+		if m, ok := it.(map[string]any); ok {
+			if text, _ := m["snippet"].(string); strings.TrimSpace(text) != "" {
+				found++
+			}
+		}
+	}
+	return found >= searchEnough
 }
 
 func (l ToolLoop) messages(history []Turn, message, timeRef string) []LoopMsg {
@@ -488,6 +558,10 @@ func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message,
 			}
 			tr.Steps = append(tr.Steps, lc.step)
 			msgs = append(msgs, LoopMsg{Role: "tool", CallID: lc.call.ID, Content: lc.reply})
+		}
+		if l.finalRound(calls, infos, message) {
+			tr.Stop = "final"
+			break
 		}
 		if round == MaxLoopRounds {
 			tr.Stop = "max_rounds"
@@ -778,6 +852,32 @@ func (lr *loopRun) wait() ([]ToolResult, bool) {
 	return lr.results, lr.mode == ToolModeLoop && lr.err == nil && lr.trace.Fallback == ""
 }
 
+// running reports whether the loop is still at work.
+func (lr *loopRun) running() bool {
+	if lr == nil || lr.done == nil {
+		return false
+	}
+	select {
+	case <-lr.done:
+		return false
+	default:
+		return true
+	}
+}
+
+// costAhead is what the loop counts for in the money left to a step that starts beside it: what it cost
+// when it has ended, and while it runs what all its rounds can cost, each at the price of roundUSD (the
+// loop asks the planner's small model unless chat.tool_model says otherwise).
+func (lr *loopRun) costAhead(roundUSD float64) float64 {
+	switch {
+	case lr == nil:
+		return 0
+	case lr.running():
+		return MaxLoopRounds * roundUSD
+	}
+	return lr.trace.CostUSD
+}
+
 // startLoop starts the tool loop for the loop and shadow modes and returns the tools the planner may
 // still choose: all of them in planner and shadow mode, none in loop mode (memory.search is added by
 // the caller), all again when the model cannot take tools.
@@ -805,7 +905,7 @@ func (rt *Runtime) startLoop(ctx context.Context, req Request, msg, timeRef stri
 		lr.trace.Stop = "no_tools"
 	default:
 		lr.done = make(chan struct{})
-		l := ToolLoop{LLM: llm, Run: rt.Tools, Role: role, Voice: req.Voice, Guard: req.Guard, Record: mode == ToolModeShadow}
+		l := ToolLoop{LLM: llm, Run: rt.Tools, Role: role, Voice: req.Voice, Guard: req.Guard, Record: mode == ToolModeShadow, Final: req.LoopFinal}
 		go func() {
 			defer close(lr.done)
 			lr.results, lr.trace, lr.err = l.Do(ctx, others, req.History, msg, timeRef)

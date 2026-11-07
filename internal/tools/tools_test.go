@@ -120,3 +120,23 @@ func TestUsageLimitsAndCooldown(t *testing.T) {
 		t.Fatal("user IDs must not be stored")
 	}
 }
+
+// Final tools end the tool loop on their one result: only tools that read, and a result that needs nothing
+// more. search.web is not among them (chat.loop_final decides it, for a search that found enough).
+func TestFinalToolsOnlyRead(t *testing.T) {
+	var final []string
+	for _, b := range Builtins() {
+		if b.Final {
+			final = append(final, b.ID)
+			if b.Writes || b.Once || !b.Chat {
+				t.Errorf("%s: final, writes %v, once %v, chat %v", b.ID, b.Writes, b.Once, b.Chat)
+			}
+		}
+	}
+	if strings.Join(final, " ") != "weather.query finance.quote finance.fx places.search" {
+		t.Fatalf("final tools: %v", final)
+	}
+	if r, _ := Find(Resolve(nil, nil), "weather.query"); !r.Final {
+		t.Fatal("Resolve dropped Final")
+	}
+}

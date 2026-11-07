@@ -1029,6 +1029,10 @@ type ChatSettings struct {
 	// ToolModel is which model role the tool loop asks: "planner" (the default: the small fast model) or
 	// "response" (the precise mode: the answer model, slower and dearer, for weak small models).
 	ToolModel string `yaml:"tool_model,omitempty" json:"tool_model,omitempty"`
+	// LoopFinal is when the tool loop stops without asking its model once more: "tools" (the default:
+	// after a round of tools whose one result is the answer, such as the weather or a quote), "search"
+	// (also after a web search that found enough) or "off" (it always asks).
+	LoopFinal string `yaml:"loop_final,omitempty" json:"loop_final,omitempty"`
 	// Vision is whether the bot looks at pictures it is called with: "auto" (the default: the answer
 	// model sees them when it takes pictures, otherwise a chat model that does describes them first)
 	// or "off". Only pictures attached to the message that calls the bot (or the one it replies to)
@@ -1059,6 +1063,17 @@ func (c ChatSettings) LoopRole() string {
 		return "planner"
 	}
 	return c.ToolModel
+}
+
+// LoopFinals are the values chat.loop_final accepts besides empty (tools).
+var LoopFinals = []string{"tools", "search", "off"}
+
+// LoopFinalMode is the effective chat.loop_final.
+func (c ChatSettings) LoopFinalMode() string {
+	if c.LoopFinal == "" {
+		return "tools"
+	}
+	return c.LoopFinal
 }
 
 // ToolModes are the values chat.tool_mode accepts besides empty (loop, the default since the live regression
@@ -1342,6 +1357,9 @@ func parse(raw []byte, problems *[]Problem) (Document, error) {
 	}
 	if d.Chat.ToolModel != "" && !slices.Contains(ToolModels, d.Chat.ToolModel) {
 		return Document{}, fmt.Errorf("chat.tool_model must be one of %v", ToolModels)
+	}
+	if d.Chat.LoopFinal != "" && !slices.Contains(LoopFinals, d.Chat.LoopFinal) {
+		return Document{}, fmt.Errorf("chat.loop_final must be one of %v", LoopFinals)
 	}
 	if d.Chat.ToolMode != "" && !slices.Contains(ToolModes, d.Chat.ToolMode) {
 		return Document{}, fmt.Errorf("chat.tool_mode must be one of %v", ToolModes)

@@ -482,7 +482,7 @@ func toolPays(r tools.Resolved) bool {
 
 // toolInfo renders one tool for the planner in the voice's language.
 func toolInfo(r tools.Resolved, p *lang.Pack, params []tools.Param) chat.ToolInfo {
-	info := chat.ToolInfo{ID: r.ID, Description: r.Description, Route: r.Route, Required: r.Required, Writes: r.Writes, Once: r.Once, Web: r.WebContent,
+	info := chat.ToolInfo{ID: r.ID, Description: r.Description, Route: r.Route, Required: r.Required, Writes: r.Writes, Once: r.Once, Final: r.Final, Web: r.WebContent,
 		Pays: toolPays(r)}
 	t := p.Tools[r.ID]
 	if info.Description == "" {

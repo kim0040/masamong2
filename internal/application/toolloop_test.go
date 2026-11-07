@@ -272,3 +272,34 @@ func TestChatTurnInjectedToolFailure(t *testing.T) {
 		t.Fatalf("tools %+v trace %+v", res.Tools, res.ToolLoop)
 	}
 }
+
+// A weather call that found its answer ends the loop: the tool's mark, the setting and the status of a
+// real result meet here. chat.loop_final: off asks again, and so does a region the service does not know.
+func TestChatTurnEndsTheLoopOnAFinalToolsResult(t *testing.T) {
+	run := func(t *testing.T, final, region string) (application.ChatResultForTest, int) {
+		f := &loopServer{plan: `{"memory_requirement":"none","tool_plan":[]}`, script: []map[string]any{
+			toolCallMsg([2]string{"weather__query", `{"region":"` + region + `"}`}), {"role": "assistant", "content": "-"}}}
+		svc := loopSvc(t, "loop", f)
+		weather := newFakeWeather(t)
+		applyDoc(t, svc, func(d *config.Document) {
+			d.Providers["openmeteo"] = config.Provider{Kind: config.KindOpenMeteo, BaseURL: weather.srv.URL}
+			d.Chat.LoopFinal = final
+		})
+		res, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m1", Message: "날씨 어때?", Speaker: "영희", SpeakerID: "u1", DryRun: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return res, len(f.toolReqs)
+	}
+	if res, asks := run(t, "", "Tokyo"); asks != 1 || res.ToolLoop.Stop != "final" {
+		t.Fatalf("default: asked %d times, trace %+v, tools %+v", asks, res.ToolLoop, res.Tools)
+	}
+	if res, asks := run(t, "off", "Tokyo"); asks != 2 || res.ToolLoop.Stop != "answered" {
+		t.Fatalf("off: asked %d times, trace %+v", asks, res.ToolLoop)
+	}
+	if res, asks := run(t, "", "아틀란티스"); asks != 2 || res.ToolLoop.Stop != "answered" {
+		t.Fatalf("unknown region: asked %d times, trace %+v, tools %+v", asks, res.ToolLoop, res.Tools)
+	}
+}

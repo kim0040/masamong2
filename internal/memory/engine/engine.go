@@ -107,6 +107,8 @@ type Engine struct {
 	qmu             sync.Mutex
 	qcache          map[string][]float32
 	qorder          []string
+	qflights        map[string]*queryFlight // query embeddings under way (under qmu)
+	qunsaved        map[string]bool         // in qcache, not yet in the database (under qmu)
 	dirtyRoom       sync.Map
 	// OnDirty, when set, is called once when a captured message queues a room that was not waiting
 	// yet, so the queue can outlive the process (set it before the engine is shared).
@@ -799,31 +801,119 @@ func (e *Engine) spend(kind string, cost *float64, fallback float64) {
 
 // EmbedQuery returns a normalized query vector (implements search.QueryEmbedder).
 func (e *Engine) EmbedQuery(ctx context.Context, text string) ([]float32, error) {
-	// keyed by space and stored at its dimensionality: a quarter of the size at 1024 of 4096 dims
-	key := store.CacheKey(e.EmbedSpace(), "query:"+e.Settings.QueryInstruction, text)
-	e.qmu.Lock()
-	if v, ok := e.qcache[key]; ok {
-		e.qmu.Unlock()
-		return append([]float32(nil), v...), nil
+	key := e.queryKey(text)
+	v, err := e.queryVector(ctx, key, text)
+	if err != nil {
+		return nil, err
 	}
-	e.qmu.Unlock()
+	e.keepQuery(key, v)
+	return append([]float32(nil), v...), nil
+}
+
+// WarmQuery starts or joins the embedding of a query a search may ask for next (chat.QueryWarmer). The
+// vector stays in memory only: it reaches the query cache in the database when a search asks for it, so
+// a message nobody searched with leaves nothing behind. A failure is the search's to meet again.
+func (e *Engine) WarmQuery(ctx context.Context, text string) {
+	if ix := e.Index(); ix == nil || ix.Recipe != e.Settings.Recipe.Version() || e.Store.DB.HasPendingEvents("source-change") {
+		return // the search would not run (ErrNotReady)
+	}
+	_, _ = e.queryVector(ctx, e.queryKey(text), text)
+}
+
+// queryKey is keyed by space and stored at its dimensionality: a quarter of the size at 1024 of 4096 dims.
+func (e *Engine) queryKey(text string) string {
+	return store.CacheKey(e.EmbedSpace(), "query:"+e.Settings.QueryInstruction, text)
+}
+
+// queryFlight is one query embedding under way. Callers asking for the same query wait for it instead of
+// paying for another. v and err are set before done closes.
+type queryFlight struct {
+	done chan struct{}
+	v    []float32
+	err  error
+}
+
+// queryVector is the query's vector from memory, the database or the provider; the slice is shared, not to
+// be changed. A caller that finds the same embedding under way waits for it, as long as its own ctx lasts.
+// If that one fails or its caller gave it up, the waiting caller tries for itself: each keeps the attempt
+// it would have had alone.
+func (e *Engine) queryVector(ctx context.Context, key, text string) ([]float32, error) {
+	for {
+		e.qmu.Lock()
+		if v, ok := e.qcache[key]; ok {
+			e.qmu.Unlock()
+			return v, nil
+		}
+		f, waiting := e.qflights[key]
+		if !waiting {
+			f = &queryFlight{done: make(chan struct{}), err: errors.New("memory: query embedding did not finish")}
+			if e.qflights == nil {
+				e.qflights = map[string]*queryFlight{}
+			}
+			e.qflights[key] = f
+		}
+		e.qmu.Unlock()
+		if !waiting {
+			return e.flyQuery(ctx, key, text, f)
+		}
+		select {
+		case <-f.done:
+			if f.err == nil {
+				return f.v, nil
+			}
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+func (e *Engine) flyQuery(ctx context.Context, key, text string, f *queryFlight) ([]float32, error) {
+	defer func() {
+		e.qmu.Lock()
+		delete(e.qflights, key)
+		e.qmu.Unlock()
+		close(f.done)
+	}()
 	if raw, ok := e.Store.CachedVector(key); ok {
 		v := search.DecodeFloat16(raw, nil)
 		e.remember(key, v)
-		return append([]float32(nil), v...), nil
+		f.v, f.err = v, nil
+		return v, nil
 	}
 	if e.LLM == nil || !e.LLM.Configured() {
-		return nil, errors.New("memory: embedding provider not configured")
+		f.err = errors.New("memory: embedding provider not configured")
+		return nil, f.err
 	}
 	v, err := e.hedgedEmbed(ctx, e.queryInput(text))
 	if err != nil {
+		f.err = err
 		return nil, err
 	}
 	v = e.fitDims(v)
 	search.Normalize(v)
+	e.qmu.Lock()
+	if e.qunsaved == nil {
+		e.qunsaved = map[string]bool{}
+	}
+	e.qunsaved[key] = true
+	e.qmu.Unlock()
 	e.remember(key, v)
-	_ = e.Store.PutQueryVectors(map[string][]byte{key: search.EncodeFloat16(v)})
-	return append([]float32(nil), v...), nil
+	f.v, f.err = v, nil
+	return v, nil
+}
+
+// keepQuery writes a vector the provider made to the query cache in the database, once.
+func (e *Engine) keepQuery(key string, v []float32) {
+	e.qmu.Lock()
+	unsaved := e.qunsaved[key]
+	delete(e.qunsaved, key)
+	e.qmu.Unlock()
+	if unsaved {
+		_ = e.Store.PutQueryVectors(map[string][]byte{key: search.EncodeFloat16(v)})
+	}
 }
 
 func (e *Engine) remember(key string, v []float32) {
@@ -835,6 +925,7 @@ func (e *Engine) remember(key string, v []float32) {
 	e.qcache[key] = v
 	for len(e.qorder) > 512 {
 		delete(e.qcache, e.qorder[0])
+		delete(e.qunsaved, e.qorder[0])
 		e.qorder = e.qorder[1:]
 	}
 }
