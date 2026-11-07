@@ -20,12 +20,18 @@
   import Dialog from '../components/Dialog.svelte'
   import TurnDetail from '../components/TurnDetail.svelte'
   import FeedbackSummary from '../components/FeedbackSummary.svelte'
+  import OperatorMarks from '../components/OperatorMarks.svelte'
+  import Switch from '../components/Switch.svelte'
   import * as I from '../lib/icons'
 
   let outcome = $state(route.query.get('outcome') ?? '')
   let tool = $state(route.query.get('tool') ?? '')
   let channel = $state(route.query.get('channel') ?? '')
   let lab = $state<'false' | 'only'>((route.query.get('lab') as any) ?? 'false')
+  let toolsOnly = $state(route.query.get('tools') === '1')
+  // a random draw of search turns to mark (turns.sample); null while the list is the plain history
+  const SAMPLE = 30
+  let sample = $state<{ pool: number } | null>(null)
   let turns = $state<any[]>([])
   let next = $state<string | undefined>()
   let loading = $state(true)
@@ -49,7 +55,7 @@
   async function load(more = false) {
     loading = !more
     loadError = undefined
-    const r = await call('turns.list', { outcome, tool, channel_id: channel, lab, limit: 50, before: more ? next : undefined })
+    const r = await call('turns.list', { outcome, tool, channel_id: channel, lab, tools_only: toolsOnly, limit: 50, before: more ? next : undefined })
     loading = false
     if (!r.ok) {
       if (more) toast('error', t('load.failed'), r.error?.message)
@@ -59,24 +65,58 @@
     turns = more ? [...turns, ...r.output.turns] : r.output.turns
     next = r.output.next_before
   }
+  // the turn being fetched: the effect below calls open() again when the URL changes, and setQuery changes it
+  let opening = ''
   async function open(id: string) {
+    if (opening === id) return
+    opening = id
     setQuery({ id })
     const r = await call('turns.get', { id })
+    if (opening !== id) return // a newer open took over
+    opening = ''
     if (r.ok) {
       selected = r.output.turn
       ledger = r.output.ledger ?? null
       if (!wide) sheetOpen = true
     }
   }
+  async function drawSample() {
+    loading = true
+    loadError = undefined
+    const r = await call('turns.sample', { n: SAMPLE, lab })
+    loading = false
+    if (!r.ok) {
+      toast('error', t('turns.sample.failed'), r.error?.message)
+      return
+    }
+    turns = r.output.turns
+    next = undefined
+    sample = { pool: r.output.pool }
+    selected = null
+    setQuery({ id: null })
+  }
+  function backToList() {
+    sample = null
+    void load()
+  }
+  // the operator's verdict was saved: show it in the list and the open turn; in a draw, go on to the next unmarked turn
+  function marked(id: string, mark: string) {
+    if (selected?.id === id) selected = { ...selected, mark }
+    turns = turns.map((x) => (x.id === id ? { ...x, mark } : x))
+    const following = sample && mark && selected?.id === id ? turns.find((x) => !x.mark && x.id !== id) : undefined
+    if (following) void open(following.id)
+  }
+  const sampled = $derived(turns.filter((x) => x.mark).length)
   $effect(() => {
-    void outcome, tool, channel, lab
-    setQuery({ outcome, tool, channel, lab: lab === 'false' ? null : lab })
+    void outcome, tool, channel, lab, toolsOnly
+    setQuery({ outcome, tool, channel, lab: lab === 'false' ? null : lab, tools: toolsOnly ? '1' : null })
+    sample = null
     void load()
   })
-  $effect(() => onLive(['turn'], () => void load()))
+  $effect(() => onLive(['turn'], () => { if (!sample) void load() }))
   $effect(() => {
     const id = route.query.get('id')
-    if (id && selected?.id !== id) void open(id)
+    if (id && selected?.id !== id && opening !== id) void open(id)
   })
   $effect(() => {
     const mq = window.matchMedia('(min-width: 1280px)')
@@ -110,20 +150,36 @@
 <PageHeader title={t('turns.title')} description={t('turns.desc')} />
 
 <FeedbackSummary />
+<OperatorMarks />
 
 <div class="filters">
   <Segmented label={t('turns.source')} bind:value={lab} options={[{ value: 'false', label: t('turns.live') }, { value: 'only', label: t('turns.lab') }]} />
   <div class="f"><Select aria-label={t('turns.outcome')} bind:value={outcome} options={[{ value: '', label: t('turns.all_outcomes') }, ...['answered', 'silent', 'not_addressed', 'reacted', 'no_vision', 'limited', 'budget', 'paused', 'disabled', 'canceled', 'error'].map((v) => ({ value: v, label: t(`outcome.${v}`) }))]} /></div>
   <div class="f"><Input aria-label={t('turns.tool')} placeholder={t('turns.tool_ph')} bind:value={tool} /></div>
   <div class="f"><Input aria-label={t('turns.channel')} placeholder={t('turns.channel_ph')} bind:value={channel} inputmode="numeric" /></div>
+  <Switch bind:checked={toolsOnly} label={t('turns.tools_only')} />
+  <Button variant="secondary" icon={I.Shuffle} onclick={drawSample}>{t('turns.sample.draw', { n: SAMPLE })}</Button>
 </div>
 
 <div class="split" class:has-detail={!!selected && wide}>
   <Card padded={false}>
+    {#if sample && !loading}
+      <div class="sample" role="status">
+        <span class="small">{t('turns.sample.banner', { n: turns.length, pool: sample.pool })}</span>
+        <span class="small muted num">{t('turns.sample.progress', { done: sampled, n: turns.length })}</span>
+        <span class="spacer"></span>
+        <Button size="sm" variant="ghost" icon={I.Shuffle} onclick={drawSample}>{t('turns.sample.again')}</Button>
+        <Button size="sm" variant="ghost" onclick={backToList}>{t('turns.sample.back')}</Button>
+      </div>
+    {/if}
     {#if loading || loadError}
       <div style:padding="20px"><LoadState res={firstPage}><Skeleton lines={8} height={18} /></LoadState></div>
     {:else if turns.length === 0}
-      <EmptyState pose="think" title={t('turns.empty')} description={t('turns.empty_body')}><Button href="/lab" icon={I.FlaskConical}>{t('home.test_chat')}</Button></EmptyState>
+      {#if sample}
+        <EmptyState pose="think" title={t('turns.sample.empty')} />
+      {:else}
+        <EmptyState pose="think" title={t('turns.empty')} description={t('turns.empty_body')}><Button href="/lab" icon={I.FlaskConical}>{t('home.test_chat')}</Button></EmptyState>
+      {/if}
     {:else}
       <div use:scrollable class="table-scroll list" bind:this={scroller} {onscroll} class:virtual>
         <table class="table" aria-rowcount={turns.length + 1}>
@@ -133,7 +189,7 @@
             {#each rows as tr, i (tr.id)}
               <tr class="clickable" class:selected={selected?.id === tr.id} aria-rowindex={start + i + 2}>
                 <td class="nowrap num muted">{relative(tr.at)}</td>
-                <td class="msgcell"><a class="row-link ellipsis" href="/turns?id={tr.id}" onclick={(e) => { e.preventDefault(); open(tr.id) }}>{#if tr.body?.message}{tr.body.message}{:else}<span class="no-text">{t(tr.body?.body_free ? 'turns.no_text' : 'turns.no_message')}</span>{/if}</a><div class="xs subtle ellipsis" title={tr.channel_id}><span class="m-only"><span class="dot" style:background={outcomeColor(tr.outcome)}></span>{`${t(`outcome.${tr.outcome}`)} · ${ms(tr.latency_ms)} · `}</span>#{tr.channel_name || tr.channel_id}{#if tr.body?.speaker}{` · ${tr.body.speaker}`}{/if}{#if tr.body?.name_call?.decision}{` · ${t(`turns.name_call.${tr.body.name_call.decision}`)}`}{/if}</div></td>
+                <td class="msgcell"><a class="row-link ellipsis" href="/turns?id={tr.id}" onclick={(e) => { e.preventDefault(); open(tr.id) }}>{#if tr.body?.message}{tr.body.message}{:else}<span class="no-text">{t(tr.body?.body_free ? 'turns.no_text' : 'turns.no_message')}</span>{/if}</a><div class="xs subtle ellipsis" title={tr.channel_id}>{#if tr.mark}<span class="mk {tr.mark}" title={t('turns.mark.title')}>{t(`turns.mark.${tr.mark}`)}</span>{' · '}{/if}<span class="m-only"><span class="dot" style:background={outcomeColor(tr.outcome)}></span>{`${t(`outcome.${tr.outcome}`)} · ${ms(tr.latency_ms)} · `}</span>#{tr.channel_name || tr.channel_id}{#if tr.body?.speaker}{` · ${tr.body.speaker}`}{/if}{#if tr.body?.name_call?.decision}{` · ${t(`turns.name_call.${tr.body.name_call.decision}`)}`}{/if}</div></td>
                 <td class="w">{#each tr.tools as tl}<span class="chip">{toolName(tl)}</span> {/each}</td>
                 <td class="r num w">{tr.hits || ''}</td>
                 <td class="r num nowrap w">{ms(tr.latency_ms)}</td>
@@ -150,11 +206,11 @@
     {/if}
   </Card>
   {#if selected && wide}
-    <div class="detail"><Card title={t('turns.detail')}>{#snippet actions()}<Button size="sm" variant="ghost" icon={I.X} onclick={() => { selected = null; setQuery({ id: null }) }}>{t('common.close')}</Button>{/snippet}<TurnDetail turn={selected} {ledger} /></Card></div>
+    <div class="detail"><Card title={t('turns.detail')}>{#snippet actions()}<Button size="sm" variant="ghost" icon={I.X} onclick={() => { selected = null; setQuery({ id: null }) }}>{t('common.close')}</Button>{/snippet}<TurnDetail turn={selected} {ledger} onmark={marked} /></Card></div>
   {/if}
 </div>
 {#if selected && !wide}
-  <Dialog bind:open={sheetOpen} title={t('turns.detail')} size="lg" onclose={() => setQuery({ id: null })}><TurnDetail turn={selected} {ledger} /></Dialog>
+  <Dialog bind:open={sheetOpen} title={t('turns.detail')} size="lg" onclose={() => setQuery({ id: null })}><TurnDetail turn={selected} {ledger} onmark={marked} /></Dialog>
 {/if}
 
 <style>
@@ -170,6 +226,24 @@
   }
   .fb .bad {
     color: var(--danger);
+  }
+  .mk {
+    font-weight: 600;
+    color: var(--ok);
+  }
+  .mk.wrong {
+    color: var(--danger);
+  }
+  .mk.stale {
+    color: var(--warn);
+  }
+  .sample {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--s-2) var(--s-3);
+    padding: var(--s-3) var(--pad-card);
+    border-bottom: 1px solid var(--border);
   }
   .filters {
     display: flex;

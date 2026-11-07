@@ -44,3 +44,18 @@ func TestListy(t *testing.T) {
 		}
 	}
 }
+
+// A search answer starts with its conclusion: whichever shape it goes out in, that first line or
+// paragraph is the first bubble / the head, never moved behind the details (nothing is reordered or cut).
+func TestConclusionStaysFirst(t *testing.T) {
+	conclusion := "결론부터: 내일은 비 안 와"
+	parts, ok := bubbles(conclusion + "\n기상청 기준으로 낮에 맑아\n저녁에 구름이 조금 껴\n우산은 필요 없어")
+	if !ok || parts[0] != conclusion || len(parts) != bubbleMax {
+		t.Fatalf("first bubble: %q", parts)
+	}
+	detail := strings.Repeat("자", 300)
+	head, rest := trimReply(conclusion + "\n\n" + detail + "\n\n" + detail)
+	if !strings.HasPrefix(head, conclusion) || strings.Contains(rest, conclusion) {
+		t.Fatalf("head %q", head)
+	}
+}

@@ -473,3 +473,34 @@ func TestAnswerSaysWhatAToolAssumed(t *testing.T) {
 		t.Fatal("the assumed-value note must appear exactly when a result carries assumed_ values")
 	}
 }
+
+// A reply built from a web search leads with its conclusion and does not list sources: the answer's tool
+// block carries the note (ko and en), only for a usable search result. Weather, a failed search and a
+// reminder do not (so the Korean golden, which has weather, is unchanged).
+func TestAnswerFromASearchLeadsWithTheConclusion(t *testing.T) {
+	for _, tag := range []string{"ko", "en"} {
+		p, _ := lang.Get(tag)
+		if strings.TrimSpace(p.Chat.ToolConclusion) == "" {
+			t.Fatalf("%s has no tool_conclusion text", tag)
+		}
+		v := Voice{Pack: p}
+		build := func(r ToolResult) string {
+			m := BuildAnswerMessages(v, AnswerInput{System: "S", Message: "q", Tools: []ToolResult{r}})
+			return m[len(m)-1].Content
+		}
+		for _, tool := range []string{"search.web", "web.read", "places.search"} {
+			if !strings.Contains(build(ToolResult{Tool: tool, OK: true, Data: map[string]any{"results": []any{}}}), p.Chat.ToolConclusion) {
+				t.Fatalf("%s: a %s result must carry the note", tag, tool)
+			}
+		}
+		for _, r := range []ToolResult{
+			{Tool: "search.web", OK: false, Status: "TOOL_LIMITED", Error: "busy"},
+			{Tool: "weather.query", OK: true, Data: map[string]any{"temp_c": 18.0}},
+			{Tool: "reminders.propose", OK: true, Status: "scheduled"},
+		} {
+			if strings.Contains(build(r), p.Chat.ToolConclusion) {
+				t.Fatalf("%s: the note appeared for %+v", tag, r)
+			}
+		}
+	}
+}

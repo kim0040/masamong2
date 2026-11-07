@@ -304,6 +304,10 @@ func BuildAnswerMessages(v Voice, in AnswerInput) []Msg {
 			// a reminder or task: ask what is still missing, confirm only what the result says was set
 			toolBlock += "\n" + c.ToolSchedule
 		}
+		if searchResults(in.Tools) && strings.TrimSpace(c.ToolConclusion) != "" {
+			// a web search answered: the conclusion comes first, sources are not listed one by one
+			toolBlock += "\n" + c.ToolConclusion
+		}
 	}
 	var recent []string
 	for _, m := range in.RecentRoom {
@@ -382,6 +386,25 @@ func scheduleResults(results []ToolResult) bool {
 	for _, r := range results {
 		if strings.HasPrefix(r.Tool, "reminders.") {
 			return true
+		}
+	}
+	return false
+}
+
+// searchPrefixes are the tools that look something up on the web (a search, a page, a place): the
+// replies people read most, and the ones that turn into a list of sources when nothing says otherwise.
+var searchPrefixes = []string{"search.", "web.", "places."}
+
+// searchResults reports whether a search tool returned a usable result.
+func searchResults(results []ToolResult) bool {
+	for _, r := range results {
+		if !r.OK {
+			continue
+		}
+		for _, p := range searchPrefixes {
+			if strings.HasPrefix(r.Tool, p) {
+				return true
+			}
 		}
 	}
 	return false

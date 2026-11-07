@@ -312,7 +312,7 @@ type ToolLoop struct {
 // and each is of a tool whose one result is the answer. A call refused, held back or left without a value
 // means there is more to do, and so does a tool that came back empty (the model tries another source).
 func (l ToolLoop) finalRound(calls []*loopCall, infos map[string]ToolInfo, message string) bool {
-	if l.Final == LoopFinalOff || len(calls) == 0 {
+	if l.Final == LoopFinalOff || len(calls) == 0 || !shortAsk(message) {
 		return false
 	}
 	for _, lc := range calls {
@@ -324,6 +324,30 @@ func (l ToolLoop) finalRound(calls []*loopCall, infos map[string]ToolInfo, messa
 		}
 	}
 	return true
+}
+
+// shortAskWords is the longest message that can settle a turn in one round. A step that depends on a
+// result ("check the weather, then search for a place that suits it") takes more words than a single
+// question, and the live comparison (scenarios_multi_ko.json) lost exactly those steps: a model that plans
+// in steps calls only the first in round one. Longer messages keep the second round: that costs seconds,
+// a dropped step costs the answer.
+const shortAskWords = 6
+
+// shortAsk reports whether the message is short enough to be one question. It reads no words of any
+// language: it counts what spaces separate, and every two han or kana letters as one word, since those
+// scripts write without spaces.
+func shortAsk(message string) bool {
+	words := 0
+	for _, field := range strings.Fields(message) {
+		cjk := 0
+		for _, r := range field {
+			if unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana) {
+				cjk++
+			}
+		}
+		words += max(1, cjk/2)
+	}
+	return words <= shortAskWords
 }
 
 // foundIt is a successful result with what was asked: no status but ok (a place not found, a partial quote,

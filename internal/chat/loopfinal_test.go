@@ -42,7 +42,7 @@ func TestFinalRoundEndsTheLoop(t *testing.T) {
 func TestFinalRoundKeepsEveryCallOfTheRound(t *testing.T) {
 	llm := &loopLLM{replies: []LoopReply{{Calls: []LoopCall{call("a", "weather__query", `{"region":"Busan"}`), call("b", "finance__quote", `{"symbol":"AAPL"}`)}}}}
 	rec := &recorder{}
-	out, asks := finalAsks(t, finalRequest("weather in Busan and the apple stock?", ""), llm, rec.run)
+	out, asks := finalAsks(t, finalRequest("Busan weather and apple stock?", ""), llm, rec.run)
 	if asks != 1 || out.ToolLoop.Stop != "final" {
 		t.Fatalf("asked %d times, trace %+v", asks, out.ToolLoop)
 	}
@@ -51,18 +51,19 @@ func TestFinalRoundKeepsEveryCallOfTheRound(t *testing.T) {
 	}
 }
 
-// What a next round would have asked because of a result is given up: the price of the option, and why
-// chat.loop_final can be turned off. Models that plan in steps show here (scenarios_multi_ko.json).
+// What a next round would have asked because of a result is given up in a short message (a longer one is
+// asked again, TestFinalRoundNeedsAShortMessage): the price of the option, and why chat.loop_final can be
+// turned off. Models that plan in steps show here (scenarios_multi_ko.json).
 func TestFinalRoundDoesNotAskForAStepThatDependsOnItsResult(t *testing.T) {
 	replies := func() []LoopReply {
 		return []LoopReply{{Calls: []LoopCall{call("a", "weather__query", `{"region":"Busan"}`)}}, {Calls: []LoopCall{call("b", "search__web", `{"query":"indoor dates"}`)}}, {Text: "-"}}
 	}
 	rec := &recorder{}
-	if _, asks := finalAsks(t, finalRequest("if it rains in Busan find me an indoor date", ""), &loopLLM{replies: replies()}, rec.run); asks != 1 || len(rec.tools()) != 1 {
+	if _, asks := finalAsks(t, finalRequest("if Busan rains, indoor date?", ""), &loopLLM{replies: replies()}, rec.run); asks != 1 || len(rec.tools()) != 1 {
 		t.Fatalf("default: asked %d times, ran %v", asks, rec.tools())
 	}
 	rec = &recorder{}
-	if _, asks := finalAsks(t, finalRequest("if it rains in Busan find me an indoor date", LoopFinalOff), &loopLLM{replies: replies()}, rec.run); asks != 3 || len(rec.tools()) != 2 {
+	if _, asks := finalAsks(t, finalRequest("if Busan rains, indoor date?", LoopFinalOff), &loopLLM{replies: replies()}, rec.run); asks != 3 || len(rec.tools()) != 2 {
 		t.Fatalf("off: asked %d times, ran %v", asks, rec.tools())
 	}
 }
@@ -134,8 +135,8 @@ func TestFinalRoundLeavesShadowModeAlone(t *testing.T) {
 	}
 }
 
-// searchResults is search.web's result (features.go search) with n items of text.
-func searchResults(n int) map[string]any {
+// fakeSearchResults is search.web's result (features.go search) with n items of text.
+func fakeSearchResults(n int) map[string]any {
 	items := make([]any, 0, n)
 	for range n {
 		items = append(items, map[string]any{"title": "t", "snippet": "text", "url": "https://example.com", "datetime": ""})
@@ -146,11 +147,11 @@ func searchResults(n int) map[string]any {
 // chat.loop_final: search lets a web search that found enough settle the turn, and only then. Off by
 // default: a question may want to read on or search again, in words nothing here can read.
 func TestSearchSettlesTheTurnOnlyWhenAskedAndEnough(t *testing.T) {
-	blank := searchResults(3)
+	blank := fakeSearchResults(3)
 	for _, it := range blank["results"].([]any) {
 		it.(map[string]any)["snippet"] = " "
 	}
-	empty := searchResults(0)
+	empty := fakeSearchResults(0)
 	empty["status"] = "empty"
 	web := call("a", "search__web", `{"query":"q"}`)
 	for name, c := range map[string]struct {
@@ -160,17 +161,17 @@ func TestSearchSettlesTheTurnOnlyWhenAskedAndEnough(t *testing.T) {
 		call LoopCall
 		asks int
 	}{
-		"enough":                    {mode: LoopFinalSearch, msg: "q", data: searchResults(searchEnough), call: web, asks: 1},
-		"more than enough":          {mode: LoopFinalSearch, msg: "q", data: searchResults(5), call: web, asks: 1},
-		"off by default":            {mode: "", msg: "q", data: searchResults(5), call: web, asks: 2},
-		"tools":                     {mode: LoopFinalTools, msg: "q", data: searchResults(5), call: web, asks: 2},
-		"too few":                   {mode: LoopFinalSearch, msg: "q", data: searchResults(searchEnough - 1), call: web, asks: 2},
+		"enough":                    {mode: LoopFinalSearch, msg: "q", data: fakeSearchResults(searchEnough), call: web, asks: 1},
+		"more than enough":          {mode: LoopFinalSearch, msg: "q", data: fakeSearchResults(5), call: web, asks: 1},
+		"off by default":            {mode: "", msg: "q", data: fakeSearchResults(5), call: web, asks: 2},
+		"tools":                     {mode: LoopFinalTools, msg: "q", data: fakeSearchResults(5), call: web, asks: 2},
+		"too few":                   {mode: LoopFinalSearch, msg: "q", data: fakeSearchResults(searchEnough - 1), call: web, asks: 2},
 		"no text":                   {mode: LoopFinalSearch, msg: "q", data: blank, call: web, asks: 2},
 		"nothing found":             {mode: LoopFinalSearch, msg: "q", data: empty, call: web, asks: 2},
-		"a deep look":               {mode: LoopFinalSearch, msg: "q", data: searchResults(5), call: call("a", "search__web", `{"query":"q","depth":"deep"}`), asks: 2},
-		"a standard look":           {mode: LoopFinalSearch, msg: "q", data: searchResults(5), call: call("a", "search__web", `{"query":"q","depth":"standard"}`), asks: 1},
-		"a link":                    {mode: LoopFinalSearch, msg: "what does https://example.com/a say", data: searchResults(5), call: web, asks: 2},
-		"a link without its scheme": {mode: LoopFinalSearch, msg: "www.example.com 내용 뭐야", data: searchResults(5), call: web, asks: 2},
+		"a deep look":               {mode: LoopFinalSearch, msg: "q", data: fakeSearchResults(5), call: call("a", "search__web", `{"query":"q","depth":"deep"}`), asks: 2},
+		"a standard look":           {mode: LoopFinalSearch, msg: "q", data: fakeSearchResults(5), call: call("a", "search__web", `{"query":"q","depth":"standard"}`), asks: 1},
+		"a link":                    {mode: LoopFinalSearch, msg: "what does https://example.com/a say", data: fakeSearchResults(5), call: web, asks: 2},
+		"a link without its scheme": {mode: LoopFinalSearch, msg: "www.example.com 내용 뭐야", data: fakeSearchResults(5), call: web, asks: 2},
 	} {
 		t.Run(name, func(t *testing.T) {
 			req := finalRequest(c.msg, c.mode)
@@ -195,7 +196,7 @@ func TestSearchSettlesTheTurnOnlyWhenAskedAndEnough(t *testing.T) {
 func TestSearchSettlesBesideOtherTools(t *testing.T) {
 	tools := func(_ context.Context, tool string, _ map[string]any) ToolResult {
 		if tool == "search.web" {
-			return ToolResult{Tool: tool, OK: true, Data: searchResults(5)}
+			return ToolResult{Tool: tool, OK: true, Data: fakeSearchResults(5)}
 		}
 		return ToolResult{Tool: tool, OK: true, Data: map[string]any{"status": "ok"}}
 	}
@@ -213,5 +214,29 @@ func TestSearchSettlesBesideOtherTools(t *testing.T) {
 	}
 	if !slices.Contains(llm.offered[1], "search__web") {
 		t.Fatalf("offered %v", llm.offered[1])
+	}
+}
+
+// Only a short message settles in one round: a longer one may hold a step that depends on the result,
+// which a model that plans in steps has not asked for yet. Spaces and CJK letters both count.
+func TestFinalRoundNeedsAShortMessage(t *testing.T) {
+	long := "내일 제주 날씨 보고 거기 맞춰서 갈 만한 곳 검색해줘"
+	llm := &loopLLM{replies: []LoopReply{{Calls: []LoopCall{call("a", "weather__query", `{"region":"Jeju"}`)}}, {}}}
+	rec := &recorder{}
+	out, asks := finalAsks(t, finalRequest(long, ""), llm, rec.run)
+	if asks != 2 || out.ToolLoop.Stop == "final" {
+		t.Fatalf("a long message must be asked again: asked %d times, trace %+v", asks, out.ToolLoop)
+	}
+	for msg, want := range map[string]bool{
+		"오늘 서울 날씨 어때":                       true,
+		"what's the weather in Seoul today": true,
+		"今日の東京の天気は":                         true,
+		long:                                false,
+		"엔비디아 주가 보고 많이 움직였으면 왜 그런지 뉴스도 찾아줘": false,
+		"先查一下明天济州岛的天气然后根据天气搜索适合去的地方":        false,
+	} {
+		if got := shortAsk(msg); got != want {
+			t.Errorf("shortAsk(%q) = %v, want %v", msg, got, want)
+		}
 	}
 }

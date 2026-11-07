@@ -257,6 +257,7 @@ func TestFinalToolEndsTheLoopBesideTheMemorySearch(t *testing.T) {
 		llm := &latencyLLM{plans: []string{planMemory}, rounds: []LoopReply{{Calls: []LoopCall{call("a", "weather__query", `{"region":"Busan"}`)}}, {Text: "-"}},
 			roundTime: []time.Duration{fakeRound1, fakeRound2}}
 		req := latencyRequest()
+		req.Message = "camping talk and Busan weather?" // a short message: a long one is asked again (shortAsk)
 		for i, ti := range req.Tools.Enabled {
 			req.Tools.Enabled[i].Final = ti.ID == "weather.query"
 		}
