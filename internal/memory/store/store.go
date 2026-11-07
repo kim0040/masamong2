@@ -2094,11 +2094,8 @@ func (s *Store) AppendChatTurns(channelKey string, turns []ChatTurn, keep int) e
 			for _, t := range turns {
 				if !s.tidb() {
 					blocked, err := MessageBlocked(tx, t.NativeID, t.SpeakerID)
-					for _, key := range append(append([]string{}, t.SourceIDs...), t.DerivedFrom...) {
-						if blocked || err != nil {
-							break
-						}
-						blocked, err = SourceBlocked(tx, key)
+					if !blocked && err == nil {
+						blocked, err = SourcesBlocked(tx, uniqueSources(t.SourceIDs, t.DerivedFrom))
 					}
 					if err != nil {
 						return err
@@ -2116,7 +2113,7 @@ func (s *Store) AppendChatTurns(channelKey string, turns []ChatTurn, keep int) e
 					if err != nil {
 						return err
 					}
-					if err := IndexSourceRefs(tx, "chat", "chat:"+fmt.Sprint(id), append(append([]string{}, t.SourceIDs...), t.NativeID, PersonRef(t.SpeakerID))); err != nil {
+					if err := IndexSourceRefs(tx, "chat", "chat:"+fmt.Sprint(id), uniqueSources(t.SourceIDs, []string{t.NativeID, PersonRef(t.SpeakerID)})); err != nil {
 						return err
 					}
 					if len(t.DerivedFrom) > 0 {

@@ -639,17 +639,14 @@ func (s *Service) recordTurn(t TurnRecord) {
 				body["message"], body["speaker"], body["message_deleted"] = "", "", true
 				body["answer"], body["answer_preview"] = "", ""
 			}
-			for _, key := range keys {
-				blocked, err := store.SourceBlocked(tx, key)
-				if err != nil {
-					return err
-				}
-				if blocked {
-					body["hits"], body["tools"], body["plan"], body["context"], body["evidence_redacted"] = []any{}, []any{}, []any{}, []any{}, true
-					body["answer"], body["answer_preview"] = "", ""
-					keys = nil
-					break
-				}
+			blocked, err = store.SourcesBlocked(tx, keys)
+			if err != nil {
+				return err
+			}
+			if blocked {
+				body["hits"], body["tools"], body["plan"], body["context"], body["evidence_redacted"] = []any{}, []any{}, []any{}, []any{}, true
+				body["answer"], body["answer_preview"] = "", ""
+				keys = nil
 			}
 			raw, _ = json.Marshal(body)
 			if _, err := tx.Exec(`INSERT INTO turn_log(id, at, day, hour, guild_id, channel_id, outcome, tools, hits, cost_usd, latency_ms, lab, body, speaker_ref, evidence_state)

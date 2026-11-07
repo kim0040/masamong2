@@ -1337,7 +1337,7 @@ func (s *Service) ChatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		"answer_preview": clip(res.Answer, 280), "answer": clip(res.Answer, 4000), "timing_ms": res.Timing,
 		"memory_state": res.Assess.MemoryState, "intent_source": res.Intent.Source, "tools": res.Tools,
 		"plan": res.Plan.ToolPlan, "hits": hitBrief(res.Hits), "ranking": res.Retrieve["applied"],
-		"context": map[string]any{"observation_ids": sources, "attribution": in.context}}
+		"context": map[string]any{"observation_ids": uniqueStrings(sources), "attribution": in.context}}
 	if err != nil && outcome != "reacted" && outcome != "not_addressed" && outcome != "canceled" && outcome != "no_vision" { // decisions, not failures
 		body["error"] = err.Error()
 	}
@@ -1625,7 +1625,7 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		if in.sourceRefs != nil {
 			sources = *in.sourceRefs
 		}
-		sources = append(append([]string{}, sources...), in.MessageID, personRef(in.SpeakerID))
+		sources = uniqueStrings(append(append([]string{}, sources...), in.MessageID, personRef(in.SpeakerID)))
 		turns := []store.ChatTurn{{Role: "user", Speaker: in.Speaker, Content: in.Message, NativeID: in.MessageID, SpeakerID: in.SpeakerID}}
 		if in.vision != nil && in.vision.Mode == "described" {
 			// the description came from other messages too: deleting one of them removes this turn
@@ -1707,15 +1707,12 @@ func (s *Service) logTurn(in ChatInput, res chat.Result) {
 		if err != nil {
 			return err
 		}
-		for _, key := range keys {
-			blocked, err := store.SourceBlocked(tx, key)
-			if err != nil {
-				return err
-			}
-			if blocked {
-				delete(body, "retrieval")
-				break
-			}
+		blocked, err := store.SourcesBlocked(tx, keys)
+		if err != nil {
+			return err
+		}
+		if blocked {
+			delete(body, "retrieval")
 		}
 		raw, _ = json.Marshal(body)
 		if _, err := tx.Exec(`INSERT INTO traces(id,body,created_at,evidence_state) VALUES(?,?,?,1)`, id, string(raw), s.Clock.Now().UTC().Format(time.RFC3339)); err != nil {

@@ -263,6 +263,38 @@ func SourceBlocked(tx *sql.Tx, id string) (bool, error) {
 	return n > 0, err
 }
 
+// sourceChunk keeps each batched lookup well under SQLite's bound-variable limit.
+const sourceChunk = 500
+
+// SourcesBlocked is SourceBlocked for a whole list at once. A long-lived room's source list is thousands
+// of IDs, and this runs while the one write connection is held: one statement per chunk, not per ID.
+func SourcesBlocked(tx *sql.Tx, keys []string) (bool, error) {
+	for lo := 0; lo < len(keys); lo += sourceChunk {
+		chunk := keys[lo:min(len(keys), lo+sourceChunk)]
+		var n int
+		err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM privacy_tombstones WHERE kind IN ('source','message') AND source_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")+`))`, toAny(chunk)...).Scan(&n)
+		if err != nil || n > 0 {
+			return n > 0, err
+		}
+	}
+	return false, nil
+}
+
+// uniqueSources joins source lists, in first-seen order, without repeats or empty IDs.
+func uniqueSources(lists ...[]string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, list := range lists {
+		for _, id := range list {
+			if id != "" && !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+	}
+	return out
+}
+
 func MessageBlocked(tx *sql.Tx, native, account string) (bool, error) {
 	var n int
 	err := tx.QueryRow(`SELECT COUNT(*) FROM privacy_tombstones WHERE (kind='message' AND source_id=? AND source_id<>'') OR (kind='account' AND source_id=? AND source_id<>'')`, native, account).Scan(&n)
