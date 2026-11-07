@@ -1,0 +1,18 @@
+{
+  "_about": "Messages that need several tools (2026-11-07), for chat.loop_final: every sentence is written for this file. 'together' asks for independent things the model can call in one round; 'chain' needs a result before it knows the next call, which a round that settles the turn cuts off; 'search' is what MASAMONG_LOOP_FINAL=search can lose. Run it with MASAMONG_SCENARIO_FILE=testdata/scenarios_multi_ko.json and MASAMONG_LOOP_FINAL=off, tools and search, and compare problems, tool_loop.rounds and timing_ms in the report.",
+  "enable_tools": ["web.read"],
+  "scenarios": [
+    {"id": "weather_fx", "category": "together", "turns": ["오늘 서울 날씨랑 달러 환율 같이 알려줘"], "expect_all_tools": ["weather.query", "finance.fx"]},
+    {"id": "weather_stock", "category": "together", "turns": ["부산 날씨 어때? 그리고 애플 주가도 알려줘"], "expect_all_tools": ["weather.query", "finance.quote"]},
+    {"id": "fx_stock", "category": "together", "turns": ["엔화 환율이랑 테슬라 주가 둘 다 봐줘"], "expect_all_tools": ["finance.fx", "finance.quote"]},
+    {"id": "place_weather", "category": "together", "turns": ["강남역 맛집 찾아주고 오늘 강남 날씨도 알려줘"], "expect_all_tools": ["places.search", "weather.query"]},
+    {"id": "weather_then_search", "category": "chain", "turns": ["내일 제주 날씨 보고 거기 맞춰서 갈 만한 곳 검색해줘"], "expect_all_tools": ["weather.query", "search.web"]},
+    {"id": "weather_then_place", "category": "chain", "turns": ["이번 주말 부산 날씨 확인하고 비 오면 해운대 근처 실내 카페 찾아줘"], "expect_all_tools": ["weather.query"]},
+    {"id": "fx_then_search", "category": "chain", "turns": ["지금 엔화 환율 확인하고 도쿄 호텔 가격을 원화로 얼마쯤 하는지 찾아봐"], "expect_all_tools": ["finance.fx", "search.web"]},
+    {"id": "stock_then_news", "category": "chain", "turns": ["엔비디아 주가 보고 많이 움직였으면 왜 그런지 뉴스도 찾아줘"], "expect_all_tools": ["finance.quote", "search.web"]},
+    {"id": "search_then_read", "category": "search", "turns": ["오늘 코스피가 왜 움직였는지 기사 찾아서 하나 자세히 읽고 설명해줘"], "expect_all_tools": ["search.web", "web.read"]},
+    {"id": "compare_two", "category": "search", "turns": ["맥북 에어랑 맥북 프로 현재 가격 각각 찾아서 비교해줘"], "expect_all_tools": ["search.web"]},
+    {"id": "follow_a_result", "category": "search", "turns": ["올해 아카데미 작품상 뭐였는지 찾고 그 감독의 다음 작품도 찾아줘"], "expect_all_tools": ["search.web"]},
+    {"id": "one_fact", "category": "search", "turns": ["오늘 비트코인 왜 올랐대?"], "expect_tools": ["finance.quote", "search.web"]}
+  ]
+}

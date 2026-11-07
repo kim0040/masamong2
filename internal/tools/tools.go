@@ -93,7 +93,10 @@ type Builtin struct {
 	// Once: in a chat turn, a call that succeeded closes the tool for the turn's later rounds. Several
 	// calls in one round still make several (two reminders asked at once); a second call in a later
 	// round would be the same request made twice (a second confirmation card for one reminder).
-	Once   bool
+	Once bool
+	// Final: in a chat turn, a tool whose one result is the answer. A loop round whose calls are all of
+	// such tools and all found what they looked for ends the loop without asking the model again.
+	Final  bool
 	Sample map[string]any
 	Inputs []Input
 	// Providers are the provider kinds the tool calls; any one of them with a key is enough (weather:
@@ -125,13 +128,13 @@ var (
 func Builtins() []Builtin {
 	return []Builtin{
 		{ID: "memory.search", Chat: true, Implemented: true, Role: "embed", Inputs: []Input{{Name: "query", Type: "text", Required: true}}},
-		{ID: "weather.query", Feature: "weather", Chat: true, Command: true, Implemented: true, Sample: map[string]any{}, Providers: []string{"open_meteo", "kma"},
+		{ID: "weather.query", Feature: "weather", Chat: true, Command: true, Implemented: true, Final: true, Sample: map[string]any{}, Providers: []string{"open_meteo", "kma"},
 			Inputs: []Input{{Name: "region", Type: "text", Example: "Seoul · Tokyo · Paris"}, {Name: "day_offset", Type: "select", Options: days14}}},
 		{ID: "disasters.query", Feature: "disasters", Chat: true, Command: true, Implemented: true, Sample: map[string]any{}, Providers: []string{"kma"},
 			Inputs: []Input{{Name: "days", Type: "number", Min: 1, Max: 7, Example: "3"}}},
-		{ID: "finance.quote", Feature: "finance", Chat: true, Command: true, Implemented: true, Required: []string{"symbol"}, Sample: map[string]any{"symbol": "AAPL"}, Providers: []string{"finnhub"},
+		{ID: "finance.quote", Feature: "finance", Chat: true, Command: true, Implemented: true, Final: true, Required: []string{"symbol"}, Sample: map[string]any{"symbol": "AAPL"}, Providers: []string{"finnhub"},
 			Inputs: []Input{{Name: "symbol", Type: "text", Required: true, Example: "AAPL · 005930.KS"}, {Name: "krw", Type: "bool"}}},
-		{ID: "finance.fx", Feature: "finance", Chat: true, Command: true, Implemented: true, Required: []string{"base"}, Sample: map[string]any{"base": "USD"}, Providers: []string{"exchangerate"},
+		{ID: "finance.fx", Feature: "finance", Chat: true, Command: true, Implemented: true, Final: true, Required: []string{"base"}, Sample: map[string]any{"base": "USD"}, Providers: []string{"exchangerate"},
 			Inputs: []Input{{Name: "base", Type: "text", Required: true, Example: "USD"}, {Name: "symbols", Type: "text", Example: "KRW, JPY, EUR"}}},
 		{ID: "search.web", Feature: "search", Chat: true, Command: true, Implemented: true, WebContent: true, Required: []string{"query"}, Sample: map[string]any{"query": "masamong", "size": 1},
 			Providers: websearch.Kinds,
@@ -141,7 +144,7 @@ func Builtins() []Builtin {
 				{Name: "depth", Type: "select", Options: []string{"quick", "standard", "deep"}},
 				{Name: "topic", Type: "select", Options: []string{"general", "news"}},
 				{Name: "provider", Type: "provider"}}},
-		{ID: "places.search", Feature: "search", Chat: true, Command: true, Implemented: true, Required: []string{"query"}, Sample: map[string]any{"query": "강남역 맛집", "size": 3},
+		{ID: "places.search", Feature: "search", Chat: true, Command: true, Implemented: true, Final: true, Required: []string{"query"}, Sample: map[string]any{"query": "강남역 맛집", "size": 3},
 			Providers: []string{"kakao_search"},
 			Inputs:    []Input{{Name: "query", Type: "text", Required: true, Example: "강남역 맛집 · Hongdae cafe"}, {Name: "size", Type: "number", Min: 1, Max: 15, Example: "5"}}},
 		{ID: "web.read", Feature: "search", Chat: true, Implemented: true, OptIn: true, WebContent: true, Required: []string{"url"}, Sample: map[string]any{"url": "https://example.com", "max_chars": 600},
@@ -405,6 +408,7 @@ type Resolved struct {
 	Scoped      bool           `json:"scoped,omitempty"`
 	Writes      bool           `json:"writes,omitempty"`
 	Once        bool           `json:"-"` // Builtin.Once
+	Final       bool           `json:"-"` // Builtin.Final
 	Inputs      []Input        `json:"inputs,omitempty"`
 	Providers   []string       `json:"providers,omitempty"` // provider kinds, any one with a key is enough
 	Uses        string         `json:"uses,omitempty"`
@@ -428,7 +432,7 @@ func Resolve(cfg map[string]Settings, features map[string]bool) []Resolved {
 	var out []Resolved
 	for _, b := range Builtins() {
 		s := cfg[b.ID]
-		r := Resolved{ID: b.ID, Kind: "builtin", Implemented: b.Implemented, Required: b.Required, Scoped: b.Scoped, Writes: b.Writes, Once: b.Once,
+		r := Resolved{ID: b.ID, Kind: "builtin", Implemented: b.Implemented, Required: b.Required, Scoped: b.Scoped, Writes: b.Writes, Once: b.Once, Final: b.Final,
 			Description: s.Description, Route: s.Route, Defaults: s.Defaults, Limits: s.Limits, Inputs: b.Inputs, Providers: b.Providers, Uses: b.Uses, Role: b.Role, OptIn: b.OptIn, Sample: b.Sample,
 			WebContent: b.WebContent}
 		r.Enabled = boolOr(s.Enabled, !b.OptIn)

@@ -140,7 +140,9 @@ go test -c -o /tmp/app.test ./internal/application
 (cd internal/application && MASAMONG_LIVE_KEYS_DIR="$PWD/../../.private/test-keys" MASAMONG_TOOL_MODE=loop \
   MASAMONG_SCENARIO_FILE=testdata/tools_regression_ko.json MASAMONG_SCENARIO_REPORT=/tmp/ko.json \
   /tmp/app.test -test.run 'TestLiveScenarios$' -test.v -test.timeout 40m)
-#   세트: testdata/scenarios_ko.json(52), tools_regression_ko.json(59), tools_regression_en.json(59)
+#   세트: testdata/scenarios_ko.json(52), tools_regression_ko.json(59), tools_regression_en.json(59),
+#         scenarios_multi_ko.json(12, 한 메시지에 여러 도구: 함께 부르는 것과 결과를 보고 잇는 것)
+#   MASAMONG_LOOP_FINAL=off|tools|search 로 chat.loop_final을 바꿔 라운드 수와 통과 수를 비교한다
 ```
 
 **기억 품질 측정**(실제 기록, 비공개 데이터 필요)은 `tools/evaluation/memory_dims/`(러너와 `run_sweep.sh`, `agg.py`)로 한다.

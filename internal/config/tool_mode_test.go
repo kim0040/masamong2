@@ -63,3 +63,32 @@ func TestChatToolModel(t *testing.T) {
 		t.Fatal("an unknown chat.tool_model is refused")
 	}
 }
+
+func TestChatLoopFinal(t *testing.T) {
+	if (ChatSettings{}).LoopFinalMode() != "tools" || (ChatSettings{LoopFinal: "search"}).LoopFinalMode() != "search" {
+		t.Fatal("chat.loop_final default")
+	}
+	var node *SchemaNode
+	for _, f := range Schema().Fields {
+		if f.Key != "chat" {
+			continue
+		}
+		for _, g := range f.Node.Fields {
+			if g.Key == "loop_final" {
+				node = g.Node
+			}
+		}
+	}
+	if node == nil || len(node.Enum) != 3 || node.Implied != "tools" {
+		t.Fatalf("chat.loop_final schema: %+v", node)
+	}
+	d := Default("a", "/tmp/x")
+	d.Chat.LoopFinal = "always"
+	b, err := Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Parse(b); err == nil {
+		t.Fatal("an unknown chat.loop_final is refused")
+	}
+}

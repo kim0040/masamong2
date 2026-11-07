@@ -203,7 +203,7 @@ func (s *Service) runTask(ctx context.Context, r reminder, at time.Time, locale 
 		Message: r.Task, Speaker: r.OwnerName, Persona: persona, Rules: rules, AgentPrompt: doc.Memory.AgentPrompt,
 		Tools: toolset, Voice: voice, PlannerModel: "planner", LoopModel: doc.Chat.LoopRole(), ResponseModel: "response",
 		TZ: s.instanceZone(), BudgetUSD: parseUSD(doc.Memory.TurnBudgetUSD, 0.05),
-		Guard: &chat.Guard{MaxUSD: maxUSD, MaxCalls: 3}, ToolMode: s.toolMode(),
+		Guard: &chat.Guard{MaxUSD: maxUSD, MaxCalls: 3}, ToolMode: s.toolMode(), LoopFinal: doc.Chat.LoopFinalMode(),
 	})
 	if err == nil {
 		res.Answer = s.safeAnswer(res.Answer, voice, chat.ComposeSystem(voice, persona, rules, doc.Memory.AgentPrompt))

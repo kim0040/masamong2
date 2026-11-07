@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +43,13 @@ type Memory interface {
 	Search(ctx context.Context, req engine.SearchRequest) (search.Result, error)
 }
 
+// QueryWarmer is optional on a Memory: it starts the embedding of a query the turn's memory search may
+// ask for, so the search finds it done or joins it. It spends none of the turn's calls, keeps what it
+// paid on the books and fails silently (the search makes its own attempt). Canceling ctx gives it up.
+type QueryWarmer interface {
+	WarmQuery(ctx context.Context, query string)
+}
+
 // ToolRunner executes one product Action for the turn (never memory.search).
 type ToolRunner func(ctx context.Context, tool string, params map[string]any) ToolResult
 
@@ -77,6 +85,8 @@ type Request struct {
 	MaxHistory int
 	// ToolMode is config chat.tool_mode: planner ("" too), shadow or loop (toolloop.go).
 	ToolMode string
+	// LoopFinal is config chat.loop_final: when the loop stops without asking once more (toolloop.go).
+	LoopFinal string
 	// RoomMemory is what the room remembers that bears on this turn (roommemory.go); nil for none.
 	RoomMemory *RoomMemory
 	// Images are the pictures the member called the bot with, for an answer model that takes them.
@@ -161,6 +171,8 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 	for _, e := range req.Earlier {
 		others = others.without(e.Tool)
 	}
+	warm := rt.startWarm(ctx, req, msg)
+	defer warm.wait()
 	// The tool loop (modes loop and shadow) runs beside the planner. In loop mode it chooses the tools,
 	// and the planner's menu shrinks to memory.search: listing only the tools that are on is how the
 	// planner prompt already varies, so its text stays the evaluated one.
@@ -179,7 +191,27 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 		}
 		return planRaw
 	}
+	readPlan := func(raw string, tools Toolset) (Plan, Assessment, search.Intent) {
+		plan := ParsePlan(raw)
+		assessed := Assess(v, plan, tools, req.MemoryOn, true)
+		planned, _ := plan.Intent()
+		if assessed.Time != nil {
+			planned.Time = assessed.Time
+		}
+		return plan, assessed, planned
+	}
 	planRaw := planOnce(plannerTools)
+	plan, assessed, intent := readPlan(planRaw, plannerTools)
+	canSearch := rt.Memory != nil && len(req.Rooms) > 0
+	if assessed.MemoryState != "search" || !canSearch {
+		warm.stop() // a plan made again later searches without it
+	}
+	// the plan is all the memory search needs: while the loop still runs it starts now, beside the loop
+	var early *earlyMemory
+	defer func() { early.discard(req.Guard) }()
+	if assessed.MemoryState == "search" && canSearch && loop.running() {
+		early = rt.startEarlyMemory(ctx, req, msg, intent, res.CostUSD, loop, nowT)
+	}
 	loopTools, loopRan := loop.wait()
 	if loop != nil {
 		res.ToolLoop = loop.trace
@@ -189,16 +221,17 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 			// the model takes no tools (or failed): the planner chooses the tools of this turn
 			plannerTools = others
 			planRaw = planOnce(plannerTools)
+			plan, assessed, intent = readPlan(planRaw, plannerTools)
+			if early != nil && (assessed.MemoryState != "search" || !reflect.DeepEqual(intent, early.intent)) {
+				// the second plan wants another search or none: what the first one found is not used
+				res.CostUSD += early.discard(req.Guard)
+				early = nil
+			}
 		}
 	}
-	res.Plan = ParsePlan(planRaw)
+	res.Plan, res.Assess = plan, assessed
 	if !res.Plan.Parsed {
 		slog.Default().WarnContext(ctx, "chat: planner response rejected", "parse_state", res.Plan.ParseState)
-	}
-	res.Assess = Assess(v, res.Plan, plannerTools, req.MemoryOn, true)
-	intent, _ := res.Plan.Intent()
-	if res.Assess.Time != nil {
-		intent.Time = res.Assess.Time
 	}
 	res.Intent = intent
 	t1 := time.Now()
@@ -207,7 +240,8 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 		res.Tools = append(res.Tools, loopTools...)
 	}
 	// the planner's tools and the memory search run at once (runSteps): each is checked against the
-	// turn's limits in plan order (the memory search last); results keep the plan's order
+	// turn's limits in plan order (the memory search last, unless it started ahead of the loop's end);
+	// results keep the plan's order
 	planned := make([]*ToolResult, len(res.Assess.Steps))
 	var steps []step
 	var toolsEnd time.Time
@@ -243,14 +277,19 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 			planned[i] = &ToolResult{Tool: st.Tool, OK: false, Status: "needs_input", Error: "missing: " + strings.Join(st.Missing, ",")}
 		}
 	}
-	searchMemory := res.Assess.MemoryState == "search" && rt.Memory != nil && len(req.Rooms) > 0
+	searchMemory := res.Assess.MemoryState == "search" && canSearch
 	var mem memoryRun
-	if searchMemory {
+	if searchMemory && early == nil {
 		remaining := req.BudgetUSD - res.CostUSD
 		steps = append(steps, step{decide: func() bool { return req.Guard.AllowMoneyContext(ctx, "memory.search") },
 			run: func() { mem = rt.searchMemory(ctx, req, msg, intent, remaining, nowT) }})
 	}
 	runSteps(ctx, req.Guard, steps)
+	if early != nil {
+		mem = early.wait()
+		early = nil
+	}
+	warm.stop()
 	for _, r := range planned {
 		if r != nil {
 			res.Tools = append(res.Tools, *r)
@@ -379,6 +418,96 @@ type memoryRun struct {
 	firstRerank float64       // the reranker's cost of the first search, when it was searched again
 	intent      search.Intent // the intent the hits were found with
 	ms          int
+}
+
+// earlyMemory is a memory search started from the plan while the tool loop still runs.
+type earlyMemory struct {
+	intent search.Intent
+	cancel context.CancelFunc
+	done   chan struct{}
+	mem    memoryRun
+}
+
+// startEarlyMemory starts the search the plan asked for. Its admission is the one it has at its usual
+// place (the money cap only, waiting for the models in flight), so under a money cap it starts once the
+// model in flight has ended. spent is what the turn's models cost so far (the planner's): the search's own
+// budget counts the loop for what it cost or, while the loop runs, for what its rounds can still cost.
+func (rt *Runtime) startEarlyMemory(ctx context.Context, req Request, msg string, intent search.Intent, spent float64, loop *loopRun, nowT time.Time) *earlyMemory {
+	ctx, cancel := context.WithCancel(ctx)
+	e := &earlyMemory{intent: intent, cancel: cancel, done: make(chan struct{})}
+	go func() {
+		defer close(e.done)
+		if req.Guard.AllowMoneyContext(ctx, "memory.search") {
+			e.mem = rt.searchMemory(ctx, req, msg, intent, req.BudgetUSD-spent-loop.costAhead(spent), nowT)
+		}
+	}()
+	return e
+}
+
+// wait is the search's result, once it has ended.
+func (e *earlyMemory) wait() memoryRun {
+	<-e.done
+	e.cancel()
+	return e.mem
+}
+
+// discard gives the search up and waits for it to end. It returns what it spent by then, also noted on
+// the guard. A nil search is no search.
+func (e *earlyMemory) discard(g *Guard) float64 {
+	if e == nil {
+		return 0
+	}
+	e.cancel()
+	mem := e.wait()
+	if !mem.ran {
+		return 0
+	}
+	rerank, _ := mem.sr.Trace["rerank_cost_usd"].(float64)
+	g.Note(rerank)
+	return rerank + mem.firstRerank
+}
+
+// warmRun is the embedding of the turn's message started ahead of the plan (QueryWarmer).
+type warmRun struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+}
+
+// startWarm starts it where the turn's memory search may run: memory on for the channel and a room to
+// search, the conditions the search itself has. The message goes to the embedding provider the search
+// would send it to, also on a turn whose plan then searches nothing.
+func (rt *Runtime) startWarm(ctx context.Context, req Request, msg string) *warmRun {
+	warmer, ok := rt.Memory.(QueryWarmer)
+	if !ok || !req.MemoryOn || len(req.Rooms) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	w := &warmRun{cancel: cancel, done: make(chan struct{})}
+	go func() {
+		defer close(w.done)
+		defer func() {
+			if p := recover(); p != nil { // it runs on its own goroutine, out of reach of the turn's recover
+				_ = crash.Error(nil, "chat query embedding", p)
+			}
+		}()
+		warmer.WarmQuery(ctx, msg)
+	}()
+	return w
+}
+
+// stop gives the embedding up without waiting for it; a search that joined it makes its own.
+func (w *warmRun) stop() {
+	if w != nil {
+		w.cancel()
+	}
+}
+
+// wait gives it up and returns when it has ended, so nothing of the turn runs after the turn.
+func (w *warmRun) wait() {
+	if w != nil {
+		w.cancel()
+		<-w.done
+	}
 }
 
 // searchMemory searches the turn's rooms. When the planner's time window finds nothing it searches

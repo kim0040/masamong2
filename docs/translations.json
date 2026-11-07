@@ -37,8 +37,8 @@
       "docs/wiki/도구와-한도.md": "c7d1947fed82333b"
     },
     "wiki/동시-처리와-성능": {
-      "docs/wiki/Concurrency-and-Performance.md": "02d9db98c722d91b",
-      "docs/wiki/동시-처리와-성능.md": "b5c651c6f5b0664c"
+      "docs/wiki/Concurrency-and-Performance.md": "012e3c904bfc0fd3",
+      "docs/wiki/동시-처리와-성능.md": "e43d40eb5e14517a"
     },
     "wiki/릴리스-체크리스트": {
       "docs/wiki/Release-Checklist.md": "1818255ecae42015",
@@ -53,8 +53,8 @@
       "docs/wiki/보류-중인-결정.md": "82e4b3bec4270bcd"
     },
     "wiki/보안과-개인정보": {
-      "docs/wiki/Security-and-Privacy.md": "4958171424490f7d",
-      "docs/wiki/보안과-개인정보.md": "199517a030d3f348"
+      "docs/wiki/Security-and-Privacy.md": "d8cf40c7d93e8835",
+      "docs/wiki/보안과-개인정보.md": "626a3981635abef1"
     },
     "wiki/부하-테스트와-장기-운영": {
       "docs/wiki/Load-Testing-and-Long-Running.md": "5c947bb91af06284",
@@ -65,8 +65,8 @@
       "docs/wiki/빠른-시작.md": "8f97bbe7ac9959e6"
     },
     "wiki/설정-레퍼런스": {
-      "docs/wiki/Configuration-Reference.md": "97c86031795c8d53",
-      "docs/wiki/설정-레퍼런스.md": "6b85d432e1599425"
+      "docs/wiki/Configuration-Reference.md": "27c03ad3c5a18540",
+      "docs/wiki/설정-레퍼런스.md": "f181031f3a3a72c9"
     },
     "wiki/설치": {
       "docs/wiki/Installation.md": "0fadd96bae14101a",

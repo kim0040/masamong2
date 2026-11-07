@@ -38,6 +38,8 @@ type liveScenario struct {
 	ForbidTools []string `json:"forbid_tools"`
 	ExpectAsk   bool     `json:"expect_ask"`
 	FailTools   []string `json:"fail_tools"`
+	// ExpectAllTools must all be planned or run (a message that asks for several things).
+	ExpectAllTools []string `json:"expect_all_tools"`
 }
 
 type scenarioCommand struct {
@@ -169,6 +171,11 @@ func TestLiveScenarios(t *testing.T) {
 	}
 	if mode := os.Getenv("MASAMONG_TOOL_MODE"); mode != "" {
 		ops = append(ops, map[string]any{"path": []any{"chat", "tool_mode"}, "value": mode})
+	}
+	// MASAMONG_LOOP_FINAL (tools | search | off) sets chat.loop_final, to compare the rounds it saves
+	// with what the answers lose
+	if final := os.Getenv("MASAMONG_LOOP_FINAL"); final != "" {
+		ops = append(ops, map[string]any{"path": []any{"chat", "loop_final"}, "value": final})
 	}
 	// MASAMONG_LIVE_RESPONSE_MODEL swaps the answer model on the same host, to compare models on the
 	// same sentences
@@ -356,6 +363,11 @@ func checkScenario(o scenarioOutcome, res application.ChatResultForTest, sc live
 			o.Problems = append(o.Problems, fmt.Sprintf("expected one of %v", sc.ExpectTools))
 		}
 	}
+	for _, tool := range sc.ExpectAllTools {
+		if !used(tool) {
+			o.Problems = append(o.Problems, "expected "+tool+" too")
+		}
+	}
 	if sc.NoTool || sc.ExpectAsk {
 		for _, tool := range o.Tools {
 			if tool != "memory.search" {
@@ -442,7 +454,7 @@ func TestScenarioFilesAreWellFormed(t *testing.T) {
 				t.Fatalf("%s: scenario %q (duplicate or no turns)", f, sc.ID)
 			}
 			ids[sc.ID] = true
-			named := append(append(append(append([]string{}, sc.ExpectTools...), sc.ForbidTools...), sc.FailTools...), suite.EnableTools...)
+			named := append(append(append(append(append([]string{}, sc.ExpectTools...), sc.ExpectAllTools...), sc.ForbidTools...), sc.FailTools...), suite.EnableTools...)
 			for tool := range sc.Params {
 				named = append(named, tool)
 			}

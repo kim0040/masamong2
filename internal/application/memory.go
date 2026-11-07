@@ -1252,9 +1252,26 @@ func (s *Service) chatOpen(in ChatInput) error {
 
 // gatedMemory applies memory.search's tool limits to chat-time memory lookups.
 type gatedMemory struct {
-	s   *Service
-	eng *engine.Engine
-	inv *action.Invoker
+	s      *Service
+	eng    *engine.Engine
+	inv    *action.Invoker
+	noWarm bool // the message's embedding waits for the plan (warmsQueries)
+}
+
+// WarmQuery starts the embedding of the turn's message ahead of the plan (chat.QueryWarmer). It takes
+// nothing from memory.search's tool limits: only a search does.
+func (g gatedMemory) WarmQuery(ctx context.Context, query string) {
+	if !g.noWarm {
+		g.eng.WarmQuery(ctx, query)
+	}
+}
+
+// warmsQueries reports whether a turn may embed its message before the plan says it needs it. Not in a
+// dry-run or practice turn, which have no reply to hurry; not on a provider with a daily_limit, because most
+// of these calls end up not needed and would use up a limit the operator set for the calls that are; and not
+// for a person who withdrew consent to being remembered, whose words leave only when a search needs them.
+func (s *Service) warmsQueries(doc config.Document, in ChatInput) bool {
+	return !in.DryRun && !s.practice && doc.Providers[doc.Models["embed"].Provider].DailyLimit == 0 && s.MemoryAllowed(in.SpeakerID)
 }
 
 func (g gatedMemory) Search(ctx context.Context, req engine.SearchRequest) (search.Result, error) {
@@ -1547,7 +1564,7 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	if note := s.roomStyleRules(in.GuildID, in.ChannelID, pol, voice.Pack); note != "" && !in.DryRun {
 		rules = strings.TrimSpace(rules + "\n\n" + note)
 	}
-	mem := gatedMemory{s: s, eng: eng, inv: &action.Invoker{Via: "chat", GuildID: in.GuildID, ChannelID: in.ChannelID, UserID: in.SpeakerID}}
+	mem := gatedMemory{s: s, eng: eng, inv: &action.Invoker{Via: "chat", GuildID: in.GuildID, ChannelID: in.ChannelID, UserID: in.SpeakerID}, noWarm: !s.warmsQueries(doc, in)}
 	rt := &chat.Runtime{LLM: llm, Memory: mem, Tools: s.chatTool(in, voice)}
 	persona := draftOr(in, in.DraftStyle, s.personaText(personaFor(in, pol.PersonaRef)))
 	// room memory (P4-3 roommemory_read.go) and explicit memory requests (P4-4 explicit.go)
@@ -1575,7 +1592,7 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		Ranking: rankingFor(in.Ranking, s.retrieveMode()), PlannerModel: "planner", LoopModel: doc.Chat.LoopRole(), ResponseModel: "response", TZ: tz,
 		BudgetUSD: parseUSD(doc.Memory.TurnBudgetUSD, 0.05), Earlier: in.Earlier,
 		Guard:      &chat.Guard{MaxUSD: parseUSD(doc.Limits.PerRequestBudgetUSD, 0), MaxCalls: doc.Limits.MaxExternalAttempts},
-		MaxHistory: maxHistory, ToolMode: s.toolMode(), RoomMemory: roomMemory, Images: images,
+		MaxHistory: maxHistory, ToolMode: s.toolMode(), LoopFinal: doc.Chat.LoopFinalMode(), RoomMemory: roomMemory, Images: images,
 	})
 	res.CostUSD += conv.costUSD + explicitCost + visionCost
 	if in.vision != nil && in.vision.Message != "" {
