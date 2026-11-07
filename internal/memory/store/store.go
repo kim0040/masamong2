@@ -2078,7 +2078,9 @@ type ChatTurn struct {
 	// SpeakerID is the account a user turn came from: withdrawing memory consent removes that
 	// person's turns (DeleteAccountMessages), in channels that store messages and in those that don't.
 	SpeakerID string
-	// SourceIDs are the messages and earlier replies read to produce this turn.
+	// SourceIDs are the messages and earlier turns read to produce this turn. An earlier turn is a link
+	// (ChatLink), not a copy of its sources, so the list stays the size of what was read; ChatLineage
+	// follows the links when a source changes. Rows from earlier releases hold a flat list instead.
 	SourceIDs []string
 	// DerivedFrom are other messages part of this turn's text was made from (the description of a
 	// picture in the message a user turn replied to). Deleting or editing one of them removes the turn,
@@ -2113,11 +2115,11 @@ func (s *Store) AppendChatTurns(channelKey string, turns []ChatTurn, keep int) e
 					if err != nil {
 						return err
 					}
-					if err := IndexSourceRefs(tx, "chat", "chat:"+fmt.Sprint(id), uniqueSources(t.SourceIDs, []string{t.NativeID, PersonRef(t.SpeakerID)})); err != nil {
+					if err := IndexSourceRefs(tx, "chat", ChatLink(id), uniqueSources(t.SourceIDs, []string{t.NativeID, PersonRef(t.SpeakerID)})); err != nil {
 						return err
 					}
 					if len(t.DerivedFrom) > 0 {
-						if err := IndexSourceRefs(tx, "chat_from", "chat:"+fmt.Sprint(id), t.DerivedFrom); err != nil {
+						if err := IndexSourceRefs(tx, "chat_from", ChatLink(id), t.DerivedFrom); err != nil {
 							return err
 						}
 					}
@@ -2139,13 +2141,14 @@ func (s *Store) AppendChatTurns(channelKey string, turns []ChatTurn, keep int) e
 	return nil
 }
 
-// RecentChatTurns returns the last n turns of a channel in order.
+// RecentChatTurns returns the last n turns of a channel in order. SourceIDs is what reading the turn
+// means for a turn built on it: a link to it, its message and its speaker.
 func (s *Store) RecentChatTurns(channelKey string, n int) ([]ChatTurn, error) {
 	if s.DB.HasPendingEvents("source-change") {
 		return nil, nil
 	}
 
-	rows, err := s.DB.DB.Query(`SELECT role,speaker,content,created_at,native_id,speaker_id,COALESCE((SELECT json_group_array(source_id) FROM evidence_refs WHERE holder_kind='chat' AND holder_id='chat:'||t.id),'[]') FROM chat_turns t WHERE channel_key=? ORDER BY id DESC LIMIT ?`, channelKey, n)
+	rows, err := s.DB.DB.Query(`SELECT id,role,speaker,content,created_at,native_id,speaker_id FROM chat_turns WHERE channel_key=? ORDER BY id DESC LIMIT ?`, channelKey, n)
 	if err != nil {
 		return nil, err
 	}
@@ -2153,12 +2156,11 @@ func (s *Store) RecentChatTurns(channelKey string, n int) ([]ChatTurn, error) {
 	var out []ChatTurn
 	for rows.Next() {
 		var t ChatTurn
-		var refs string
-		if err := rows.Scan(&t.Role, &t.Speaker, &t.Content, &t.CreatedAt, &t.NativeID, &t.SpeakerID, &refs); err != nil {
+		var id int64
+		if err := rows.Scan(&id, &t.Role, &t.Speaker, &t.Content, &t.CreatedAt, &t.NativeID, &t.SpeakerID); err != nil {
 			return nil, err
 		}
-		_ = json.Unmarshal([]byte(refs), &t.SourceIDs)
-		t.SourceIDs = append(t.SourceIDs, t.NativeID, PersonRef(t.SpeakerID))
+		t.SourceIDs = uniqueSources([]string{ChatLink(id), t.NativeID, PersonRef(t.SpeakerID)})
 		out = append(out, t)
 	}
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {

@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"fmt"
+	"slices"
 	"testing"
 )
 
@@ -122,5 +123,96 @@ func TestRepeatedSourcesIndexTheSameAsUniqueOnes(t *testing.T) {
 	var n int
 	if err := st.DB.DB.QueryRow(`SELECT COUNT(*) FROM chat_turns WHERE channel_key='late'`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("a repeated list with a tombstoned ID was kept: %d %v", n, err)
+	}
+}
+
+// A link to a chat turn that is gone blocks like a tombstone: its sources can no longer be promised to be
+// found. A link to a kept turn does not.
+func TestALinkToAGoneTurnBlocks(t *testing.T) {
+	st := openStore(t)
+	if err := st.AppendChatTurns("c", []ChatTurn{{Role: "user", Content: "q", NativeID: "m", SpeakerID: "u"}}, 40); err != nil {
+		t.Fatal(err)
+	}
+	turns, err := st.RecentChatTurns("c", 1)
+	if err != nil || len(turns) != 1 {
+		t.Fatalf("%d %v", len(turns), err)
+	}
+	check := func(keys []string, want bool) {
+		t.Helper()
+		err := st.DB.WithWriter(func(tx *sql.Tx) error {
+			blocked, err := SourcesBlocked(tx, keys)
+			if blocked != want {
+				t.Errorf("%v: blocked %v, want %v", keys, blocked, want)
+			}
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	check(turns[0].SourceIDs, false)
+	check([]string{ChatLink(999999)}, true)
+	check([]string{"chat:not-a-number"}, true)
+	if _, err := st.DB.DB.Exec(`DELETE FROM chat_turns`); err != nil {
+		t.Fatal(err)
+	}
+	check(turns[0].SourceIDs, true)
+}
+
+// The walk follows links and the "made from" kind, finds nothing for an unknown or empty list, and stops
+// at a cycle (none is written, but a walk that could not end would hold the write connection).
+func TestChatLineageClosesTheLinks(t *testing.T) {
+	st := openStore(t)
+	insert := func(kind, holder string, sources ...string) {
+		t.Helper()
+		err := st.DB.WithWriter(func(tx *sql.Tx) error {
+			for _, source := range sources {
+				if _, err := tx.Exec(`INSERT OR IGNORE INTO evidence_refs(source_id,holder_kind,holder_id) VALUES(?,?,?)`, source, kind, holder); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert("chat", "chat:1", "msg-a", "shared")
+	insert("chat", "chat:2", "chat:1", "msg-b")
+	insert("chat", "chat:3", "chat:2")
+	insert("chat_from", "chat:4", "picture")
+	insert("chat", "chat:5", "chat:4")
+	insert("chat", "chat:6", "unrelated")
+	insert("turn_ev", "turn-1", "chat:3") // a turn record is found by the keys, it is not a link to walk
+	insert("chat", "chat:7", "chat:8")
+	insert("chat", "chat:8", "chat:7", "cycle")
+	cases := []struct {
+		keys []string
+		want []string
+	}{
+		{[]string{"msg-a"}, []string{"chat:1", "chat:2", "chat:3"}},
+		{[]string{"msg-b"}, []string{"chat:2", "chat:3"}},
+		{[]string{"picture"}, []string{"chat:4", "chat:5"}},
+		{[]string{"cycle"}, []string{"chat:7", "chat:8"}},
+		{[]string{"nobody-read-this"}, nil},
+		{nil, nil},
+	}
+	for _, c := range cases {
+		var got []string
+		err := st.DB.WithWriter(func(tx *sql.Tx) error {
+			var err error
+			got, err = ChatLineage(tx, c.keys)
+			if err != nil {
+				return err
+			}
+			return TombstoneSources(tx, got, now())
+		})
+		if err != nil {
+			t.Fatalf("%v: %v", c.keys, err)
+		}
+		slices.Sort(got)
+		if !slices.Equal(got, c.want) {
+			t.Errorf("%v: got %v, want %v", c.keys, got, c.want)
+		}
 	}
 }

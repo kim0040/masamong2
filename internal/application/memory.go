@@ -1489,6 +1489,9 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 			history = append(history, chat.Turn{Role: t.Role, Speaker: t.Speaker, Content: t.Content, At: at})
 			if in.sourceRefs != nil {
 				*in.sourceRefs = append(*in.sourceRefs, t.SourceIDs...)
+				if t.Role == "user" && t.NativeID != "" {
+					*in.sourceRefs = append(*in.sourceRefs, corpus.DiscordLiveObservationID(room, t.NativeID))
+				}
 			}
 		}
 	}
@@ -1625,7 +1628,7 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		if in.sourceRefs != nil {
 			sources = *in.sourceRefs
 		}
-		sources = uniqueStrings(append(append([]string{}, sources...), in.MessageID, personRef(in.SpeakerID)))
+		sources = uniqueStrings(append(append(append([]string{}, sources...), lookedUp(res)...), in.MessageID, personRef(in.SpeakerID)))
 		turns := []store.ChatTurn{{Role: "user", Speaker: in.Speaker, Content: in.Message, NativeID: in.MessageID, SpeakerID: in.SpeakerID}}
 		if in.vision != nil && in.vision.Mode == "described" {
 			// the description came from other messages too: deleting one of them removes this turn
@@ -1641,6 +1644,19 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		noteTurnTiming(&res, "post_send", int(time.Since(deliverEnd).Milliseconds()))
 	}
 	return res, nil
+}
+
+// lookedUp lists the messages a reply retrieved (its hits and tool results): the reply is built on them as
+// much as on the conversation, so deleting one takes the reply out of the chat context. Messages, not
+// leaves: deleting a message tombstones the leaf that held it, the leaf's ID comes back when the room is
+// cut again, and a later reply on the new leaf has read nothing deleted.
+func lookedUp(res chat.Result) []string {
+	raw, _ := json.Marshal(map[string]any{"hits": hitBrief(res.Hits), "tools": res.Tools})
+	var body any
+	_ = json.Unmarshal(raw, &body)
+	var ids []string
+	walkEvidence(body, func(_ map[string]any, found []string) { ids = append(ids, found...) })
+	return ids
 }
 
 // toolFailureToReplay keeps a failed tool exchange from becoming an answer the bot cites again in an

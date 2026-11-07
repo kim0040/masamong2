@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,6 +14,8 @@ import (
 
 	"masamong/internal/action"
 	"masamong/internal/application"
+	"masamong/internal/config"
+	"masamong/internal/memory/corpus"
 	"masamong/internal/memory/engine"
 	"masamong/internal/memory/store"
 )
@@ -293,5 +297,131 @@ func TestATurnKeepsEachSourceOnce(t *testing.T) {
 			t.Fatalf("%q is repeated in %s", id, strings.Join(ids, " "))
 		}
 		seen[id] = true
+	}
+}
+
+// A reply made from a memory the bot looked up is built on that memory: deleting the message takes the
+// reply out of the chat context, and every reply after it.
+func TestDeletingARetrievedMessageTakesTheReplyBuiltOnIt(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/embeddings":
+			var req struct {
+				Input []string `json:"input"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&req)
+			data := make([]map[string]any, len(req.Input))
+			for i := range req.Input {
+				data[i] = map[string]any{"index": i, "embedding": []float32{1, 0, 0, 0, 0, 0, 0, 0}}
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": data, "usage": map[string]any{"prompt_tokens": 8, "cost": 0.000001}})
+		case "/chat/completions":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": `{"memory_requirement":"required","tool_plan":[{"tool_name":"memory.search","parameters":{"query":"canary"}}]}`}, "finish_reason": "stop"}},
+				"usage":   map[string]any{"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.00001},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("FAKE_OR_KEY", "k")
+	svc := embedSvc(t, t.TempDir(), srv.URL)
+	applyDoc(t, svc, func(d *config.Document) {
+		d.Models["planner"] = config.Model{Provider: "openrouter", Model: "fake/plan"}
+		d.Models["response"] = config.Model{Provider: "openrouter", Model: "fake/answer"}
+		d.Providers["openmeteo"] = config.Provider{Kind: config.KindOpenMeteo, Disabled: true}
+		d.Memory.Retrieve = "auto"
+		d.Chat.ToolMode = "planner"
+	})
+	eng, err := svc.MemoryEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now().Add(-48 * time.Hour)
+	if _, err := eng.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", MessageID: "secret", AuthorID: "alice", AuthorName: "alice", Content: "the canary lives at number nine", At: start}); err != nil {
+		t.Fatal(err)
+	}
+	// enough newer lines that the message is not one of the recent lines every reply reads anyway
+	for i := range 24 {
+		if _, err := eng.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", MessageID: fmt.Sprintf("filler%d", i), AuthorID: "bob", AuthorName: "bob", Content: fmt.Sprintf("unrelated chatter %d", i), At: start.Add(time.Duration(i+1) * time.Minute)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc.MemoryPassForTest(context.Background())
+	if _, err := eng.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	res, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "q1", Message: "where does the canary live?", Speaker: "bob", SpeakerID: "bob"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := false
+	for _, h := range res.Hits {
+		for _, id := range h.ObservationIDs {
+			seen = seen || id == corpus.DiscordLiveObservationID(engine.RoomKey("g", "c"), "secret")
+		}
+	}
+	if !seen {
+		t.Fatalf("the reply did not retrieve the message (state %s): %+v", res.RagState, res.Hits)
+	}
+	later := chainTurn(t, svc, "c", "n1", "bob")
+	if n := assistantTurns(t, svc, "c"); n != 2 {
+		t.Fatalf("assistant turns: %d, want 2", n)
+	}
+	if err := svc.MessagesDeleted("g", "c", []string{"secret"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.DrainRedactions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if answerKept(t, svc, res.TurnID) {
+		t.Fatal("the turn history keeps the reply that retrieved the deleted message")
+	}
+	if n := assistantTurns(t, svc, "c"); n != 0 {
+		t.Fatalf("%d replies built on the retrieved message are still in the chat context", n)
+	}
+	if answerKept(t, svc, later) {
+		t.Fatal("the turn history keeps a reply built on the retrieved message")
+	}
+
+	// the leaf that held the message is cut again; a reply on what remains of it has read nothing deleted
+	svc.MemoryPassForTest(context.Background())
+	if _, err := eng.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	res, err = svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "q2", Message: "any unrelated chatter?", Speaker: "bob", SpeakerID: "bob"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Hits) == 0 {
+		t.Fatalf("no hits after the leaves were cut again (state %s): this proves nothing", res.RagState)
+	}
+	if n := assistantTurns(t, svc, "c"); n != 1 {
+		t.Fatalf("a reply on the remaining messages was refused: %d replies kept", n)
+	}
+}
+
+// The lists stay the size of what a turn read: a reply names the turns it read, not everything they read.
+func TestSourceListsStopGrowingWithTheConversation(t *testing.T) {
+	svc := chainSvc(t)
+	var last string
+	sizes := map[int]int{}
+	links := map[int]int{}
+	for i := 1; i <= 90; i++ {
+		last = chainTurn(t, svc, "c", fmt.Sprintf("n%d", i), fmt.Sprintf("u%d", i%5))
+		if i == 30 || i == 60 || i == 90 {
+			sizes[i] = len(chainBody(t, svc, last))
+			links[i] = chainCount(t, svc, `SELECT COUNT(*) FROM evidence_links`)
+		}
+	}
+	// which lines are the recent ones varies a little between runs when they share a timestamp
+	if sizes[30] == 0 || sizes[90] > sizes[30]+sizes[30]/2 {
+		t.Fatalf("source list of one turn at 30, 60, 90 turns: %v", sizes)
+	}
+	// each turn adds a like amount to the index, however long the room has talked
+	early, late := links[60]-links[30], links[90]-links[60]
+	if late > early+early/3 {
+		t.Fatalf("index entries added by turns 31-60: %d, by turns 61-90: %d", early, late)
 	}
 }

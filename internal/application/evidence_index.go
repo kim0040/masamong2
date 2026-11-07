@@ -549,6 +549,9 @@ func (s *Service) processRedactions(ctx context.Context, db *storage.Store, jobs
 	for _, l := range leaves {
 		keys[l] = true
 	}
+	if err := s.closeChatLineage(ctx, db, keys); err != nil {
+		return err
+	}
 	words := newTextMatcher(uniqueStrings(texts))
 	match := func(raw string) bool {
 		var v any
@@ -572,6 +575,32 @@ func (s *Service) processRedactions(ctx context.Context, db *storage.Store, jobs
 		return err
 	}
 	return s.redactSmallTables(db, keys, match, editedOnly)
+}
+
+// closeChatLineage adds to keys every chat turn built on them, and tombstones those turns in the same
+// write transaction: a reply committed before it is found by the walk, one committed after it links to a
+// tombstoned turn and refuses itself. So this comes before anything looks up holders by these keys.
+func (s *Service) closeChatLineage(ctx context.Context, db *storage.Store, keys map[string]bool) error {
+	if !db.IsSQLite() {
+		return nil
+	}
+	all := make([]string, 0, len(keys))
+	for k := range keys {
+		all = append(all, k)
+	}
+	return db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+		lineage, err := store.ChatLineage(tx, all)
+		if err != nil {
+			return err
+		}
+		if err := store.TombstoneSources(tx, lineage, s.nowString()); err != nil {
+			return err
+		}
+		for _, id := range lineage {
+			keys[id] = true
+		}
+		return nil
+	})
 }
 
 // redactTurnBody clears the fields of a turn body that match and marks it.
