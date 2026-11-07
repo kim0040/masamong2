@@ -36,7 +36,7 @@
 - 요약 호출은 생각을 끕니다(`Effort: "none"`). 샌드박스(`experimental/rag-leaf-parent/engine.py`)도 같이 바꿨습니다.
 - 모든 채팅 호출: 생각을 요청했는데 본문·도구 호출 없이 `finish_reason=length`로 끝나면, 생각 없이 한 번 더 묻고 두 호출 비용을 합칩니다(`internal/providers/openai/openai.go`, `TestThinkingThatUsesTheWholeBudgetIsAskedAgainWithout`).
 - 빈 답은 대체문으로 저장하지 않고 다음 패스에 다시 요약합니다. 호출 기록에는 `empty`로 남기고, 모든 답이 비면 패스가 `provider_error`로 멈춥니다(`TestEmptySummaryIsLeftForTheNextPass`). 캐시에 남은 대체문은 무시되고, 진짜 요약이 나오면 덮어씁니다.
-- 한 번만 도는 마이그레이션이 대체문 요약과 그 캐시를 지워 다음 패스가 다시 요약하게 합니다(`migrateFallbackSummaries`, `TestFallbackSummariesAreClearedOnce`).
+- 처음에는 한 번만 도는 마이그레이션이 대체문 요약을 지워 다음 패스가 다시 요약하게 했습니다. 2026-11-08에 이 삭제를 없앴습니다. DB를 열 때 저장된 요약과 벡터를 지우면 그 조각을 모두 다시 요약하고 다시 임베딩하게 되고, 비용은 업그레이드한 사람이 모르는 사이에 나갑니다. "어떤 릴리스·재시작·업그레이드·설정 변경도 저장된 기록을 다시 요약하거나 다시 임베딩하거나 일괄로 고치지 않는다"는 규칙에 어긋납니다. 이제 표식만 남기고, 대체문 요약은 그 조각이 실제로 바뀔 때까지 그대로 둡니다. 그때까지 요약 줄기의 효과가 없는 조각이 남는 것은 받아들입니다(`migrateFallbackSummaries`, `TestFallbackSummariesAreNotCleared`, `TestOpeningAnOlderReleasesStoreReprocessesNothing`). 공개 릴리스는 v1.0.0부터 이 표식을 남겼으므로, 삭제가 실제로 돌 수 있었던 DB는 그보다 오래된 것뿐입니다.
 
 ## 교훈
 
