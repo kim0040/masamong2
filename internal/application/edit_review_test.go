@@ -250,7 +250,9 @@ func TestTheStepsForGoingBackRunAsWritten(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, after, found := strings.Cut(string(raw), "v1.1.x로 되돌릴 때")
+	// a Windows checkout has CRLF here, and the document is the same document
+	text := strings.ReplaceAll(string(raw), "\r\n", "\n")
+	_, after, found := strings.Cut(text, "v1.1.x로 되돌릴 때")
 	if !found {
 		t.Fatal("the section is gone")
 	}
