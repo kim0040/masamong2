@@ -8,7 +8,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
+	"masamong/internal/memory/store"
 	"masamong/internal/storage"
 )
 
@@ -66,6 +68,9 @@ func (s *Service) scheduleResync(rooms []string) {
 	})
 }
 
+// SettledMark is the number a caller takes before it reads what a turn will come with (ChatInput.ReadFrom).
+func (s *Service) SettledMark() int64 { return store.SettledMark(s.Store) }
+
 // MessageEdited applies an author's edit of a Discord message the bot may have stored.
 func (s *Service) MessageEdited(guildID, channelID, messageID, content string, at time.Time) error {
 	ctx, done, ok := s.beginWork(context.Background())
@@ -101,6 +106,45 @@ func (s *Service) MessageEdited(guildID, channelID, messageID, content string, a
 		s.drainRedactions(context.Background())
 	}
 	return nil
+}
+
+// MessageKeptItsWords takes an edit that left the words as they were and the files too (only the connector can say
+// that): what was read of the message is still what the message says, so nothing built on it changes and only the
+// stored revision moves. It reports false, changing nothing, unless the words are shown the same as the copy the bot
+// holds, and the caller then applies the edit in full. So does a change of the message not finished yet: that one
+// is decided by its own job, and these words may be the ones it replaces.
+func (s *Service) MessageKeptItsWords(guildID, channelID, messageID, content string, at time.Time) (bool, error) {
+	_, done, ok := s.beginWork(context.Background())
+	if !ok {
+		return false, nil
+	}
+	defer done()
+	content = strings.TrimSpace(content) // as the copies hold it (connectors' bodyOf)
+	if s.Store == nil || s.practice || messageID == "" || content == "" {
+		return false, nil
+	}
+	db, err := s.adminDB()
+	if err != nil || !db.IsSQLite() {
+		return false, err
+	}
+	if at.IsZero() {
+		at = s.Clock.Now()
+	}
+	// the window keeps a clipped copy: a longer message cannot be compared with it
+	windowSame := utf8.RuneCountInString(content) <= liveTextRunes && s.liveHasWords(guildID, channelID, messageID, content)
+	kept := false
+	err = db.WithWriter(func(tx *sql.Tx) error {
+		if s.Store.HasPendingEvents("source-change") {
+			return nil
+		}
+		waiting, err := sourcesInJobsAfter(tx, 0)
+		if err != nil || waiting[messageID] {
+			return err
+		}
+		kept, err = store.KeepMessageWords(tx, messageID, content, at.UTC().Format(time.RFC3339Nano), windowSame)
+		return err
+	})
+	return kept, err
 }
 
 // MessagesDeleted applies the deletion of Discord messages: stored text, chat context and the text

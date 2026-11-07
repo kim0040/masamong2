@@ -190,3 +190,97 @@ func TestChatTurnsToCopyCarriesDerivedFrom(t *testing.T) {
 		t.Fatalf("the plain turn: %v", turns[1].DerivedFrom)
 	}
 }
+
+// A reply whose walk has tombstoned it but whose row is still there (the job failed after the walk and waits for its
+// retry) is not read again: nothing built on it would be kept, and the words it holds are on their way out. A user
+// turn whose edit has settled is read again, with its new words.
+func TestRecentChatTurnsLeavesOutWhatIsOnItsWayOut(t *testing.T) {
+	st := openStore(t)
+	const key = "discord:g:c"
+	if err := st.AppendChatTurns(key, []ChatTurn{
+		{Role: "user", Speaker: "alice", Content: "edited words", NativeID: "m1", SpeakerID: "alice"},
+		{Role: "assistant", Content: "reply on the old words", NativeID: "m1", SpeakerID: "alice"},
+		{Role: "user", Speaker: "bob", Content: "unrelated", NativeID: "m2", SpeakerID: "bob"},
+		{Role: "assistant", Content: "unrelated reply", NativeID: "m2", SpeakerID: "bob"},
+	}, 40); err != nil {
+		t.Fatal(err)
+	}
+	read := func() []string {
+		t.Helper()
+		turns, err := st.RecentChatTurns(key, 16)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, turn := range turns {
+			out = append(out, turn.Content)
+		}
+		return out
+	}
+	turns, err := st.RecentChatTurns(key, 16)
+	if err != nil || len(turns) != 4 {
+		t.Fatalf("before the change: %d turns, %v", len(turns), err)
+	}
+	userLink, replyLink := turns[0].SourceIDs[0], turns[1].SourceIDs[0]
+	tombstone(t, st, "source", userLink)
+	tombstone(t, st, "source", replyLink)
+	if got := read(); len(got) != 2 || got[0] != "unrelated" || got[1] != "unrelated reply" {
+		t.Fatalf("while the job waits: %q", got)
+	}
+	settle(t, st, userLink)
+	if got := read(); len(got) != 3 || got[0] != "edited words" {
+		t.Fatalf("after the edit settled: %q", got)
+	}
+	// the limit counts what is shown, so a tombstoned row does not push a kept turn out of the window
+	turns, err = st.RecentChatTurns(key, 3)
+	if err != nil || len(turns) != 3 || turns[0].Content != "edited words" {
+		t.Fatalf("the window with a limit: %+v, %v", turns, err)
+	}
+	// and a later change hides the settled turn again
+	tombstone(t, st, "source", userLink)
+	if got := read(); len(got) != 2 {
+		t.Fatalf("after a later change: %q", got)
+	}
+}
+
+// A job is finished only for the revision that settled, and only until the message changes again.
+func TestEditFinishedIsAboutOneRevision(t *testing.T) {
+	st := openStore(t)
+	at := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	finished := func(when string) bool {
+		t.Helper()
+		got, err := EditFinished(st.DB, "m", when)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if finished(at.Format(time.RFC3339Nano)) {
+		t.Fatal("a message with no tombstone is not finished")
+	}
+	if err := st.DB.WithWriter(func(tx *sql.Tx) error { return Tombstone(tx, "message", "m", at.Format(time.RFC3339Nano)) }); err != nil {
+		t.Fatal(err)
+	}
+	tombstone(t, st, "source", "unrelated")
+	if finished(at.Format(time.RFC3339Nano)) {
+		t.Fatal("a revision not settled is not finished")
+	}
+	settle(t, st, "m")
+	if !finished(at.Format(time.RFC3339Nano)) {
+		t.Fatal("the settled revision is finished")
+	}
+	if finished(at.Add(time.Second).Format(time.RFC3339Nano)) || finished(at.Add(-time.Second).Format(time.RFC3339Nano)) {
+		t.Fatal("another revision was taken as finished")
+	}
+	if finished("not a time") {
+		t.Fatal("a time that cannot be read was taken as finished")
+	}
+	if err := st.DB.WithWriter(func(tx *sql.Tx) error {
+		return Tombstone(tx, "message", "m", at.Add(time.Minute).Format(time.RFC3339Nano))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if finished(at.Add(time.Minute).Format(time.RFC3339Nano)) {
+		t.Fatal("a change after the settling left it finished")
+	}
+}

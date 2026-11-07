@@ -11,6 +11,7 @@ import (
 	"io"
 	"log/slog"
 	"math/rand"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -898,6 +899,7 @@ func (g *Gateway) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 		ctx, cancel := context.WithTimeout(base, g.ActionTimeout)
 		defer cancel()
 		req := requestFor(cmd, opts, ictx, "dc:"+i.ID)
+		mark := g.svc.SettledMark() // before the command reads anything: its result may go on into a chat turn
 		res := g.svc.Execute(ctx, req)
 		if application.Unanswered(res) && !ictx.Private {
 			// the reply is posted inside the turn: the conversation keeps only what reached Discord
@@ -933,7 +935,7 @@ func (g *Gateway) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 				return said
 			}
 			if _, ok := g.commandFollowUp(base, s, res, application.ChatInput{GuildID: i.GuildID, ChannelID: i.ChannelID, MessageID: "dc:" + i.ID,
-				Message: slashText(cmd, data.Options), Speaker: ictx.UserName, SpeakerID: ictx.UserID, Locale: ictx.Locale, Deliver: deliver}); ok {
+				Message: slashText(cmd, data.Options), Speaker: ictx.UserName, SpeakerID: ictx.UserID, Locale: ictx.Locale, Deliver: deliver, ReadFrom: mark}); ok {
 				return
 			}
 		}
@@ -1452,12 +1454,15 @@ func (g *Gateway) forgetFollow(id string) {
 // answerHeld answers the messages the merger held as one turn, replying to the last of them.
 func (g *Gateway) answerHeld(msgs []*discordgo.MessageCreate) {
 	last := msgs[len(msgs)-1]
+	mark := g.svc.SettledMark() // before the pictures are chosen: an edit settled by now has reached them
 	call := g.heldCall(msgs)
+	call.readFrom = mark
 	text := mergedText(msgs)
 	if call.continues != "" {
 		// a picture sent right after a call without one: the call's words come again with it
 		text = strings.TrimSpace(call.continues + "\n" + text)
 	}
+	call.fragments = fragmentIDs(msgs, call.continuedFrom)
 	g.work(func(ctx context.Context) {
 		if last.GuildID == "" && !g.svc.DMChatAllowed(ctx, last.Author.ID) {
 			g.sendDMNotice(ctx, g.sess, last, "discord.chat.dm_closed", "closed")
@@ -1467,14 +1472,32 @@ func (g *Gateway) answerHeld(msgs []*discordgo.MessageCreate) {
 	})
 }
 
+// fragmentIDs lists the messages whose words the turn holds apart from the one it replies to, the last of the held
+// ones: the rest of the burst and the call a picture continues.
+func fragmentIDs(msgs []*discordgo.MessageCreate, continuedFrom []string) []string {
+	last := msgs[len(msgs)-1].ID
+	var out []string
+	for _, m := range msgs {
+		if m.ID != "" && m.ID != last {
+			out = append(out, m.ID)
+		}
+	}
+	for _, id := range continuedFrom {
+		if id != "" && id != last && !slices.Contains(out, id) {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
 // heldCall is how the held messages called the bot. Pictures are collected only for a turn addressed to
 // the bot (a mention, its name, a reply to it, a follow-up the window chose, a line in the bot's own
 // thread): a room that answers everything does not read the pictures of messages nobody said to it.
 func (g *Gateway) heldCall(msgs []*discordgo.MessageCreate) turnCall {
 	last := msgs[len(msgs)-1]
-	continues, owed := g.takePictureFollow(msgs)
+	continues, continuedFrom, owed := g.takePictureFollow(msgs)
 	if last.GuildID == "" {
-		call := turnCall{addressed: true, continues: continues}
+		call := turnCall{addressed: true, continues: continues, continuedFrom: continuedFrom}
 		g.callPictures(msgs, &call)
 		return call
 	}
@@ -1502,7 +1525,7 @@ func (g *Gateway) heldCall(msgs []*discordgo.MessageCreate) turnCall {
 		}
 		nameOnly = anyName && !anySure && !inThread
 	}
-	call := turnCall{addressed: addressed, nameOnly: nameOnly, followUp: followUp, continues: continues}
+	call := turnCall{addressed: addressed, nameOnly: nameOnly, followUp: followUp, continues: continues, continuedFrom: continuedFrom}
 	if addressed || followUp || inThread {
 		g.callPictures(msgs, &call)
 	}
@@ -1565,23 +1588,25 @@ func (g *Gateway) notePictureFollow(m *discordgo.MessageCreate) bool {
 	}
 	c, ok := g.pictures.follows(m.ChannelID, m.Author.ID, time.Now())
 	if ok {
-		g.pictureFollowIDs.Store(m.ID, c.text)
+		g.pictureFollowIDs.Store(m.ID, c)
 	}
 	return ok
 }
 
-// takePictureFollow takes the marks notePictureFollow left on held messages: the continued call's words.
-func (g *Gateway) takePictureFollow(msgs []*discordgo.MessageCreate) (string, bool) {
+// takePictureFollow takes the marks notePictureFollow left on held messages: the continued call's words and the
+// messages they came from.
+func (g *Gateway) takePictureFollow(msgs []*discordgo.MessageCreate) (string, []string, bool) {
 	text, owed := "", false
+	var from []string
 	for _, m := range msgs {
 		if v, ok := g.pictureFollowIDs.LoadAndDelete(m.ID); ok {
 			owed = true
-			if t, _ := v.(string); t != "" {
-				text = t
+			if c, _ := v.(pendingCall); c.text != "" {
+				text, from = c.text, c.ids
 			}
 		}
 	}
-	return text, owed
+	return text, from, owed
 }
 
 // pictureOnly reports a message that is pictures and nothing else.
@@ -1604,8 +1629,11 @@ type turnCall struct {
 	imageOnly                     bool   // the messages said nothing but the call: the pictures are the request
 	imageEarlier                  bool   // the pictures were posted just before the call, not with it
 	continues                     string // the words of the call this picture-only message continues
+	continuedFrom                 []string
 	imageTotal                    int
 	imageSkipped                  map[string]int
+	fragments                     []string // the other messages whose words the turn holds (ChatInput.Fragments)
+	readFrom                      int64    // the mark taken before the pictures were chosen (ChatInput.ReadFrom)
 }
 
 // callImages lists the pictures the bot was called with (inbound.go imageRefs) and whether they are the
@@ -1666,7 +1694,26 @@ func (g *Gateway) onMessageUpdate(s *discordgo.Session, m *discordgo.MessageUpda
 	g.merge.edit(m.ID, m.Content)
 	g.pictures.edited(m.ChannelID, m.ID, m.Attachments)
 	g.applyMessageChange(messageReconciliation{Operation: "edit", GuildID: m.GuildID, ChannelID: m.ChannelID,
-		MessageIDs: []string{m.ID}, Content: m.Content, At: *m.EditedTimestamp})
+		MessageIDs: []string{m.ID}, Content: m.Content, At: *m.EditedTimestamp, SameFiles: sameFiles(m.BeforeUpdate, m.Attachments)})
+}
+
+// sameFiles reports whether an edit kept the message's attachments. A message no longer in the state cache cannot
+// say, and is taken as changed.
+func sameFiles(before *discordgo.Message, after []*discordgo.MessageAttachment) bool {
+	if before == nil {
+		return false
+	}
+	ids := func(list []*discordgo.MessageAttachment) []string {
+		out := make([]string, 0, len(list))
+		for _, a := range list {
+			if a != nil {
+				out = append(out, a.ID)
+			}
+		}
+		sort.Strings(out)
+		return out
+	}
+	return slices.Equal(ids(before.Attachments), ids(after))
 }
 
 // stateMessages is how many recent messages per channel the state cache keeps.
@@ -1849,6 +1896,7 @@ func (g *Gateway) runCommand(s *discordgo.Session, m *discordgo.MessageCreate, c
 		Private: m.GuildID == "", UserName: displayName(m)}
 	ctx, cancel := context.WithTimeout(g.runCtx(), g.ActionTimeout)
 	defer cancel()
+	mark := g.svc.SettledMark() // before the command reads anything: its result may go on into a chat turn
 	res := g.svc.Execute(ctx, requestFor(cmd, opts, ictx, "dc:"+m.ID))
 	if application.Unanswered(res) && (!ictx.Private || m.GuildID == "") { // a DM: CommandToChat checks DM chat is open
 		// no answer from the tool: carry on as a conversation, off the event loop
@@ -1869,7 +1917,7 @@ func (g *Gateway) runCommand(s *discordgo.Session, m *discordgo.MessageCreate, c
 			}
 			selection, _ := g.callImages([]*discordgo.MessageCreate{m})
 			if _, ok := g.commandFollowUp(base, s, res, application.ChatInput{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID,
-				Message: m.Content, Speaker: displayName(m), SpeakerID: m.Author.ID, Deliver: deliver, Images: selection.Refs,
+				Message: m.Content, Speaker: displayName(m), SpeakerID: m.Author.ID, Deliver: deliver, Images: selection.Refs, ReadFrom: mark,
 				OnRefusal: func(err error) {
 					var limit application.DMLimited
 					if m.GuildID == "" && errors.As(err, &limit) {
@@ -1945,6 +1993,7 @@ func (g *Gateway) answer(base context.Context, s *discordgo.Session, m *discordg
 	_, err := g.svc.ChatTurn(ctx, application.ChatInput{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID, Message: text,
 		Speaker: displayName(m), SpeakerID: m.Author.ID, MaxWait: chatQueueWait, TurnTimeout: chatTurnTimeout, NameOnly: nameOnly, FollowUp: followUp, Addressed: startTyping,
 		Images: call.images, ImageOnly: call.imageOnly, ImageEarlier: call.imageEarlier, ImageTotal: call.imageTotal, ImageSkipped: call.imageSkipped,
+		Fragments: call.fragments, ReadFrom: call.readFrom,
 		OnVisionNotice: func(note string) { visionNotice = note },
 		Deliver: func(deliverCtx context.Context, res chat.Result) string {
 			typing.stop()

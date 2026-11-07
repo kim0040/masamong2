@@ -1044,6 +1044,8 @@ func (s *Service) seedThread(guildID, parentID, threadID, callerID string) []sto
 	if err != nil || !s.MemoryAllowed(callerID) {
 		return nil
 	}
+	// taken before the turns are read: an edit settled by then is one whose new words the copies hold
+	mark := store.SettledMark(s.Store)
 	turns, err := eng.Store.ChatTurnsToCopy(blocks.ChannelKey(guildID, parentID), 40)
 	if err != nil {
 		return nil
@@ -1051,6 +1053,7 @@ func (s *Service) seedThread(guildID, parentID, threadID, callerID string) []sto
 	var mine []store.ChatTurn
 	for _, t := range turns {
 		if t.SpeakerID == callerID {
+			t.ReadAsOf, t.Copied = mark, true
 			mine = append(mine, t)
 		}
 	}

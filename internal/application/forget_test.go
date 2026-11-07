@@ -29,6 +29,10 @@ func TestUncapturedMessageEditsAndDeletionsReachChatContext(t *testing.T) {
 	}
 	svc.MessagesDeleted("g", "c", []string{"910"})
 	svc.MessageEdited("g", "c", "911", "고친 말", time.Now())
+	// until its cleanup has finished the edited turn is held back with what is built on it (RecentChatTurns)
+	if err := svc.DrainRedactions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	turns, _ := eng.Store.RecentChatTurns("discord:g:c", 10)
 	var lines []string
 	for _, tr := range turns {
