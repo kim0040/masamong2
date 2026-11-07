@@ -80,8 +80,9 @@ type Request struct {
 	Earlier []ToolResult
 	// Guard caps the turn's optional work by what it spent (see Guard); nil means no cap.
 	Guard *Guard
-	// MaxHistory is how many History turns the answer sees (0 = 8). A caller that already chose the
-	// conversation's lines and budgeted them (application callerConversation) passes more.
+	// MaxHistory is how many History turns the answer sees (0 = HistoryShown). A caller that already chose the
+	// conversation's lines and budgeted them (application callerConversation) passes more, and records all of them as
+	// read.
 	MaxHistory int
 	// ToolMode is config chat.tool_mode: planner ("" too), shadow or loop (toolloop.go).
 	ToolMode string
@@ -358,7 +359,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 	t3 := time.Now()
 	maxHistory := req.MaxHistory
 	if maxHistory <= 0 {
-		maxHistory = 8
+		maxHistory = HistoryShown
 	}
 	searched, searchedState := res.Hits, res.RagState
 	roomBlock, kept, roomTrace := renderRoomMemory(v, req.RoomMemory, res.Hits)

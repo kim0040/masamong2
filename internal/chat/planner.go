@@ -155,7 +155,12 @@ type PlannerBudget struct {
 	MaxMessageChars, MaxTurns, MaxTurnChars, MaxContextChars, MaxSummaryChars int
 }
 
-var defaultBudget = PlannerBudget{1500, 8, 400, 2600, 600}
+// HistoryShown is how many of a conversation's latest rows can reach a prompt: the answer's default (Request.MaxHistory),
+// and the planner's and the tool loop's budget. A reply is recorded as having read those rows (the application's
+// chatTurn), so no prompt may look further back than this.
+const HistoryShown = 8
+
+var defaultBudget = PlannerBudget{1500, HistoryShown, 400, 2600, 600}
 
 func renderTurn(v Voice, t Turn, content string) string {
 	c := v.pack().Chat
@@ -212,19 +217,18 @@ func BuildPlannerMessages(v Voice, message string, history []Turn, summary, time
 	return []Msg{{Role: "system", Content: system}, {Role: "user", Content: strings.Join(parts, "\n\n")}}
 }
 
-// pickTurns renders the latest conversation turns that fit the budget, oldest first, and returns how
-// many runes they take. The planner and the tool loop show the conversation the same way.
+// pickTurns renders those of the last MaxTurns rows that fit the budget, oldest first, and returns how many runes they
+// take. The planner and the tool loop show the conversation the same way. A row left out (empty, or over the budget)
+// lets no older one in: a reply is recorded as having read rows by their place (HistoryShown), and the words of a row
+// further back would be in a prompt without the reply being known to have read them.
 func pickTurns(v Voice, history []Turn, b PlannerBudget) ([]string, int) {
 	c := v.pack().Chat
 	var picked []string
 	used := 0
-	for i := len(history) - 1; i >= 0; i-- {
+	for i := len(history) - 1; i >= max(0, len(history)-b.MaxTurns); i-- {
 		t := history[i]
 		content := sanitize(v, t.Content)
 		if (t.Role != "user" && t.Role != "assistant") || content == "" {
-			continue
-		}
-		if len(picked) >= b.MaxTurns {
 			continue
 		}
 		content, _ = clip(content, b.MaxTurnChars, c.Truncated)

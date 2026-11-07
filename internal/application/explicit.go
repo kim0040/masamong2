@@ -127,8 +127,8 @@ func (s *Service) explicitMemoryTurn(ctx context.Context, in ChatInput, voice ch
 	}
 	// what the member may be pointing at: what the bot keeps about them, then what bears on this talk
 	candidates := s.myItems(db, in.GuildID, ref, nil, explicitItemsMax/2)
-	last := ""
-	for i := len(history) - 1; i >= 0; i-- {
+	last := "" // from the rows a reply is recorded as having read (chat.HistoryShown), as every prompt of the turn
+	for i := len(history) - 1; i >= max(0, len(history)-chat.HistoryShown); i-- {
 		if history[i].Role == "assistant" {
 			last = history[i].Content
 			break

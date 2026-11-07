@@ -118,6 +118,15 @@ class BuilderTests(unittest.TestCase):
         self.assertEqual(idx, sorted(idx))
         self.assertNotIn(": m34", user)
 
+    def test_a_row_left_out_lets_no_older_one_in(self) -> None:
+        # long rows spend the budget, empty rows take a place: an older row stays out either way (the product records
+        # a reply as having read the last rows by their place)
+        for filler in ("가" * 400, ""):
+            h = _history(("user", "오래된 짧은 말"), *[("assistant", filler) for _ in range(8)])
+            self.assertNotIn("오래된 짧은 말", _user(_build("q", history=h)))
+        h = _history(("user", "여덟 번째 말"), *[("assistant", "가" * 400) for _ in range(7)])
+        self.assertLessEqual(_build("q", history=h).trace["history"]["kept"], 8)
+
     def test_per_turn_clip_marks_truncation(self) -> None:
         h = _history(("user", "가" * 1000))
         b = _build("q", history=h, budget=pc.PlannerBudget(max_turn_chars=100))

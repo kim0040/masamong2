@@ -190,7 +190,8 @@ def _select_history(
     conversation_id: str,
     budget: PlannerBudget,
 ) -> tuple[list[str], dict[str, Any]]:
-    """Newest turns first until the budget is spent; returned in chronological order."""
+    """The last max_turns rows, newest first, while the budget lasts; returned in chronological order. A row left out
+    (empty, or over the budget) lets no older one in: the product records a reply as having read rows by their place."""
 
     trace: dict[str, Any] = {"n": 0, "kept": 0, "dropped_old": 0, "dropped_role": 0, "clipped": 0, "chars": 0}
     if history is None:
@@ -203,13 +204,13 @@ def _select_history(
     trace["n"] = len(turns)
     picked: list[str] = []
     used = 0
-    for turn in reversed(turns):
+    for back, turn in enumerate(reversed(turns)):
         role = str(turn.get("role") or "")
         content = _sanitize(str(turn.get("content") or ""))
         if role not in ROLES or not content:
             trace["dropped_role"] += 1
             continue
-        if len(picked) >= budget.max_turns:
+        if back >= budget.max_turns:
             trace["dropped_old"] += 1
             continue
         content, clipped = _clip(content, budget.max_turn_chars)

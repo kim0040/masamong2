@@ -1464,10 +1464,6 @@ func shownEarlier(hits []search.Hit, h search.Hit) int {
 	return 0
 }
 
-// historyShown is how many of a channel's latest turns reach a prompt: the answer's default MaxHistory, and the planner's
-// and the tool loop's budget in the chat package. TestAMessageChangeTakesTheRepliesThatReadIt fails if they part.
-const historyShown = 8
-
 func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, error) {
 	if (strings.TrimSpace(in.Message) == "" && !in.imageOnly) || in.ChannelID == "" {
 		return chat.Result{}, errors.New("channel_id and message required")
@@ -1536,7 +1532,9 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	var history []chat.Turn
 	// The window is more than a prompt shows. What reaches the prompt is read; a turn further back is held by its link
 	// alone, as is every turn in a channel that shows each caller only their conversation: a withdrawal follows the
-	// link, and a deleted message takes only the replies that read it (store.ChatReaders).
+	// link, and a deleted message takes only the replies that read it (store.ChatReaders). No prompt holds a row before
+	// the last chat.HistoryShown, whichever rows are empty or long: every prompt built from this history keeps to them,
+	// and a caller's conversation records each line it shows (conv.sources).
 	var windowAll, windowShown, windowLinks []string
 	if turns, err := eng.Store.RecentChatTurns(key, 16); err == nil {
 		for i, t := range turns {
@@ -1548,7 +1546,7 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 			}
 			windowAll = append(windowAll, read...)
 			windowLinks = append(windowLinks, t.SourceIDs[0]) // its own link comes first
-			if i >= len(turns)-historyShown {
+			if i >= len(turns)-chat.HistoryShown {
 				windowShown = append(windowShown, read...)
 			}
 		}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"masamong/internal/application"
+	"masamong/internal/chat"
 	"masamong/internal/memory/engine"
 	"masamong/internal/memory/store"
 )
@@ -407,5 +408,55 @@ func TestAReplysLineIsNotItsRequest(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no reply among the lines, this proves nothing: %q", ids)
+	}
+}
+
+// What a reply is recorded as having read and what its prompts held are the same rows, whichever of them are long or
+// empty: the words are in no prompt and a deletion leaves the reply, or they are in one and it goes.
+func TestEveryPromptStaysInWhatTheReplyRecords(t *testing.T) {
+	long := strings.Repeat("long words ", 50)
+	for name, tc := range map[string]struct {
+		rows     int
+		content  string
+		question string
+		read     bool
+	}{
+		"long rows, the message before them":  {rows: chat.HistoryShown, content: long, question: "and now?"},
+		"long rows, the message among them":   {rows: chat.HistoryShown - 1, content: long, question: "and now?", read: true},
+		"empty rows, the message before them": {rows: chat.HistoryShown, content: "  ", question: "and now?"},
+		"empty rows, the message among them":  {rows: chat.HistoryShown - 1, content: "  ", question: "and now?", read: true},
+		// the memory classifier is told the bot's last reply: only one of the rows the reply records
+		"a memory request, no reply among the rows": {rows: chat.HistoryShown, content: long, question: "기억해줘: 나는 차를 좋아해"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc, prompts := quietSvc(t)
+			e := mustEngine(t, svc)
+			rows := []store.ChatTurn{{Role: "user", Content: chainWords, NativeID: "m", SpeakerID: "alice", Speaker: "alice"},
+				{Role: "assistant", Content: chainWords + " again", NativeID: "m", SpeakerID: "alice"}}
+			for i := range tc.rows {
+				rows = append(rows, store.ChatTurn{Role: "user", Content: tc.content, NativeID: fmt.Sprintf("pad-%d", i), SpeakerID: "bob", Speaker: "bob"})
+			}
+			if tc.read {
+				rows = rows[:1:1]
+				for i := range tc.rows {
+					rows = append(rows, store.ChatTurn{Role: "assistant", Content: tc.content, NativeID: fmt.Sprintf("pad-%d", i), SpeakerID: "bob"})
+				}
+			}
+			if err := e.Store.AppendChatTurns("discord:g:c", rows, 40); err != nil {
+				t.Fatal(err)
+			}
+			before := prompts.calls()
+			res, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "n", Message: tc.question, Speaker: "bob", SpeakerID: "bob"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if saw := prompts.sawSince(before, chainWords); saw != tc.read {
+				t.Fatalf("a prompt held the message's words: %v, want %v", saw, tc.read)
+			}
+			changeSource(t, svc, "delete", "m", "alice")
+			if kept := answerKept(t, svc, res.TurnID); kept == tc.read {
+				t.Fatalf("the reply kept %v after a deletion of what it read: %v", kept, tc.read)
+			}
+		})
 	}
 }

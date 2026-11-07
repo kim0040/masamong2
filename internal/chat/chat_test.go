@@ -434,3 +434,44 @@ func TestEmptyTimeWindowIsSearchedOnceMoreWithoutIt(t *testing.T) {
 		t.Fatalf("no window: %d %v", len(mem.reqs), res.Retrieve)
 	}
 }
+
+// A reply is recorded as having read the last HistoryShown rows by their place, so a row left out of them lets no
+// older one into the planner's or the tool loop's prompt.
+func TestPromptsStayInTheLastRows(t *testing.T) {
+	long := strings.Repeat("긴 말 ", 200)
+	older := Turn{Role: "user", Speaker: "철수", Content: "오래된 짧은 말"}
+	fill := func(n int, row Turn) []Turn {
+		out := []Turn{older}
+		for range n {
+			out = append(out, row)
+		}
+		return out
+	}
+	shows := func(history []Turn) (planner, loop bool) {
+		for _, m := range BuildPlannerMessages(koVoice(), "q", history, "", "", goldenTools(nil)) {
+			planner = planner || strings.Contains(m.Content, older.Content)
+		}
+		for _, m := range (ToolLoop{Voice: koVoice()}).messages(history, "q", "") {
+			loop = loop || strings.Contains(m.Content, older.Content)
+		}
+		return planner, loop
+	}
+	for name, tc := range map[string]struct {
+		history []Turn
+		want    bool
+	}{
+		"long rows spend the budget": {fill(HistoryShown, Turn{Role: "user", Content: long}), false},
+		"empty rows take a place":    {fill(HistoryShown, Turn{Role: "assistant", Content: "  "}), false},
+		"in the last rows":           {fill(HistoryShown-1, Turn{Role: "assistant", Content: "짧은 답"}), true},
+		"short rows, further back":   {fill(HistoryShown, Turn{Role: "assistant", Content: "짧은 답"}), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if planner, loop := shows(tc.history); planner != tc.want || loop != tc.want {
+				t.Fatalf("planner %v, loop %v, want %v", planner, loop, tc.want)
+			}
+		})
+	}
+	if defaultBudget.MaxTurns != HistoryShown {
+		t.Fatalf("the budget shows %d rows, a reply records %d", defaultBudget.MaxTurns, HistoryShown)
+	}
+}
