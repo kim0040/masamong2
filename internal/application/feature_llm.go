@@ -79,7 +79,8 @@ func (s *Service) featureText(ctx context.Context, role, kind, system, prompt st
 		class = errclass.Empty
 	}
 	// the role is the feature (summary, fortune, notice digest), so the ledger shows what the call was for
-	s.noteLLMCall(ctx, llmCall{Role: kind, Model: m.Model, Provider: m.Provider, FinishReason: res.FinishReason, PromptTokens: res.PromptTokens,
-		CompletionTokens: res.CompletionTokens, CachedTokens: res.CachedTokens, Latency: time.Since(began), CostUSD: cost, Class: class})
+	servedProvider, servedModel := servedBy(m.Provider, m.Model, res) // a fallback that answered is named, and flagged
+	s.noteLLMCall(ctx, llmCall{Role: kind, Model: servedModel, Provider: servedProvider, FinishReason: res.FinishReason, PromptTokens: res.PromptTokens,
+		CompletionTokens: res.CompletionTokens, CachedTokens: res.CachedTokens, Latency: time.Since(began), CostUSD: cost, Class: class, Fallback: res.Fallback})
 	return strings.TrimSpace(res.Content), cost, err
 }

@@ -81,7 +81,7 @@ func (s *Service) memoryBlocks(ctx context.Context, req action.Request) action.R
 		// message_vectors_estimate=true adds what turning memory.message_vectors on would cost (the
 		// console's confirmation); the pending count is part of the section while the setting is on.
 		// With the setting off and no estimate asked for, the section is absent and nothing extra runs.
-		lap := s.laps("memory.blocks.list")
+		lap := s.laps(ctx, "memory.blocks.list")
 		defer lap.done()
 		mem := s.memoryStatusFor(ctx, true, boolVal(in, "message_vectors_estimate"))
 		lap.mark("memory_status")

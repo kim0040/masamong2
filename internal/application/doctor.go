@@ -27,7 +27,7 @@ var warnedZoneSettings sync.Map
 // feature without its key does not answer (no_key): only the practice instance answers from built-in
 // samples (practice_sample), so a real instance never shows sample data as if it were live.
 func (s *Service) doctor(ctx context.Context, req action.Request) action.Result {
-	lap := s.laps("doctor")
+	lap := s.laps(ctx, "doctor")
 	defer lap.done()
 	features := map[string]any{}
 	attention := []map[string]any{}

@@ -1014,6 +1014,8 @@ type ChatInput struct {
 	// stale and is refused with ErrChatBusy. TurnTimeout bounds the turn itself and starts after that
 	// wait, so a queue does not use up the turn's time. 0 for either: no limit of its own.
 	MaxWait, TurnTimeout time.Duration
+	// started is when ChatTurn began, the zero point of the turn's timings and spans (turn_timing.go).
+	started time.Time
 }
 
 // chatRoute is the model and provider behind one chat role.
@@ -1287,6 +1289,7 @@ func (s *Service) ChatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	}
 	started := time.Now()
 	in.turnID = newID("turn_")
+	in.started = started
 	ctx = observability.WithTurn(ctx, in.turnID)
 	sources := []string{}
 	in.sourceRefs = &sources
@@ -1349,6 +1352,7 @@ func (s *Service) ChatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		body["name_call"] = map[string]any{"decision": na.decision, "tone": na.tone} // closed values, never model text
 	}
 	addToolLoop(body, res)
+	addTurnSpans(body, res)
 	visionRecord(body, in.vision)
 	noteRoomMemory(body, res)
 	res.TurnID = in.turnID
@@ -1424,7 +1428,9 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	if in.MaxWait > 0 {
 		waitCtx, stopWait = context.WithTimeout(ctx, in.MaxWait)
 	}
+	queued := time.Now()
 	release, err := s.turns.enter(waitCtx, blocks.ChannelKey(in.GuildID, in.ChannelID), s.Doc().Limits.ConcurrentTurns())
+	queueWait := int(time.Since(queued).Milliseconds())
 	stopWait()
 	if err != nil {
 		if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
@@ -1575,8 +1581,9 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		Ranking: rankingFor(in.Ranking, s.retrieveMode()), PlannerModel: "planner", LoopModel: doc.Chat.LoopRole(), ResponseModel: "response", TZ: tz,
 		BudgetUSD: parseUSD(doc.Memory.TurnBudgetUSD, 0.05), Earlier: in.Earlier,
 		Guard:      &chat.Guard{MaxUSD: parseUSD(doc.Limits.PerRequestBudgetUSD, 0), MaxCalls: doc.Limits.MaxExternalAttempts},
-		MaxHistory: maxHistory, ToolMode: s.toolMode(), RoomMemory: roomMemory, Images: images,
+		MaxHistory: maxHistory, ToolMode: s.toolMode(), RoomMemory: roomMemory, Images: images, TurnStart: in.started,
 	})
+	noteTurnTiming(&res, "queue_wait", queueWait)
 	res.CostUSD += conv.costUSD + explicitCost + visionCost
 	if in.vision != nil && in.vision.Message != "" {
 		in.Message = in.vision.Message // a description made while answering joins the kept message
@@ -1597,8 +1604,11 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		s.notePartialVision(&in, in.vision)
 	}
 	s.decideThreadOffer(in, pol, res, in.context)
+	var firstSendMS int
+	var deliverEnd time.Time
 	if in.Deliver != nil {
-		said = in.Deliver(ctx, res)
+		said, firstSendMS, deliverEnd = deliverTimed(ctx, in, res)
+		noteTurnTiming(&res, "first_send", firstSendMS)
 	}
 	if strings.TrimSpace(said) != "" && !in.Proactive && !in.banter {
 		s.openFollowWindow(in, said, pol, in.FollowUp)
@@ -1626,6 +1636,9 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		_ = eng.Store.AppendChatTurns(key, turns, 40)
 	}
 	s.logTurn(in, res)
+	if !deliverEnd.IsZero() {
+		noteTurnTiming(&res, "post_send", int(time.Since(deliverEnd).Milliseconds()))
+	}
 	return res, nil
 }
 
@@ -1665,6 +1678,7 @@ func (s *Service) logTurn(in ChatInput, res chat.Result) {
 		"hits":    len(res.Hits), "memory_state": res.Assess.MemoryState, "intent_source": res.Intent.Source,
 		"retrieval": res.Retrieve, "timing_ms": res.Timing, "cost_usd": res.CostUSD, "tools": len(res.Tools),
 	}
+	addTurnSpans(body, res)
 	if res.ToolLoop != nil {
 		body[toolLoopKey(res.ToolLoop)] = res.ToolLoop.Brief() // calls and reasons, no arguments
 	}

@@ -192,7 +192,7 @@ add("role", {
 add("role", {
     "reference": ("대화 참조 판별", "Reference check"), "name_call": ("이름 부름 판별", "Name-call check"), "follow": ("이어 말하기 판별", "Follow-up check"),
     "thread_summary": ("스레드 요약", "Thread summary"), "memory_summary": ("기억 색인 요약", "Memory index summary"),
-    "fortune": ("운세", "Fortune"), "participation": ("먼저 말 걸기 판단", "Chime-in check"),
+    "fortune": ("운세", "Fortune"), "participation": ("먼저 말 걸기 판단", "Chime-in check"), "tool_loop": ("도구 루프", "Tool loop"),
 })
 add("memstate", {"search": ("기억 검색함", "memory searched"), "skip": ("기억 필요 없음", "memory not needed"), "optional_unplanned": ("검색 안 함(선택)", "optional, not searched"),
                  "blocked_disabled": ("이 방은 기억 꺼짐", "memory off here"), "unparsed": ("의도 파악 결과 해석 실패", "plan not parsed"), "unknown": ("알 수 없음", "unknown"),
@@ -1253,6 +1253,7 @@ add("", {
     "conv.would": ("(기록만 하고 이 방식에서는 하지 않음) {what}", "{what} (recorded only; not done in this mode)"),
     "conv.outcome_hint": ("그 뒤 일어난 일", "What happened next"),
     "conv.o.retagged": ("다시 태그함", "Tagged the bot again"),
+    "conv.o.retagged_after_answer": ("답한 뒤 다시 태그함", "Tagged the bot again after an answer"),
     "conv.d.name_call.bot": ("봇에게 한 말", "To the bot"),
     "conv.d.name_call.about_bot": ("봇 이야기", "About the bot"),
     "conv.d.name_call.unsure": ("애매함", "Unsure"),

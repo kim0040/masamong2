@@ -83,6 +83,9 @@ type Request struct {
 	// They go with the answer's last user message only: the planner and the tool loop read the text,
 	// where the caller put a tag saying a picture came with it.
 	Images []Image
+	// TurnStart is when the turn began (the application's ChatTurn), the zero point of Result.Spans; the
+	// zero time counts from the start of Answer.
+	TurnStart time.Time
 }
 
 // Result is the answer plus a body-free trace for logs/diagnostics.
@@ -113,6 +116,12 @@ type Result struct {
 	AnswerRetry string `json:"answer_retry,omitempty"`
 	// AnswerLoop marks an answer cut because it kept repeating itself (loopguard.go)
 	AnswerLoop bool `json:"answer_loop,omitempty"`
+	// Spans are the stretches that ran at once (planner, tool loop, tools, memory search, answer) in
+	// milliseconds from the turn's start, and WaitedOn says which side of the planner/tool loop join was
+	// still running when the other was done ("loop" | "planner"; "" with no loop). Timing sums the steps;
+	// these show where the turn actually waited.
+	Spans    []Span `json:"spans,omitempty"`
+	WaitedOn string `json:"waited_on,omitempty"`
 }
 
 // Runtime answers turns.
@@ -135,6 +144,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 		return Result{}, ErrEmptyMessage
 	}
 	res := Result{Timing: map[string]int{}, RagState: string(retrieval.StateNotAttempted)}
+	sp := newSpanLog(req.TurnStart)
 	ctx = WithGuard(ctx, req.Guard)
 	tz := req.TZ
 	if tz == nil {
@@ -164,6 +174,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 	// The tool loop (modes loop and shadow) runs beside the planner. In loop mode it chooses the tools,
 	// and the planner's menu shrinks to memory.search: listing only the tools that are on is how the
 	// planner prompt already varies, so its text stays the evaluated one.
+	loopStart := time.Now()
 	loop, plannerTools := rt.startLoop(ctx, req, msg, timeRef, others)
 	planOnce := func(tools Toolset) string {
 		menu := tools
@@ -174,13 +185,16 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 		planRaw, cost, err := rt.LLM.Chat(ctx, req.PlannerModel, BuildPlannerMessages(v, msg, req.History, "", timeRef, menu), PlannerMaxTokens, 0)
 		res.CostUSD += cost
 		res.Timing["plan"] += ms(t0)
+		sp.add("planner", t0, time.Now())
 		if err != nil {
 			return ""
 		}
 		return planRaw
 	}
 	planRaw := planOnce(plannerTools)
+	plannerEnd := time.Now()
 	loopTools, loopRan := loop.wait()
+	res.WaitedOn = sp.joinLoop(loop, loopStart, plannerEnd)
 	if loop != nil {
 		res.ToolLoop = loop.trace
 		res.CostUSD += loop.trace.CostUSD
@@ -233,6 +247,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 				req.Guard.Note(0) // what the tool pays for is added by the tool (Guard.Spend)
 				return true
 			}, run: func() {
+				defer sp.begin("tool:" + st.Tool)()
 				r := runTool(ctx, req.Guard, rt.Tools, st.Tool, st.Parameters)
 				planned[i] = &r
 				endMu.Lock()
@@ -248,7 +263,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 	if searchMemory {
 		remaining := req.BudgetUSD - res.CostUSD
 		steps = append(steps, step{decide: func() bool { return req.Guard.AllowMoneyContext(ctx, "memory.search") },
-			run: func() { mem = rt.searchMemory(ctx, req, msg, intent, remaining, nowT) }})
+			run: func() { defer sp.begin("memory")(); mem = rt.searchMemory(ctx, req, msg, intent, remaining, nowT) }})
 	}
 	runSteps(ctx, req.Guard, steps)
 	for _, r := range planned {
@@ -340,6 +355,9 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 		res.CostUSD += completion.CostUSD
 	}
 	res.Timing["answer"] = ms(t3)
+	sp.add("answer", t3, time.Now())
+	res.Spans = sp.spans()
+	res.CostUSD += req.Guard.PaidTotal() // what the tools paid for (a search's fee) is part of the turn's cost
 	_, _, res.Skipped = req.Guard.Totals()
 	if err != nil {
 		return res, err

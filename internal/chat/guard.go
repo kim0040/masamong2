@@ -31,7 +31,8 @@ type Guard struct {
 	models  int
 	changed chan struct{}
 	skipped []string
-	parent  *Guard // a step's own guard (child) passes everything on to the turn's
+	paid    float64 // what tools paid for that no model-call total holds (a web search), see Paid
+	parent  *Guard  // a step's own guard (child) passes everything on to the turn's
 }
 
 // Begin reserves a model call at its start. The returned end adds its final cost exactly once,
@@ -139,6 +140,29 @@ func (g *Guard) Spend(usd float64) {
 	g.spent += usd
 	g.mu.Unlock()
 	g.parent.Spend(usd)
+}
+
+// Paid adds what a tool paid a provider for, other than a model call the turn already counts (a web
+// search's fee), to the cost of the turn: Result.CostUSD includes PaidTotal. The caller also gives the same
+// amount to Spend, which is the cap's view of it; Paid is only the turn's cost, so nothing is counted twice.
+func (g *Guard) Paid(usd float64) {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	g.paid += usd
+	g.mu.Unlock()
+	g.parent.Paid(usd)
+}
+
+// PaidTotal is what the turn's tools paid for (Paid).
+func (g *Guard) PaidTotal() float64 {
+	if g == nil {
+		return 0
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.paid
 }
 
 // child is the guard of one step that runs beside others: what the step notes and spends reaches the

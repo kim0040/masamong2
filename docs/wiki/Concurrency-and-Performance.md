@@ -98,7 +98,7 @@ READY and RESUMED callbacks enter the same work-admission guard as replies and c
 
 ## When something is off
 
-- **Slow replies**: in the console's **Conversations**, the per-step times (`timing_ms`) show which step is slow. Usually it is the model provider. If replies often wait for `max_concurrent_turns`, raise it.
+- **Slow replies**: in the console's **Conversations**, the per-step times (`timing_ms`) show which step is slow. Usually it is the model provider. `queue_wait` (the wait for the channel's turn and a model slot), `first_send` (from the turn's start to the first bubble on screen) and `post_send` (the writes after sending) are kept too. The steps that run at once (planner and tool loop, tools and memory search) are in the turn record's `spans` (start and end in ms from the turn's start) and `waited_on` (which side of the planner/tool-loop join finished last, `loop` or `planner`). If replies often wait for `max_concurrent_turns`, raise it.
 - **Some messages get no reply**: if Conversations shows "limited" with `too many replies waiting in this channel`, the room's queue was full. That is the anti-flood working.
 - Otherwise see [Troubleshooting](https://github.com/kim0040/masamong2/wiki/Troubleshooting).
 

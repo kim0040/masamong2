@@ -2247,6 +2247,7 @@ func (g *Gateway) sendReplyParts(ctx context.Context, parts []string, ref *disco
 		said.WriteString(part)
 		ids = append(ids, sent.ID)
 		rep.Sent++
+		application.NoteFirstSend(ctx) // the turn's first_send timing: a no-op unless ctx is a chat reply's
 	}
 	rep.MessageIDs = ids
 	return said.String(), ids, rep

@@ -13,6 +13,7 @@ import (
 	"masamong/internal/errclass"
 	"masamong/internal/errcode"
 	"masamong/internal/observability"
+	"masamong/internal/providers/openai"
 	"masamong/internal/tools"
 )
 
@@ -61,6 +62,7 @@ var ledgerSQLite = []string{
 		cost_usd REAL NOT NULL DEFAULT 0,
 		result_chars INTEGER NOT NULL DEFAULT 0,
 		class TEXT NOT NULL DEFAULT '',
+		provider TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_tool_calls_turn ON tool_calls(turn_id)`,
@@ -100,6 +102,7 @@ var ledgerTiDB = []string{
 		cost_usd DOUBLE NOT NULL DEFAULT 0,
 		result_chars INT NOT NULL DEFAULT 0,
 		class VARCHAR(32) NOT NULL DEFAULT '',
+		provider VARCHAR(128) NOT NULL DEFAULT '',
 		created_at VARCHAR(64) NOT NULL,
 		KEY idx_tool_calls_turn (turn_id),
 		KEY idx_tool_calls_created (created_at)
@@ -260,6 +263,9 @@ type toolCall struct {
 	CostUSD      float64
 	ResultChars  int
 	Class        errclass.Class
+	// Provider is the configured service that answered (a web search: which of the services in
+	// web_search.order found the pages); "" when the tool has none.
+	Provider string
 }
 
 // noteToolCall records one tool execution (or one the turn's Guard held back) of the turn ctx belongs to.
@@ -279,9 +285,9 @@ func (s *Service) noteToolCall(ctx context.Context, c toolCall) {
 	if guard == "" {
 		guard = "allowed"
 	}
-	s.ledger.add(s, `INSERT INTO tool_calls(turn_id, tool, param_keys, param_sources, guard, status, latency_ms, cost_usd, result_chars, class, created_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?)`, observability.TurnID(ctx), c.Tool, string(kj), string(sj), guard, c.Status, c.Latency.Milliseconds(),
-		c.CostUSD, c.ResultChars, string(c.Class), s.Clock.Now().UTC().Format(time.RFC3339))
+	s.ledger.add(s, `INSERT INTO tool_calls(turn_id, tool, param_keys, param_sources, guard, status, latency_ms, cost_usd, result_chars, class, provider, created_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, observability.TurnID(ctx), c.Tool, string(kj), string(sj), guard, c.Status, c.Latency.Milliseconds(),
+		c.CostUSD, c.ResultChars, string(c.Class), c.Provider, s.Clock.Now().UTC().Format(time.RFC3339))
 }
 
 // ledgerQueue is how many rows may wait for the writer. A turn makes a handful of rows, so this only
@@ -403,6 +409,9 @@ func (w *ledgerWriter) flush(s *Service, rows []ledgerRow) {
 // LedgerDropped is how many call-ledger rows were dropped because the writer's queue was full.
 func (s *Service) LedgerDropped() int64 { return s.ledger.dropped.Load() }
 
+// ledgerRoleToolLoop names the tool loop's model calls in the ledger (chatLLM.ChatTools).
+const ledgerRoleToolLoop = "tool_loop"
+
 // ledgerRoleKey carries a more specific name for the model call made under ctx.
 type ledgerRoleKey struct{}
 
@@ -418,6 +427,15 @@ func ledgerRole(ctx context.Context, role string) string {
 		return l
 	}
 	return role
+}
+
+// servedBy is the provider and model that answered a call made through an adapter with fallbacks: the
+// role's own pair when it answered (or failed alone), the fallback's when one stood in.
+func servedBy(provider, model string, res openai.ChatResult) (string, string) {
+	if n := len(res.Attempts); n > 0 && res.Provider != "" {
+		return res.Provider, res.Attempts[n-1].Model
+	}
+	return provider, model
 }
 
 // declaredParamKeys keeps the parameter names the tool declares (its Inputs) and folds anything else the
@@ -517,7 +535,7 @@ func (s *Service) turnLedgers(turnID string) map[string]any {
 		m["fallback"] = asInt(m["fallback"]) == 1
 		return m
 	})
-	tc := []string{"tool", "param_keys", "param_sources", "guard", "status", "latency_ms", "cost_usd", "result_chars", "class", "created_at"}
+	tc := []string{"tool", "param_keys", "param_sources", "guard", "status", "latency_ms", "cost_usd", "result_chars", "class", "provider", "created_at"}
 	read("tool_calls", `SELECT `+strings.Join(tc, ", ")+` FROM tool_calls WHERE turn_id=? ORDER BY id`, tc, func(raw []any) map[string]any {
 		m := rowMap(tc)(raw)
 		var keys []string

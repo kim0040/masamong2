@@ -197,7 +197,7 @@ func (s *Service) alertTick(ctx context.Context) {
 	locale := s.alertLocale()
 	least := severityRank[s.Doc().Alerts.Least()]
 	var items []attention
-	if res := s.dashboardOverview(ctx, action.Request{Action: "dashboard.overview", Locale: locale}); res.OK {
+	if res := s.dashboardOverview(withBackgroundRead(ctx), action.Request{Action: "dashboard.overview", Locale: locale}); res.OK {
 		items, _ = res.Output["attention"].([]attention)
 	}
 	sent := map[string]alertSent{}

@@ -85,6 +85,7 @@ func (c chatLLM) ChatTools(ctx context.Context, role string, msgs []chat.LoopMsg
 		on := true
 		req.ParallelToolCalls = &on
 	}
+	began := time.Now()
 	end := chat.GuardFrom(ctx).Begin()
 	cost := 0.0
 	defer func() { end(cost) }()
@@ -96,6 +97,11 @@ func (c chatLLM) ChatTools(ctx context.Context, role string, msgs []chat.LoopMsg
 		_ = eng.Store.AddSpend("chat", cost, 1)
 	}
 	end(cost)
+	// a loop round is a model call like the planner's: one ledger row, also when the model refused tools
+	// or a fallback answered (the turn's cost counts it, LoopTrace.CostUSD)
+	servedProvider, servedModel := servedBy(r.provider, r.model, res)
+	c.s.noteLLMCall(ctx, llmCall{Role: ledgerRoleToolLoop, Model: servedModel, Provider: servedProvider, FinishReason: res.FinishReason, PromptTokens: res.PromptTokens,
+		CompletionTokens: res.CompletionTokens, CachedTokens: res.CachedTokens, Latency: time.Since(began), CostUSD: cost, Class: errclass.Of(err), Fallback: res.Fallback})
 	if err != nil && (errors.Is(err, openai.ErrToolsUnsupported) || errclass.Of(err) == errclass.Unsupported) {
 		// a model without tools is not a provider in trouble: the planner takes over, nothing to report
 		if _, took := c.s.toolsTaken.Load(refusedKey(c.s, r)); !took {

@@ -181,6 +181,8 @@ func migrateAdmin(st *storage.Store) error {
 		{"channel_summary", "evidence_state", "INTEGER NOT NULL DEFAULT 0", "TINYINT NOT NULL DEFAULT 0"},
 		// one memory-index ledger row may summarize several provider calls for a job and role
 		{"llm_calls", "call_count", "INTEGER NOT NULL DEFAULT 1", "INT NOT NULL DEFAULT 1"},
+		// which service answered a tool call (a web search: the one of web_search.order that found the pages)
+		{"tool_calls", "provider", "TEXT NOT NULL DEFAULT ''", "VARCHAR(128) NOT NULL DEFAULT ''"},
 		// repeating reminders (reminders_repeat.go): the rule as JSON ('' = once), its end, how many were leased,
 		// and the occurrence being sent
 		{"reminders", "repeat_rule", "TEXT NOT NULL DEFAULT ''", "VARCHAR(512) NOT NULL DEFAULT ''"},
@@ -1146,7 +1148,7 @@ type attention struct {
 
 func (s *Service) dashboardOverview(ctx context.Context, req action.Request) action.Result {
 	db, _ := s.adminDB()
-	lap := s.laps("dashboard")
+	lap := s.laps(ctx, "dashboard")
 	defer lap.done()
 	doc := s.doctor(ctx, req)
 	lap.mark("doctor")

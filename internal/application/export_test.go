@@ -361,3 +361,14 @@ func CapsCacheForTest(s *Service, provider string) *openai.CapsCache {
 func LookupModelCapsForTest(s *Service, ctx context.Context, provider string) {
 	s.lookupModelCaps(ctx, provider)
 }
+
+// SlowReadForTest logs one read that took longer than lapSlow, as a console read (background false) or as
+// the alert loop's own (true).
+func (s *Service) SlowReadForTest(ctx context.Context, background bool) {
+	if background {
+		ctx = withBackgroundRead(ctx)
+	}
+	l := s.laps(ctx, "probe")
+	l.start = time.Now().Add(-lapSlow - time.Second)
+	l.done()
+}

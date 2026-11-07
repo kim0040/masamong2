@@ -37,6 +37,9 @@ type followWindow struct {
 	untagged int    // untagged follow-ups answered in a row
 	lastID   string // conversation_log id of the last decision (its outcome is noted later)
 	lastSkip time.Time
+	// lastAnswer is when the last decision was to answer: a tag within followRetagWindow after it is noted
+	// ("retagged_after_answer") beside the skipped ones ("retagged"), so the two rates can be compared
+	lastAnswer time.Time
 }
 
 type followState struct {
@@ -109,13 +112,17 @@ func (s *Service) NoteDirectCall(guildID, channelID, authorID string) {
 	f := &s.follow
 	f.mu.Lock()
 	w := f.wins[followKey(guildID, channelID, authorID)]
-	id := ""
-	if w != nil && !w.lastSkip.IsZero() && s.Clock.Now().Sub(w.lastSkip) <= followRetagWindow {
-		id, w.lastSkip = w.lastID, time.Time{}
+	id, outcome := "", ""
+	switch {
+	case w == nil:
+	case !w.lastSkip.IsZero() && s.Clock.Now().Sub(w.lastSkip) <= followRetagWindow:
+		id, outcome, w.lastSkip = w.lastID, "retagged", time.Time{}
+	case !w.lastAnswer.IsZero() && s.Clock.Now().Sub(w.lastAnswer) <= followRetagWindow:
+		id, outcome, w.lastAnswer = w.lastID, "retagged_after_answer", time.Time{}
 	}
 	f.mu.Unlock()
 	if id != "" {
-		s.ownedGo("follow outcome", func(context.Context) { s.noteConversationOutcome(id, "retagged") })
+		s.ownedGo("follow outcome", func(context.Context) { s.noteConversationOutcome(id, outcome) })
 	}
 }
 
@@ -238,9 +245,11 @@ func (s *Service) FollowUp(ctx context.Context, m ObservedMessage) bool {
 	f.mu.Lock()
 	if w := f.wins[key]; w != nil {
 		w.lastID = id
-		w.lastSkip = time.Time{}
+		w.lastSkip, w.lastAnswer = time.Time{}, time.Time{}
 		if decision != "answer" {
 			w.lastSkip = s.Clock.Now()
+		} else if mode == "window" { // an answer the mode let through (a would_answer was not sent)
+			w.lastAnswer = s.Clock.Now()
 		}
 	}
 	f.mu.Unlock()

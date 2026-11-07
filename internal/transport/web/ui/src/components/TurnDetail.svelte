@@ -121,7 +121,7 @@
           <ul class="calls">
             {#each toolCalls as c}
               <li>
-                <div class="row small"><span class="chip">{toolName(c.tool)}</span><span class="muted">{c.guard === 'skipped' ? t('turns.tool.skipped') : c.status}</span>{#if c.class}<span class="chip err">{cls(c.class)}</span>{/if}<span class="spacer"></span><span class="num">{ms(c.latency_ms)}{c.cost_usd ? ` · ${usd(c.cost_usd, 4)}` : ''}</span></div>
+                <div class="row small"><span class="chip">{toolName(c.tool)}</span>{#if c.provider}<span class="chip mono">{c.provider}</span>{/if}<span class="muted">{c.guard === 'skipped' ? t('turns.tool.skipped') : c.status}</span>{#if c.class}<span class="chip err">{cls(c.class)}</span>{/if}<span class="spacer"></span><span class="num">{ms(c.latency_ms)}{c.cost_usd ? ` · ${usd(c.cost_usd, 4)}` : ''}</span></div>
                 <div class="row xs muted">
                   {#if c.param_keys?.length}<span>{t('turns.tool.params')}</span>{#each c.param_keys as k}<span class="chip mono">{k}{#if c.param_sources?.[k]} · {t(`turns.tool.source.${c.param_sources[k]}`)}{/if}</span>{/each}{/if}
                   {#if c.result_chars}<span class="num">{t('turns.tool.result', { n: num(c.result_chars) })}</span>{/if}

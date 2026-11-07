@@ -610,6 +610,10 @@ func (s *Service) chatTool(in ChatInput, v chat.Voice) chat.ToolRunner {
 			}
 			_, spentAfter, _ := chat.GuardFrom(ctx).Totals()
 			call.Status, call.Latency, call.CostUSD = out.Status, time.Since(began), max(spentAfter-spentBefore, 0)
+			// the service that answered, where the tool names one (a web search: its id from web_search.order)
+			if id, _ := res.Output["provider"].(string); id != "" {
+				call.Provider = clip(id, 128)
+			}
 			if call.Status == "" {
 				call.Status = "ok"
 			}

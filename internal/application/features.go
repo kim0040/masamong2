@@ -691,6 +691,7 @@ func (s *Service) search(ctx context.Context, req action.Request) action.Result 
 		if res.CostUSD != nil {
 			s.recordSpend("search", *res.CostUSD)
 			chat.GuardFrom(ctx).Spend(*res.CostUSD)
+			chat.GuardFrom(ctx).Paid(*res.CostUSD) // the turn's cost counts the fee too (Guard.Paid)
 		}
 		if len(res.Results) == 0 && len(tried)+1 < len(order) {
 			tried = append(tried, map[string]any{"provider": id, "reason": "empty"})
