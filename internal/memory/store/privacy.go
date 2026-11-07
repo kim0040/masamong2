@@ -66,6 +66,10 @@ func MigratePrivacy(db *storage.Store) error {
 	}
 	for _, q := range []string{
 		`CREATE TABLE IF NOT EXISTS privacy_tombstones(kind TEXT NOT NULL, source_id TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY(kind,source_id)) WITHOUT ROWID`,
+		// see SettleSources. Any tombstone written after an edit settled means the source changed again.
+		`CREATE TABLE IF NOT EXISTS privacy_settled(seq INTEGER PRIMARY KEY AUTOINCREMENT, source_id TEXT NOT NULL UNIQUE)`,
+		`CREATE TRIGGER IF NOT EXISTS privacy_settled_insert AFTER INSERT ON privacy_tombstones BEGIN DELETE FROM privacy_settled WHERE source_id=NEW.source_id; END`,
+		`CREATE TRIGGER IF NOT EXISTS privacy_settled_update AFTER UPDATE ON privacy_tombstones BEGIN DELETE FROM privacy_settled WHERE source_id=NEW.source_id; END`,
 	} {
 		if _, err := db.DB.Exec(q); err != nil {
 			return err
@@ -227,6 +231,25 @@ func currentMessageRevision(tx *sql.Tx, native, at string) (bool, error) {
 	return err != nil || !latest.After(wanted), nil
 }
 
+// messageRevisionRecorded reports whether the message's tombstone already is this revision: the intent
+// wrote it before the source was changed, and the worker may have finished the edit since.
+func messageRevisionRecorded(tx *sql.Tx, native, at string) (bool, error) {
+	wanted, err := time.Parse(time.RFC3339Nano, at)
+	if err != nil {
+		return false, nil
+	}
+	var raw string
+	err = tx.QueryRow(`SELECT at FROM privacy_tombstones WHERE kind='message' AND source_id=?`, native).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	latest, err := time.Parse(time.RFC3339Nano, raw)
+	return err == nil && latest.Equal(wanted), nil
+}
+
 // ObservationCurrent also closes the interval between a committed intent and source replay.
 // An edited observation becomes usable again only after the corresponding revision has committed.
 func ObservationCurrent(tx *sql.Tx, id string) (bool, error) {
@@ -272,15 +295,67 @@ const sourceChunk = 500
 // per ID. A link to a chat turn that is no longer kept also blocks: the turn's own sources are only
 // guaranteed to be followed from a link written while the turn was there (PruneChatHolders).
 func SourcesBlocked(tx *sql.Tx, keys []string) (bool, error) {
+	return SourcesBlockedAsOf(tx, keys, 0) // settled sources number from 1: none is excused
+}
+
+// SourcesBlockedAsOf is SourcesBlocked for a turn that took SettledMark before reading anything: a source
+// whose edit settled by then does not block it, because what the turn read is the edited text.
+func SourcesBlockedAsOf(tx *sql.Tx, keys []string, asOf int64) (bool, error) {
 	for lo := 0; lo < len(keys); lo += sourceChunk {
 		chunk := keys[lo:min(len(keys), lo+sourceChunk)]
 		var n int
-		err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM privacy_tombstones WHERE kind IN ('source','message') AND source_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")+`))`, toAny(chunk)...).Scan(&n)
+		err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM privacy_tombstones t WHERE t.kind IN ('source','message') AND t.source_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")+`)
+			AND NOT EXISTS(SELECT 1 FROM privacy_settled d WHERE d.source_id=t.source_id AND d.seq<=?))`, append(toAny(chunk), asOf)...).Scan(&n)
 		if err != nil || n > 0 {
 			return n > 0, err
 		}
 	}
 	return chatLinkGone(tx, keys)
+}
+
+// Settling an edit. A tombstone says a source changed; it does not say whether a reader saw the text
+// before or after the change. For a deletion that does not matter: nothing may be built on the message from
+// then on. An edit leaves a message to read, and a reply on the new text is an ordinary reply. Comparing
+// times cannot tell the two apart: an edit's time is Discord's clock, not this computer's, and a turn can
+// start after the intent is committed and still read the old text, until the source is changed.
+//
+// So order is taken from the database instead. When the worker has finished everything an edit asks for (the
+// source changed, every reply built on the old text removed), it writes the source here, in a transaction
+// after all of that. A turn reads the highest number before it reads anything. A settled number at or below
+// the turn's therefore means every read of that turn came after the edit was finished, whatever the clocks
+// say; a higher one, or none, leaves the tombstone blocking as before.
+//
+//   - Any later tombstone of the source removes it (the triggers in MigratePrivacy), so a turn is never
+//     excused by an edit that has since been followed by another change.
+//   - A source that was deleted or withdrawn is never written ('erased' tombstones): only an edit has a text
+//     left to read. The tombstones stay, because they also keep a late capture from bringing old text back.
+//   - AUTOINCREMENT never reuses a number, so a removed row cannot be mistaken for a later one.
+
+// SettledMark is the number a turn takes before it reads anything: 0 when it cannot be read, which excuses
+// nothing.
+func SettledMark(db *storage.Store) int64 {
+	if db == nil || !db.IsSQLite() {
+		return 0
+	}
+	var mark int64
+	if err := db.Reader().QueryRow(`SELECT COALESCE(MAX(seq),0) FROM privacy_settled`).Scan(&mark); err != nil {
+		return 0
+	}
+	return mark
+}
+
+// SettleSources records that the edits of these sources are finished. Replacing a row gives it a new
+// number, so a turn already under way stays blocked.
+func SettleSources(tx *sql.Tx, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(ids)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT OR REPLACE INTO privacy_settled(source_id) SELECT DISTINCT value FROM json_each(?) WHERE value<>'' AND value NOT IN (SELECT source_id FROM privacy_tombstones WHERE kind='erased')`, string(raw))
+	return err
 }
 
 // chatLinkGone reports whether any of the keys is a link to a chat turn that no longer exists.

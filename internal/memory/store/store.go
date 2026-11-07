@@ -512,8 +512,15 @@ func (s *Store) EditMessageContext(ctx context.Context, platform, nativeID, cont
 			if err != nil || !current {
 				return err
 			}
-			if err := Tombstone(tx, "message", nativeID, at); err != nil {
+			// not written again for the same revision: it would undo a finished edit (SettleSources)
+			recorded, err := messageRevisionRecorded(tx, nativeID, at)
+			if err != nil {
 				return err
+			}
+			if !recorded {
+				if err := Tombstone(tx, "message", nativeID, at); err != nil {
+					return err
+				}
 			}
 		}
 		// the chat turn follows the edit whether or not the channel stores its messages (a channel the
@@ -530,7 +537,12 @@ func (s *Store) EditMessageContext(ctx context.Context, platform, nativeID, cont
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
-		if err != nil || old == content {
+		if err != nil {
+			return err
+		}
+		if old == content {
+			// the words stayed (a changed attachment); this revision is applied all the same (ObservationCurrent)
+			_, err := tx.Exec(`UPDATE memory_observations SET edited_at=? WHERE observation_id=?`, at, rev.ObservationID)
 			return err
 		}
 		if _, err := tx.Exec(`UPDATE memory_observations SET content=?, edited_at=? WHERE observation_id=?`, content, at, rev.ObservationID); err != nil {
@@ -2086,6 +2098,8 @@ type ChatTurn struct {
 	// picture in the message a user turn replied to). Deleting or editing one of them removes the turn,
 	// user turns included (holder kind "chat_from").
 	DerivedFrom []string
+	// ReadAsOf is the SettledMark the turn took before reading its SourceIDs (0: none, nothing is excused).
+	ReadAsOf int64
 }
 
 // AppendChatTurns commits turns and their source index together, then trims to the last keep turns.
@@ -2097,7 +2111,10 @@ func (s *Store) AppendChatTurns(channelKey string, turns []ChatTurn, keep int) e
 				if !s.tidb() {
 					blocked, err := MessageBlocked(tx, t.NativeID, t.SpeakerID)
 					if !blocked && err == nil {
-						blocked, err = SourcesBlocked(tx, uniqueSources(t.SourceIDs, t.DerivedFrom))
+						blocked, err = SourcesBlockedAsOf(tx, uniqueSources(t.SourceIDs), t.ReadAsOf)
+					}
+					if !blocked && err == nil {
+						blocked, err = SourcesBlocked(tx, uniqueSources(t.DerivedFrom))
 					}
 					if err != nil {
 						return err
@@ -2167,6 +2184,43 @@ func (s *Store) RecentChatTurns(channelKey string, n int) ([]ChatTurn, error) {
 		out[i], out[j] = out[j], out[i]
 	}
 	return out, rows.Err()
+}
+
+// ChatTurnsToCopy is RecentChatTurns for writing the turns to another channel: each one also says what its
+// words were partly made from, so the copy stays tied to it (DerivedFrom).
+func (s *Store) ChatTurnsToCopy(channelKey string, n int) ([]ChatTurn, error) {
+	turns, err := s.RecentChatTurns(channelKey, n)
+	if err != nil || s.tidb() || len(turns) == 0 {
+		return turns, err
+	}
+	links := make([]string, len(turns))
+	for i, t := range turns {
+		links[i] = t.SourceIDs[0] // the turn's own link comes first
+	}
+	raw, err := json.Marshal(links)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.DB.DB.Query(`SELECT holder_id,source_id FROM evidence_refs WHERE holder_kind='chat_from' AND holder_id IN (SELECT value FROM json_each(?))`, string(raw))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	from := map[string][]string{}
+	for rows.Next() {
+		var link, source string
+		if err := rows.Scan(&link, &source); err != nil {
+			return nil, err
+		}
+		from[link] = append(from[link], source)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for i := range turns {
+		turns[i].DerivedFrom = from[links[i]]
+	}
+	return turns, nil
 }
 
 // LeafVectorWidths reads the range of active float16 widths without fetching vector BLOBs or
