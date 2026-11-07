@@ -375,6 +375,7 @@ func (g *Gateway) handleThreadComponent(s *discordgo.Session, i *discordgo.Inter
 		// a button outlives the policy it was made under: when the room's threads have been switched off
 		// since, no thread is made. The buttons are already gone; only the one who pressed is told.
 		if g.svc.ThreadsOff(i.GuildID, i.ChannelID) {
+			g.svc.ThreadOfferDropped(i.GuildID, i.ChannelID, "thread_off")
 			if _, err := s.FollowupMessageCreate(i.Interaction, false, &discordgo.WebhookParams{Content: g.svc.ThreadOffNotice(i.GuildID, i.ChannelID),
 				Flags: discordgo.MessageFlagsEphemeral, AllowedMentions: noMentions}, discordgo.WithContext(ctx)); err != nil {
 				g.log.Debug("discord: thread off notice failed", "err", err)

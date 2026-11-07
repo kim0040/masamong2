@@ -827,6 +827,7 @@
   "conv.d.thread.skip_group": "複数人の会話",
   "conv.d.thread.skip_no_permission": "スレッドの権限がなく開けず",
   "conv.d.thread.skip_create_failed": "スレッドを作れず",
+  "conv.d.thread.skip_thread_off": "この部屋はスレッドがオフ",
   "conv.d.thread.closed_stop": "終了：やめるよう言われたため",
   "conv.d.thread.closed_idle": "終了：しばらく静かだったため",
   "conv.d.thread.closed_stop_recap": "終了：やめるよう言われたため（要約を投稿）",

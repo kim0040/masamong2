@@ -961,6 +961,7 @@
   "conv.d.thread.offer": "제안",
   "conv.d.thread.opened": "열림",
   "conv.d.thread.skip_create_failed": "스레드를 만들지 못함",
+  "conv.d.thread.skip_thread_off": "이 방은 스레드를 꺼 둠",
   "conv.d.thread.skip_declined": "거절한 적 있음",
   "conv.d.thread.skip_group": "여러 사람 대화",
   "conv.d.thread.skip_no_permission": "스레드 권한이 없어 못 엶",

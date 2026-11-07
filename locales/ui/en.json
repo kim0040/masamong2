@@ -961,6 +961,7 @@
   "conv.d.thread.offer": "Offered",
   "conv.d.thread.opened": "Opened",
   "conv.d.thread.skip_create_failed": "Could not create the thread",
+  "conv.d.thread.skip_thread_off": "Threads are off in this room",
   "conv.d.thread.skip_declined": "Declined before",
   "conv.d.thread.skip_group": "Several people talking",
   "conv.d.thread.skip_no_permission": "No permission to open threads",

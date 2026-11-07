@@ -827,6 +827,7 @@
   "conv.d.thread.skip_group": "Varias personas hablando",
   "conv.d.thread.skip_no_permission": "Sin permiso para abrir hilos",
   "conv.d.thread.skip_create_failed": "No se pudo crear el hilo",
+  "conv.d.thread.skip_thread_off": "Los hilos están desactivados en este canal",
   "conv.d.thread.closed_stop": "Cerrado: pidieron parar",
   "conv.d.thread.closed_idle": "Cerrado: llevaba rato en silencio",
   "conv.d.thread.closed_stop_recap": "Cerrado: pidieron parar (con resumen)",

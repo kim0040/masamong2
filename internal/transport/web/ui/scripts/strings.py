@@ -1355,6 +1355,7 @@ add("", {
     "conv.d.thread.skip_group": ("여러 사람 대화", "Several people talking"),
     "conv.d.thread.skip_no_permission": ("스레드 권한이 없어 못 엶", "No permission to open threads"),
     "conv.d.thread.skip_create_failed": ("스레드를 만들지 못함", "Could not create the thread"),
+    "conv.d.thread.skip_thread_off": ("이 방은 스레드를 꺼 둠", "Threads are off in this room"),
     "conv.d.thread.closed_stop": ("닫힘: 그만하자고 해서", "Closed: asked to stop"),
     "conv.d.thread.closed_idle": ("닫힘: 한동안 조용해서", "Closed: quiet for a while"),
     "conv.d.thread.closed_stop_recap": ("닫힘: 그만하자고 해서 (요약 올림)", "Closed: asked to stop (recap posted)"),

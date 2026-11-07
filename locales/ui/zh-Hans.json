@@ -827,6 +827,7 @@
   "conv.d.thread.skip_group": "多人对话",
   "conv.d.thread.skip_no_permission": "没有权限，未能开帖",
   "conv.d.thread.skip_create_failed": "未能创建帖子",
+  "conv.d.thread.skip_thread_off": "此频道已关闭帖子",
   "conv.d.thread.closed_stop": "已关闭：有人说到此为止",
   "conv.d.thread.closed_idle": "已关闭：安静了一阵",
   "conv.d.thread.closed_stop_recap": "已关闭：有人说到此为止（已发总结）",
