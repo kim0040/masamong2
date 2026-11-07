@@ -255,7 +255,8 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 	}
 	// the planner's tools and the memory search run at once (runSteps): each is checked against the
 	// turn's limits in plan order (the memory search last, unless it started ahead of the loop's end);
-	// results keep the plan's order
+	// results keep the plan's order. The memory search does wait for the tools that pay for themselves,
+	// so that it is told what they leave.
 	planned := make([]*ToolResult, len(res.Assess.Steps))
 	var steps []step
 	var toolsEnd time.Time
@@ -301,9 +302,9 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 		spent := res.CostUSD
 		steps = append(steps, step{decide: func() bool { return req.Guard.AllowMoneyContext(ctx, "memory.search") },
 			run: func() {
-				defer sp.begin("memory")()
 				// the fees of the steps decided before this one count too, whether they have ended yet or not
 				req.Guard.WaitSpent(ctx)
+				defer sp.begin("memory")()
 				mem = rt.searchMemory(ctx, req, msg, intent, req.BudgetUSD-spent-req.Guard.PaidTotal(), nowT)
 			}})
 	}
@@ -473,7 +474,8 @@ func (rt *Runtime) startEarlyMemory(ctx context.Context, req Request, msg string
 		defer close(e.done)
 		if req.Guard.AllowMoneyContext(ctx, "memory.search") {
 			// a model call or a fee still on its way is part of what the search may count on being spent, and the
-			// first call of the loop is the only thing the turn can price the rest of the loop by
+			// first call of the loop is the only thing the turn can price the rest of the loop by. The tools of a
+			// second plan (a loop that failed, shadow mode) are not decided yet, and are not counted.
 			req.Guard.WaitSpent(ctx)
 			defer sp.begin("memory")()
 			e.mem = rt.searchMemory(ctx, req, msg, intent, earlyRemaining(req, spent, loop), nowT)

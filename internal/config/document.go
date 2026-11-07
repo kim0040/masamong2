@@ -1030,7 +1030,7 @@ type ChatSettings struct {
 	// "response" (the precise mode: the answer model, slower and dearer, for weak small models).
 	ToolModel string `yaml:"tool_model,omitempty" json:"tool_model,omitempty"`
 	// LoopFinal is when the tool loop stops without asking its model once more: "tools" (the default:
-	// after a round of tools whose one result is the answer, such as the weather or a quote), "search"
+	// after a round of tools whose one result is the answer, such as a place search), "search"
 	// (also after a web search that found enough) or "off" (it always asks).
 	LoopFinal string `yaml:"loop_final,omitempty" json:"loop_final,omitempty"`
 	// Vision is whether the bot looks at pictures it is called with: "auto" (the default: the answer

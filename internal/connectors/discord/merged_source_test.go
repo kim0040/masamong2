@@ -205,3 +205,25 @@ func TestASlashCommandTurnAfterASettledEdit(t *testing.T) {
 		t.Fatalf("the answer of a slash command turn was blanked after a settled edit: %d kept", n)
 	}
 }
+
+// An edit that kept the words leaves no tombstone. An older edit still in the queue (a restart replays what a failed
+// removal left behind) is older than it all the same, and a newer one is not.
+func TestAnOlderEditInTheQueueIsNotCurrentAfterAnEditThatKeptTheWords(t *testing.T) {
+	g, _ := dmGateway(t, true)
+	at := time.Now().Add(time.Hour)
+	sendDM(g, dmMessage("dm-kept", "Synthetic words"))
+	waitDMWork(g)
+	kept, err := g.svc.MessageKeptItsWords("", "dm-fixture", "dm-kept", "Synthetic words", at)
+	if err != nil || !kept {
+		t.Fatalf("kept %v, %v", kept, err)
+	}
+	event := func(when time.Time) messageReconciliation {
+		return messageReconciliation{Operation: "edit", ChannelID: "dm-fixture", MessageIDs: []string{"dm-kept"}, Content: "words taken out later", At: when}
+	}
+	if current, err := g.reconciliationEditCurrent(event(at.Add(-time.Minute))); err != nil || current {
+		t.Fatalf("the older edit: current %v, %v", current, err)
+	}
+	if current, err := g.reconciliationEditCurrent(event(at.Add(time.Minute))); err != nil || !current {
+		t.Fatalf("a newer edit: current %v, %v", current, err)
+	}
+}

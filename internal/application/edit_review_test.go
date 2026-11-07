@@ -287,6 +287,27 @@ func tombstonesOf(t *testing.T, svc *application.Service, id string) int {
 	return chainCount(t, svc, `SELECT COUNT(*) FROM privacy_tombstones WHERE source_id=?`, id)
 }
 
+// The record of a revision that kept the words goes with the tombstones, once it is older than anything kept.
+func TestRetentionRemovesOldKeptRevisions(t *testing.T) {
+	svc, _ := editSvc(t)
+	chainTurn(t, svc, "c", "m", "alice")
+	if _, err := svc.Store.DB.Exec(`INSERT INTO message_kept_revisions(native_id,at) VALUES('old','2000-01-01T00:00:00.000000000Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Store.DB.Exec(`INSERT INTO message_kept_revisions(native_id,at) VALUES('new',?)`, time.Now().UTC().Format("2006-01-02T15:04:05.000000000Z")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.RunRetentionForTest(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := chainCount(t, svc, `SELECT COUNT(*) FROM message_kept_revisions WHERE native_id='old'`); n != 0 {
+		t.Fatal("an old record stayed")
+	}
+	if n := chainCount(t, svc, `SELECT COUNT(*) FROM message_kept_revisions WHERE native_id='new'`); n != 1 {
+		t.Fatal("a recent record went")
+	}
+}
+
 // An edit that kept the words leaves no tombstone, and is a revision all the same: an older edit arriving after
 // it (out of order, or replayed after a restart) must not bring back words the newer one took out.
 func TestAnOlderEditDoesNotPassAnEditThatKeptTheWords(t *testing.T) {

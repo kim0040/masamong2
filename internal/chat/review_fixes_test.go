@@ -151,6 +151,50 @@ func TestDiscardedSearchKeepsItsCostAndTakesNoCall(t *testing.T) {
 	}
 }
 
+// A search that widened its window pays two reranks: the first goes on the guard when it widens (searchMemory),
+// the second when the search is dropped, and the turn counts each once.
+func TestDroppedWidenedSearchCountsBothReranksOnce(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		req := latencyRequest()
+		req.Guard = &Guard{MaxCalls: 8}
+		rt := &Runtime{Memory: &windowMemory{}}
+		mem := rt.searchMemory(context.Background(), req, "camping", search.Intent{Recent: true}, 0.05, time.Now())
+		if !mem.relaxed {
+			t.Fatalf("the search did not widen: %+v", mem)
+		}
+		done := make(chan struct{})
+		close(done)
+		cost := (&earlyMemory{cancel: func() {}, done: done, mem: mem}).discard(req.Guard)
+		calls, spent, _ := req.Guard.Totals()
+		if want := 0.0005; math.Abs(cost-want) > 1e-12 || math.Abs(spent-want) > 1e-12 || calls != 0 {
+			t.Fatalf("turn cost %v, guard spent %v, %d calls; want both %v and no call", cost, spent, calls, want)
+		}
+	})
+}
+
+// However the race between a search that has just been let go and the second plan ends, what the search paid is
+// in the turn's cost and in the guard's spending alike, and takes no call.
+func TestAReplanLeavesTheTurnCostAndTheGuardAgreeing(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const planRecent = `{"memory_requirement":"required","question_kind":"event","person_targets":[],"semantic_query":"camping","time_scope":"recent","tool_plan":[]}`
+		llm := &latencyLLM{plans: []string{planRecent, planNoMemory}, loopErr: ErrToolsUnsupported, loopErrAt: time.Second}
+		req := latencyRequest()
+		req.Guard = &Guard{MaxCalls: 8}
+		res, err := (&Runtime{LLM: llm, Memory: &windowMemory{}}).Answer(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		calls, spent, _ := req.Guard.Totals()
+		if math.Abs(res.CostUSD-spent) > 1e-12 {
+			t.Fatalf("turn cost %v, guard spent %v", res.CostUSD, spent)
+		}
+		// two planner calls, the loop's one and the answer
+		if calls != 4 {
+			t.Fatalf("guard counted %d calls", calls)
+		}
+	})
+}
+
 // A cut-off answer goes on in a second call: the answer's time and span run to its end.
 type continuingLLM struct {
 	*latencyLLM

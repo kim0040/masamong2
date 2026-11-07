@@ -56,12 +56,9 @@ type latencyLLM struct {
 	roundTime []time.Duration
 	loopErr   error
 	loopErrAt time.Duration
-	// loopErrRound is the round loopErr comes in, counted from 0: the rounds before it answer as usual
-	loopErrRound int
-	planCost     float64
-	loopCost     float64
-	planCalls    int
-	loopCalls    int
+	planCost  float64
+	loopCost  float64
+	planCalls int
 }
 
 func (f *latencyLLM) Chat(ctx context.Context, model string, _ []Msg, _ int, _ float64) (string, float64, error) {
@@ -83,11 +80,7 @@ func (f *latencyLLM) ToolsReady(string) bool { return true }
 func (f *latencyLLM) ChatTools(ctx context.Context, _ string, _ []LoopMsg, _ []ToolSpec, _ int) (LoopReply, error) {
 	end := GuardFrom(ctx).Begin()
 	defer end(f.loopCost)
-	f.mu.Lock()
-	failing := f.loopErr != nil && f.loopCalls >= f.loopErrRound
-	f.loopCalls++
-	f.mu.Unlock()
-	if failing {
+	if f.loopErr != nil {
 		_ = sleepCtx(ctx, f.loopErrAt)
 		return LoopReply{}, f.loopErr
 	}
