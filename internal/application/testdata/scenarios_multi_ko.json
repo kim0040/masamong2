@@ -13,6 +13,7 @@
     {"id": "search_then_read", "category": "search", "turns": ["오늘 코스피가 왜 움직였는지 기사 찾아서 하나 자세히 읽고 설명해줘"], "expect_all_tools": ["search.web", "web.read"]},
     {"id": "compare_two", "category": "search", "turns": ["맥북 에어랑 맥북 프로 현재 가격 각각 찾아서 비교해줘"], "expect_all_tools": ["search.web"]},
     {"id": "follow_a_result", "category": "search", "turns": ["올해 아카데미 작품상 뭐였는지 찾고 그 감독의 다음 작품도 찾아줘"], "expect_all_tools": ["search.web"]},
-    {"id": "one_fact", "category": "search", "turns": ["오늘 비트코인 왜 올랐대?"], "expect_tools": ["finance.quote", "search.web"]}
+    {"id": "one_fact", "category": "search", "turns": ["오늘 비트코인 왜 올랐대?"], "expect_tools": ["finance.quote", "search.web"]},
+    {"id": "short_why", "category": "search", "turns": ["엔화 왜 이래"], "expect_all_tools": ["search.web"]}
   ]
 }

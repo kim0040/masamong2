@@ -56,7 +56,7 @@ func (s *Service) threadBackedOff(guildID, channelID string, now time.Time) bool
 		return false
 	}
 	rows, err := db.Reader().Query(`SELECT decision, created_at, outcome FROM conversation_log WHERE guild_id=? AND channel_id=? AND kind=?
-		AND decision IN ('offer','auto','opened') ORDER BY created_at DESC LIMIT ?`, guildID, channelID, convThread, threadBackoffRows)
+		AND decision IN ('offer','auto','opened') ORDER BY created_at DESC, rowid DESC LIMIT ?`, guildID, channelID, convThread, threadBackoffRows)
 	if err != nil {
 		return false
 	}

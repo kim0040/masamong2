@@ -222,7 +222,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 	// the plan is all the memory search needs: while the loop still runs it starts now, beside the loop
 	var early *earlyMemory
 	defer func() { early.discard(req.Guard) }()
-	if assessed.MemoryState == "search" && canSearch && loop.running() {
+	if assessed.MemoryState == "search" && canSearch && loop.running() && loopPriceKnown(req) {
 		early = rt.startEarlyMemory(ctx, req, msg, intent, res.CostUSD, loop, nowT, sp)
 	}
 	loopTools, loopRan := loop.wait()
@@ -268,8 +268,11 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 			}
 			info, _ := req.Tools.find(st.Tool)
 			cancel := func() { planned[i] = &ToolResult{Tool: st.Tool, Status: "cancelled"} }
-			steps = append(steps, step{key: st.Tool, reserved: true, cancel: cancel, pays: info.Pays, decide: func() bool {
-				if !req.Guard.AllowContext(ctx, st.Tool) {
+			hold := &paidHold{}
+			steps = append(steps, step{key: st.Tool, reserved: true, cancel: cancel, pays: info.Pays, hold: hold, decide: func() bool {
+				allowed, endPaid := req.Guard.AllowPayingContext(ctx, st.Tool, info.Pays)
+				hold.end = endPaid
+				if !allowed {
 					if ctx.Err() != nil {
 						cancel()
 						return false
@@ -295,7 +298,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 	searchMemory := res.Assess.MemoryState == "search" && canSearch
 	var mem memoryRun
 	if searchMemory && early == nil {
-		remaining := req.BudgetUSD - res.CostUSD
+		remaining := req.BudgetUSD - res.CostUSD - req.Guard.PaidTotal() // the fees tools were charged count too
 		steps = append(steps, step{decide: func() bool { return req.Guard.AllowMoneyContext(ctx, "memory.search") },
 			run: func() { defer sp.begin("memory")(); mem = rt.searchMemory(ctx, req, msg, intent, remaining, nowT) }})
 	}
@@ -393,12 +396,18 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 		completion, err = rt.complete(ctx, req.ResponseModel, msgs, answerBudget, 0.2)
 		res.CostUSD += completion.CostUSD
 	}
-	res.Timing["answer"] = ms(t3)
-	sp.add("answer", t3, time.Now())
-	res.Spans = sp.spans()
-	res.CostUSD += req.Guard.PaidTotal() // what the tools paid for (a search's fee) is part of the turn's cost
-	_, _, res.Skipped = req.Guard.Totals()
+	// the answer's time ends with the last call that makes it, the one that goes on with a cut-off answer
+	// included; what the tools and the query embedding were charged is final by then
+	finish := func() {
+		res.Timing["answer"] = ms(t3)
+		sp.add("answer", t3, time.Now())
+		res.Spans = sp.spans()
+		warm.wait()
+		res.CostUSD += req.Guard.PaidTotal() // what the tools paid for (a search's fee) is part of the turn's cost
+		_, _, res.Skipped = req.Guard.Totals()
+	}
 	if err != nil {
+		finish()
 		return res, err
 	}
 	answer := strings.TrimSpace(completion.Text)
@@ -423,6 +432,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 			answer = cutAtSentenceBoundary(answer) + " " + v.pack().Chat.IncompleteAnswer
 		}
 	}
+	finish()
 	res.Answer = strings.TrimSpace(answer)
 	return res, nil
 }
@@ -449,18 +459,62 @@ type earlyMemory struct {
 // startEarlyMemory starts the search the plan asked for. Its admission is the one it has at its usual
 // place (the money cap only, waiting for the models in flight), so under a money cap it starts once the
 // model in flight has ended. spent is what the turn's models cost so far (the planner's): the search's own
-// budget counts the loop for what it cost or, while the loop runs, for what its rounds can still cost.
+// budget counts the loop for what it cost or, while the loop runs, for what its rounds can still cost
+// (earlyRemaining).
 func (rt *Runtime) startEarlyMemory(ctx context.Context, req Request, msg string, intent search.Intent, spent float64, loop *loopRun, nowT time.Time, sp *spanLog) *earlyMemory {
 	ctx, cancel := context.WithCancel(ctx)
 	e := &earlyMemory{intent: intent, cancel: cancel, done: make(chan struct{})}
 	go func() {
 		defer close(e.done)
 		if req.Guard.AllowMoneyContext(ctx, "memory.search") {
+			req.Guard.WaitPaid(ctx) // a fee still on its way is part of what the search may count on being spent
 			defer sp.begin("memory")()
-			e.mem = rt.searchMemory(ctx, req, msg, intent, req.BudgetUSD-spent-loop.costAhead(spent), nowT)
+			e.mem = rt.searchMemory(ctx, req, msg, intent, earlyRemaining(req, spent, loop), nowT)
 		}
 	}()
 	return e
+}
+
+// loopPriceKnown reports whether the loop's rounds can be priced from what the turn has paid for models so
+// far: they are asked of the planner's model, whose calls the turn has already seen. chat.tool_model set to
+// another model has a price nothing known to the turn bounds, so a search beside such a loop would be told
+// a budget that cannot be shown to be no larger than the one it would have after the loop; it starts
+// after the loop, as before.
+func loopPriceKnown(req Request) bool {
+	return req.LoopModel == "" || req.LoopModel == req.PlannerModel
+}
+
+// feeAllowanceUSD is what a round of the loop that is still to come is counted to pay a service
+// (ToolInfo.Pays) in earlyRemaining: a web search costs about 0.007 (Exa's costDollars), rounded up. A fee
+// that is not known yet is not known; this is the estimate.
+const feeAllowanceUSD = 0.01
+
+// payingTools reports whether the set offers a tool that pays for itself (other than the memory search).
+func payingTools(ts Toolset) bool {
+	for _, t := range ts.Enabled {
+		if t.Pays && t.ID != "memory.search" {
+			return true
+		}
+	}
+	return false
+}
+
+// earlyRemaining is what a memory search that starts beside the tool loop may count on having left: the
+// budget less what the turn's models and the fees of its tools have cost (the search after the loop is
+// told the same, less what the loop then also costs). A loop that has ended counts for what it cost. One
+// that still runs counts for all of its rounds, each at the price of the dearest model call the turn has
+// had so far (at least the planner's) plus, when the toolset has a tool that pays for itself, a fee
+// allowance, and for a second planner call, which a loop that fails brings. Nothing better is known of a
+// call that has not been made, so the estimate errs towards less.
+func earlyRemaining(req Request, planCost float64, loop *loopRun) float64 {
+	ahead := loop.costAhead(max(planCost, req.Guard.MaxCall()))
+	if loop.running() {
+		ahead += planCost // the planner asked again when the loop fails
+		if payingTools(req.Tools) {
+			ahead += MaxLoopRounds * feeAllowanceUSD
+		}
+	}
+	return req.BudgetUSD - planCost - req.Guard.PaidTotal() - ahead
 }
 
 // wait is the search's result, once it has ended.
@@ -470,8 +524,8 @@ func (e *earlyMemory) wait() memoryRun {
 	return e.mem
 }
 
-// discard gives the search up and waits for it to end. It returns what it spent by then, also noted on
-// the guard. A nil search is no search.
+// discard gives the search up and waits for it to end. It returns what it spent by then, also added to the
+// guard's spending (not its call count). A nil search is no search.
 func (e *earlyMemory) discard(g *Guard) float64 {
 	if e == nil {
 		return 0
@@ -482,7 +536,7 @@ func (e *earlyMemory) discard(g *Guard) float64 {
 		return 0
 	}
 	rerank, _ := mem.sr.Trace["rerank_cost_usd"].(float64)
-	g.Note(rerank)
+	g.Spend(rerank) // its cost only: a search nobody used takes no call from the tools still to come
 	return rerank + mem.firstRerank
 }
 
@@ -551,7 +605,7 @@ func (rt *Runtime) searchMemory(ctx context.Context, req Request, msg string, in
 		again, err2 := rt.Memory.Search(ctx, engine.SearchRequest{Query: msg, Intent: wide, Rooms: req.Rooms, Ranking: req.Ranking,
 			RemainingUSD: max(0, remaining-first), Now: nowT})
 		if err2 == nil {
-			req.Guard.Note(first)
+			req.Guard.Spend(first) // the first search's reranker: its cost counts, it takes no call from the tools
 			out.sr, out.relaxed, out.firstRerank, out.intent = again, true, first, wide
 		} else {
 			slog.Default().WarnContext(ctx, "chat: memory search without the time window failed", "error", errKind(err2))

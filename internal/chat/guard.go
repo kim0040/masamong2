@@ -32,6 +32,8 @@ type Guard struct {
 	changed chan struct{}
 	skipped []string
 	paid    float64 // what tools paid for that no model-call total holds (a web search), see Paid
+	paying  int     // steps that pay for themselves (ToolInfo.Pays) under way: their fee is not in spent yet
+	maxCall float64 // the dearest model call that has ended so far
 	parent  *Guard  // a step's own guard (child) passes everything on to the turn's
 }
 
@@ -51,6 +53,7 @@ func (g *Guard) Begin() func(float64) {
 		once.Do(func() {
 			g.mu.Lock()
 			g.spent += usd
+			g.maxCall = max(g.maxCall, usd)
 			g.models--
 			if g.changed != nil {
 				close(g.changed)
@@ -62,10 +65,84 @@ func (g *Guard) Begin() func(float64) {
 	}
 }
 
+// BeginPaid says that a step which pays for itself (ToolInfo.Pays) is under way: the fee it adds to the
+// guard comes when it ends, so what was spent is not final before that. The returned end must be called
+// once the step is over, whatever came of it. Under a money cap admission waits for it as for a model.
+func (g *Guard) BeginPaid() func() {
+	if g == nil {
+		return func() {}
+	}
+	g.mu.Lock()
+	g.paying++
+	g.mu.Unlock()
+	parentEnd := g.parent.BeginPaid()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			g.mu.Lock()
+			g.paying--
+			if g.changed != nil {
+				close(g.changed)
+				g.changed = nil
+			}
+			g.mu.Unlock()
+			parentEnd()
+		})
+	}
+}
+
+// WaitPaid returns when no step that pays for itself is under way, or ctx ends: from then on PaidTotal
+// holds every fee the turn has been charged so far.
+func (g *Guard) WaitPaid(ctx context.Context) {
+	if g == nil {
+		return
+	}
+	for ; g.parent != nil; g = g.parent {
+	}
+	for {
+		g.mu.Lock()
+		if g.paying == 0 || ctx.Err() != nil {
+			g.mu.Unlock()
+			return
+		}
+		if g.changed == nil {
+			g.changed = make(chan struct{})
+		}
+		changed := g.changed
+		g.mu.Unlock()
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// MaxCall is the cost of the dearest model call of the turn that has ended so far: what the next call of
+// the same model can be expected to cost at the most, when nothing else is known about it.
+func (g *Guard) MaxCall() float64 {
+	if g == nil {
+		return 0
+	}
+	for ; g.parent != nil; g = g.parent {
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.maxCall
+}
+
 // AllowContext waits for model costs under a money cap, then checks the optional step's limits.
 // Waiting follows the turn context; cancellation is not a budget refusal.
 func (g *Guard) AllowContext(ctx context.Context, step string) bool {
-	return g.allowContext(ctx, step, true)
+	ok, _ := g.allowContext(ctx, step, true, false)
+	return ok
+}
+
+// AllowPayingContext is AllowContext for a step that may pay for itself (ToolInfo.Pays). When it is
+// allowed it is under way in the same breath (BeginPaid), so a step that looks at the money in between
+// cannot miss its fee; end must be called once the step is over. end is never nil.
+func (g *Guard) AllowPayingContext(ctx context.Context, step string, pays bool) (ok bool, end func()) {
+	return g.allowContext(ctx, step, true, pays)
 }
 
 // AllowMoneyContext is AllowContext for a step the call count does not hold back: only the money cap
@@ -73,23 +150,25 @@ func (g *Guard) AllowContext(ctx context.Context, step string) bool {
 // window) are few and fixed, and a turn that spent its calls on the planner and web searches would
 // otherwise never reach the memory the planner asked for.
 func (g *Guard) AllowMoneyContext(ctx context.Context, step string) bool {
-	return g.allowContext(ctx, step, false)
+	ok, _ := g.allowContext(ctx, step, false, false)
+	return ok
 }
 
-func (g *Guard) allowContext(ctx context.Context, step string, countCalls bool) bool {
+func (g *Guard) allowContext(ctx context.Context, step string, countCalls, pays bool) (bool, func()) {
+	noEnd := func() {}
 	if g == nil {
-		return ctx.Err() == nil
+		return ctx.Err() == nil, noEnd
 	}
 	if g.parent != nil {
-		return g.parent.allowContext(ctx, step, countCalls)
+		return g.parent.allowContext(ctx, step, countCalls, pays)
 	}
 	for {
 		g.mu.Lock()
 		if ctx.Err() != nil {
 			g.mu.Unlock()
-			return false
+			return false, noEnd
 		}
-		if g.MaxUSD > 0 && g.models > 0 {
+		if g.MaxUSD > 0 && (g.models > 0 || g.paying > 0) {
 			if g.changed == nil {
 				g.changed = make(chan struct{})
 			}
@@ -99,12 +178,28 @@ func (g *Guard) allowContext(ctx context.Context, step string, countCalls bool) 
 			case <-changed:
 				continue
 			case <-ctx.Done():
-				return false
+				return false, noEnd
 			}
 		}
 		allowed := g.allowLocked(step, countCalls)
+		end := noEnd
+		if allowed && pays {
+			g.paying++
+			var once sync.Once
+			end = func() {
+				once.Do(func() {
+					g.mu.Lock()
+					g.paying--
+					if g.changed != nil {
+						close(g.changed)
+						g.changed = nil
+					}
+					g.mu.Unlock()
+				})
+			}
+		}
 		g.mu.Unlock()
-		return allowed
+		return allowed, end
 	}
 }
 
@@ -243,11 +338,15 @@ const ToolParallel = 4
 type step struct {
 	decide   func() bool
 	run      func()
-	pays     bool   // spends money of its own (ToolInfo.Pays)
-	key      string // calls of the same tool wait for their predecessor in model order
+	pays     bool      // spends money of its own (ToolInfo.Pays)
+	hold     *paidHold // set by decide when it made the step count as under way (AllowPayingContext)
+	key      string    // calls of the same tool wait for their predecessor in model order
 	cancel   func()
 	reserved bool
 }
+
+// paidHold carries the end of a paying step's BeginPaid from its decide to runSteps.
+type paidHold struct{ end func() }
 
 // runSteps decides steps in model order and runs at most ToolParallel together, serializing each key.
 // When the turn has a money cap, a step that pays is waited for before the next step is decided, so the
@@ -272,7 +371,15 @@ func runSteps(ctx context.Context, g *Guard, steps []step) {
 		if s.key != "" {
 			last[s.key] = done
 		}
+		endPaid := func() {}
+		switch {
+		case s.hold != nil && s.hold.end != nil:
+			endPaid = s.hold.end // decide has made it count already
+		case s.pays:
+			endPaid = g.BeginPaid() // its fee is not spent yet: the steps that look at the money wait for it
+		}
 		cancel := func() {
+			endPaid()
 			if s.reserved {
 				g.releaseCall()
 			}
@@ -310,6 +417,7 @@ func runSteps(ctx context.Context, g *Guard, steps []step) {
 				}
 			}
 			defer func() { <-slots }()
+			defer endPaid()
 			if ctx.Err() != nil {
 				cancel()
 				return

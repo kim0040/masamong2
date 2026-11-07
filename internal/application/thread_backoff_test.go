@@ -96,3 +96,20 @@ func TestOpenedThreadEndsTheBackoffAndRestLengthens(t *testing.T) {
 		t.Fatal("an opened thread starts it over")
 	}
 }
+
+// Rows written in the same instant are read newest first by their insertion order: an offer made after a
+// thread was opened counts for the rest, one made before it does not.
+func TestThreadBackoffReadsRowsOfOneInstantInTheOrderTheyWereWritten(t *testing.T) {
+	svc := setupSvc(t)
+	at := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
+	svc.Clock = clock.Fixed{T: at}
+	svc.LogThreadOfferForTest("g", "c", at.Add(-time.Hour))
+	svc.LogThreadOfferForTest("g", "c", at) // before the thread was opened
+	svc.ThreadOpened(context.Background(), "g", "c", "th", "uc", "")
+	svc.LogThreadOfferForTest("g", "c", at) // after it, one instant later in the log
+	svc.Clock = clock.Fixed{T: at.Add(time.Hour)}
+	// newest first: offer, opened, offer, offer → one offer passed over since the thread: no rest
+	if svc.ThreadBackedOffForTest("g", "c") {
+		t.Fatal("the offer written after the opened thread was counted with the ones before it")
+	}
+}

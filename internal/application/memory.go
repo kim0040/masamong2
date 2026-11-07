@@ -426,6 +426,15 @@ func (s *Service) MemoryEngine() (*engine.Engine, error) {
 	st.eng.CallProviders = callProviders
 	st.eng.ResolveBatcher = s.batchResolver(doc, st.eng)
 	st.eng.OnCall = func(ctx context.Context, c engine.CallInfo) {
+		if c.Role == "embed" {
+			// a query embedding made for a chat turn (also the one started ahead of the plan, a search that
+			// never came) is charged to that turn once: to its cost and to the spending its limits look at.
+			// Only the call that went to the provider reports, so a search that joined it pays nothing more.
+			// A rerank is counted from the search's trace
+			g := chat.GuardFrom(ctx)
+			g.Spend(c.CostUSD)
+			g.Paid(c.CostUSD)
+		}
 		role := c.Role
 		if role == "summary" {
 			// "summary" is already used by chat and channel summaries; keep the memory-index role distinct.

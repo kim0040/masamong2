@@ -1,6 +1,7 @@
 package application_test
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"masamong/internal/action"
 	"masamong/internal/application"
 )
 
@@ -216,8 +218,10 @@ func TestSlowSearchServiceIsPassedOver(t *testing.T) {
 	}
 }
 
-// A freshness word the schema does not offer is dropped, not sent on (Tavily answers 400 to "hour").
-func TestSearchDropsUnknownFreshness(t *testing.T) {
+// A freshness word within the day becomes "day" (a search for the latest news says "hour" or "recent"
+// as often as "day"); a word that names no span the services take is dropped, not sent on (Tavily
+// answers 400 to "hour").
+func TestSearchNarrowsFreshnessWordsWithinTheDay(t *testing.T) {
 	var got map[string]any
 	tavily := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -228,10 +232,88 @@ func TestSearchDropsUnknownFreshness(t *testing.T) {
 	defer tavily.Close()
 	svc := setupSvc(t)
 	pointAt(t, svc, "tavily", tavily.URL, "T_KEY", "k")
-	for fresh, want := range map[string]any{"hour": nil, "": nil, "Week": "week", "day": "day"} {
+	for fresh, want := range map[string]any{"hour": "day", "today": "day", "24h": "day", "now": "day", "recent": "day", " Recent ": "day",
+		"": nil, "year": nil, "yesterday": nil, "Week": "week", "day": "day", "month": "month"} {
 		out(t, svc, "search.web", map[string]any{"query": "캠핑", "fresh": fresh})
 		if got["time_range"] != want {
 			t.Errorf("fresh %q: time_range = %v, want %v", fresh, got["time_range"], want)
 		}
+	}
+}
+
+// A turn that has ended stops the search where it is: the services left are not asked, and neither the
+// service that was cut off nor our own time limit goes into a service's health as its failure. A
+// service's own error still does.
+func TestSearchStopsWithTheTurnAndBlamesNoServiceForOurLimits(t *testing.T) {
+	var slowHits, nextHits atomic.Int32
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		slowHits.Add(1)
+		_, _ = io.Copy(io.Discard, r.Body)
+		select {
+		case <-r.Context().Done():
+		case <-time.After(20 * time.Second):
+		}
+	}))
+	defer slow.Close()
+	next := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextHits.Add(1)
+		_, _ = w.Write([]byte(`{"organic":[{"title":"가평 캠핑장","link":"https://camp.example/1","snippet":"강 보이는 자리","position":1}]}`))
+	}))
+	defer next.Close()
+	svc := setupSvc(t)
+	pointAt(t, svc, "tavily", slow.URL, "T_KEY", "k")
+	pointAt(t, svc, "serper", next.URL, "S_KEY", "k")
+	lastError := func(id string) any {
+		h, _ := out(t, svc, "providers.list", nil)["health"].(map[string]any)[id].(map[string]any)
+		return h["last_error"]
+	}
+	run := func(ctx context.Context) action.Result {
+		raw, _ := json.Marshal(map[string]any{"query": "캠핑"})
+		return svc.Execute(ctx, action.Request{Action: "search.web", Input: raw, Locale: "en"})
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(150*time.Millisecond, cancel)
+	started := time.Now()
+	res := run(ctx)
+	if took := time.Since(started); took > 3*time.Second {
+		t.Fatalf("the cancelled turn held the search for %v", took)
+	}
+	if res.OK || nextHits.Load() != 0 || slowHits.Load() != 1 {
+		t.Fatalf("a cancelled turn must stop at the service it was waiting for: ok %v, next hits %d, slow hits %d", res.OK, nextHits.Load(), slowHits.Load())
+	}
+	if e := lastError("tavily"); e != nil {
+		t.Fatalf("the cancelled call went into the service's health: %v", e)
+	}
+
+	restore := application.SetSearchDeadlineForTest("standard", 150*time.Millisecond)
+	defer restore()
+	res = run(context.Background())
+	if !res.OK || res.Output["provider"] != "serper" || nextHits.Load() != 1 {
+		t.Fatalf("our own limit hands over to the next service: %+v", res)
+	}
+	if e := lastError("tavily"); e != nil {
+		t.Fatalf("our own time limit went into the service's health: %v", e)
+	}
+	// both services cut off by our limit: the last one's timeout is not recorded either
+	pointAt(t, svc, "serper", slow.URL, "S_KEY", "k")
+	if res = run(context.Background()); res.OK {
+		t.Fatalf("both services timed out: %+v", res)
+	}
+	if e, f := lastError("tavily"), lastError("serper"); e != nil || f != nil {
+		t.Fatalf("our time limit went into the health of tavily %v / serper %v", e, f)
+	}
+
+	// a service that answers with an error is recorded
+	restore()
+	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }))
+	defer broken.Close()
+	pointAt(t, svc, "tavily", broken.URL, "T_KEY", "k")
+	pointAt(t, svc, "serper", next.URL, "S_KEY", "k")
+	if res = run(context.Background()); !res.OK || res.Output["provider"] != "serper" {
+		t.Fatalf("an erroring service hands over: %+v", res)
+	}
+	if lastError("tavily") == nil {
+		t.Fatal("the service's own error is not recorded")
 	}
 }
