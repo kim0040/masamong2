@@ -371,12 +371,19 @@ func TestReplanKeepsOrDropsTheEarlySearch(t *testing.T) {
 				for _, s := range m.searches {
 					asked = append(asked, s.Intent.SemanticQuery)
 				}
-				if len(asked) != len(c.searches) {
-					t.Fatalf("searches %v, want %v", asked, c.searches)
+				want := c.searches
+				// The first plan's search waits for the model in flight (the money cap). When the loop fails, it
+				// and the second planner call race for the moment that frees: a search dropped before it began
+				// was never asked. Either order is right, as long as the later plan's search is the one used.
+				if c.second != planMemory && (len(asked) == 0 || asked[0] != "camping") {
+					want = want[1:]
+				}
+				if len(asked) != len(want) {
+					t.Fatalf("searches %v, want %v", asked, want)
 				}
 				for i := range asked {
-					if asked[i] != c.searches[i] {
-						t.Fatalf("searches %v, want %v", asked, c.searches)
+					if asked[i] != want[i] {
+						t.Fatalf("searches %v, want %v", asked, want)
 					}
 				}
 				if res.RagState != c.state {
