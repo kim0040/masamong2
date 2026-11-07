@@ -60,7 +60,12 @@ func startFakeTray(t *testing.T, root string) *exec.Cmd {
 	t.Cleanup(func() { _ = cmd.Process.Kill(); <-exited })
 	// a freshly built test binary can take seconds to start while antivirus scans it
 	deadline := time.Now().Add(30 * time.Second)
-	for !Running(root, "tray.lock") {
+	// the lock first, its process ID a moment later: on a slow machine StopTray could read the file in between
+	lockHoldsPID := func() bool {
+		raw, err := os.ReadFile(filepath.Join(root, "tray.lock"))
+		return err == nil && strings.TrimSpace(string(raw)) != ""
+	}
+	for !Running(root, "tray.lock") || !lockHoldsPID() {
 		select {
 		case err := <-exited:
 			exited <- err
