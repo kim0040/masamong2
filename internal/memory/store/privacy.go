@@ -469,6 +469,24 @@ func EditRecorded(ctx context.Context, q interface {
 	return err == nil && latest.Equal(at), nil
 }
 
+// EditSuperseded reports whether the message has a newer revision than at (a later edit, or its deletion), so that a
+// delivery of at comes too late: the stored words refuse it (currentMessageRevision), and the reply on the newest words,
+// the live window and the queue must too. q is a connection or a transaction.
+func EditSuperseded(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, native string, at time.Time) (bool, error) {
+	var raw string
+	err := q.QueryRowContext(ctx, `SELECT at FROM privacy_tombstones WHERE kind='message' AND source_id=?`, native).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	latest, err := time.Parse(time.RFC3339Nano, raw)
+	return err == nil && latest.After(at), nil
+}
+
 // KeptRevisionNewer reports whether an edit that kept the message's words is newer than at, so that a change at
 // at comes too late to be applied. q is a connection or a transaction.
 func KeptRevisionNewer(ctx context.Context, q interface {

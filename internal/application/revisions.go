@@ -100,6 +100,12 @@ func (s *Service) MessageEdited(guildID, channelID, messageID, content string, a
 		if err != nil || recorded {
 			return err
 		}
+		// a delivery older than the newest revision: the job would take the replies on the newest words, and the live
+		// line would go back to the old ones
+		superseded, err := store.EditSuperseded(ctx, s.Store.Reader(), messageID, at)
+		if err != nil || superseded {
+			return err
+		}
 	}
 	s.flights.edited(messageID, content, at) // before the intent: see turnFlights
 	s.liveEdit(guildID, channelID, messageID, content)
@@ -246,6 +252,11 @@ func (s *Service) commitSourceChange(ctx context.Context, guildID, channelID str
 			// a replay of an intent that was committed before the event could be marked done (MessageEdited)
 			recorded, err := store.EditRecorded(ctx, tx, messageIDs[0], at)
 			if err != nil || recorded {
+				return err
+			}
+			// or of an edit a newer one overtook after MessageEdited looked
+			superseded, err := store.EditSuperseded(ctx, tx, messageIDs[0], at)
+			if err != nil || superseded {
 				return err
 			}
 		}
