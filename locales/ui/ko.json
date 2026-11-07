@@ -456,6 +456,8 @@
   "cfg.memory.state.hint": "방에서 지금 오가는 화제와 열린 질문을 답변에 참고합니다. 기본은 켬입니다.",
   "cfg.memory.summaries": "청크 요약",
   "cfg.memory.turn_budget_usd": "턴당 기억 검색 예산 (USD)",
+  "cfg.memory.warm_query": "질문을 미리 임베딩해 두기",
+  "cfg.memory.warm_query.hint": "켬: 기억이 켜진 방에서 질문을 받으면, 기억 검색이 필요한지 정하기 전에 질문을 임베딩 공급자로 먼저 보내 둡니다. 검색이 필요하면 바로 이어 쓰고, 필요 없는 턴의 질문도 한 번 보내집니다. 끔: 기억 검색이 질문을 요구할 때만 보냅니다. 그 턴의 첫 기억 검색이 더 걸릴 수 있습니다. 기본은 켬입니다.",
   "cfg.models": "모델",
   "cfg.participation": "먼저 말 걸기",
   "cfg.participation.cooldown_sec": "재참여 쿨다운(초)",

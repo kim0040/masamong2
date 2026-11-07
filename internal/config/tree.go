@@ -146,6 +146,7 @@ var enums = map[string][]string{
 	"memory.episodes":     OnOff,
 	"memory.state":        OnOff,
 	"memory.cards":        OnOff,
+	"memory.warm_query":   OnOff,
 }
 
 // implied is what an empty value of these fields means; it comes from the same accessors the
@@ -166,7 +167,7 @@ func implied() map[string]any {
 		"chat.loop_final":           ChatSettings{}.LoopFinalMode(),
 		"chat.vision":               ChatSettings{}.VisionMode(),
 		"memory.derived_budget_usd": "3.00", "memory.day_boundary": "05:00",
-		"memory.episodes": "on", "memory.state": "on", "memory.cards": "off", "memory.message_vectors": m.MessageVectorsOn(),
+		"memory.episodes": "on", "memory.state": "on", "memory.cards": "off", "memory.warm_query": "on", "memory.message_vectors": m.MessageVectorsOn(),
 		"participation.wait_sec": int(p.Wait().Seconds()), "participation.cooldown_sec": int(p.Cooldown().Seconds()),
 		"participation.per_hour": p.Hourly(), "participation.per_day": p.Daily(), "participation.judge_per_hour": p.Judges(),
 		"participation.min_score": p.Threshold(), "participation.shadow_drafts": p.Drafts(),

@@ -392,6 +392,7 @@
             <Field id="rt" label={t('index.retrieve')} hint={t(`index.retrieve_hint.${cfg.doc.memory?.retrieve ?? 'auto'}`)}>
               {#snippet children({ id, describedby })}<Select {id} aria-describedby={describedby} value={cfg.doc.memory?.retrieve ?? 'auto'} onchange={(e) => setMem('retrieve', (e.currentTarget as HTMLSelectElement).value)} options={['auto', 'hybrid', 'rerank', 'off'].map((v) => ({ value: v, label: t(`index.retrieve.${v}`) }))} />{/snippet}
             </Field>
+            <Switch checked={cfg.doc.memory?.warm_query !== 'off'} onchange={(v) => setMem('warm_query', v ? '' : 'off')} label={t('cfg.memory.warm_query')} hint={t('cfg.memory.warm_query.hint')} />
             <Field id="tb" label={t('blocks.set.turn_budget')} hint={t('blocks.set.turn_budget_hint')}>
               {#snippet children({ id, describedby })}<Input {id} aria-describedby={describedby} inputmode="decimal" value={cfg.doc.memory?.turn_budget_usd ?? '0.05'} onchange={(e) => setMem('turn_budget_usd', (e.currentTarget as HTMLInputElement).value.trim())} />{/snippet}
             </Field>

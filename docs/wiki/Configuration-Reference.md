@@ -186,6 +186,7 @@ Model calls reserve the call count at their start and add cost at completion. Wi
 | `day_boundary` | `"05:00"` | Where one day's talk ends for room memory (`HH:MM`, `i18n.timezone`): late-night chat stays one day |
 | `episodes` | `on` | `on` · `off`. Replies get up to 3 related room episodes (about 1,200 characters), each with a few of its lines read again as they stand now |
 | `state` | `on` | `on` · `off`. Replies get the room's live topics linked to the speaker's conversation (about 500 characters) |
+| `warm_query` | `on` | `on` · `off`. In a room with memory on, the calling message is embedded while the planner thinks, so a memory search finds the vector ready; turns that end up not searching send the message too. `off` sends it only when a search needs it (the first memory search of a turn may take longer). Read each turn, no restart; it rebuilds nothing |
 | `cards` | `off` | `on` · `off`. Person cards: a fact someone said about themselves on 2 or more days, in 2 or more conversations (or asked to have remembered), kept per server. Replies get the speaker's card and up to 2 others'. Members see theirs with `/mymemory` and delete it with `/forgetme` |
 
 ## chat

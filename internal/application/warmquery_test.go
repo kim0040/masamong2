@@ -23,6 +23,8 @@ type warmProvider struct {
 	message  atomic.Pointer[string]
 	asked    atomic.Int32 // embeddings of the message
 	holdPlan atomic.Bool
+	embeds   atomic.Int32 // every embedding request, of the message or not
+	chats    atomic.Int32 // every chat completion (summaries, planner, answers)
 }
 
 func (f *warmProvider) server(t *testing.T) *httptest.Server {
