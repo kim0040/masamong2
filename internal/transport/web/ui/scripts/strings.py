@@ -727,6 +727,13 @@ add("turns", {
     "feedback_title": ("Discord에서 사람들이 이 답변에 남긴 반응과 평가", "Reactions and ratings people gave this reply in Discord"),
     "feedback_reason.wrong": ("틀리거나 지어냄", "wrong or made up"), "feedback_reason.forgot": ("기억 못 함", "did not remember"),
     "feedback_reason.tone": ("말투", "tone"), "feedback_reason.too_long": ("너무 김", "too long"), "feedback_reason.other": ("기타", "other"),
+
+    # signals noted from what people did after a reply; not ratings, never a score (implicit_feedback.go)
+    "implicit_label": ("자동 감지(참고용)", "Detected (hint only)"),
+    "implicit_title": ("사람이 누른 평가가 아니라, 답변 뒤에 보인 행동에서 자동으로 감지한 신호입니다. 점수나 경보가 아니라 살펴볼 턴을 고르는 데에만 씁니다.", "Not a rating: signals detected from what people did after the reply. Not a score or an alert; only a hint for choosing turns to review."),
+    "implicit.recall": ("2분 안에 다시 부름", "called again within 2 min"), "implicit.thanks": ("고마움 표현", "said thanks"),
+    "implicit.laugh": ("웃음", "laughed"), "implicit.correction": ("정정 표현", "corrected"),
+    "implicit.retag": ("건너뛴 말 뒤 다시 태그", "tagged again after a skipped message"), "implicit.thread_declined": ("스레드 제안 거절", "declined the thread offer"),
 })
 # call ledgers, delivery and context choice shown with a turn (all body-free)
 add("turns", {
@@ -1352,6 +1359,7 @@ add("", {
     "conv.d.thread.skip_offered": ("이미 제안함", "Already offered"),
     "conv.d.thread.skip_declined": ("거절한 적 있음", "Declined before"),
     "conv.d.thread.skip_rate": ("제안 횟수 제한", "Offer limit"),
+    "conv.d.thread.skip_backoff": ("제안이 계속 무시돼 쉬는 중", "Resting: recent offers were ignored"),
     "conv.d.thread.skip_group": ("여러 사람 대화", "Several people talking"),
     "conv.d.thread.skip_no_permission": ("스레드 권한이 없어 못 엶", "No permission to open threads"),
     "conv.d.thread.skip_create_failed": ("스레드를 만들지 못함", "Could not create the thread"),

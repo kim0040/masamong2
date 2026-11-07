@@ -3717,5 +3717,14 @@
   "usage.period_label": "调用次数和费用的期间",
   "conn.host_note.anthropic": "Anthropic Claude 模型：聊天与图像输入；无嵌入、重排序、图像生成或提示词缓存。",
   "setup.model.host_note.anthropic": "Anthropic：直接使用 Claude 模型。无嵌入、重排序或图像生成，请由其他提供商补充这些功能。该端点不支持提示词缓存。",
-  "conn.api.anthropic": "Anthropic API"
+  "conn.api.anthropic": "Anthropic API",
+  "turns.implicit_label": "自动检测（仅供参考）",
+  "turns.implicit_title": "这不是评价：是根据回复之后的行为自动检测到的信号。不是分数也不是警报，只用于挑选值得查看的轮次。",
+  "turns.implicit.recall": "2 分钟内再次呼叫",
+  "turns.implicit.thanks": "表示感谢",
+  "turns.implicit.laugh": "笑了",
+  "turns.implicit.correction": "纠正了",
+  "turns.implicit.retag": "被忽略的消息后再次@",
+  "turns.implicit.thread_declined": "拒绝了帖子提议",
+  "conv.d.thread.skip_backoff": "暂停中：最近的提议被忽略"
 }

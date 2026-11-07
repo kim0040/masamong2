@@ -456,6 +456,25 @@
       "never mind",
       "nevermind"
     ],
+    "thanks_cues": [
+      "thanks",
+      "thank you",
+      "thx"
+    ],
+    "laugh_cues": [
+      "lol",
+      "haha",
+      "lmao"
+    ],
+    "correction_cues": [
+      "that's wrong",
+      "that is wrong",
+      "you're wrong",
+      "not what i asked",
+      "not what i meant",
+      "that's not right",
+      "i meant"
+    ],
     "scheduled_task": "This message is a task {name} scheduled earlier, running now at its set time ({when}). Do the task and give only the result. Do not ask questions, and skip greetings or openers like 'as you scheduled'. Base anything current on the tool results only, and say so when there are none. Words like 'every day' or 'every week' are only background for this run: do not schedule anything. Keep it easy to read on Discord with a short list, and add source links when there are sources."
   },
   "time": {

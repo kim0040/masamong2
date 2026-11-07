@@ -229,6 +229,7 @@ MASAMONG_LIVE_KEYS_DIR=~/keys MASAMONG_SCENARIO_REPORT=/tmp/report.json \
 | `conversation.refer*`, `follow*`, 스레드 문구(`offer`·`seed`·`recap`·`summary*` 등), `banter_rules`, `banter_emoji` | "저거" 같은 지시어 대상 찾기, 이어 말하기 분류, 스레드 제안·요약, 장난 받아치기(실험) |
 | `features.room_style(_system)`, `room_style_note`, `room_style_header`, `room_style_kinds` | 방 말투 특징 뽑기와 승인 메모의 틀(실험) |
 | `features.quiet_cues`, `chime_off_cues` | 끼어들기 물러서기의 "조용히 해"·"끼어들기 꺼"(메시지 전체가 같을 때만) |
+| `features.thanks_cues`, `laugh_cues`, `correction_cues` | 답변 뒤 짧은 메시지의 고마움·웃음·정정 표현(영어 단어는 낱말 단위로 맞춤). `turn_feedback`에 `implicit:*`로 남는 의심 턴 선별용 신호이며 점수나 경보가 아님. ko·en만 있고 나머지 언어는 목록이 없어 신호도 없음 |
 | `features.turn_stop_cues` | 진행 중인 답을 멈추는 "그만"·"stop"(메시지 전체가 같고, 그 사람의 답이 진행 중일 때만) |
 | `memory.episode_extract*`, `channel_state*`, `read_header`, `*_block` | 방 사건·방 상태 만들기와 답에 넣는 블록 머리말 |
 | `memory.explicit(_system)`, `explicit_cues`, `instruction_cues` | "기억해·틀려·잊어줘" 분류(지시·민감 여부 포함)와 분류기를 부를 단서 |

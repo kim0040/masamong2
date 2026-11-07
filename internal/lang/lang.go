@@ -190,7 +190,14 @@ type Features struct {
 	ChimeOffCues []string `json:"chime_off_cues,omitempty"`
 	// TurnStopCues ("그만", "stop") cancel the reply the bot is writing for that person when they are a
 	// whole message; with nothing in flight they are ordinary talk.
-	TurnStopCues   []string `json:"turn_stop_cues,omitempty"`
+	TurnStopCues []string `json:"turn_stop_cues,omitempty"`
+	// ThanksCues, LaughCues and CorrectionCues are words that show how a person took the bot's last reply
+	// ("고마워", "ㅋㅋ", "그게 아니라"). A short message holding one is noted on that reply's turn as an
+	// implicit signal (application/implicit_feedback.go). They only help choose turns to review: they are
+	// never a score or an alert. A language without a list has no such signal.
+	ThanksCues     []string `json:"thanks_cues,omitempty"`
+	LaughCues      []string `json:"laugh_cues,omitempty"`
+	CorrectionCues []string `json:"correction_cues,omitempty"`
 	ProactiveRules string   `json:"proactive_rules"`
 	// ScheduledTask is the answer rule of a scheduled task's run (application reminders_task.go): it is
 	// a run of a task set earlier, done now, scheduling nothing. {name} asked for it, {when} is its time.

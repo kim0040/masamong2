@@ -3717,5 +3717,14 @@
   "usage.period_label": "Llamadas y gasto de",
   "conn.host_note.anthropic": "Modelos Claude de Anthropic: chat y entrada de imágenes; sin embeddings, reranking, generación de imágenes ni caché de prompts.",
   "setup.model.host_note.anthropic": "Anthropic: modelos Claude directamente. Sin embeddings, reranking ni generación de imágenes; cubre esas funciones con otro proveedor. Este endpoint no admite caché de prompts.",
-  "conn.api.anthropic": "Anthropic API"
+  "conn.api.anthropic": "Anthropic API",
+  "turns.implicit_label": "Detectado (solo orientativo)",
+  "turns.implicit_title": "No es una valoración: señales detectadas por lo que hicieron las personas tras la respuesta. No es una puntuación ni una alerta; solo ayuda a elegir turnos que revisar.",
+  "turns.implicit.recall": "volvió a llamar en 2 min",
+  "turns.implicit.thanks": "dio las gracias",
+  "turns.implicit.laugh": "se rió",
+  "turns.implicit.correction": "corrigió",
+  "turns.implicit.retag": "etiquetó de nuevo tras un mensaje omitido",
+  "turns.implicit.thread_declined": "rechazó la oferta de hilo",
+  "conv.d.thread.skip_backoff": "En pausa: las ofertas recientes se ignoraron"
 }

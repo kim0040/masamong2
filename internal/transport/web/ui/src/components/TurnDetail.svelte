@@ -38,6 +38,7 @@
     <span class="small muted num">{datetime(turn.at, true)}</span>
     {#if turn.lab}<span class="chip">{t('turns.lab')}</span>{/if}
     {#if turn.feedback}<span class="chip" title={t('turns.feedback_title')}>{#if turn.feedback.good}👍 {turn.feedback.good} {/if}{#if turn.feedback.bad}👎 {turn.feedback.bad}{/if}{#if turn.feedback.reasons?.length} · {turn.feedback.reasons.map((r: string) => t(`turns.feedback_reason.${r}`)).join(', ')}{/if}</span>{/if}
+    {#if turn.implicit && Object.keys(turn.implicit).length}<span class="chip auto" title={t('turns.implicit_title')}>{t('turns.implicit_label')} · {Object.entries(turn.implicit).map(([k, n]) => t(`turns.implicit.${k}`) + (Number(n) > 1 ? ` ×${n}` : '')).join(', ')}</span>{/if}
     <span class="spacer"></span>
     <span class="small num">{ms(turn.latency_ms)} · {usd(turn.cost_usd)}</span>
   </header>
@@ -258,6 +259,10 @@
     gap: 6px;
     align-items: center;
     flex-wrap: wrap;
+  }
+  .chip.auto {
+    background: transparent;
+    outline: 1px dashed var(--border);
   }
   .chip.err {
     color: var(--danger);

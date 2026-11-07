@@ -580,6 +580,9 @@ type TurnRecord struct {
 	Body        map[string]any `json:"body,omitempty"`
 	// Feedback is what people said about the reply: {"good": n, "bad": n, "reasons": [...]} (feedback.go)
 	Feedback map[string]any `json:"feedback,omitempty"`
+	// Implicit counts what the person did after the reply, by kind ({"recall": 1, "thanks": 1}); hints for
+	// choosing turns to review, apart from Feedback and never a score (implicit_feedback.go).
+	Implicit map[string]int `json:"implicit,omitempty"`
 	// SpeakerID is whom the turn answered; only its one-way hash is stored (speaker_ref), so a
 	// withdrawn memory consent can find the person's turns (forgetPerson).
 	SpeakerID string `json:"-"`
@@ -689,7 +692,8 @@ func (s *Service) turnsAction(req action.Request) action.Result {
 		if err != nil {
 			return action.Fail(req, errcode.InvalidInput, "generic.error", "turn not found", nil)
 		}
-		t.Feedback = s.turnFeedback([]string{t.ID})[t.ID]
+		rated, implicit := s.turnFeedback([]string{t.ID})
+		t.Feedback, t.Implicit = rated[t.ID], implicit[t.ID]
 		if t.Body["body_free"] == nil { // a channel's logging level keeps its text out of the history; do not rebuild it
 			s.resolveEvidence(t.Body)
 		}
@@ -741,14 +745,14 @@ func (s *Service) turnsAction(req action.Request) action.Result {
 	for i, t := range list {
 		ids[i] = t.ID
 	}
-	fb := s.turnFeedback(ids)
+	fb, implicit := s.turnFeedback(ids)
 	names := s.turnChannelNames(list)
 	botID, botName := "", ""
 	if s.Discord != nil {
 		botID, botName = s.Discord.BotUser()
 	}
 	for i := range list {
-		list[i].Feedback = fb[list[i].ID]
+		list[i].Feedback, list[i].Implicit = fb[list[i].ID], implicit[list[i].ID]
 		list[i].ChannelName = names[list[i].ChannelID]
 		if msg, ok := list[i].Body["message"].(string); ok && botID != "" && botName != "" {
 			// the preview reads "@bot …", not the raw mention markup

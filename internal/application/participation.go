@@ -305,6 +305,7 @@ func (s *Service) Observe(m ObservedMessage) {
 	}
 	s.noteLive(m)
 	s.noteThreadActivity(m)
+	s.implicitObserve(m)
 	key := m.GuildID + ":" + m.ChannelID
 	// the author's consent is read before the lock is taken, and only when a collected row waits for it
 	var counted *bool
