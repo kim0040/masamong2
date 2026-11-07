@@ -21,6 +21,7 @@ import (
 //
 // The same table also holds implicit signals (source "implicit:*", rating always 0, implicit_feedback.go).
 // They are not ratings: every sum, count and chip of ratings leaves them out and shows them apart.
+// The console operator's verdicts (source "operator", operator_marks.go) are kept apart in the same way.
 
 var feedbackSQLite = []string{
 	`CREATE TABLE IF NOT EXISTS reply_messages (
@@ -221,6 +222,9 @@ func (s *Service) turnFeedback(ids []string) (rated map[string]map[string]any, i
 		if rows.Scan(&id, &source, &rating, &reason) != nil {
 			continue
 		}
+		if source == operatorSource { // the operator's verdict is shown apart (operator_marks.go)
+			continue
+		}
 		if kind, ok := strings.CutPrefix(source, implicitSource); ok {
 			if implicit[id] == nil {
 				implicit[id] = map[string]int{}
@@ -253,11 +257,11 @@ func (s *Service) feedbackAction(req action.Request) action.Result {
 		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
 	}
 	since := s.Clock.Now().AddDate(0, 0, -max(intVal(inputMap(req), "days", 30), 1)).UTC().Format(time.RFC3339)
-	// Only what people rated: the implicit signals are counted apart (below) and never as good or bad.
+	// Only what people rated: the implicit signals (below) and the operator's marks (operator_marks.go) are counted apart and never as good or bad.
 	var good, bad int
-	_ = db.Reader().QueryRow(`SELECT COALESCE(SUM(CASE WHEN rating>0 THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN rating<0 THEN 1 ELSE 0 END),0) FROM turn_feedback WHERE at>=? AND source NOT LIKE 'implicit:%'`, since).Scan(&good, &bad)
+	_ = db.Reader().QueryRow(`SELECT COALESCE(SUM(CASE WHEN rating>0 THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN rating<0 THEN 1 ELSE 0 END),0) FROM turn_feedback WHERE at>=? AND source NOT LIKE 'implicit:%' AND source<>'operator'`, since).Scan(&good, &bad)
 	reasons := map[string]int{}
-	if rows, err := db.Reader().Query(`SELECT reason, COUNT(*) FROM turn_feedback WHERE at>=? AND reason<>'' AND source NOT LIKE 'implicit:%' GROUP BY reason`, since); err == nil {
+	if rows, err := db.Reader().Query(`SELECT reason, COUNT(*) FROM turn_feedback WHERE at>=? AND reason<>'' AND source NOT LIKE 'implicit:%' AND source<>'operator' GROUP BY reason`, since); err == nil {
 		defer rows.Close()
 		for rows.Next() {
 			var r string

@@ -253,7 +253,11 @@ type Chat struct {
 	ToolQueued string `json:"tool_queued"`
 	// ToolSchedule is added when a reminder or task tool answered (reminders.*): a question still to ask
 	// (needs_detail) is asked and nothing is claimed as set; what was set is confirmed from the result.
-	ToolSchedule   string            `json:"tool_schedule"`
+	ToolSchedule string `json:"tool_schedule"`
+	// ToolConclusion is added when a web search tool answered (search.*, web.*, places.*): the conclusion goes in the reply's first line, sources are not listed one by
+	// one. Optional: a pack without it adds nothing. It lives in the tool block, not in answer_template
+	// or memory_rules, which stay byte-identical to the sandbox.
+	ToolConclusion string            `json:"tool_conclusion,omitempty"`
 	MemoryRules    string            `json:"memory_rules"`
 	SecurityRules  string            `json:"security_rules"`
 	RagNotes       map[string]string `json:"rag_notes"`

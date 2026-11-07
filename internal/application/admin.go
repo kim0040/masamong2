@@ -322,6 +322,12 @@ func (s *Service) adminActions(ctx context.Context, req action.Request) action.R
 		return s.dashboardOverview(ctx, req)
 	case "turns.list", "turns.get":
 		return s.turnsAction(req)
+	case "turns.mark":
+		return s.turnMarkAction(req)
+	case "turns.sample":
+		return s.turnSampleAction(req)
+	case "turns.marks":
+		return s.turnMarksAction(req)
 	case "audit.list":
 		return s.auditList(req)
 	case "stats.series":
@@ -585,6 +591,10 @@ type TurnRecord struct {
 	// Implicit counts what the person did after the reply, by kind ({"recall": 1, "thanks": 1}); hints for
 	// choosing turns to review, apart from Feedback and never a score (implicit_feedback.go).
 	Implicit map[string]int `json:"implicit,omitempty"`
+	// Mark is the console operator's verdict on the reply ("right", "wrong", "stale"); MarkBlocked says why
+	// the turn cannot be marked ("expired", "deleted", "no_text", "no_answer"; operator_marks.go).
+	Mark        string `json:"mark,omitempty"`
+	MarkBlocked string `json:"mark_blocked,omitempty"`
 	// SpeakerID is whom the turn answered; only its one-way hash is stored (speaker_ref), so a
 	// withdrawn memory consent can find the person's turns (forgetPerson).
 	SpeakerID string `json:"-"`
@@ -695,7 +705,7 @@ func (s *Service) turnsAction(req action.Request) action.Result {
 			return action.Fail(req, errcode.InvalidInput, "generic.error", "turn not found", nil)
 		}
 		rated, implicit := s.turnFeedback([]string{t.ID})
-		t.Feedback, t.Implicit = rated[t.ID], implicit[t.ID]
+		t.Feedback, t.Implicit, t.Mark = rated[t.ID], implicit[t.ID], s.turnMarks([]string{t.ID})[t.ID]
 		if t.Body["body_free"] == nil { // a channel's logging level keeps its text out of the history; do not rebuild it
 			s.resolveEvidence(t.Body)
 		}
@@ -714,6 +724,9 @@ func (s *Service) turnsAction(req action.Request) action.Result {
 	}
 	if v := strVal(in, "tool", ""); v != "" {
 		where, args = append(where, "(tools=? OR tools LIKE ? OR tools LIKE ? OR tools LIKE ?)"), append(args, v, v+",%", "%,"+v, "%,"+v+",%")
+	}
+	if boolVal(in, "tools_only") {
+		where = append(where, "tools<>''")
 	}
 	switch strVal(in, "lab", "false") {
 	case "only":
@@ -743,29 +756,36 @@ func (s *Service) turnsAction(req action.Request) action.Result {
 		}
 		list = append(list, t)
 	}
+	s.decorateTurns(list)
+	out := map[string]any{"turns": list}
+	if len(list) == limit {
+		out["next_before"] = list[len(list)-1].At
+	}
+	return action.OK(req, out)
+}
+
+// decorateTurns adds to listed turns what is kept beside them: ratings, implicit signals, the operator's
+// mark, the channel's name, and the preview's mention markup turned into the bot's name.
+func (s *Service) decorateTurns(list []TurnRecord) {
 	ids := make([]string, len(list))
 	for i, t := range list {
 		ids[i] = t.ID
 	}
 	fb, implicit := s.turnFeedback(ids)
+	marks := s.turnMarks(ids)
 	names := s.turnChannelNames(list)
 	botID, botName := "", ""
 	if s.Discord != nil {
 		botID, botName = s.Discord.BotUser()
 	}
 	for i := range list {
-		list[i].Feedback, list[i].Implicit = fb[list[i].ID], implicit[list[i].ID]
+		list[i].Feedback, list[i].Implicit, list[i].Mark = fb[list[i].ID], implicit[list[i].ID], marks[list[i].ID]
 		list[i].ChannelName = names[list[i].ChannelID]
 		if msg, ok := list[i].Body["message"].(string); ok && botID != "" && botName != "" {
 			// the preview reads "@bot …", not the raw mention markup
 			list[i].Body["message"] = strings.NewReplacer("<@"+botID+">", "@"+botName, "<@!"+botID+">", "@"+botName).Replace(msg)
 		}
 	}
-	out := map[string]any{"turns": list}
-	if len(list) == limit {
-		out["next_before"] = list[len(list)-1].At
-	}
-	return action.OK(req, out)
 }
 
 // turnChannelNames maps the listed turns' channels to their Discord names, one lookup per server.
@@ -801,6 +821,7 @@ func scanTurn(scan func(...any) error, withBody bool) (TurnRecord, error) {
 	}
 	b := map[string]any{}
 	_ = json.Unmarshal([]byte(body), &b)
+	t.MarkBlocked = markBlock(b)
 	if withBody {
 		t.Body = b
 	} else {

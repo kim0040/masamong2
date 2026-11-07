@@ -768,7 +768,7 @@ func (s *Service) execute(ctx context.Context, req action.Request) action.Result
 	case "storage.status", "storage.migrate":
 		return s.storageActions(ctx, req)
 	case "admin.prefs", "admin.prefs.set", "runtime.pause", "runtime.status", "runtime.restart", "runtime.stop", "dashboard.overview",
-		"turns.list", "turns.get", "audit.list", "stats.series", "lab.reviews", "lab.review", "config.document", "config.patch",
+		"turns.list", "turns.get", "turns.mark", "turns.sample", "turns.marks", "audit.list", "stats.series", "lab.reviews", "lab.review", "config.document", "config.patch",
 		"config.snapshots", "config.snapshot", "config.snapshot.delete", "config.snapshot.restore", "config.changes":
 		return s.adminActions(ctx, req)
 	case "backup.list", "backup.create", "backup.verify", "backup.restoreDryRun", "backup.restore", "backup.delete":

@@ -6,9 +6,10 @@
   import Status from './Status.svelte'
   import Button from './Button.svelte'
   import JsonView from './JsonView.svelte'
+  import TurnMark from './TurnMark.svelte'
   import * as I from '../lib/icons'
   // One turn as a timeline: message → decision → tools → evidence → answer.
-  let { turn, ledger = null }: { turn: any; ledger?: any } = $props()
+  let { turn, ledger = null, onmark }: { turn: any; ledger?: any; onmark?: (id: string, mark: string) => void } = $props()
   const b = $derived(turn.body ?? {})
   const tools = $derived((b.tools ?? []) as { tool: string; ok: boolean; status?: string; error?: string; data?: any }[])
   const hits = $derived((b.hits ?? []) as any[])
@@ -96,7 +97,7 @@
     {/if}
     <li>
       <span class="dot accent"><I.Bot size={14} aria-hidden="true" /></span>
-      <div><h3>{t('turns.step.answer')}</h3>{#if b.error}<p class="err break">{b.error}</p>{:else}<p class="msg">{b.answer || t('lab.silent')}</p>{/if}</div>
+      <div><h3>{t('turns.step.answer')}</h3>{#if b.error}<p class="err break">{b.error}</p>{:else}<p class="msg">{b.answer || t('lab.silent')}</p>{/if}<TurnMark {turn} {onmark} /></div>
     </li>
     {#if llm.length}
       <li>
