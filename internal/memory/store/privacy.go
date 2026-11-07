@@ -70,6 +70,9 @@ func MigratePrivacy(db *storage.Store) error {
 		`CREATE TABLE IF NOT EXISTS privacy_settled(seq INTEGER PRIMARY KEY AUTOINCREMENT, source_id TEXT NOT NULL UNIQUE)`,
 		`CREATE TRIGGER IF NOT EXISTS privacy_settled_insert AFTER INSERT ON privacy_tombstones BEGIN DELETE FROM privacy_settled WHERE source_id=NEW.source_id; END`,
 		`CREATE TRIGGER IF NOT EXISTS privacy_settled_update AFTER UPDATE ON privacy_tombstones BEGIN DELETE FROM privacy_settled WHERE source_id=NEW.source_id; END`,
+		// the newest edit that left a message's words as they were (KeepMessageWords): no tombstone, nothing changed,
+		// but an older edit arriving late is still older than it
+		`CREATE TABLE IF NOT EXISTS message_kept_revisions(native_id TEXT PRIMARY KEY, at TEXT NOT NULL)`,
 	} {
 		if _, err := db.DB.Exec(q); err != nil {
 			return err
@@ -218,6 +221,10 @@ func currentMessageRevision(tx *sql.Tx, native, at string) (bool, error) {
 	wanted, err := time.Parse(time.RFC3339Nano, at)
 	if err != nil {
 		return true, nil
+	}
+	newer, err := KeptRevisionNewer(context.Background(), tx, native, wanted)
+	if err != nil || newer {
+		return false, err
 	}
 	var raw string
 	err = tx.QueryRow(`SELECT at FROM privacy_tombstones WHERE kind='message' AND source_id=?`, native).Scan(&raw)
@@ -402,14 +409,21 @@ func KeepMessageWords(tx *sql.Tx, native, content, at string, windowSame bool) (
 		if err != nil {
 			return false, err
 		}
+		kept := windowSame
 		if turns > 0 {
-			return turns == same, nil
+			kept = turns == same
 		}
-		return windowSame, nil
+		if !kept {
+			return false, nil
+		}
+		return true, recordKeptRevision(tx, native, at)
 	case err != nil:
 		return false, err
 	case old != content:
 		return false, nil
+	}
+	if err := recordKeptRevision(tx, native, at); err != nil {
+		return false, err
 	}
 	current, err := currentMessageRevision(tx, native, at)
 	if err != nil || !current || revisionOlder(at, edited) {
@@ -417,6 +431,33 @@ func KeepMessageWords(tx *sql.Tx, native, content, at string, windowSame bool) (
 	}
 	_, err = tx.Exec(`UPDATE memory_observations SET edited_at=? WHERE observation_id=?`, at, observation)
 	return err == nil, err
+}
+
+// recordKeptRevision remembers the newest revision that kept the words. A channel without capture has no other place
+// for it, and with capture the revision checks read the tombstone first and find none.
+func recordKeptRevision(tx *sql.Tx, native, at string) error {
+	if parsed, err := time.Parse(time.RFC3339Nano, at); err == nil {
+		at = parsed.UTC().Format("2006-01-02T15:04:05.000000000Z")
+	}
+	_, err := tx.Exec(`INSERT INTO message_kept_revisions(native_id,at) VALUES(?,?) ON CONFLICT(native_id) DO UPDATE SET at=MAX(at,excluded.at)`, native, at)
+	return err
+}
+
+// KeptRevisionNewer reports whether an edit that kept the message's words is newer than at, so that a change at
+// at comes too late to be applied. q is a connection or a transaction.
+func KeptRevisionNewer(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, native string, at time.Time) (bool, error) {
+	var raw string
+	err := q.QueryRowContext(ctx, `SELECT at FROM message_kept_revisions WHERE native_id=?`, native).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	kept, err := time.Parse(time.RFC3339Nano, raw)
+	return err == nil && kept.After(at), nil
 }
 
 // revisionOlder reports whether at is before the stored revision; a time that cannot be read is not.

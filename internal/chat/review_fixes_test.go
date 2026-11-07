@@ -128,26 +128,27 @@ func TestSearchAfterTheLoopCountsTheFeesPaid(t *testing.T) {
 	})
 }
 
-// A search nobody used costs money but takes no call from the tools still to come.
-func TestDiscardedSearchTakesNoCallSlot(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		m := &latencyMemory{started: time.Now(), cost: 0.0003}
-		llm := &latencyLLM{plans: []string{planMemory, planNoMemory}, loopErr: ErrToolsUnsupported, loopErrAt: 8 * time.Second}
-		req := latencyRequest()
-		req.Guard = &Guard{MaxCalls: 6}
-		res, err := (&Runtime{LLM: llm, Memory: plainMemory{m}}).Answer(context.Background(), req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		calls, spent, _ := req.Guard.Totals()
-		// two planner calls, the loop's one and the answer are the turn's model calls; the dropped search is none
-		if calls != 4 {
-			t.Fatalf("the turn made 4 model calls, the guard counts %d", calls)
-		}
-		if math.Abs(spent-0.0003) > 1e-12 || math.Abs(res.CostUSD-0.0003) > 1e-12 {
-			t.Fatalf("guard spent %v, turn cost %v, want the search's 0.0003", spent, res.CostUSD)
-		}
-	})
+// A search that is dropped after it paid still costs what it paid, in the turn's cost and in the guard's spending,
+// and takes no call from the tools still to come. The first search's reranker, when it searched twice, is on the
+// guard already (searchMemory) and comes back for the turn's cost. A search that never ran cost nothing.
+func TestDiscardedSearchKeepsItsCostAndTakesNoCall(t *testing.T) {
+	discarded := func(mem memoryRun) *earlyMemory {
+		done := make(chan struct{})
+		close(done)
+		return &earlyMemory{cancel: func() {}, done: done, mem: mem}
+	}
+	g := &Guard{MaxCalls: 1}
+	sr := search.Result{Trace: map[string]any{"rerank_cost_usd": 0.0003}}
+	if got := discarded(memoryRun{ran: true, sr: sr, firstRerank: 0.0002}).discard(g); math.Abs(got-0.0005) > 1e-12 {
+		t.Fatalf("turn cost %v, want both reranks", got)
+	}
+	calls, spent, _ := g.Totals()
+	if calls != 0 || math.Abs(spent-0.0003) > 1e-12 {
+		t.Fatalf("guard: %d calls, spent %v", calls, spent)
+	}
+	if got := discarded(memoryRun{}).discard(g); got != 0 {
+		t.Fatalf("a search that never ran cost %v", got)
+	}
 }
 
 // A cut-off answer goes on in a second call: the answer's time and span run to its end.
@@ -200,7 +201,7 @@ func TestAnswerTimeIncludesTheContinuation(t *testing.T) {
 }
 
 // Under a money cap, a step is not admitted while a step that pays for itself is under way: its fee is
-// not in the spending yet. WaitPaid returns when it has ended; MaxCall is the dearest model call so far.
+// not in the spending yet. WaitSpent returns when it has ended; MaxCall is the dearest model call so far.
 func TestMoneyCapWaitsForAStepThatPays(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		g := &Guard{MaxUSD: 0.03}
@@ -218,7 +219,7 @@ func TestMoneyCapWaitsForAStepThatPays(t *testing.T) {
 			admitted = time.Since(started)
 		}()
 		go func() {
-			g.WaitPaid(context.Background())
+			g.WaitSpent(context.Background())
 			waited = time.Since(started)
 		}()
 		time.Sleep(2 * time.Second)
@@ -228,7 +229,7 @@ func TestMoneyCapWaitsForAStepThatPays(t *testing.T) {
 		end() // once
 		synctest.Wait()
 		if admitted != 2*time.Second || waited != 2*time.Second {
-			t.Fatalf("admitted after %v, WaitPaid returned after %v, want both 2s", admitted, waited)
+			t.Fatalf("admitted after %v, WaitSpent returned after %v, want both 2s", admitted, waited)
 		}
 		if got := g.MaxCall(); got != 0.004 {
 			t.Fatalf("dearest call %v", got)
@@ -261,25 +262,51 @@ func (w *windowMemory) Search(ctx context.Context, req engine.SearchRequest) (se
 		Trace: map[string]any{"rerank_cost_usd": 0.0003}}, nil
 }
 
-// A search dropped after it searched twice (the planner's window found nothing) still costs both reranks,
-// in the turn's cost and in the guard's spending, and takes no call slot.
-func TestDroppedSearchKeepsBothRerankCosts(t *testing.T) {
+// Without a money cap nothing holds the search back while the loop's first call is under way, and only that call
+// says what the loop costs: the search waits for it, so a loop dearer than the planner is not priced as the planner.
+func TestEarlySearchWithoutACapWaitsForTheLoopsFirstCall(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		const planRecent = `{"memory_requirement":"required","question_kind":"event","person_targets":[],"semantic_query":"camping","time_scope":"recent","tool_plan":[]}`
-		llm := &latencyLLM{plans: []string{planRecent, planNoMemory}, loopErr: ErrToolsUnsupported, loopErrAt: 12 * time.Second}
+		const planCost, loopCost = 0.0001, 0.008
+		m := &beganMemory{latencyMemory: &latencyMemory{started: time.Now()}}
+		llm := &latencyLLM{plans: []string{planMemory}, rounds: searchRound(), roundTime: []time.Duration{fakeRound1, fakeRound2}, planCost: planCost, loopCost: loopCost}
 		req := latencyRequest()
-		req.Guard = &Guard{MaxCalls: 8}
-		res, err := (&Runtime{LLM: llm, Memory: &windowMemory{}}).Answer(context.Background(), req)
-		if err != nil {
+		req.Guard = &Guard{MaxCalls: 6}
+		req.BudgetUSD = 0.03
+		if _, err := (&Runtime{LLM: llm, Memory: m, Tools: latencyTools}).Answer(context.Background(), req); err != nil {
 			t.Fatal(err)
 		}
-		calls, spent, _ := req.Guard.Totals()
-		if want := 0.0005; math.Abs(res.CostUSD-want) > 1e-12 || math.Abs(spent-want) > 1e-12 {
-			t.Fatalf("turn cost %v, guard spent %v, want both %v", res.CostUSD, spent, want)
+		if got, sequential := m.searches[0].RemainingUSD, 0.03-planCost-2*loopCost; got > sequential+1e-12 {
+			t.Fatalf("told %v, more than the %v the search after the loop would be told", got, sequential)
 		}
-		// two planner calls, the loop's one and the answer: neither search takes a call slot
-		if calls != 4 {
-			t.Fatalf("guard counted %d calls", calls)
+		if m.began[0] < fakeRound1 {
+			t.Fatalf("the search began at %v, before the loop's first call ended at %v", m.began[0], fakeRound1)
+		}
+	})
+}
+
+// With the planner choosing the tools, the memory search is decided after the tools it plans beside and is
+// told what is left once their fees are in, not what was left when the steps were laid out.
+func TestPlannedSearchCountsTheFeeOfThePlannedTool(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const planCost, fee = 0.0001, 0.03
+		m := &latencyMemory{started: time.Now()}
+		plan := `{"memory_requirement":"required","question_kind":"event","person_targets":[],"semantic_query":"camping","tool_plan":[{"tool_name":"search.web","parameters":{"query":"x"}}]}`
+		llm := &latencyLLM{plans: []string{plan}, planCost: planCost}
+		req := requestWithPaidSearch()
+		req.ToolMode = ToolModePlanner
+		for _, cap := range []float64{0, 0.2} {
+			req.Guard = &Guard{MaxUSD: cap, MaxCalls: 6}
+			llm.planCalls = 0
+			m.searches = nil
+			if _, err := (&Runtime{LLM: llm, Memory: plainMemory{m}, Tools: paidSearch(fee)}).Answer(context.Background(), req); err != nil {
+				t.Fatal(err)
+			}
+			if len(m.searches) != 1 {
+				t.Fatalf("cap %v: %d searches", cap, len(m.searches))
+			}
+			if got, want := m.searches[0].RemainingUSD, 0.05-planCost-fee; math.Abs(got-want) > 1e-12 {
+				t.Fatalf("cap %v: told %v, want %v", cap, got, want)
+			}
 		}
 	})
 }

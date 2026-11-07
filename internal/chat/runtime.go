@@ -298,9 +298,14 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 	searchMemory := res.Assess.MemoryState == "search" && canSearch
 	var mem memoryRun
 	if searchMemory && early == nil {
-		remaining := req.BudgetUSD - res.CostUSD - req.Guard.PaidTotal() // the fees tools were charged count too
+		spent := res.CostUSD
 		steps = append(steps, step{decide: func() bool { return req.Guard.AllowMoneyContext(ctx, "memory.search") },
-			run: func() { defer sp.begin("memory")(); mem = rt.searchMemory(ctx, req, msg, intent, remaining, nowT) }})
+			run: func() {
+				defer sp.begin("memory")()
+				// the fees of the steps decided before this one count too, whether they have ended yet or not
+				req.Guard.WaitSpent(ctx)
+				mem = rt.searchMemory(ctx, req, msg, intent, req.BudgetUSD-spent-req.Guard.PaidTotal(), nowT)
+			}})
 	}
 	runSteps(ctx, req.Guard, steps)
 	if early != nil {
@@ -457,8 +462,8 @@ type earlyMemory struct {
 }
 
 // startEarlyMemory starts the search the plan asked for. Its admission is the one it has at its usual
-// place (the money cap only, waiting for the models in flight), so under a money cap it starts once the
-// model in flight has ended. spent is what the turn's models cost so far (the planner's): the search's own
+// place (the money cap only), and with or without a cap it starts once the model call and the paying steps
+// in flight have ended (WaitSpent): the loop's first call is what prices the rest of it. spent is what the turn's models cost so far (the planner's): the search's own
 // budget counts the loop for what it cost or, while the loop runs, for what its rounds can still cost
 // (earlyRemaining).
 func (rt *Runtime) startEarlyMemory(ctx context.Context, req Request, msg string, intent search.Intent, spent float64, loop *loopRun, nowT time.Time, sp *spanLog) *earlyMemory {
@@ -467,7 +472,9 @@ func (rt *Runtime) startEarlyMemory(ctx context.Context, req Request, msg string
 	go func() {
 		defer close(e.done)
 		if req.Guard.AllowMoneyContext(ctx, "memory.search") {
-			req.Guard.WaitPaid(ctx) // a fee still on its way is part of what the search may count on being spent
+			// a model call or a fee still on its way is part of what the search may count on being spent, and the
+			// first call of the loop is the only thing the turn can price the rest of the loop by
+			req.Guard.WaitSpent(ctx)
 			defer sp.begin("memory")()
 			e.mem = rt.searchMemory(ctx, req, msg, intent, earlyRemaining(req, spent, loop), nowT)
 		}

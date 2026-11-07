@@ -56,9 +56,12 @@ type latencyLLM struct {
 	roundTime []time.Duration
 	loopErr   error
 	loopErrAt time.Duration
-	planCost  float64
-	loopCost  float64
-	planCalls int
+	// loopErrRound is the round loopErr comes in, counted from 0: the rounds before it answer as usual
+	loopErrRound int
+	planCost     float64
+	loopCost     float64
+	planCalls    int
+	loopCalls    int
 }
 
 func (f *latencyLLM) Chat(ctx context.Context, model string, _ []Msg, _ int, _ float64) (string, float64, error) {
@@ -80,7 +83,11 @@ func (f *latencyLLM) ToolsReady(string) bool { return true }
 func (f *latencyLLM) ChatTools(ctx context.Context, _ string, _ []LoopMsg, _ []ToolSpec, _ int) (LoopReply, error) {
 	end := GuardFrom(ctx).Begin()
 	defer end(f.loopCost)
-	if f.loopErr != nil {
+	f.mu.Lock()
+	failing := f.loopErr != nil && f.loopCalls >= f.loopErrRound
+	f.loopCalls++
+	f.mu.Unlock()
+	if failing {
 		_ = sleepCtx(ctx, f.loopErrAt)
 		return LoopReply{}, f.loopErr
 	}
@@ -398,31 +405,6 @@ func TestReplanKeepsOrDropsTheEarlySearch(t *testing.T) {
 			})
 		})
 	}
-}
-
-// A dropped search that already finished still cost what it cost.
-func TestDroppedSearchKeepsItsCost(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		m := &latencyMemory{started: time.Now(), cost: 0.0003}
-		// the first search ends at 3.4 + 4.2 = 7.6, the loop fails at 8.0; no money cap, so the search does
-		// not wait for the loop's model
-		llm := &latencyLLM{plans: []string{planMemory, planNoMemory}, loopErr: ErrToolsUnsupported, loopErrAt: 8 * time.Second}
-		req := latencyRequest()
-		req.Guard = &Guard{MaxCalls: 6}
-		res, err := (&Runtime{LLM: llm, Memory: plainMemory{m}}).Answer(context.Background(), req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !m.finished || len(res.Hits) != 0 {
-			t.Fatalf("finished %v, hits %+v", m.finished, res.Hits)
-		}
-		if math.Abs(res.CostUSD-0.0003) > 1e-12 {
-			t.Fatalf("the dropped search's cost is missing: %v", res.CostUSD)
-		}
-		if _, spent, _ := req.Guard.Totals(); math.Abs(spent-0.0003) > 1e-12 {
-			t.Fatalf("guard spent %v", spent)
-		}
-	})
 }
 
 // What the search is told it may spend (its rerank gate) is never more than the turn would have left if

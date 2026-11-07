@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"masamong/internal/fsutil"
+	"masamong/internal/memory/store"
 )
 
 // messageReconciliationFile is the first format: one JSON array rewritten whole on every failed
@@ -229,6 +230,10 @@ func (g *Gateway) reconciliationEditCurrent(event messageReconciliation) (bool, 
 	reader := g.svc.Store.Reader()
 	ctx, cancel := context.WithTimeout(g.reconciliationContext(), 5*time.Second)
 	defer cancel()
+	// an edit that kept the words leaves no tombstone, and is a revision all the same
+	if newer, err := store.KeptRevisionNewer(ctx, reader, event.MessageIDs[0], event.At); err != nil || newer {
+		return false, err
+	}
 	var raw string
 	err := reader.QueryRowContext(ctx, `SELECT at FROM privacy_tombstones WHERE kind='message' AND source_id=?`, event.MessageIDs[0]).Scan(&raw)
 	if errors.Is(err, sql.ErrNoRows) {

@@ -91,9 +91,10 @@ func (g *Guard) BeginPaid() func() {
 	}
 }
 
-// WaitPaid returns when no step that pays for itself is under way, or ctx ends: from then on PaidTotal
-// holds every fee the turn has been charged so far.
-func (g *Guard) WaitPaid(ctx context.Context) {
+// WaitSpent returns when no model call and no step that pays for itself is under way, or ctx ends: from then
+// on what the turn has been charged so far is known (PaidTotal, MaxCall), and a search can be told a budget
+// that counts it. Without a money cap AllowMoneyContext does not wait for them, so this does.
+func (g *Guard) WaitSpent(ctx context.Context) {
 	if g == nil {
 		return
 	}
@@ -101,7 +102,7 @@ func (g *Guard) WaitPaid(ctx context.Context) {
 	}
 	for {
 		g.mu.Lock()
-		if g.paying == 0 || ctx.Err() != nil {
+		if (g.paying == 0 && g.models == 0) || ctx.Err() != nil {
 			g.mu.Unlock()
 			return
 		}

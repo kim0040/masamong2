@@ -88,6 +88,13 @@ func (s *Service) MessageEdited(guildID, channelID, messageID, content string, a
 	if at.IsZero() {
 		at = s.Clock.Now()
 	}
+	if s.Store.IsSQLite() {
+		// older than an edit that kept the words: those words stand, and what is built on them
+		newer, err := store.KeptRevisionNewer(ctx, s.Store.Reader(), messageID, at)
+		if err != nil || newer {
+			return err
+		}
+	}
 	s.liveEdit(guildID, channelID, messageID, content)
 	s.dropReminderContextMessages([]string{messageID}) // a reminder's copy would keep the old words
 	if err := s.queueSourceChange(guildID, channelID, []string{messageID}, "edit", content, at); err != nil {

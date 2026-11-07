@@ -287,6 +287,66 @@ func tombstonesOf(t *testing.T, svc *application.Service, id string) int {
 	return chainCount(t, svc, `SELECT COUNT(*) FROM privacy_tombstones WHERE source_id=?`, id)
 }
 
+// An edit that kept the words leaves no tombstone, and is a revision all the same: an older edit arriving after
+// it (out of order, or replayed after a restart) must not bring back words the newer one took out.
+func TestAnOlderEditDoesNotPassAnEditThatKeptTheWords(t *testing.T) {
+	content := func(t *testing.T, svc *application.Service, query, id string) string {
+		t.Helper()
+		var words string
+		if err := svc.Store.DB.QueryRow(query, id).Scan(&words); err != nil {
+			t.Fatal(err)
+		}
+		return words
+	}
+	newer := time.Now().Add(time.Hour)
+	older := newer.Add(-30 * time.Minute)
+	t.Run("stored", func(t *testing.T) {
+		svc, _ := editSvc(t)
+		chainTurn(t, svc, "c", "m", "alice")
+		built := chainTurn(t, svc, "c", "n0", "bob")
+		const query = `SELECT content FROM memory_observations WHERE native_message_id=?`
+		words := content(t, svc, query, "m")
+		if kept, err := svc.MessageKeptItsWords("g", "c", "m", words, newer); err != nil || !kept {
+			t.Fatalf("kept %v, %v", kept, err)
+		}
+		if err := svc.MessageEdited("g", "c", "m", "words taken out later", older); err != nil {
+			t.Fatal(err)
+		}
+		svc.DrainRedactions(t.Context())
+		if got := content(t, svc, query, "m"); got != words {
+			t.Fatalf("the older edit brought back %q", got)
+		}
+		if !answerKept(t, svc, built) {
+			t.Fatal("the older edit took a reply built on the current words")
+		}
+		// a newer edit still goes through
+		if err := svc.MessageEdited("g", "c", "m", "newest words", newer.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		svc.DrainRedactions(t.Context())
+		if got := content(t, svc, query, "m"); got != "newest words" {
+			t.Fatalf("a newer edit was refused: %q", got)
+		}
+	})
+	t.Run("without capture", func(t *testing.T) {
+		svc, _ := editSvc(t)
+		if _, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m", Message: "the words", Speaker: "alice", SpeakerID: "alice", DryRun: false}); err != nil {
+			t.Fatal(err)
+		}
+		const query = `SELECT content FROM chat_turns WHERE native_id=? AND role='user'`
+		if kept, err := svc.MessageKeptItsWords("g", "c", "m", "the words", newer); err != nil || !kept {
+			t.Fatalf("kept %v, %v", kept, err)
+		}
+		if err := svc.MessageEdited("g", "c", "m", "words taken out later", older); err != nil {
+			t.Fatal(err)
+		}
+		svc.DrainRedactions(t.Context())
+		if got := content(t, svc, query, "m"); got != "the words" {
+			t.Fatalf("the older edit brought back %q", got)
+		}
+	})
+}
+
 // The words and the files stayed: what was read is what the message says, nothing built on it changes.
 func TestAnEditKeepingTheWordsChangesNothing(t *testing.T) {
 	keep := func(t *testing.T, svc *application.Service, id, words string, at time.Time) bool {
