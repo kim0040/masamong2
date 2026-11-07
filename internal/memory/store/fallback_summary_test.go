@@ -8,10 +8,10 @@ import (
 	"masamong/internal/memory/leaves"
 )
 
-// A summary that is only the body's opening (the model spent its budget thinking) is cleared once so the
-// next pass summarizes the leaf again; a real summary stays. The stand-in cached under the body is
-// replaced when the real summary of that body is cached.
-func TestFallbackSummariesAreClearedOnce(t *testing.T) {
+// A summary that is only the body's opening (the model spent its budget thinking) stays as it is, with its vector: an
+// earlier release cleared them at Open, and every one of them went back to the models on the next pass. No start may do
+// that. The stand-in cached under the body is replaced when the real summary of that body is cached.
+func TestFallbackSummariesAreNotCleared(t *testing.T) {
 	st := openStore(t)
 	o := mk(0, time.Now().Add(-time.Hour))
 	if _, err := st.InsertObservations([]corpus.Observation{o}, nil); err != nil {
@@ -45,8 +45,12 @@ func TestFallbackSummariesAreClearedOnce(t *testing.T) {
 	var summary string
 	var vec []byte
 	_ = st.DB.DB.QueryRow(`SELECT summary, summary_vec FROM memory_leaves WHERE leaf_id=?`, leaf).Scan(&summary, &vec)
-	if summary != "" || vec != nil {
-		t.Fatalf("the stand-in summary is cleared for the next pass: %q %v", summary, vec)
+	if summary != opening || len(vec) != 2 {
+		t.Fatalf("opening the store changed a stored summary: %q %v", summary, vec)
+	}
+	var marked int
+	if err := st.DB.DB.QueryRow(`SELECT done FROM memory_privacy_migration WHERE id=2`).Scan(&marked); err != nil || marked != 1 {
+		t.Fatalf("the marker: %d %v", marked, err)
 	}
 	if err := st.PutSummaryText("stand-in", leaf, body, "주말 캠핑 약속"); err != nil {
 		t.Fatal(err)

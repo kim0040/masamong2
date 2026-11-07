@@ -202,8 +202,8 @@ func Open(db *storage.Store) (*Store, error) {
 			return nil, fmt.Errorf("memory migration: embed cache kind: %w", err)
 		}
 	}
-	// message vectors made before the label column existed get an empty label, so they are embedded
-	// again once and carry the label from then on; the format column marks float16 rows of the first
+	// message vectors made before the label column existed get an empty label and stay as they are (no
+	// start sends the history to the models again); the format column marks float16 rows of the first
 	// version, which load as they are
 	if err := migrateMessageVectors(db); err != nil {
 		return nil, err

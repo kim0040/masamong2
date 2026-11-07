@@ -373,8 +373,8 @@ func TestRenamedSpeakerMakesItsMessagesPendingAgain(t *testing.T) {
 	}
 }
 
-// A database made before the label column existed keeps its vectors and gets the column on open; those
-// rows are pending once and carry the label afterwards.
+// A database made before the label column existed keeps its vectors and gets the column on open. Nothing is embedded
+// again for that (no_reprocess_test.go): those rows stay current until the message's own vector is made again.
 func TestMessageVectorLabelColumnIsMigrated(t *testing.T) {
 	st := openStore(t)
 	seedMsgs(t, st, msgRoom, 8, time.Now().Add(-48*time.Hour))
@@ -392,8 +392,23 @@ func TestMessageVectorLabelColumnIsMigrated(t *testing.T) {
 	if !st.DB.HasColumn("memory_message_vectors", "label") {
 		t.Fatal("the label column was not added")
 	}
-	if n, _ := st.CountPendingMessages([]string{msgRoom}, msgSpace); n != 8 {
-		t.Fatalf("old rows without a label are pending once, got %d", n)
+	if n, _ := st.CountPendingMessages([]string{msgRoom}, msgSpace); n != 0 {
+		t.Fatalf("old rows without a label are queued again: %d", n)
+	}
+	if ps, _ := st.PendingMessages([]string{msgRoom}, msgSpace, 0); len(ps) != 0 {
+		t.Fatalf("old rows without a label are queued again: %d", len(ps))
+	}
+	current := 0
+	if err := st.ScanMessageVectors([]string{msgRoom}, msgSpace, func(v MessageVector) error {
+		if v.Current {
+			current++
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if current != 8 {
+		t.Fatalf("%d of 8 old rows are searched", current)
 	}
 }
 

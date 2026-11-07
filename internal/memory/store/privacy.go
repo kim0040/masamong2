@@ -111,10 +111,11 @@ func (s *Store) migrateSummaryCache() error {
 	return err
 }
 
-// Summaries written while the summary model spent its whole output budget thinking hold the body's
-// opening instead (postmortem 0005). Clear them once so the next pass summarizes those leaves again. The
-// stand-in that was also cached under the body is not deleted by its text (a real summary elsewhere may
-// read the same): the indexer ignores a cached stand-in and PutSummaryText replaces it.
+// Summaries written while the summary model spent its whole output budget thinking hold the body's opening instead
+// (postmortem 0005). A store that has them keeps them: this step once cleared them, which queued every such leaf to be
+// summarized and embedded again on the next pass, paid for by whoever upgraded. No release, restart or upgrade does that
+// (docs/MAINTAINING.md; internal/memory/engine/no_reprocess_test.go). Only the marker is left, so a database that passed
+// here looks the same as ever. A cached stand-in is still ignored by the indexer, and PutSummaryText replaces it.
 func (s *Store) migrateFallbackSummaries() error {
 	if s.tidb() {
 		return nil
@@ -122,20 +123,8 @@ func (s *Store) migrateFallbackSummaries() error {
 	if _, err := s.DB.DB.Exec(`CREATE TABLE IF NOT EXISTS memory_privacy_migration(id INTEGER PRIMARY KEY,done INTEGER NOT NULL)`); err != nil {
 		return err
 	}
-	var done int
-	if s.DB.DB.QueryRow(`SELECT done FROM memory_privacy_migration WHERE id=2`).Scan(&done) == nil && done == 1 {
-		return nil
-	}
-	const fallback = `summary<>'' AND summary=substr(body,1,180)`
-	for _, q := range []string{
-		`UPDATE memory_leaves SET summary='', summary_vec=NULL WHERE ` + fallback,
-		`INSERT OR REPLACE INTO memory_privacy_migration VALUES(2,1)`,
-	} {
-		if _, err := s.DB.DB.Exec(q); err != nil {
-			return err
-		}
-	}
-	return nil
+	_, err := s.DB.DB.Exec(`INSERT OR REPLACE INTO memory_privacy_migration VALUES(2,1)`)
+	return err
 }
 
 // expectedBody identifies the snapshot the model saw. A summary finishing after invalidation or

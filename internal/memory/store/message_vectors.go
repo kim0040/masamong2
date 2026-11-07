@@ -72,7 +72,7 @@ const (
 const messageCacheCleanupDDL = `CREATE TABLE IF NOT EXISTS memory_message_vector_migration(id INTEGER PRIMARY KEY, done INTEGER NOT NULL)`
 
 // migrateMessageVectors brings a message vector table made by an earlier version up to date: the label
-// column (rows made before it have an empty label and are embedded again once), the format column (rows
+// column (rows made before it have an empty label, and stay as they are: see vectorOutdated), the format column (rows
 // made before it are float16), and the removal of the embedding-cache copies the first version kept of
 // every message vector (kind "message"), which nothing reads or writes any more.
 func migrateMessageVectors(db *storage.Store) error {
@@ -152,6 +152,11 @@ type MessageVector struct {
 	Current bool
 }
 
+// vectorOutdated says a message's vector was made under a speaker label the message no longer has. An empty label says
+// nothing of the kind: the row is older than the label column, and an upgrade does not send the history to the models
+// again for that (no_reprocess_test.go).
+const vectorOutdated = `(mv.label<>'' AND mv.label<>o.actor_label)`
+
 // pendingMessageQuery selects the messages of closed leaves of the active recipe that have no vector
 // in the space, or whose vector was made with another speaker label, in a stable order. Messages that are
 // deleted (content erased) never qualify.
@@ -166,7 +171,7 @@ func pendingMessageQuery(rooms []string, space string, recipe []string) (string,
 		CROSS JOIN memory_observations o ON o.observation_id=j.value
 		LEFT JOIN memory_message_vectors mv ON mv.observation_id=o.observation_id
 		WHERE ` + activeLeaves + ` AND memory_leaves.closed=1 AND o.deleted_at='' AND o.content<>''
-		AND (mv.observation_id IS NULL OR mv.embed_space<>? OR mv.label<>o.actor_label)`
+		AND (mv.observation_id IS NULL OR mv.embed_space<>? OR ` + vectorOutdated + `)`
 	args := []any{space}
 	if len(rooms) > 0 {
 		q += ` AND memory_leaves.room IN (` + strings.TrimSuffix(strings.Repeat("?,", len(rooms)), ",") + `)`
@@ -253,7 +258,7 @@ func (s *Store) CountPendingMessagesContext(ctx context.Context, rooms []string,
 	q := `SELECT o.content FROM memory_observations o
 		LEFT JOIN memory_message_vectors mv ON mv.observation_id=o.observation_id
 		WHERE o.deleted_at='' AND o.content<>''
-		AND (mv.observation_id IS NULL OR mv.embed_space<>? OR mv.label<>o.actor_label)
+		AND (mv.observation_id IS NULL OR mv.embed_space<>? OR ` + vectorOutdated + `)
 		AND o.observation_id IN (` + leafQ + `)`
 	rows, err := s.DB.Reader().QueryContext(ctx, q, args...)
 	if err != nil {
@@ -442,7 +447,7 @@ func scanMessageVectorRows(db messageVectorQuerier, rooms, ids []string, space s
 		order = ""
 	}
 	rows, err := db.Query(`SELECT mv.observation_id, mv.room, mv.text_hash, mv.label, mv.updated_at, mv.fmt, `+blob+`,
-		CASE WHEN o.actor_label=mv.label AND o.deleted_at='' THEN 1 ELSE 0 END
+		CASE WHEN NOT `+vectorOutdated+` AND o.deleted_at='' THEN 1 ELSE 0 END
 		FROM memory_message_vectors mv JOIN memory_observations o ON o.observation_id=mv.observation_id
 		WHERE mv.embed_space=? AND `+filter+` IN (`+ph+`)`+order, args...)
 	if err != nil {
