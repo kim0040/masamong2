@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"testing"
+	"time"
 )
 
 // seedEvidence fills a store the way a room that has been talking for months looks: many tombstones
@@ -157,8 +158,8 @@ func BenchmarkChatLineage(b *testing.B) {
 	}
 }
 
-// BenchmarkPruneChatHolders is the retention read over a live chain (nothing goes): it runs on the read
-// pool, and this is what it costs each pass.
+// BenchmarkPruneChatHolders is the retention pass over a live chain (nothing goes): the walk holds the write connection,
+// and this is what it costs each pass.
 func BenchmarkPruneChatHolders(b *testing.B) {
 	st := openStore(b)
 	seedChain(b, st, 20000)
@@ -167,9 +168,38 @@ func BenchmarkPruneChatHolders(b *testing.B) {
 	}
 	b.ResetTimer()
 	for range b.N {
-		n, err := st.PruneChatHolders(context.Background(), 2000)
+		n, err := st.PruneChatHolders(context.Background(), 2000, time.Now())
 		if err != nil || n != 0 {
 			b.Fatalf("pruned %d, %v", n, err)
+		}
+	}
+}
+
+// BenchmarkMarkChatHolders is what the retention pass holds the write connection for, on a chain that all goes and on
+// one kept by its last reply. Both walk the whole chain; the first also writes a mark for each turn.
+func BenchmarkMarkChatHolders(b *testing.B) {
+	for _, depth := range []int{2000, 20000} {
+		for _, kept := range []bool{false, true} {
+			b.Run(fmt.Sprintf("depth=%d/kept=%v", depth, kept), func(b *testing.B) {
+				st := openStore(b)
+				seedChain(b, st, depth)
+				if kept {
+					if _, err := st.DB.DB.Exec(`INSERT INTO chat_turns(id,channel_key,role,speaker,content,created_at,native_id,speaker_id,evidence_state) VALUES(?,'c','assistant','','a','','','',1)`, depth-1); err != nil {
+						b.Fatal(err)
+					}
+				}
+				b.ResetTimer()
+				for range b.N {
+					if err := st.markChatHolders(context.Background(), time.Now()); err != nil {
+						b.Fatal(err)
+					}
+					b.StopTimer()
+					if _, err := st.DB.DB.Exec(`DELETE FROM privacy_tombstones WHERE kind='pruning'`); err != nil {
+						b.Fatal(err)
+					}
+					b.StartTimer()
+				}
+			})
 		}
 	}
 }

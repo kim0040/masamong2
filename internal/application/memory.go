@@ -959,6 +959,22 @@ func (s *Service) usageReset(req action.Request) action.Result {
 // ---------------------------------------------------------------------------
 
 // ChatInput is one message addressed to the bot.
+// The clock of a chat turn, the longest of them (the connector's: a command's follow-up has 180 s in all, a chime-in 2
+// minutes, and a lab turn stores nothing). A turn gets ChatTurnTimeout once it has its place in the channel, and the
+// wait for that place is bounded by ChatQueueWait. ChatTurnCeiling bounds the whole call, whatever happens in between.
+const (
+	ChatTurnTimeout = 180 * time.Second
+	ChatQueueWait   = 120 * time.Second
+	ChatTurnCeiling = ChatQueueWait + ChatTurnTimeout + 30*time.Second
+)
+
+// chatLinkHold is how long a turn removed by a deletion stays indexed for a turn that read it before it went, even with
+// nothing linking to it yet (store.PruneChatHolders). A turn reads the conversation once it has its place, so
+// ChatTurnCeiling is more than it can run for after that; the margin is the wait for the write connection its commit
+// takes after its clock ran out, which no clock bounds. Retention runs once a day: a longer hold costs one more day of
+// a few index rows, a shorter one a reply.
+const chatLinkHold = ChatTurnCeiling + 5*time.Minute
+
 type ChatInput struct {
 	GuildID, ChannelID string
 	MessageID          string // the Discord message being answered (its edit or deletion follows the turn)

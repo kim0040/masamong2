@@ -178,14 +178,17 @@ func (s *Service) runRetention(ctx context.Context) (map[string]int64, error) {
 			return out, fmt.Errorf("evidence_refs: %w", err)
 		}
 		// After the turn entries above: a chat turn stays indexed while a turn record links to it too.
-		n, err = eng.Store.PruneChatHolders(ctx, pruneBatch)
+		n, err = eng.Store.PruneChatHolders(ctx, pruneBatch, now.Add(-chatLinkHold))
 		out["evidence_refs"] += n
 		// Tombstones survive pending jobs, then expire with turn retention. Consent and observation
 		// tombstones continue to prevent captured or imported messages from reappearing.
 		if d := days["turns"]; d >= 0 && !s.Store.HasPendingEvents("capture") && !s.Store.HasPendingEvents("source-change") {
 			cutoff := now.AddDate(0, 0, -d).Format(time.RFC3339)
 			removed, err := s.batched(ctx, func() (int64, error) {
-				res, err := s.Store.DB.ExecContext(ctx, `DELETE FROM privacy_tombstones WHERE (kind,source_id) IN (SELECT kind,source_id FROM privacy_tombstones WHERE at < ? AND NOT EXISTS (SELECT 1 FROM redaction_jobs) LIMIT ?)`, cutoff, pruneBatch)
+				// a mark of PruneChatHolders is work left, not old news: its turn may be half taken, and without the mark a
+				// reply could link to it. A 'going' tombstone is safe here: the shortest keep is a day, chatLinkHold minutes
+				res, err := s.Store.DB.ExecContext(ctx, `DELETE FROM privacy_tombstones WHERE (kind,source_id) IN (SELECT kind,source_id FROM privacy_tombstones
+					WHERE at < ? AND kind<>'pruning' AND NOT EXISTS (SELECT 1 FROM redaction_jobs) LIMIT ?)`, cutoff, pruneBatch)
 				if err != nil {
 					return 0, err
 				}

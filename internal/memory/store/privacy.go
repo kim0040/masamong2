@@ -206,12 +206,15 @@ func putSummaryTextTx(tx *sql.Tx, key, leaf, body, summary string) error {
 	return err
 }
 
+// tombstoneTime is how a tombstone's time is written: one width, so they compare as text.
+const tombstoneTime = "2006-01-02T15:04:05.000000000Z"
+
 func Tombstone(tx *sql.Tx, kind, id, at string) error {
 	if id == "" {
 		return nil
 	}
 	if parsed, err := time.Parse(time.RFC3339Nano, at); err == nil {
-		at = parsed.UTC().Format("2006-01-02T15:04:05.000000000Z")
+		at = parsed.UTC().Format(tombstoneTime)
 	}
 	_, err := tx.Exec(`INSERT INTO privacy_tombstones(kind,source_id,at) VALUES(?,?,?) ON CONFLICT(kind,source_id) DO UPDATE SET at=MAX(privacy_tombstones.at,excluded.at)`, kind, id, at)
 	return err
@@ -310,9 +313,10 @@ const sourceChunk = 500
 
 // SourcesBlocked is SourceBlocked for a whole list at once. A source list can be thousands of IDs (older
 // rows are flat), and this runs while the one write connection is held: one statement per chunk, not
-// per ID. A link to a chat turn whose index entries are gone also blocks: nothing could follow it. A turn removed
-// because it read a changed message keeps its entries while something links to it (PruneChatHolders), so a reply that
-// read only that turn is not refused, and a withdrawal still reaches it (see ChatReaders).
+// per ID. A link to a chat turn whose index entries are gone, or going (PruneChatHolders), also blocks: nothing could
+// follow it. A turn removed because it read a changed message keeps its entries while something links to it, and for
+// as long as a turn can run, so a reply that read only that turn is not refused, and a withdrawal still reaches it
+// (see ChatReaders).
 func SourcesBlocked(tx *sql.Tx, keys []string) (bool, error) {
 	return SourcesBlockedAsOf(tx, keys, 0) // settled sources number from 1: none is excused
 }
@@ -519,8 +523,9 @@ func EditFinished(db *storage.Store, message, at string) (bool, error) {
 	return err == nil && latest.Equal(wanted), nil
 }
 
-// chatLinkGone reports whether any of the keys is a link to a chat turn that nothing can be followed through: the
-// turn is not there and neither are its index entries (or the link cannot be read).
+// chatLinkGone reports whether any of the keys is a link to a chat turn that nothing can be followed through: the turn
+// is not there, and its index entries are not either or are about to go (a mark of PruneChatHolders), or the link cannot
+// be read.
 func chatLinkGone(tx *sql.Tx, keys []string) (bool, error) {
 	var links []string
 	for _, key := range keys {
@@ -543,7 +548,8 @@ func chatLinkGone(tx *sql.Tx, keys []string) (bool, error) {
 	var gone bool
 	err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM json_each(?) j
 		WHERE NOT EXISTS(SELECT 1 FROM chat_turns t WHERE t.id=CAST(substr(j.value,6) AS INTEGER))
-			AND NOT EXISTS(SELECT 1 FROM evidence_holders h WHERE h.holder_id=j.value AND h.holder_kind='chat'))`, string(raw)).Scan(&gone)
+			AND (NOT EXISTS(SELECT 1 FROM evidence_holders h WHERE h.holder_id=j.value AND h.holder_kind='chat')
+				OR EXISTS(SELECT 1 FROM privacy_tombstones m WHERE m.kind='`+pruningMark+`' AND m.source_id=j.value)))`, string(raw)).Scan(&gone)
 	return gone, err
 }
 
@@ -641,7 +647,7 @@ func TombstoneSources(tx *sql.Tx, ids []string, at string) error {
 
 // MarkChatTurnsGoing says these turns read a changed message and are about to be removed or rewritten: nothing reads
 // them until then (RecentChatTurns). Unlike a source's tombstone it refuses no reply that has read them already: such
-// a reply did not read the message.
+// a reply did not read the message, and PruneChatHolders leaves their entries for as long as one can still be running.
 func MarkChatTurnsGoing(tx *sql.Tx, links []string, at string) error {
 	return tombstoneAs(tx, "going", links, at)
 }
@@ -651,7 +657,7 @@ func tombstoneAs(tx *sql.Tx, kind string, ids []string, at string) error {
 		return nil
 	}
 	if parsed, err := time.Parse(time.RFC3339Nano, at); err == nil {
-		at = parsed.UTC().Format("2006-01-02T15:04:05.000000000Z")
+		at = parsed.UTC().Format(tombstoneTime)
 	}
 	raw, err := json.Marshal(ids)
 	if err != nil {
@@ -661,31 +667,66 @@ func tombstoneAs(tx *sql.Tx, kind string, ids []string, at string) error {
 	return err
 }
 
-// PruneChatHolders removes the index entries of chat turns that are gone and that nothing still kept
-// builds on. A turn past the kept window stays indexed while a later turn links to it (the promise is
-// that a withdrawal reaches every reply built on it, however old), so the entries of one chain go when its last
-// reply goes. It computes the whole set in one read, so a chain thousands of turns deep is not unwound one layer per
-// pass. A reply that read a turn just removed can still link to it while these run: it is kept if the entries are
-// there when it commits (chatLinkGone), and a pass that read before that commit can take them after it.
-func (s *Store) PruneChatHolders(ctx context.Context, batch int) (int64, error) {
-	// the join order is fixed: walking from each kept turn is a few indexed lookups, scanning every chat
-	// link for each of them is quadratic in the chain (postmortem 0004)
-	rows, err := s.DB.Reader().QueryContext(ctx, `WITH RECURSIVE kept(name) AS (
-			SELECT src.source_id FROM evidence_sources src
-				CROSS JOIN evidence_links l ON l.source=src.id
-				CROSS JOIN evidence_holders h ON h.id=l.holder
-				WHERE src.source_id GLOB 'chat:*' AND (h.holder_kind NOT IN ('chat','chat_from')
-					OR EXISTS (SELECT 1 FROM chat_turns t WHERE t.id=CAST(substr(h.holder_id,6) AS INTEGER)))
-			UNION
-			SELECT src.source_id FROM kept
-				CROSS JOIN evidence_holders h ON h.holder_id=kept.name AND h.holder_kind IN ('chat','chat_from')
-				CROSS JOIN evidence_links l ON l.holder=h.id
-				CROSS JOIN evidence_sources src ON src.id=l.source
-				WHERE src.source_id GLOB 'chat:*'
-		) SELECT h.id FROM evidence_holders h
-			WHERE h.holder_kind IN ('chat','chat_from')
-				AND NOT EXISTS (SELECT 1 FROM chat_turns t WHERE t.id=CAST(substr(h.holder_id,6) AS INTEGER))
-				AND h.holder_id NOT IN (SELECT name FROM kept)`)
+// pruningMark is the tombstone kind of a gone chat turn whose index entries are being taken (PruneChatHolders). It says
+// nothing about the source's words: only chatLinkGone reads it.
+const pruningMark = "pruning"
+
+// PruneChatHolders removes the index entries of chat turns that are gone and that nothing still kept builds on. A turn
+// past the kept window stays indexed while a later turn links to it (the promise is that a withdrawal reaches every
+// reply built on it, however old), so the entries of one chain go when its last reply goes.
+//
+// The order is what keeps that promise against a reply committing meanwhile, which may link to a turn that is gone as
+// long as the turn is indexed (chatLinkGone). The set is computed and marked in one write transaction: a reply that
+// committed before it is seen by the computation and keeps what it links to, and one that commits after it finds the
+// mark and refuses itself, however few entries have been taken yet. The batches then take their time, and a mark goes
+// only with the last entry of its turn, so a pass that stops anywhere is finished by the next one.
+//
+// A turn removed by a deletion is held out, and what it links to with it, while its 'going' tombstone is at or after
+// goingFrom: a reply that read it before it went may still be running, and it read no deleted word (MarkChatTurnsGoing).
+func (s *Store) PruneChatHolders(ctx context.Context, batch int, goingFrom time.Time) (int64, error) {
+	if err := s.markChatHolders(ctx, goingFrom); err != nil {
+		return 0, err
+	}
+	return s.takeMarkedChatHolders(ctx, batch)
+}
+
+// markChatHolders holds the write connection for the whole of the walk: 0.7 s on one core for a chain of 20,000 replies
+// (postmortem 0006, BenchmarkMarkChatHolders), once a day. Walking from each kept turn is a few indexed lookups: the join
+// order is fixed, because scanning every chat link for each of them is quadratic in the chain (postmortem 0004).
+func (s *Store) markChatHolders(ctx context.Context, goingFrom time.Time) error {
+	held := goingFrom.UTC().Format(tombstoneTime)
+	return s.DB.WithWriterContext(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `WITH RECURSIVE kept(name) AS (
+				SELECT src.source_id FROM evidence_sources src
+					CROSS JOIN evidence_links l ON l.source=src.id
+					CROSS JOIN evidence_holders h ON h.id=l.holder
+					WHERE src.source_id GLOB 'chat:*' AND (h.holder_kind NOT IN ('chat','chat_from')
+						OR EXISTS (SELECT 1 FROM chat_turns t WHERE t.id=CAST(substr(h.holder_id,6) AS INTEGER))
+						OR EXISTS (SELECT 1 FROM privacy_tombstones g WHERE g.kind='going' AND g.source_id=h.holder_id AND g.at>=?))
+				UNION
+				SELECT src.source_id FROM kept
+					CROSS JOIN evidence_holders h ON h.holder_id=kept.name AND h.holder_kind IN ('chat','chat_from')
+					CROSS JOIN evidence_links l ON l.holder=h.id
+					CROSS JOIN evidence_sources src ON src.id=l.source
+					WHERE src.source_id GLOB 'chat:*'
+			) INSERT INTO privacy_tombstones(kind,source_id,at)
+			SELECT '`+pruningMark+`',h.holder_id,? FROM evidence_holders h
+				WHERE h.holder_kind IN ('chat','chat_from')
+					AND NOT EXISTS (SELECT 1 FROM chat_turns t WHERE t.id=CAST(substr(h.holder_id,6) AS INTEGER))
+					AND NOT EXISTS (SELECT 1 FROM privacy_tombstones g WHERE g.kind='going' AND g.source_id=h.holder_id AND g.at>=?)
+					AND h.holder_id NOT IN (SELECT name FROM kept)
+			ON CONFLICT(kind,source_id) DO NOTHING`, held, time.Now().UTC().Format(tombstoneTime), held)
+		return err
+	})
+}
+
+// takeMarkedChatHolders removes the entries of the marked turns, and each mark once its turn has none left. It reads
+// the marks, not this pass's set: what an earlier pass left is finished here. A mark stays until then whatever has
+// happened since: part of that turn's entries may be gone, and a link to it could no longer be followed.
+func (s *Store) takeMarkedChatHolders(ctx context.Context, batch int) (int64, error) {
+	rows, err := s.DB.Reader().QueryContext(ctx, `SELECT h.id FROM privacy_tombstones m
+		CROSS JOIN evidence_holders h ON h.holder_id=m.source_id
+		WHERE m.kind='`+pruningMark+`' AND h.holder_kind IN ('chat','chat_from')`)
 	if err != nil {
 		return 0, err
 	}
@@ -728,7 +769,10 @@ func (s *Store) PruneChatHolders(ctx context.Context, batch int) (int64, error) 
 			}
 		}
 	}
-	return total, nil
+	// the last entry of a turn takes its holder with it (evidence_links_cleanup), so an entry left keeps its mark
+	_, err = s.DB.DB.ExecContext(ctx, `DELETE FROM privacy_tombstones WHERE kind='`+pruningMark+`'
+		AND NOT EXISTS (SELECT 1 FROM evidence_holders h WHERE h.holder_id=privacy_tombstones.source_id AND h.holder_kind IN ('chat','chat_from'))`)
+	return total, err
 }
 
 // uniqueSources joins source lists, in first-seen order, without repeats or empty IDs.

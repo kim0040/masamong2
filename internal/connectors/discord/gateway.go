@@ -134,9 +134,9 @@ const (
 	// bounds the whole call, whatever happens in between. The wait is 120 s because a normal message
 	// can stand behind a picture turn (p90 88 s) or behind a turn that plans and answers (about 105 s)
 	// in the same channel, and must not end as the "catching up" notice only for that.
-	chatTurnTimeout = 180 * time.Second
-	chatQueueWait   = 120 * time.Second
-	chatTurnCeiling = chatQueueWait + chatTurnTimeout + 30*time.Second
+	chatTurnTimeout = application.ChatTurnTimeout
+	chatQueueWait   = application.ChatQueueWait
+	chatTurnCeiling = application.ChatTurnCeiling
 	// interactionAckTimeout: Discord drops an interaction that is not answered within 3 seconds.
 	interactionAckTimeout = 2500 * time.Millisecond
 )
