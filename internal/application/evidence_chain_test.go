@@ -20,10 +20,11 @@ import (
 	"masamong/internal/memory/store"
 )
 
-// The promise these tests pin (postmortem 0003): a reply is made from what it read, so when a source
-// message is deleted, edited or its author withdraws, every later reply built on it goes too, however
-// many replies lie between them and whether or not the turn that first read it is still in the 40 kept
-// turns. Replies that came before the source, and other channels, stay.
+// The promise these tests pin (postmortems 0003 and 0006): a reply is made from what it read. When a source message is
+// deleted or edited, the replies that read it go, and those on top of them stay (evidence_direct_read_test.go). When
+// its author withdraws, every later reply built on it goes too, however many replies lie between them and whether or
+// not the turn that first read it is still in the 40 kept turns. Replies that came before the source, and other
+// channels, stay.
 
 // chainTurn captures one message and answers it, as a channel with capture on does.
 func chainTurn(t *testing.T, svc *application.Service, channel, id, author string) string {
@@ -125,12 +126,23 @@ func TestAChangedSourceTakesEveryReplyBuiltOnIt(t *testing.T) {
 					t.Fatal(err)
 				}
 
-				if n := assistantTurns(t, svc, "c"); n != 0 {
-					t.Fatalf("%d replies built on the source are still in the chat context", n)
+				// this channel shows each caller their own conversation: of alice's message, only her turn read it
+				wantKept, wantGone := 20, after[:1]
+				stayed := after[1:]
+				if change == "withdraw" {
+					wantKept, wantGone, stayed = 0, after, nil
 				}
-				for i, turn := range after {
+				if n := assistantTurns(t, svc, "c"); n != wantKept {
+					t.Fatalf("%d replies in the chat context, want %d", n, wantKept)
+				}
+				for i, turn := range wantGone {
 					if answerKept(t, svc, turn) {
 						t.Fatalf("turn %d after the source keeps its answer in the turn history", i)
+					}
+				}
+				for i, turn := range stayed {
+					if !answerKept(t, svc, turn) {
+						t.Fatalf("turn %d did not read the source and lost its answer", i+1)
 					}
 				}
 				for _, turn := range before {
@@ -149,8 +161,8 @@ func TestAChangedSourceTakesEveryReplyBuiltOnIt(t *testing.T) {
 
 				// the room is not stuck: the next reply is kept and its text stays
 				next := chainTurn(t, svc, "c", "fresh", "bob")
-				if n := assistantTurns(t, svc, "c"); n != 1 {
-					t.Fatalf("assistant turns after a fresh message: %d, want 1", n)
+				if n := assistantTurns(t, svc, "c"); n != min(wantKept+1, 20) {
+					t.Fatalf("assistant turns after a fresh message: %d, want %d", n, min(wantKept+1, 20))
 				}
 				if !answerKept(t, svc, next) {
 					t.Fatal("the first reply after the change lost its answer")
@@ -174,18 +186,19 @@ func TestRepeatedDeletionOfASourceIsHarmless(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if n := assistantTurns(t, svc, "c"); n != 0 {
+	// bob's own conversation: his turn read neither alice's message nor her reply
+	if n := assistantTurns(t, svc, "c"); n != 1 {
 		t.Fatalf("assistant turns: %d", n)
 	}
 	next := chainTurn(t, svc, "c", "fresh", "bob")
-	if n := assistantTurns(t, svc, "c"); n != 1 || !answerKept(t, svc, next) {
+	if n := assistantTurns(t, svc, "c"); n != 2 || !answerKept(t, svc, next) {
 		t.Fatalf("assistant turns after a fresh message: %d", n)
 	}
 }
 
-// Replies written by an earlier release hold the whole chain as a flat list. Replies written now, on top
-// of them, must still go when a message only the old list names is deleted.
-func TestRepliesOnTopOfAFlatListFollowItsDeletion(t *testing.T) {
+// Replies written by an earlier release hold the whole chain as a flat list, and count as having read all of it. The
+// replies written now, on top of them, read only the old reply: they stay.
+func TestRepliesOnTopOfAFlatListStayAfterItsDeletion(t *testing.T) {
 	svc := chainSvc(t)
 	eng, err := svc.MemoryEngine()
 	if err != nil {
@@ -211,38 +224,30 @@ func TestRepliesOnTopOfAFlatListFollowItsDeletion(t *testing.T) {
 	if err := svc.DrainRedactions(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if n := assistantTurns(t, svc, "c"); n != 0 {
-		t.Fatalf("%d replies on top of the old list survived", n)
+	if n := assistantTurns(t, svc, "c"); n != 3 {
+		t.Fatalf("%d replies in the context, want the 3 on top of the old list without it", n)
+	}
+	if n := chainCount(t, svc, `SELECT COUNT(*) FROM chat_turns WHERE content='old answer'`); n != 0 {
+		t.Fatal("the reply whose list names the message stayed")
 	}
 	for _, turn := range turns {
-		if answerKept(t, svc, turn) {
-			t.Fatal("the turn history keeps a reply on top of the old list")
+		if !answerKept(t, svc, turn) {
+			t.Fatal("a reply on top of the old list lost its answer")
 		}
 	}
 }
 
-// A thread starts with copies of its caller's turns. The copies, and replies in the thread, are built on
-// the same sources as the parent's.
+// A thread starts with copies of its caller's turns. A copy of a reply that read the message goes with it. A reply in
+// the thread read the copy, not the message, and stays.
 func TestThreadCopiesFollowADeletionInTheParentChain(t *testing.T) {
 	svc := chainSvc(t)
-	eng, err := svc.MemoryEngine()
-	if err != nil {
-		t.Fatal(err)
-	}
+	applyDoc(t, svc, func(d *config.Document) {
+		d.Guilds = map[string]config.GuildSettings{"g": {Channels: map[string]config.ChannelPolicy{"c": {Respond: "mention", Attribution: "off"}, "thread": {Respond: "mention", Attribution: "off"}}}}
+	})
 	chainTurn(t, svc, "c", "secret", "alice")
 	chainTurn(t, svc, "c", "n1", "bob")
-	parent, err := eng.Store.RecentChatTurns("discord:g:c", 40)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var mine []store.ChatTurn
-	for _, turn := range parent {
-		if turn.SpeakerID == "bob" {
-			mine = append(mine, turn)
-		}
-	}
-	if err := eng.Store.AppendChatTurns("discord:g:thread", mine, 40); err != nil {
-		t.Fatal(err)
+	if n := svc.SeedThreadForTest("g", "c", "thread", "bob"); n != 2 {
+		t.Fatalf("seeded %d", n)
 	}
 	reply := chainTurn(t, svc, "thread", "t1", "bob")
 	if n := assistantTurns(t, svc, "thread"); n != 2 {
@@ -254,11 +259,14 @@ func TestThreadCopiesFollowADeletionInTheParentChain(t *testing.T) {
 	if err := svc.DrainRedactions(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if n := assistantTurns(t, svc, "thread"); n != 0 {
-		t.Fatalf("%d replies in the thread survived", n)
+	if n := assistantTurns(t, svc, "thread"); n != 1 {
+		t.Fatalf("%d replies in the thread, want the one that read the copy and not the copy", n)
 	}
-	if answerKept(t, svc, reply) {
-		t.Fatal("the turn history keeps the thread's reply")
+	if n := chainCount(t, svc, `SELECT COUNT(*) FROM chat_turns WHERE channel_key='discord:g:thread' AND role='assistant' AND native_id='n1'`); n != 0 {
+		t.Fatal("the copy of the reply that read the message stayed")
+	}
+	if !answerKept(t, svc, reply) {
+		t.Fatal("the thread's reply lost its answer")
 	}
 }
 

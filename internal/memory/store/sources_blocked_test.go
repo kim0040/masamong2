@@ -156,6 +156,11 @@ func TestALinkToAGoneTurnBlocks(t *testing.T) {
 	if _, err := st.DB.DB.Exec(`DELETE FROM chat_turns`); err != nil {
 		t.Fatal(err)
 	}
+	// gone, and still indexed: a withdrawal can follow the link, so a reply that read the turn is kept
+	check(turns[0].SourceIDs, false)
+	if _, err := st.DB.DB.Exec(`DELETE FROM evidence_links`); err != nil {
+		t.Fatal(err)
+	}
 	check(turns[0].SourceIDs, true)
 }
 
@@ -214,5 +219,44 @@ func TestChatLineageClosesTheLinks(t *testing.T) {
 		if !slices.Equal(got, c.want) {
 			t.Errorf("%v: got %v, want %v", c.keys, got, c.want)
 		}
+	}
+}
+
+// Reading a reply is reading the reply, and its request only if the request's own turn was read too. A turn marked as
+// going is not read, and refuses no reply that read it already.
+func TestWhatReadingATurnMeans(t *testing.T) {
+	st := openStore(t)
+	if err := st.AppendChatTurns("c", []ChatTurn{
+		{Role: "user", Content: "q", NativeID: "m", SpeakerID: "u"},
+		{Role: "assistant", Content: "a", NativeID: "m", SpeakerID: "u"},
+	}, 40); err != nil {
+		t.Fatal(err)
+	}
+	turns, err := st.RecentChatTurns("c", 2)
+	if err != nil || len(turns) != 2 {
+		t.Fatalf("%d %v", len(turns), err)
+	}
+	if !slices.Contains(turns[0].SourceIDs, "m") {
+		t.Fatalf("the request does not name its message: %v", turns[0].SourceIDs)
+	}
+	if slices.Contains(turns[1].SourceIDs, "m") {
+		t.Fatalf("the reply names its request's message: %v", turns[1].SourceIDs)
+	}
+	reply := turns[1].SourceIDs[0]
+	if err := st.DB.WithWriter(func(tx *sql.Tx) error { return MarkChatTurnsGoing(tx, []string{reply}, "2026-11-08T00:00:00Z") }); err != nil {
+		t.Fatal(err)
+	}
+	turns, err = st.RecentChatTurns("c", 2)
+	if err != nil || len(turns) != 1 || turns[0].Role != "user" {
+		t.Fatalf("a turn marked as going was read: %+v %v", turns, err)
+	}
+	if err := st.DB.WithWriter(func(tx *sql.Tx) error {
+		blocked, err := SourcesBlocked(tx, []string{reply})
+		if blocked {
+			t.Error("a turn marked as going refuses a reply that read it")
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

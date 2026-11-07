@@ -439,7 +439,9 @@ func (s *Service) processRedactions(ctx context.Context, db *storage.Store, queu
 		return err
 	}
 	keys := map[string]bool{}
-	var texts, obs, people []string
+	// what a withdrawal names (or a job of an earlier release): every reply built on it goes, not only those that read it
+	whole := map[string]bool{}
+	var texts, obs, wholeObs, people []string
 	withdrawn := false // a batch with a withdrawal erases by person: no collected row is spared then
 	type candidate struct{ guild, channel, message string }
 	var candidates []candidate
@@ -474,6 +476,15 @@ func (s *Service) processRedactions(ctx context.Context, db *storage.Store, queu
 			if err != nil {
 				return err
 			}
+		}
+		messageChange := j.Operation == "delete" || j.Operation == "edit"
+		if !messageChange {
+			for _, list := range [][]string{j.Leaves, j.Messages, j.Obs, {j.Ref}} {
+				for _, id := range list {
+					whole[id] = true
+				}
+			}
+			wholeObs = append(wholeObs, j.Obs...)
 		}
 		for _, id := range j.Leaves {
 			keys[id] = true
@@ -513,10 +524,11 @@ func (s *Service) processRedactions(ctx context.Context, db *storage.Store, queu
 		for rows.Next() {
 			var o, n string
 			if rows.Scan(&o, &n) == nil {
-				keys[o] = true
+				keys[o], whole[o] = true, true
 				obs = append(obs, o)
+				wholeObs = append(wholeObs, o)
 				if n != "" {
-					keys[n] = true
+					keys[n], whole[n] = true, true
 				}
 			}
 		}
@@ -555,7 +567,18 @@ func (s *Service) processRedactions(ctx context.Context, db *storage.Store, queu
 	for _, l := range leaves {
 		keys[l] = true
 	}
-	if err := s.closeChatLineage(ctx, db, keys); err != nil {
+	if len(wholeObs) > 0 {
+		leaves, err := leavesHolding(db, uniqueStrings(wholeObs))
+		if err != nil {
+			return err
+		}
+		for _, l := range leaves {
+			whole[l] = true
+		}
+	}
+	delete(whole, "")
+	readers, err := s.closeChatLineage(ctx, db, keys, whole)
+	if err != nil {
 		return err
 	}
 	words := newTextMatcher(uniqueStrings(texts))
@@ -580,7 +603,7 @@ func (s *Service) processRedactions(ctx context.Context, db *storage.Store, queu
 	if err := s.invalidateRoomMemory(ctx, db, jobs); err != nil {
 		return err
 	}
-	if err := s.redactSmallTables(db, keys, match, editedOnly); err != nil {
+	if err := s.redactSmallTables(db, keys, readers, match, editedOnly); err != nil {
 		return err
 	}
 	return s.settleEdits(ctx, db, jobs, queued)
@@ -588,7 +611,7 @@ func (s *Service) processRedactions(ctx context.Context, db *storage.Store, queu
 
 // unfinishedJobs leaves out the edits that are already finished. A job that runs again after its edit settled
 // (a crash, a replay) must not repeat it: the walk from the message goes through the user turn that stayed, to
-// every reply built on it, and by now those are replies on the new words. Writing the tombstones again would also
+// every reply that read it, and by now those are replies on the new words. Writing the tombstones again would also
 // undo the settling and take a new number, refusing turns under way. Any change of the message since then has
 // removed the settled row, so such a job is not taken for finished.
 func (s *Service) unfinishedJobs(db *storage.Store, jobs []redactionJob) ([]redactionJob, error) {
@@ -883,19 +906,27 @@ func settleOldEditBatch(ctx context.Context, db *storage.Store, after string) (s
 	return messages[len(messages)-1], nil
 }
 
-// closeChatLineage adds to keys every chat turn built on them, and tombstones those turns in the same
-// write transaction: a reply committed before it is found by the walk, one committed after it links to a
-// tombstoned turn and refuses itself. So this comes before anything looks up holders by these keys.
-func (s *Service) closeChatLineage(ctx context.Context, db *storage.Store, keys map[string]bool) error {
+// closeChatLineage marks the chat turns to go, in one write transaction with the marks, so this comes before anything
+// looks up holders by these keys. A deleted or edited message takes the turns that read it, returned as readers: the
+// keys stay as they are, for a reply on top of those turns stays and is found by no key. A withdrawal (whole) takes
+// every turn built on what it names, added to keys: a reply committed before the transaction is found by the walk, and
+// one committed after it links to a tombstoned turn and refuses itself.
+func (s *Service) closeChatLineage(ctx context.Context, db *storage.Store, keys, whole map[string]bool) ([]string, error) {
 	if !db.IsSQLite() {
-		return nil
+		return nil, nil
 	}
-	all := make([]string, 0, len(keys))
+	var names []string
+	var erased []string
 	for k := range keys {
-		all = append(all, k)
+		if whole[k] {
+			erased = append(erased, k)
+		} else {
+			names = append(names, k)
+		}
 	}
-	return db.WithWriterContext(ctx, func(tx *sql.Tx) error {
-		lineage, err := store.ChatLineage(tx, all)
+	var readers []string
+	err := db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+		lineage, err := store.ChatLineage(tx, erased)
 		if err != nil {
 			return err
 		}
@@ -905,8 +936,13 @@ func (s *Service) closeChatLineage(ctx context.Context, db *storage.Store, keys 
 		for _, id := range lineage {
 			keys[id] = true
 		}
-		return nil
+		readers, err = store.ChatReaders(tx, names)
+		if err != nil {
+			return err
+		}
+		return store.MarkChatTurnsGoing(tx, readers, s.nowString())
 	})
+	return readers, err
 }
 
 // redactTurnBody clears the fields of a turn body that match and marks it.
@@ -1040,7 +1076,7 @@ func (s *Service) redactLegacyTurns(ctx context.Context, db *storage.Store, matc
 // redactSmallTables handles what the console's operators curate by hand: lab reviews, memory reviews and
 // eval runs. They are small, so they are scanned once per batch of jobs rather than indexed.
 // keepCollected names messages that were only edited: the collected rows of those stay (they hold no text).
-func (s *Service) redactSmallTables(db *storage.Store, keys map[string]bool, match func(string) bool, keepCollected map[string]bool) error {
+func (s *Service) redactSmallTables(db *storage.Store, keys map[string]bool, readers []string, match func(string) bool, keepCollected map[string]bool) error {
 	// Transitive review -> eval links must be captured before deleting a review.
 	frontier := make([]string, 0, len(keys))
 	for key := range keys {
@@ -1076,6 +1112,11 @@ func (s *Service) redactSmallTables(db *storage.Store, keys map[string]bool, mat
 	}
 	rawKeys, _ := json.Marshal(all)
 	if _, err := db.DB.Exec(`DELETE FROM chat_turns WHERE role<>'user' AND 'chat:'||id IN (SELECT holder_id FROM evidence_refs WHERE holder_kind='chat' AND source_id IN (SELECT value FROM json_each(?)))`, string(rawKeys)); err != nil {
+		return err
+	}
+	// a reply among them that holds none of the keys itself: a thread's copy of one that read them (store.ChatReaders)
+	rawReaders, _ := json.Marshal(readers)
+	if _, err := db.DB.Exec(`DELETE FROM chat_turns WHERE role<>'user' AND 'chat:'||id IN (SELECT value FROM json_each(?))`, string(rawReaders)); err != nil {
 		return err
 	}
 	// a user turn whose text was partly made from another message (a picture's description, vision.go)

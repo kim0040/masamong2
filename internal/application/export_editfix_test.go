@@ -76,3 +76,17 @@ func (s *Service) NotedWordsForTest(messageID string) string {
 func (s *Service) SeedThreadForTest(guildID, parentID, threadID, callerID string) int {
 	return len(s.seedThread(guildID, parentID, threadID, callerID))
 }
+
+// ChannelLineIDsForTest names the lines a turn in the channel would choose its conversation from.
+func (s *Service) ChannelLineIDsForTest(guildID, channelID, messageID string) []string {
+	eng, err := s.MemoryEngine()
+	if err != nil {
+		return nil
+	}
+	lines, _ := s.channelLines(ChatInput{GuildID: guildID, ChannelID: channelID, MessageID: messageID}, eng)
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = l.ID
+	}
+	return out
+}

@@ -2091,8 +2091,9 @@ type ChatTurn struct {
 	// person's turns (DeleteAccountMessages), in channels that store messages and in those that don't.
 	SpeakerID string
 	// SourceIDs are the messages and earlier turns read to produce this turn. An earlier turn is a link
-	// (ChatLink), not a copy of its sources, so the list stays the size of what was read; ChatLineage
-	// follows the links when a source changes. Rows from earlier releases hold a flat list instead.
+	// (ChatLink), not a copy of its sources, so the list stays the size of what was read: a message is here
+	// only when its words reached the prompt (ChatReaders), and ChatLineage follows the links for a withdrawal.
+	// Rows from earlier releases hold a flat list, and count as having read all of it.
 	SourceIDs []string
 	// DerivedFrom are other messages part of this turn's text was made from (the description of a
 	// picture in the message a user turn replied to). Deleting or editing one of them removes the turn,
@@ -2172,7 +2173,11 @@ func (s *Store) AppendDecidedChatTurns(channelKey string, decide func() []ChatTu
 					if err := IndexSourceRefs(tx, "chat", ChatLink(id), uniqueSources(t.SourceIDs, []string{t.NativeID, PersonRef(t.SpeakerID)})); err != nil {
 						return err
 					}
-					if from := uniqueSources(t.DerivedFrom, t.Merged); len(from) > 0 {
+					from := uniqueSources(t.DerivedFrom, t.Merged)
+					if t.Copied && len(t.SourceIDs) > 0 {
+						from = uniqueSources(from, t.SourceIDs[:1]) // a copy holds the words of the turn it copies
+					}
+					if len(from) > 0 {
 						if err := IndexSourceRefs(tx, "chat_from", ChatLink(id), from); err != nil {
 							return err
 						}
@@ -2196,18 +2201,19 @@ func (s *Store) AppendDecidedChatTurns(channelKey string, decide func() []ChatTu
 }
 
 // RecentChatTurns returns the last n turns of a channel in order. SourceIDs is what reading the turn
-// means for a turn built on it: a link to it, its message and its speaker.
+// means for a turn built on it: a link to it and its speaker, and for a user turn the messages its words are: its own
+// and those in DerivedFrom. A reply has its request's ID as its message, and reading the reply is not reading that.
 func (s *Store) RecentChatTurns(channelKey string, n int) ([]ChatTurn, error) {
 	if s.DB.HasPendingEvents("source-change") {
 		return nil, nil
 	}
 
-	// A turn with a tombstone on its link is built on something that changed and only has not been removed yet (the
-	// job failed after its walk, and waits for its retry): nothing built on it would be kept, and it is not read.
-	// A user turn whose edit has settled holds the new words and is read again.
+	// A turn with a tombstone on its link read something that changed and only has not been removed yet (the job
+	// failed after its walk, and waits for its retry): it is not read. A user turn whose edit has settled holds the
+	// new words and is read again.
 	notGoing := ""
 	if !s.tidb() {
-		notGoing = ` AND NOT EXISTS (SELECT 1 FROM privacy_tombstones t WHERE t.kind='source' AND t.source_id='chat:'||chat_turns.id
+		notGoing = ` AND NOT EXISTS (SELECT 1 FROM privacy_tombstones t WHERE t.kind IN ('source','going') AND t.source_id='chat:'||chat_turns.id
 			AND NOT EXISTS (SELECT 1 FROM privacy_settled d WHERE d.source_id=t.source_id))`
 	}
 	rows, err := s.DB.DB.Query(`SELECT id,role,speaker,content,created_at,native_id,speaker_id FROM chat_turns WHERE channel_key=?`+notGoing+` ORDER BY id DESC LIMIT ?`, channelKey, n)
@@ -2222,22 +2228,27 @@ func (s *Store) RecentChatTurns(channelKey string, n int) ([]ChatTurn, error) {
 		if err := rows.Scan(&id, &t.Role, &t.Speaker, &t.Content, &t.CreatedAt, &t.NativeID, &t.SpeakerID); err != nil {
 			return nil, err
 		}
-		t.SourceIDs = uniqueSources([]string{ChatLink(id), t.NativeID, PersonRef(t.SpeakerID)})
+		t.SourceIDs = []string{ChatLink(id)}
+		if t.Role == "user" {
+			t.SourceIDs = append(t.SourceIDs, t.NativeID)
+		}
+		t.SourceIDs = uniqueSources(t.SourceIDs, []string{PersonRef(t.SpeakerID)})
 		out = append(out, t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
 	}
-	return out, rows.Err()
+	if s.tidb() || len(out) == 0 {
+		return out, nil
+	}
+	return s.withDerivedFrom(out)
 }
 
-// ChatTurnsToCopy is RecentChatTurns for writing the turns to another channel: each one also says what its
-// words were partly made from, so the copy stays tied to it (DerivedFrom).
-func (s *Store) ChatTurnsToCopy(channelKey string, n int) ([]ChatTurn, error) {
-	turns, err := s.RecentChatTurns(channelKey, n)
-	if err != nil || s.tidb() || len(turns) == 0 {
-		return turns, err
-	}
+// withDerivedFrom adds what each turn's words were partly made from. Reading a user turn is reading those messages too.
+func (s *Store) withDerivedFrom(turns []ChatTurn) ([]ChatTurn, error) {
 	links := make([]string, len(turns))
 	for i, t := range turns {
 		links[i] = t.SourceIDs[0] // the turn's own link comes first
@@ -2264,8 +2275,17 @@ func (s *Store) ChatTurnsToCopy(channelKey string, n int) ([]ChatTurn, error) {
 	}
 	for i := range turns {
 		turns[i].DerivedFrom = from[links[i]]
+		if turns[i].Role == "user" {
+			turns[i].SourceIDs = uniqueSources(turns[i].SourceIDs, from[links[i]])
+		}
 	}
 	return turns, nil
+}
+
+// ChatTurnsToCopy is RecentChatTurns for writing the turns to another channel: each one also says what its
+// words were partly made from, so the copy stays tied to it (DerivedFrom).
+func (s *Store) ChatTurnsToCopy(channelKey string, n int) ([]ChatTurn, error) {
+	return s.RecentChatTurns(channelKey, n)
 }
 
 // LeafVectorWidths reads the range of active float16 widths without fetching vector BLOBs or

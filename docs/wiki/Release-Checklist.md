@@ -77,7 +77,7 @@ Ask 50+ questions people would really ask in the **Answer lab** and mark each re
 
 The database only migrates forward at start (there is no reverse conversion). To go back, reinstall the previous version and restore the **backup made before upgrading**. Conversation from the meantime is fetched again by Discord **catching up missed messages**, up to the last 7 days.
 
-**Going back to v1.1.x**: restoring the backup is all it takes. To open the current database with the older version instead, empty the conversation context first. Replies from later versions point at the turns they read with links only, and v1.1.x does not follow links, so deleting a message would leave the replies built on it. The steps are in the [maintainer guide §4](https://github.com/kim0040/masamong2/blob/main/docs/MAINTAINING.md).
+**Going back to v1.1.x**: restoring the backup is all it takes. To open the current database with the older version instead, empty the conversation context first. Replies from later versions point at the turns they read with links only, and v1.1.x does not follow links, so a withdrawal of consent would leave the replies built on what the person said. The steps are in the [maintainer guide §4](https://github.com/kim0040/masamong2/blob/main/docs/MAINTAINING.md).
 
 ## 5. Current limits
 

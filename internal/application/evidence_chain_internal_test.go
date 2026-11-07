@@ -52,9 +52,9 @@ func repliesKept(t *testing.T, s *Service, channel string) int {
 	return n
 }
 
-// A turn that read the window before the deletion and writes after the worker finished links to turns
-// that are gone. It cannot be kept: nothing would ever find it again.
-func TestAReplyWrittenAfterTheRedactionCannotLinkToARemovedTurn(t *testing.T) {
+// A turn that read the window before the deletion writes after the worker finished. It read a reply that is gone and
+// no deleted message: it stays, and its link can still be followed. One that read the message itself is refused.
+func TestAReplyWrittenAfterTheRedactionIsJudgedByWhatItRead(t *testing.T) {
 	s := privacyService(t)
 	e, _ := s.MemoryEngine()
 	window := chainOf(t, s, "c", "secret", 3)
@@ -68,29 +68,44 @@ func TestAReplyWrittenAfterTheRedactionCannotLinkToARemovedTurn(t *testing.T) {
 	if err := s.DrainRedactions(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if n := repliesKept(t, s, "c"); n != 0 {
-		t.Fatalf("replies after the redaction: %d", n)
+	if n := repliesKept(t, s, "c"); n != 2 {
+		t.Fatalf("replies after the redaction: %d, want the 2 on top of the one that read the message", n)
 	}
-	if err := e.Store.AppendChatTurns("discord:g:c", []store.ChatTurn{{Role: "assistant", Content: "late", NativeID: "late-q", SpeakerID: "bob", SourceIDs: read}}, 40); err != nil {
-		t.Fatal(err)
+	write := func(native string, sources []string) {
+		t.Helper()
+		if err := e.Store.AppendChatTurns("discord:g:c", []store.ChatTurn{{Role: "assistant", Content: "late", NativeID: native, SpeakerID: "bob", SourceIDs: sources}}, 40); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if n := repliesKept(t, s, "c"); n != 0 {
-		t.Fatal("a late reply linked to removed turns was kept")
+	write("reads-the-message", append([]string{"secret"}, read...))
+	if n := repliesKept(t, s, "c"); n != 2 {
+		t.Fatal("a late reply that read the deleted message was kept")
 	}
-	s.recordTurn(TurnRecord{ID: "late-turn", GuildID: "g", ChannelID: "c", SpeakerID: "bob", Body: map[string]any{
-		"message": "late", "answer": "late answer built on them", "answer_preview": "late answer",
-		"context": map[string]any{"observation_ids": read}}})
-	if raw := turnBody(t, s, "late-turn"); strings.Contains(raw, "built on them") || !strings.Contains(raw, `"evidence_redacted":true`) {
-		t.Fatal("a late turn record built on removed turns kept its answer: " + raw)
+	write("reads-a-reply", read)
+	if n := repliesKept(t, s, "c"); n != 3 {
+		t.Fatal("a late reply that read only the removed reply was refused")
+	}
+	record := func(id string, sources []string) string {
+		t.Helper()
+		s.recordTurn(TurnRecord{ID: id, GuildID: "g", ChannelID: "c", SpeakerID: "bob", Body: map[string]any{
+			"message": "late", "answer": "late answer built on them", "answer_preview": "late answer",
+			"context": map[string]any{"observation_ids": sources}}})
+		return turnBody(t, s, id)
+	}
+	if raw := record("late-reader", append([]string{"secret"}, read...)); strings.Contains(raw, "built on them") || !strings.Contains(raw, `"evidence_redacted":true`) {
+		t.Fatal("a late record that read the deleted message kept its answer: " + raw)
 	}
 	var indexed int
-	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM evidence_refs WHERE holder_kind=? AND holder_id='late-turn' AND source_id GLOB 'chat:*'`, holderTurnEvidence).Scan(&indexed); err != nil || indexed != 0 {
+	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM evidence_refs WHERE holder_kind=? AND holder_id='late-reader' AND source_id GLOB 'chat:*'`, holderTurnEvidence).Scan(&indexed); err != nil || indexed != 0 {
 		t.Fatalf("the refused turn stays indexed: %d %v", indexed, err)
+	}
+	if raw := record("late-on-top", read); !strings.Contains(raw, "built on them") {
+		t.Fatal("a late record that read only the removed reply lost its answer: " + raw)
 	}
 }
 
-// A reply committed while the job waits in the queue links to turns the worker has not reached yet: the
-// walk happens when the worker runs, so it is found.
+// A reply committed while the job waits in the queue is judged when the worker runs: found if it read the message,
+// left if it read only replies.
 func TestAReplyCommittedWhileTheJobWaitsIsFound(t *testing.T) {
 	s := privacyService(t)
 	e, _ := s.MemoryEngine()
@@ -113,8 +128,8 @@ func TestAReplyCommittedWhileTheJobWaitsIsFound(t *testing.T) {
 	if err := s.DrainRedactions(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if n := repliesKept(t, s, "c"); n != 0 {
-		t.Fatalf("replies after the worker ran: %d", n)
+	if n := repliesKept(t, s, "c"); n != 3 {
+		t.Fatalf("replies after the worker ran: %d, want all but the one that read the message", n)
 	}
 }
 
@@ -202,7 +217,7 @@ func TestTheWalkTombstonesTheLineageBeforeTheRowsGo(t *testing.T) {
 		read = append(read, turn.SourceIDs...)
 	}
 	keys := map[string]bool{"secret": true}
-	if err := s.closeChatLineage(context.Background(), s.Store, keys); err != nil {
+	if _, err := s.closeChatLineage(context.Background(), s.Store, keys, keys); err != nil {
 		t.Fatal(err)
 	}
 	if n := repliesKept(t, s, "c"); n != 3 {

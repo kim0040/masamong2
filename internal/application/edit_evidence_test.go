@@ -88,7 +88,12 @@ func (p *promptServer) calls() int {
 func editSvc(t *testing.T) (*application.Service, *promptServer) {
 	t.Helper()
 	p := newPromptServer(t)
-	return routedSvc(t, p.URL, p.URL), p
+	svc := routedSvc(t, p.URL, p.URL)
+	// everyone's turns reach everyone's prompt: what the replies here read is the channel's window
+	applyDoc(t, svc, func(d *config.Document) {
+		d.Guilds = map[string]config.GuildSettings{"g": {Channels: map[string]config.ChannelPolicy{"c": {Respond: "mention", Attribution: "off"}}}}
+	})
+	return svc, p
 }
 
 func changeSource(t *testing.T, svc *application.Service, change, id, author string) {

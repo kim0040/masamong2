@@ -1462,6 +1462,10 @@ func shownEarlier(hits []search.Hit, h search.Hit) int {
 	return 0
 }
 
+// historyShown is how many of a channel's latest turns reach a prompt: the answer's default MaxHistory, and the planner's
+// and the tool loop's budget in the chat package. TestAMessageChangeTakesTheRepliesThatReadIt fails if they part.
+const historyShown = 8
+
 func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, error) {
 	if (strings.TrimSpace(in.Message) == "" && !in.imageOnly) || in.ChannelID == "" {
 		return chat.Result{}, errors.New("channel_id and message required")
@@ -1528,15 +1532,22 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	key := blocks.ChannelKey(in.GuildID, in.ChannelID)
 	room := engine.RoomKey(in.GuildID, in.ChannelID)
 	var history []chat.Turn
+	// The window is more than a prompt shows. What reaches the prompt is read; a turn further back is held by its link
+	// alone, as is every turn in a channel that shows each caller only their conversation: a withdrawal follows the
+	// link, and a deleted message takes only the replies that read it (store.ChatReaders).
+	var windowAll, windowShown, windowLinks []string
 	if turns, err := eng.Store.RecentChatTurns(key, 16); err == nil {
-		for _, t := range turns {
+		for i, t := range turns {
 			at, _ := time.Parse(time.RFC3339, t.CreatedAt) // the store writes RFC3339; a bad value shows no age
 			history = append(history, chat.Turn{Role: t.Role, Speaker: t.Speaker, Content: t.Content, At: at})
-			if in.sourceRefs != nil {
-				*in.sourceRefs = append(*in.sourceRefs, t.SourceIDs...)
-				if t.Role == "user" && t.NativeID != "" {
-					*in.sourceRefs = append(*in.sourceRefs, corpus.DiscordLiveObservationID(room, t.NativeID))
-				}
+			read := t.SourceIDs
+			if t.Role == "user" && t.NativeID != "" {
+				read = append(slices.Clone(read), corpus.DiscordLiveObservationID(room, t.NativeID))
+			}
+			windowAll = append(windowAll, read...)
+			windowLinks = append(windowLinks, t.SourceIDs[0]) // its own link comes first
+			if i >= len(turns)-historyShown {
+				windowShown = append(windowShown, read...)
 			}
 		}
 	}
@@ -1569,7 +1580,7 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		// conversations of the room are not shown to the planner or the answer at all
 		history, recent, maxHistory = conv.history, nil, 24
 		if in.sourceRefs != nil {
-			*in.sourceRefs = append(*in.sourceRefs, conv.sources...)
+			*in.sourceRefs = append(append(*in.sourceRefs, windowLinks...), conv.sources...)
 		}
 		for k, v := range conv.ledger {
 			if in.context != nil {
@@ -1580,7 +1591,7 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		// the recent lines reach the reply only here (RecentRoom below), so only here is it built on them. With the
 		// caller's conversation in their place it is built on the lines that conversation picked (conv.sources). A
 		// line offered to the reference classifier and not picked leaves nothing: it answers with labels only.
-		*in.sourceRefs = append(*in.sourceRefs, ambient...)
+		*in.sourceRefs = append(append(append(*in.sourceRefs, windowLinks...), windowShown...), ambient...)
 	}
 	toolset := s.chatToolset(voice, in.GuildID, in.ChannelID)
 	_, memTool := toolsetHas(toolset, "memory.search")
@@ -1610,9 +1621,9 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	persona := draftOr(in, in.DraftStyle, s.personaText(personaFor(in, pol.PersonaRef)))
 	// room memory (P4-3 roommemory_read.go) and explicit memory requests (P4-4 explicit.go)
 	roomIn := in
-	if in.sourceRefs != nil && attributed {
+	if in.sourceRefs != nil {
 		// what room memory takes as already known in the room does not depend on what this reply is built on
-		known := append(slices.Clone(*in.sourceRefs), ambient...)
+		known := append(append(slices.Clone(*in.sourceRefs), windowAll...), ambient...)
 		roomIn.sourceRefs = &known
 	}
 	roomMemory := s.turnRoomMemory(ctx, roomIn, pol, voice, history, recent)

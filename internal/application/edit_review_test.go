@@ -24,6 +24,10 @@ import (
 // mark, or a turn with no mark at all, has no such excuse.
 func TestATurnWithAPictureIsJudgedByTheMarkBeforeItsPictures(t *testing.T) {
 	svc, _ := visionSvc(t)
+	// bob's turns read alice's message only in a channel that shows them everyone's
+	applyDoc(t, svc, func(d *config.Document) {
+		d.Guilds = map[string]config.GuildSettings{"g": {Channels: map[string]config.ChannelPolicy{"c": {Respond: "mention", Attribution: "off"}}}}
+	})
 	url, _ := picture(t)
 	chainTurn(t, svc, "c", "secret", "alice")
 	before := svc.SettledMark()
@@ -595,8 +599,9 @@ func TestARecentLineInThePromptIsWhatAReplyIsBuiltOn(t *testing.T) {
 		}
 	}
 	t.Logf("a line in the prompt: its deletion took %d of %d", lost, depth)
-	if lost != depth {
-		t.Fatalf("deleting a line the replies read took %d of %d replies", lost, depth)
+	// the prompt shows the last 12 recent lines: the turns after that have read replies on it, not the line
+	if lost != 12 {
+		t.Fatalf("deleting a line 12 replies read took %d of %d replies", lost, depth)
 	}
 }
 

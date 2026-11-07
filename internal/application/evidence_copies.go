@@ -66,7 +66,7 @@ func copySources(tx *sql.Tx, values ...any) ([]string, error) {
 		raw, _ := json.Marshal(frontier)
 		// Expand a whole frontier in set-based queries, rather than scanning leaves per observation.
 		// A link to a chat turn stays a link: copying what it holds would rebuild the flat list, and a
-		// deletion follows the link instead (store.ChatLineage).
+		// withdrawal follows the link instead (store.ChatLineage).
 		rows, err := tx.Query(`SELECT j.value FROM memory_leaves l,json_each(l.observation_ids) j WHERE l.leaf_id IN (SELECT value FROM json_each(?))
 			UNION SELECT source_id FROM evidence_refs WHERE holder_id IN (SELECT value FROM json_each(?) WHERE value NOT GLOB 'chat:*')
 			UNION SELECT COALESCE(native_message_id,'') FROM memory_observations WHERE observation_id IN (SELECT value FROM json_each(?))`, string(raw), string(raw), string(raw))

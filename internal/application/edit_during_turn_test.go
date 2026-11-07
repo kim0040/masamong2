@@ -11,7 +11,6 @@ import (
 
 	"masamong/internal/application"
 	"masamong/internal/chat"
-	"masamong/internal/config"
 	"masamong/internal/memory/engine"
 	"masamong/internal/memory/store"
 )
@@ -28,11 +27,7 @@ const (
 // quietSvc is a channel that stores no messages and shows every reply the channel's plain conversation.
 func quietSvc(t *testing.T) (*application.Service, *promptServer) {
 	t.Helper()
-	svc, prompts := editSvc(t)
-	applyDoc(t, svc, func(d *config.Document) {
-		d.Guilds = map[string]config.GuildSettings{"g": {Channels: map[string]config.ChannelPolicy{"c": {Respond: "mention", Attribution: "off"}}}}
-	})
-	return svc, prompts
+	return editSvc(t)
 }
 
 // answerWhile answers the message, doing during what the person does while the turn runs.

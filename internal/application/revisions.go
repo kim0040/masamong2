@@ -94,7 +94,7 @@ func (s *Service) MessageEdited(guildID, channelID, messageID, content string, a
 		if err != nil || newer {
 			return err
 		}
-		// the same event again: its job is in the queue or done, and doing it twice would take the replies built on
+		// the same event again: its job is in the queue or done, and doing it twice would take the replies that read
 		// the new words
 		recorded, err := store.EditRecorded(ctx, s.Store.Reader(), messageID, at)
 		if err != nil || recorded {
