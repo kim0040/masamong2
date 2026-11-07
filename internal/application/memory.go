@@ -1016,6 +1016,9 @@ type ChatInput struct {
 	MaxWait, TurnTimeout time.Duration
 	// started is when ChatTurn began, the zero point of the turn's timings and spans (turn_timing.go).
 	started time.Time
+	// readAsOf is the SettledMark taken before the turn read anything (store.SettleSources). It stays 0,
+	// which excuses nothing, for a turn that came with something already read: a command's result or pictures.
+	readAsOf int64
 }
 
 // chatRoute is the model and provider behind one chat role.
@@ -1307,6 +1310,9 @@ func (s *Service) ChatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	started := time.Now()
 	in.turnID = newID("turn_")
 	in.started = started
+	if len(in.Earlier) == 0 && len(in.Images) == 0 {
+		in.readAsOf = store.SettledMark(s.Store)
+	}
 	ctx = observability.WithTurn(ctx, in.turnID)
 	sources := []string{}
 	in.sourceRefs = &sources
@@ -1382,7 +1388,7 @@ func (s *Service) ChatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		body = s.withLoggingLevel(s.channelPolicy(in.GuildID, in.ChannelID).Logging.Level, outcome, err, body)
 	}
 	s.recordTurn(TurnRecord{ID: res.TurnID, GuildID: in.GuildID, ChannelID: in.ChannelID, SpeakerID: in.SpeakerID, Outcome: outcome, Tools: names, Hits: len(res.Hits),
-		CostUSD: res.CostUSD, LatencyMS: int(time.Since(started).Milliseconds()), Lab: in.DryRun, Body: body})
+		CostUSD: res.CostUSD, LatencyMS: int(time.Since(started).Milliseconds()), Lab: in.DryRun, ReadAsOf: in.readAsOf, Body: body})
 	return res, err
 }
 
@@ -1652,7 +1658,7 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 			turns[0].DerivedFrom = in.vision.Sources
 		}
 		if !toolFailureToReplay(res.Tools) {
-			turns = append(turns, store.ChatTurn{Role: "assistant", Content: said, NativeID: in.MessageID, SpeakerID: in.SpeakerID, SourceIDs: sources})
+			turns = append(turns, store.ChatTurn{Role: "assistant", Content: said, NativeID: in.MessageID, SpeakerID: in.SpeakerID, SourceIDs: sources, ReadAsOf: in.readAsOf})
 		}
 		_ = eng.Store.AppendChatTurns(key, turns, 40)
 	}
@@ -1740,7 +1746,7 @@ func (s *Service) logTurn(in ChatInput, res chat.Result) {
 		if err != nil {
 			return err
 		}
-		blocked, err := store.SourcesBlocked(tx, keys)
+		blocked, err := store.SourcesBlockedAsOf(tx, keys, in.readAsOf)
 		if err != nil {
 			return err
 		}

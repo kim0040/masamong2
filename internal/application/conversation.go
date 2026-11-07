@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -191,6 +192,9 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) []conversation.
 		if l.Bot && answered[l.ReplyTo] {
 			continue // the stored answer has the whole reply; its posted parts would repeat it
 		}
+		if l.Bot && l.Text != "" && s.replyWithdrawn(l.ID) {
+			l.Text = ""
+		}
 		if old, ok := byID[l.ID]; ok && l.Text == "" && old.Text != "" && !l.Bot {
 			l.Text = old.Text // consent is checked when the window is filled; the store checks its own
 		}
@@ -211,6 +215,24 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) []conversation.
 		out = append(out, l)
 	}
 	return out
+}
+
+// replyWithdrawn reports whether a bot message posted a reply that is not to be built on: its turn's record
+// was emptied because what the reply read changed, or there is no record yet to say otherwise (a reply posted
+// is recorded just after its turn gives up its place). liveBlankReplies cannot reach a post that arrives after
+// the change. A message that is not a reply is not this function's to judge.
+func (s *Service) replyWithdrawn(messageID string) bool {
+	db, err := s.adminDB()
+	if err != nil {
+		return true
+	}
+	var withdrawn sql.NullBool
+	err = db.Reader().QueryRow(`SELECT t.id IS NULL OR COALESCE(json_extract(t.body,'$.evidence_redacted'),0) OR COALESCE(json_extract(t.body,'$.message_deleted'),0)
+		FROM reply_messages r LEFT JOIN turn_log t ON t.id=r.turn_id WHERE r.message_id=?`, messageID).Scan(&withdrawn)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false
+	}
+	return err != nil || withdrawn.Bool
 }
 
 // resolveReference asks the classifier which of the other conversations' lines the call points at. Any

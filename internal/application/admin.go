@@ -583,6 +583,8 @@ type TurnRecord struct {
 	CostUSD   float64  `json:"cost_usd"`
 	LatencyMS int      `json:"latency_ms"`
 	Lab       bool     `json:"lab"`
+	// ReadAsOf is the turn's SettledMark, taken before it read anything (ChatInput.readAsOf).
+	ReadAsOf int64 `json:"-"`
 	// ChannelName is the channel's current Discord name (lists only; empty when the gateway does not know it)
 	ChannelName string         `json:"channel_name,omitempty"`
 	Body        map[string]any `json:"body,omitempty"`
@@ -649,7 +651,7 @@ func (s *Service) recordTurn(t TurnRecord) {
 				body["message"], body["speaker"], body["message_deleted"] = "", "", true
 				body["answer"], body["answer_preview"] = "", ""
 			}
-			blocked, err = store.SourcesBlocked(tx, keys)
+			blocked, err = store.SourcesBlockedAsOf(tx, keys, t.ReadAsOf)
 			if err != nil {
 				return err
 			}

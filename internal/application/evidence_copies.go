@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"masamong/internal/action"
@@ -140,9 +141,16 @@ func (s *Service) enqueueRedactionTx(tx *sql.Tx, j redactionJob) error {
 		j.At = s.Clock.Now().UTC().Format(time.RFC3339Nano)
 	}
 	keys := uniqueStrings(append(append(append(append([]string{}, j.Messages...), j.Obs...), j.Leaves...), j.Ref))
+	// anything but an edit that leaves words to read takes these sources out of settling for good
+	erasing := j.Operation != "edit" || strings.TrimSpace(j.Content) == ""
 	for _, key := range keys {
 		if err := store.Tombstone(tx, "source", key, j.At); err != nil {
 			return err
+		}
+		if erasing {
+			if err := store.Tombstone(tx, "erased", key, j.At); err != nil {
+				return err
+			}
 		}
 	}
 	for _, id := range j.Messages {

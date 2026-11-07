@@ -1037,13 +1037,14 @@ func (s *Service) ThreadOpened(ctx context.Context, guildID, parentID, threadID,
 }
 
 // seedThread copies the caller's last turns with the bot in the parent channel into the thread's
-// conversation (with their evidence refs, so a deleted message leaves the copy too).
+// conversation (with their evidence refs and what their words came from, so a deleted message leaves the
+// copy too).
 func (s *Service) seedThread(guildID, parentID, threadID, callerID string) []store.ChatTurn {
 	eng, err := s.MemoryEngine()
 	if err != nil || !s.MemoryAllowed(callerID) {
 		return nil
 	}
-	turns, err := eng.Store.RecentChatTurns(blocks.ChannelKey(guildID, parentID), 40)
+	turns, err := eng.Store.ChatTurnsToCopy(blocks.ChannelKey(guildID, parentID), 40)
 	if err != nil {
 		return nil
 	}

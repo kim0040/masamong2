@@ -31,3 +31,4 @@
 | [0003](0003-deletion-missed-derived-copies.md) | 원문을 지워도 파생된 사본이 남음 |
 | [0004](0004-pending-count-stalled-the-bot.md) | 대기 메시지 수를 세는 쿼리가 봇 전체를 몇 분씩 멈춤 |
 | [0005](0005-summaries-thought-away.md) | 요약 모델이 생각하느라 출력 한도를 다 써서 요약 5만 개가 빈칸이 됨 |
+| [0006](0006-edited-message-and-looked-up-evidence.md) | 메시지를 고치면 봇이 자기 답을 잊고, 검색으로 읽은 메시지를 지워도 답이 남음 |

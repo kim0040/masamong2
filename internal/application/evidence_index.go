@@ -158,6 +158,7 @@ func indexTurnRefs(tx *sql.Tx, turnID string, keys []string, messageID string) e
 
 // redactionJob is one change of a source: a message edited or deleted, or a person who withdrew.
 type redactionJob struct {
+	id        int64    // its row, when it came from the queue
 	Guild     string   `json:"guild,omitempty"`
 	Channel   string   `json:"channel,omitempty"`
 	Messages  []string `json:"messages,omitempty"` // native Discord message IDs
@@ -289,6 +290,7 @@ func (s *Service) drainRedactions(ctx context.Context) bool {
 				s.Log.Warn("invalid redaction intent retained", "job", id, "err", err)
 				return false
 			}
+			j.id = id
 			ids = append(ids, id)
 			jobs = append(jobs, j)
 		}
@@ -574,7 +576,137 @@ func (s *Service) processRedactions(ctx context.Context, db *storage.Store, jobs
 	if err := s.invalidateRoomMemory(ctx, db, jobs); err != nil {
 		return err
 	}
-	return s.redactSmallTables(db, keys, match, editedOnly)
+	if err := s.redactSmallTables(db, keys, match, editedOnly); err != nil {
+		return err
+	}
+	if withdrawn {
+		return nil
+	}
+	return s.settleEdits(ctx, db, jobs)
+}
+
+// settleEdits runs last, after everything an edit asks for: from here on a new turn reads only the edited
+// text, and its reply is not refused for the tombstones (store.SettleSources has the reasoning). A message
+// that has another change waiting in the queue, or that is no longer current, is left blocked.
+func (s *Service) settleEdits(ctx context.Context, db *storage.Store, jobs []redactionJob) error {
+	if !db.IsSQLite() {
+		return nil
+	}
+	type edit struct {
+		message string
+		leaves  []string
+	}
+	var edits []edit
+	var last int64
+	for _, j := range jobs {
+		last = max(last, j.id)
+		if j.Operation != "edit" || strings.TrimSpace(j.Content) == "" || len(j.Messages) != 1 {
+			continue
+		}
+		leaves, err := leavesHolding(db, j.Obs)
+		if err != nil {
+			return err
+		}
+		edits = append(edits, edit{j.Messages[0], uniqueStrings(append(leaves, j.Leaves...))})
+	}
+	if len(edits) == 0 {
+		return nil
+	}
+	return db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+		waiting, err := sourcesInJobsAfter(tx, last)
+		if err != nil {
+			return err
+		}
+		var settled []string
+		for _, e := range edits {
+			sources, ok, err := editedSources(tx, e.message)
+			if err != nil {
+				return err
+			}
+			for _, id := range sources {
+				ok = ok && !waiting[id]
+			}
+			if !ok {
+				continue
+			}
+			settled = append(settled, sources...)
+			for _, leaf := range e.leaves {
+				if !waiting[leaf] {
+					settled = append(settled, leaf)
+				}
+			}
+		}
+		return store.SettleSources(tx, settled)
+	})
+}
+
+// sourcesInJobsAfter lists what the jobs queued after the given one name.
+func sourcesInJobsAfter(tx *sql.Tx, last int64) (map[string]bool, error) {
+	rows, err := tx.Query(`SELECT payload FROM redaction_jobs WHERE id>?`, last)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	names := map[string]bool{}
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		var j redactionJob
+		if err := json.Unmarshal([]byte(raw), &j); err != nil {
+			return nil, err
+		}
+		for _, list := range [][]string{j.Messages, j.Obs, j.Leaves} {
+			for _, id := range list {
+				names[id] = true
+			}
+		}
+	}
+	return names, rows.Err()
+}
+
+// editedSources lists what an edit of the message leaves in place with the new text: the message, its stored
+// copy and the user turns that quoted it (the rows EditMessage changed). ok is false when the stored copy
+// is not at the latest revision or has been deleted.
+func editedSources(tx *sql.Tx, message string) (sources []string, ok bool, err error) {
+	read := func(query string, each func(*sql.Rows) error) error {
+		rows, err := tx.Query(query, message)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			if err := each(rows); err != nil {
+				return err
+			}
+		}
+		return rows.Err()
+	}
+	var observations []string
+	err = read(`SELECT observation_id FROM memory_observations WHERE platform='discord' AND native_message_id=?`, func(r *sql.Rows) error {
+		var id string
+		err := r.Scan(&id)
+		observations = append(observations, id)
+		return err
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	for _, id := range observations {
+		current, err := store.ObservationCurrent(tx, id)
+		if err != nil || !current {
+			return nil, false, err
+		}
+	}
+	sources = append(append(sources, message), observations...)
+	err = read(`SELECT id FROM chat_turns WHERE native_id=? AND role='user'`, func(r *sql.Rows) error {
+		var id int64
+		err := r.Scan(&id)
+		sources = append(sources, store.ChatLink(id))
+		return err
+	})
+	return sources, err == nil, err
 }
 
 // closeChatLineage adds to keys every chat turn built on them, and tombstones those turns in the same

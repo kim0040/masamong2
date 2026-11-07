@@ -80,6 +80,7 @@ func (s *Service) liveEdit(guildID, channelID, messageID, content string) {
 	w := &s.live
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	s.liveBlankReplies(guildID, channelID, []string{messageID})
 	for _, key := range s.liveKeys(guildID, channelID) {
 		for i, l := range w.chans[key] {
 			if l.ID == messageID && l.Text != "" {
@@ -100,6 +101,7 @@ func (s *Service) liveDelete(guildID, channelID string, messageIDs []string) {
 	if w.chans == nil {
 		return
 	}
+	s.liveBlankReplies(guildID, channelID, messageIDs)
 	for _, key := range s.liveKeys(guildID, channelID) {
 		kept := w.chans[key][:0:0]
 		for _, l := range w.chans[key] {
@@ -111,7 +113,45 @@ func (s *Service) liveDelete(guildID, channelID string, messageIDs []string) {
 	}
 }
 
-// liveForget drops a person's words from every live window (consent withdrawn).
+// liveBlankReplies takes the words out of the bot's lines that may be built on messages about to change: every
+// line posted since the earliest of them, and all of them when the window no longer holds one (it is older than
+// the window). In the whole guild, because a thread starts from its parent's turns. A reply that is still
+// kept loses nothing (channelLines shows the stored answer instead), and the line stays: it still tells who
+// talks to whom. Called with the lock held.
+func (s *Service) liveBlankReplies(guildID, channelID string, messageIDs []string) {
+	wanted := map[string]bool{}
+	for _, id := range messageIDs {
+		wanted[id] = true
+	}
+	var since time.Time
+	found := 0
+	for _, key := range s.liveKeys(guildID, channelID) {
+		for _, l := range s.live.chans[key] {
+			if wanted[l.ID] {
+				found++
+				if since.IsZero() || l.At.Before(since) {
+					since = l.At
+				}
+			}
+		}
+	}
+	if found < len(wanted) {
+		since = time.Time{}
+	}
+	for key, lines := range s.live.chans {
+		if !strings.HasPrefix(key, guildID+":") {
+			continue
+		}
+		for i := range lines {
+			if lines[i].Bot && !wanted[lines[i].ID] && !lines[i].At.Before(since) {
+				lines[i].Text = ""
+			}
+		}
+	}
+}
+
+// liveForget drops a person's words from every live window (consent withdrawn), and the bot's lines, any of
+// which may be built on them.
 func (s *Service) liveForget(accountID string) {
 	if accountID == "" {
 		return
@@ -121,7 +161,7 @@ func (s *Service) liveForget(accountID string) {
 	defer w.mu.Unlock()
 	for key, lines := range w.chans {
 		for i := range lines {
-			if lines[i].AuthorID == accountID {
+			if lines[i].AuthorID == accountID || lines[i].Bot {
 				w.chans[key][i].Text = ""
 			}
 		}
