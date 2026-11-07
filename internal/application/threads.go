@@ -116,6 +116,8 @@ type offerTrack struct {
 	chars         int
 	offered       bool
 	declinedUntil time.Time
+	offerTurn     string // the turn whose reply carried the offer (a "keep it here" is noted on it)
+	backedOff     bool   // skip_backoff is logged once per conversation, not once per reply
 }
 
 // threadTrackIdle: a track this quiet is a finished conversation, and its "no" has run out too.
@@ -858,6 +860,14 @@ func (s *Service) decideThreadOffer(in ChatInput, pol config.ChannelPolicy, res 
 		score++
 	}
 	ch := in.GuildID + ":" + in.ChannelID
+	// A channel whose last offers were all passed over rests (thread_backoff.go). That reads the log, so it
+	// is read outside the lock, and only for a conversation that would otherwise be offered one.
+	backoff := false
+	if score >= threadOfferScore && mode != "off" && !tr.offered && !now.Before(tr.declinedUntil) {
+		t.mu.Unlock()
+		backoff = s.threadBackedOff(in.GuildID, in.ChannelID, now)
+		t.mu.Lock()
+	}
 	kept := t.offersAt[ch] // swept to the last hour
 	decision := ""
 	switch {
@@ -868,6 +878,11 @@ func (s *Service) decideThreadOffer(in ChatInput, pol config.ChannelPolicy, res 
 		decision = "skip_offered"
 	case now.Before(tr.declinedUntil):
 		decision = "skip_declined"
+	case backoff:
+		if !tr.backedOff {
+			decision = "skip_backoff"
+		}
+		tr.backedOff = true
 	case len(kept) >= threadOffersPerHour:
 		decision = "skip_rate"
 	case callers(attribution) >= 2:
@@ -878,7 +893,7 @@ func (s *Service) decideThreadOffer(in ChatInput, pol config.ChannelPolicy, res 
 		decision = "offer"
 	}
 	if decision == "offer" || decision == "auto" {
-		tr.offered = true
+		tr.offered, tr.offerTurn = true, in.turnID
 		t.offersAt[ch] = append(kept, now)
 	}
 	t.mu.Unlock()
@@ -922,6 +937,8 @@ func (s *Service) ThreadOfferFailed(offer ThreadOffer, reason string) {
 		t.offersAt[offer.ch] = kept
 	}
 	t.mu.Unlock()
+	// never shown, so nobody passed it over (thread_backoff.go leaves it out of the count)
+	s.ownedGo("thread offer outcome", func(context.Context) { s.noteConversationOutcome(offer.logID, threadOutcomeNotShown) })
 	guild, channel, _ := strings.Cut(offer.ch, ":")
 	s.ThreadOfferDropped(guild, channel, reason)
 }
@@ -949,11 +966,14 @@ func (s *Service) ThreadOfferDropped(guildID, channelID, reason string) {
 func (s *Service) DeclineThread(guildID, channelID, callerID string) {
 	t := s.threadsLoaded()
 	t.mu.Lock()
+	offerTurn := ""
 	if tr := t.tracks[guildID+":"+channelID+":"+callerID]; tr != nil {
 		tr.declinedUntil = s.Clock.Now().Add(threadDeclinedQuiet)
+		offerTurn = tr.offerTurn
 	}
 	t.mu.Unlock()
 	s.logConversation(convDecision{Guild: guildID, Channel: channelID, Author: callerID, Kind: convThread, Decision: "declined"})
+	s.implicitWrite(guildID, offerTurn, callerID, "thread_declined") // a hint for review, not a score (implicit_feedback.go)
 }
 
 // ThreadOpened is a thread the bot just made for a caller's conversation. It seeds the thread's context

@@ -162,6 +162,8 @@ type Service struct {
 	banter       banterState // playful mentions answered back (banter.go)
 	toolsRefused sync.Map    // models that refused a request with tools: key → time of the refusal (toolloop.go)
 	toolsTaken   sync.Map    // models that answered a request with tools in this process (toolloop.go)
+	// implicit holds the latest reply per person, for implicit feedback (implicit_feedback.go)
+	implicit implicitState
 	// visionRefused remembers the models that refused pictures ("<provider>|<model>" → when, vision.go)
 	visionRefused sync.Map
 	// modelBreaker rests models that keep failing so their fallbacks answer at once (failover.go);

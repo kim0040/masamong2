@@ -3719,5 +3719,14 @@
   "usage.period_label": "呼び出し数・費用の期間",
   "conn.host_note.anthropic": "Anthropic の Claude モデル: チャット・画像入力。埋め込み・リランキング・画像生成・プロンプトキャッシュはありません。",
   "setup.model.host_note.anthropic": "Anthropic: Claude モデルを直接使います。埋め込み・リランキング・画像生成はないため、それらの役割は別のプロバイダーで補ってください。このエンドポイントはプロンプトキャッシュに対応していません。",
-  "conn.api.anthropic": "Anthropic API"
+  "conn.api.anthropic": "Anthropic API",
+  "turns.implicit_label": "自動検出（参考）",
+  "turns.implicit_title": "評価ではありません。返信のあとの行動から自動で検出した信号です。スコアや警告ではなく、見直すターンを選ぶ目安にだけ使います。",
+  "turns.implicit.recall": "2分以内にもう一度呼んだ",
+  "turns.implicit.thanks": "お礼を言った",
+  "turns.implicit.laugh": "笑った",
+  "turns.implicit.correction": "訂正した",
+  "turns.implicit.retag": "見送られた発言のあと再度メンション",
+  "turns.implicit.thread_declined": "スレッドの提案を断った",
+  "conv.d.thread.skip_backoff": "休止中：最近の提案が無視された"
 }

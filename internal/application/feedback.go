@@ -18,6 +18,9 @@ import (
 // Stored: which reply (turn id), a one-way hash of who rated it, good or bad, an optional reason and
 // where it came from. No message text, no Discord user id. People who withdrew memory consent and
 // blocked people are not recorded. Ratings go with the turn records' retention (retention.turn_days).
+//
+// The same table also holds implicit signals (source "implicit:*", rating always 0, implicit_feedback.go).
+// They are not ratings: every sum, count and chip of ratings leaves them out and shows them apart.
 
 var feedbackSQLite = []string{
 	`CREATE TABLE IF NOT EXISTS reply_messages (
@@ -194,32 +197,41 @@ func (s *Service) putFeedback(turn, userID, source string, rating int, reason st
 	}
 }
 
-// turnFeedback sums the ratings of the given turns: good and bad counts and the reasons given.
-func (s *Service) turnFeedback(ids []string) map[string]map[string]any {
-	out := map[string]map[string]any{}
+// turnFeedback sums, per turn, the ratings people gave (good and bad counts and the reasons) and,
+// separately, the implicit signals noted on it (count per kind, implicit_feedback.go). The two never mix:
+// an implicit row is never counted as good or bad.
+func (s *Service) turnFeedback(ids []string) (rated map[string]map[string]any, implicit map[string]map[string]int) {
+	rated, implicit = map[string]map[string]any{}, map[string]map[string]int{}
 	db, err := s.adminDB()
 	if err != nil || len(ids) == 0 {
-		return out
+		return rated, implicit
 	}
 	args := make([]any, len(ids))
 	for i, id := range ids {
 		args[i] = id
 	}
-	rows, err := db.Reader().Query(`SELECT turn_id, rating, reason FROM turn_feedback WHERE turn_id IN (?`+strings.Repeat(",?", len(ids)-1)+`)`, args...)
+	rows, err := db.Reader().Query(`SELECT turn_id, source, rating, reason FROM turn_feedback WHERE turn_id IN (?`+strings.Repeat(",?", len(ids)-1)+`)`, args...)
 	if err != nil {
-		return out
+		return rated, implicit
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var id, reason string
+		var id, source, reason string
 		var rating int
-		if rows.Scan(&id, &rating, &reason) != nil {
+		if rows.Scan(&id, &source, &rating, &reason) != nil {
 			continue
 		}
-		f := out[id]
+		if kind, ok := strings.CutPrefix(source, implicitSource); ok {
+			if implicit[id] == nil {
+				implicit[id] = map[string]int{}
+			}
+			implicit[id][kind]++
+			continue
+		}
+		f := rated[id]
 		if f == nil {
 			f = map[string]any{"good": 0, "bad": 0}
-			out[id] = f
+			rated[id] = f
 		}
 		if rating > 0 {
 			f["good"] = f["good"].(int) + 1
@@ -231,20 +243,21 @@ func (s *Service) turnFeedback(ids []string) map[string]map[string]any {
 			f["reasons"] = append(rs, reason)
 		}
 	}
-	return out
+	return rated, implicit
 }
 
-// feedbackAction: feedback.summary (counts for the console: last 30 days, bad replies first).
+// feedbackAction: feedback.summary (counts for the console: last 30 days; the implicit signals apart from the ratings).
 func (s *Service) feedbackAction(req action.Request) action.Result {
 	db, err := s.adminDB()
 	if err != nil {
 		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
 	}
 	since := s.Clock.Now().AddDate(0, 0, -max(intVal(inputMap(req), "days", 30), 1)).UTC().Format(time.RFC3339)
+	// Only what people rated: the implicit signals are counted apart (below) and never as good or bad.
 	var good, bad int
-	_ = db.Reader().QueryRow(`SELECT COALESCE(SUM(CASE WHEN rating>0 THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN rating<0 THEN 1 ELSE 0 END),0) FROM turn_feedback WHERE at>=?`, since).Scan(&good, &bad)
+	_ = db.Reader().QueryRow(`SELECT COALESCE(SUM(CASE WHEN rating>0 THEN 1 ELSE 0 END),0), COALESCE(SUM(CASE WHEN rating<0 THEN 1 ELSE 0 END),0) FROM turn_feedback WHERE at>=? AND source NOT LIKE 'implicit:%'`, since).Scan(&good, &bad)
 	reasons := map[string]int{}
-	if rows, err := db.Reader().Query(`SELECT reason, COUNT(*) FROM turn_feedback WHERE at>=? AND reason<>'' GROUP BY reason`, since); err == nil {
+	if rows, err := db.Reader().Query(`SELECT reason, COUNT(*) FROM turn_feedback WHERE at>=? AND reason<>'' AND source NOT LIKE 'implicit:%' GROUP BY reason`, since); err == nil {
 		defer rows.Close()
 		for rows.Next() {
 			var r string
@@ -254,5 +267,16 @@ func (s *Service) feedbackAction(req action.Request) action.Result {
 			}
 		}
 	}
-	return action.OK(req, map[string]any{"good": good, "bad": bad, "reasons": reasons, "since": since})
+	implicit := map[string]int{}
+	if rows, err := db.Reader().Query(`SELECT source, COUNT(*) FROM turn_feedback WHERE at>=? AND source LIKE 'implicit:%' GROUP BY source`, since); err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var src string
+			var n int
+			if rows.Scan(&src, &n) == nil {
+				implicit[strings.TrimPrefix(src, implicitSource)] = n
+			}
+		}
+	}
+	return action.OK(req, map[string]any{"good": good, "bad": bad, "reasons": reasons, "implicit": implicit, "since": since})
 }

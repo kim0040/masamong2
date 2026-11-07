@@ -1612,6 +1612,7 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	}
 	if strings.TrimSpace(said) != "" && !in.Proactive && !in.banter {
 		s.openFollowWindow(in, said, pol, in.FollowUp)
+		s.implicitNoteReply(in)
 	}
 	if in.banter && in.Deliver != nil && strings.TrimSpace(said) != "" {
 		s.noteBanter(in.GuildID, in.ChannelID, "line", in.turnID)
