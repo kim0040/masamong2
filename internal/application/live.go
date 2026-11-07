@@ -16,8 +16,9 @@ import (
 // tell the caller's conversation from the other talk in the room; the stored messages and chat turns
 // fill it in after a restart.
 const (
-	liveMaxLines = 150
-	liveMaxAge   = 3 * time.Hour
+	liveMaxLines  = 150
+	liveMaxAge    = 3 * time.Hour
+	liveTextRunes = 1500
 	// A channel that has said nothing for a day keeps no window: lines older than liveMaxAge are of no
 	// use to attribution, and stored messages and chat turns fill the window in again when it talks. The
 	// count cap keeps a server that opens many short-lived channels or threads from holding a window
@@ -44,7 +45,7 @@ func (s *Service) noteLive(m ObservedMessage) {
 		text = ""
 	}
 	l := conversation.Line{ID: m.MessageID, AuthorID: m.AuthorID, Author: m.AuthorName, Bot: m.FromBot, ReplyTo: m.ReplyTo,
-		Mentions: append([]string(nil), m.Mentions...), MentionsOthers: m.MentionsOthers, At: m.At, Text: clip(text, 1500)}
+		Mentions: append([]string(nil), m.Mentions...), MentionsOthers: m.MentionsOthers, At: m.At, Text: clip(text, liveTextRunes)}
 	key := liveKey(m.GuildID, m.ChannelID)
 	w := &s.live
 	w.mu.Lock()
@@ -77,20 +78,35 @@ func (s *Service) liveLines(guildID, channelID string) []conversation.Line {
 
 // liveEdit and liveDelete apply an author's edit or deletion, so a removed message never reaches a reply.
 func (s *Service) liveEdit(guildID, channelID, messageID, content string) {
+	unreached := s.liveUnreached(guildID, channelID)
 	w := &s.live
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	s.liveBlankReplies(guildID, channelID, []string{messageID})
+	s.liveBlankReplies(guildID, channelID, []string{messageID}, unreached)
 	for _, key := range s.liveKeys(guildID, channelID) {
 		for i, l := range w.chans[key] {
 			if l.ID == messageID && l.Text != "" {
-				w.chans[key][i].Text = clip(content, 1500)
+				w.chans[key][i].Text = clip(content, liveTextRunes)
 			}
 		}
 	}
 }
 
+// liveHasWords reports whether the window holds these exact words for the message.
+func (s *Service) liveHasWords(guildID, channelID, messageID, content string) bool {
+	w := &s.live
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for _, l := range w.chans[liveKey(guildID, channelID)] {
+		if l.ID == messageID && l.Text != "" && l.Text == content {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) liveDelete(guildID, channelID string, messageIDs []string) {
+	unreached := s.liveUnreached(guildID, channelID)
 	gone := map[string]bool{}
 	for _, id := range messageIDs {
 		gone[id] = true
@@ -101,7 +117,7 @@ func (s *Service) liveDelete(guildID, channelID string, messageIDs []string) {
 	if w.chans == nil {
 		return
 	}
-	s.liveBlankReplies(guildID, channelID, messageIDs)
+	s.liveBlankReplies(guildID, channelID, messageIDs, unreached)
 	for _, key := range s.liveKeys(guildID, channelID) {
 		kept := w.chans[key][:0:0]
 		for _, l := range w.chans[key] {
@@ -113,12 +129,52 @@ func (s *Service) liveDelete(guildID, channelID string, messageIDs []string) {
 	}
 }
 
+// liveUnreached lists the live windows of the guild whose replies cannot have read this channel: what can read a
+// room is its own channel, the channel's thread family, and whoever has blocks attached (channelRooms; rooms are never
+// shared otherwise). Which room a block holds is slow to read, and blanking a kept reply costs nothing, so a channel
+// with blocks counts as reached. A window opened after this look is not listed, and so is reached. nil, everything is
+// reached, when the channel is not known or is a deleted thread, whose family is no longer told. It reads the
+// database, so it runs before the window's lock is taken.
+func (s *Service) liveUnreached(guildID, channelID string) map[string]bool {
+	if channelID == "" || s.threadDeleted(channelID) {
+		return nil
+	}
+	w := &s.live
+	w.mu.Lock()
+	var channels []string
+	for key := range w.chans {
+		if other, ok := strings.CutPrefix(key, guildID+":"); ok && other != channelID {
+			channels = append(channels, other)
+		}
+	}
+	w.mu.Unlock()
+	root := func(channel string) string {
+		if parent := s.threadParent(channel); parent != "" {
+			return parent
+		}
+		return channel
+	}
+	family := root(channelID)
+	out := map[string]bool{}
+	for _, other := range channels {
+		// a direct message is its own room: no other channel reads it, and it reads no other
+		if guildID != "" {
+			parent := root(other)
+			if parent == family || len(s.channelPolicy(guildID, parent).RAGView.Blocks) > 0 {
+				continue
+			}
+		}
+		out[liveKey(guildID, other)] = true
+	}
+	return out
+}
+
 // liveBlankReplies takes the words out of the bot's lines that may be built on messages about to change: every
 // line posted since the earliest of them, and all of them when the window no longer holds one (it is older than
-// the window). In the whole guild, because a thread starts from its parent's turns. A reply that is still
-// kept loses nothing (channelLines shows the stored answer instead), and the line stays: it still tells who
-// talks to whom. Called with the lock held.
-func (s *Service) liveBlankReplies(guildID, channelID string, messageIDs []string) {
+// the window). In the channel and the windows whose replies can read it (liveUnreached names the others), because a
+// thread starts from its parent's turns. A reply that is still kept loses nothing (channelLines shows the stored
+// answer instead), and the line stays: it still tells who talks to whom. Called with the lock held.
+func (s *Service) liveBlankReplies(guildID, channelID string, messageIDs []string, unreached map[string]bool) {
 	wanted := map[string]bool{}
 	for _, id := range messageIDs {
 		wanted[id] = true
@@ -139,7 +195,7 @@ func (s *Service) liveBlankReplies(guildID, channelID string, messageIDs []strin
 		since = time.Time{}
 	}
 	for key, lines := range s.live.chans {
-		if !strings.HasPrefix(key, guildID+":") {
+		if !strings.HasPrefix(key, guildID+":") || unreached[key] {
 			continue
 		}
 		for i := range lines {

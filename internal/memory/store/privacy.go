@@ -358,6 +358,93 @@ func SettleSources(tx *sql.Tx, ids []string) error {
 	return err
 }
 
+// TurnsBeforeTombstone reports whether every user turn of the message was written before the message's tombstone,
+// as a turn an edit left is. One written after it is not what an edit left, and which change it followed is not known.
+// A time that cannot be read says no.
+func TurnsBeforeTombstone(tx *sql.Tx, native string) (bool, error) {
+	var raw string
+	if err := tx.QueryRow(`SELECT at FROM privacy_tombstones WHERE kind='message' AND source_id=?`, native).Scan(&raw); err != nil {
+		return false, err
+	}
+	tombstone, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return false, nil
+	}
+	rows, err := tx.Query(`SELECT created_at FROM chat_turns WHERE native_id=? AND role='user'`, native)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var created string
+		if err := rows.Scan(&created); err != nil {
+			return false, err
+		}
+		at, err := time.Parse(time.RFC3339Nano, created)
+		if err != nil || at.After(tombstone) {
+			return false, nil
+		}
+	}
+	return true, rows.Err()
+}
+
+// KeepMessageWords records a revision of a message whose words are those the bot holds: the stored message's, or
+// when the channel stores none, those of every turn of the message (a merged or described turn holds more than the
+// message, and is not the same), or, with no turn either, the window's (windowSame). Only the stored revision moves.
+// It reports false, changing nothing, when no copy shows the words to be the same.
+func KeepMessageWords(tx *sql.Tx, native, content, at string, windowSame bool) (bool, error) {
+	var observation, old, edited string
+	err := tx.QueryRow(`SELECT observation_id,content,edited_at FROM memory_observations WHERE platform='discord' AND native_message_id=? AND deleted_at=''`, native).Scan(&observation, &old, &edited)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		var turns, same int
+		err := tx.QueryRow(`SELECT COUNT(*), COALESCE(SUM(content=?),0) FROM chat_turns WHERE native_id=? AND role='user'`, content, native).Scan(&turns, &same)
+		if err != nil {
+			return false, err
+		}
+		if turns > 0 {
+			return turns == same, nil
+		}
+		return windowSame, nil
+	case err != nil:
+		return false, err
+	case old != content:
+		return false, nil
+	}
+	current, err := currentMessageRevision(tx, native, at)
+	if err != nil || !current || revisionOlder(at, edited) {
+		return err == nil, err // an old event, its words the same as the newer ones: nothing to move
+	}
+	_, err = tx.Exec(`UPDATE memory_observations SET edited_at=? WHERE observation_id=?`, at, observation)
+	return err == nil, err
+}
+
+// revisionOlder reports whether at is before the stored revision; a time that cannot be read is not.
+func revisionOlder(at, stored string) bool {
+	a, errA := time.Parse(time.RFC3339Nano, at)
+	b, errB := time.Parse(time.RFC3339Nano, stored)
+	return errA == nil && errB == nil && a.Before(b)
+}
+
+// EditFinished reports whether this revision of the message was settled and nothing has changed the message since
+// (any later tombstone removes the settled row). at is the job's revision.
+func EditFinished(db *storage.Store, message, at string) (bool, error) {
+	wanted, err := time.Parse(time.RFC3339Nano, at)
+	if err != nil {
+		return false, nil
+	}
+	var raw string
+	err = db.Reader().QueryRow(`SELECT t.at FROM privacy_settled d JOIN privacy_tombstones t ON t.kind='message' AND t.source_id=d.source_id WHERE d.source_id=?`, message).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	latest, err := time.Parse(time.RFC3339Nano, raw)
+	return err == nil && latest.Equal(wanted), nil
+}
+
 // chatLinkGone reports whether any of the keys is a link to a chat turn that no longer exists.
 func chatLinkGone(tx *sql.Tx, keys []string) (bool, error) {
 	var ids []any

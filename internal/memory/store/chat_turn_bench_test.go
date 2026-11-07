@@ -63,6 +63,46 @@ func BenchmarkAppendChatTurns(b *testing.B) {
 	}
 }
 
+// BenchmarkRecentChatTurns is the read every turn does before anything else, on a window of 16 from the 40 kept
+// turns of a store with many tombstones, with and without the turns themselves tombstoned.
+func BenchmarkRecentChatTurns(b *testing.B) {
+	for _, c := range []struct{ tombstones, inWindow int }{{0, 0}, {50000, 0}, {500000, 0}, {50000, 16}} {
+		b.Run(fmt.Sprintf("tombstones=%d/inWindow=%d", c.tombstones, c.inWindow), func(b *testing.B) {
+			st := openStore(b)
+			seedEvidence(b, st, c.tombstones, 0)
+			for i := range 40 {
+				if err := st.AppendChatTurns("c", []ChatTurn{{Role: "user", Content: "words of a turn", NativeID: fmt.Sprintf("m%d", i), SpeakerID: "u"}}, 40); err != nil {
+					b.Fatal(err)
+				}
+			}
+			if c.inWindow > 0 {
+				turns, err := st.RecentChatTurns("c", c.inWindow)
+				if err != nil {
+					b.Fatal(err)
+				}
+				err = st.DB.WithWriter(func(tx *sql.Tx) error {
+					for _, t := range turns {
+						if err := Tombstone(tx, "source", t.SourceIDs[0], now()); err != nil {
+							return err
+						}
+					}
+					return nil
+				})
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ResetTimer()
+			for range b.N {
+				turns, err := st.RecentChatTurns("c", 16)
+				if err != nil || len(turns) != 16 {
+					b.Fatalf("%d turns, %v", len(turns), err)
+				}
+			}
+		})
+	}
+}
+
 // seedChain writes a chain of depth replies as the link structure does: each reply links to the 16 turns
 // before it, and keeps 25 IDs of what it newly read.
 func seedChain(b *testing.B, st *Store, depth int) {

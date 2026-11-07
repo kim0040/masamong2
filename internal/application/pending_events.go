@@ -17,6 +17,10 @@ var (
 	pendingEventPollMax = 10 * time.Second
 )
 
+// oldEditsDelay keeps the pass over old edits (settleOldEdits) out of the busy minute after a start. A variable so a
+// test can shorten it.
+var oldEditsDelay = 30 * time.Second
+
 // pendingEventStepHook, when set by a test, runs at the start of every worker pass.
 var pendingEventStepHook func()
 
@@ -36,6 +40,7 @@ func (s *Service) startEventWorker() {
 		wait := pendingEventPollMin
 		wake := s.Store.EventWake()
 		var lastWarn string
+		started, oldEditsDone := time.Now(), false
 		for {
 			if pendingEventStepHook != nil {
 				pendingEventStepHook()
@@ -53,7 +58,21 @@ func (s *Service) startEventWorker() {
 			case err == nil:
 				pending = true
 				s.kickRedaction()
-			case errors.Is(err, sql.ErrNoRows), strings.Contains(err.Error(), "no such table"): // TiDB has no redaction queue
+			case errors.Is(err, sql.ErrNoRows):
+				if oldEditsDone || time.Since(started) < oldEditsDelay {
+					break
+				}
+				// the queue is empty: edits finished by an earlier release, a batch at a time
+				done, err := s.settleOldEdits(ctx)
+				oldEditsDone = done && err == nil
+				pending = pending || !done
+				if err != nil && ctx.Err() == nil {
+					if msg := err.Error(); msg != lastWarn {
+						lastWarn = msg
+						s.Log.Warn("memory: settling old edits failed; it is retried", "err", err)
+					}
+				}
+			case strings.Contains(err.Error(), "no such table"): // TiDB has no redaction queue
 			case ctx.Err() == nil:
 				if msg := err.Error(); msg != lastWarn {
 					lastWarn = msg // once per distinct failure, not once a second

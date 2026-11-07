@@ -2098,8 +2098,17 @@ type ChatTurn struct {
 	// picture in the message a user turn replied to). Deleting or editing one of them removes the turn,
 	// user turns included (holder kind "chat_from").
 	DerivedFrom []string
-	// ReadAsOf is the SettledMark the turn took before reading its SourceIDs (0: none, nothing is excused).
+	// Merged are the other messages of a burst that was answered as one turn: their words are in Content,
+	// and the connector read them before any mark could be taken, so nothing excuses them. The turn is tied
+	// to them like DerivedFrom (holder kind "chat_from").
+	Merged []string
+	// ReadAsOf is the SettledMark the turn took before reading its SourceIDs and DerivedFrom (0: none,
+	// nothing is excused).
 	ReadAsOf int64
+	// Copied says the row is a copy of a kept turn (a thread's seed), read from the store after ReadAsOf was
+	// taken. So its own message counts as read at that mark too. A live turn's message came from the
+	// connector before its mark, and its tombstone refuses the turn whatever the mark says.
+	Copied bool
 }
 
 // AppendChatTurns commits turns and their source index together, then trims to the last keep turns.
@@ -2109,12 +2118,16 @@ func (s *Store) AppendChatTurns(channelKey string, turns []ChatTurn, keep int) e
 		err := s.DB.WithWriter(func(tx *sql.Tx) error {
 			for _, t := range turns {
 				if !s.tidb() {
-					blocked, err := MessageBlocked(tx, t.NativeID, t.SpeakerID)
+					native, read := t.NativeID, uniqueSources(t.SourceIDs, t.DerivedFrom)
+					if t.Copied {
+						native, read = "", uniqueSources(read, []string{t.NativeID})
+					}
+					blocked, err := MessageBlocked(tx, native, t.SpeakerID)
 					if !blocked && err == nil {
-						blocked, err = SourcesBlockedAsOf(tx, uniqueSources(t.SourceIDs), t.ReadAsOf)
+						blocked, err = SourcesBlockedAsOf(tx, read, t.ReadAsOf)
 					}
 					if !blocked && err == nil {
-						blocked, err = SourcesBlocked(tx, uniqueSources(t.DerivedFrom))
+						blocked, err = SourcesBlocked(tx, uniqueSources(t.Merged))
 					}
 					if err != nil {
 						return err
@@ -2135,8 +2148,8 @@ func (s *Store) AppendChatTurns(channelKey string, turns []ChatTurn, keep int) e
 					if err := IndexSourceRefs(tx, "chat", ChatLink(id), uniqueSources(t.SourceIDs, []string{t.NativeID, PersonRef(t.SpeakerID)})); err != nil {
 						return err
 					}
-					if len(t.DerivedFrom) > 0 {
-						if err := IndexSourceRefs(tx, "chat_from", ChatLink(id), t.DerivedFrom); err != nil {
+					if from := uniqueSources(t.DerivedFrom, t.Merged); len(from) > 0 {
+						if err := IndexSourceRefs(tx, "chat_from", ChatLink(id), from); err != nil {
 							return err
 						}
 					}
@@ -2165,7 +2178,15 @@ func (s *Store) RecentChatTurns(channelKey string, n int) ([]ChatTurn, error) {
 		return nil, nil
 	}
 
-	rows, err := s.DB.DB.Query(`SELECT id,role,speaker,content,created_at,native_id,speaker_id FROM chat_turns WHERE channel_key=? ORDER BY id DESC LIMIT ?`, channelKey, n)
+	// A turn with a tombstone on its link is built on something that changed and only has not been removed yet (the
+	// job failed after its walk, and waits for its retry): nothing built on it would be kept, and it is not read.
+	// A user turn whose edit has settled holds the new words and is read again.
+	notGoing := ""
+	if !s.tidb() {
+		notGoing = ` AND NOT EXISTS (SELECT 1 FROM privacy_tombstones t WHERE t.kind='source' AND t.source_id='chat:'||chat_turns.id
+			AND NOT EXISTS (SELECT 1 FROM privacy_settled d WHERE d.source_id=t.source_id))`
+	}
+	rows, err := s.DB.DB.Query(`SELECT id,role,speaker,content,created_at,native_id,speaker_id FROM chat_turns WHERE channel_key=?`+notGoing+` ORDER BY id DESC LIMIT ?`, channelKey, n)
 	if err != nil {
 		return nil, err
 	}

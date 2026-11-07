@@ -105,6 +105,26 @@ gh release create v1.0.1 build/release/* --title "Masamong v1.0.1" --generate-no
 3. 바뀐 영역의 로컬 테스트를 돌린다. 검색을 바꿨으면 parity도 돌린다(§5).
 4. 위키 [릴리스 체크리스트](wiki/릴리스-체크리스트.md)를 따른다.
 
+**v1.1.x로 되돌릴 때**
+
+v1.1.x 뒤의 답은 읽은 턴을 링크(`chat:<id>`)로만 가리킨다. v1.1.x 바이너리는 링크를 따라가지 않으므로, 그 DB로 켜면 메시지를 지워도 링크로 이어진 답이 대화 문맥과 턴 기록에 남는다. 그 사이에 돈 보관 정리가 링크 색인까지 지우므로 다시 올려도 복구되지 않는다. `privacy_settled` 표와 트리거는 v1.1.x에 해가 없으니 그대로 둔다.
+
+1. **올리기 전 백업이 있으면 그것으로 복원한다**(위키 [릴리스 체크리스트 §4](wiki/릴리스-체크리스트.md)). 이 경우 아래는 필요 없다. 백업 뒤에 지워진 메시지가 복원본에 남는 점은 어느 버전이든 같으니, 복원 뒤 삭제 요청을 다시 처리한다.
+2. **지금 DB를 그대로 쓰려면** 서비스를 멈추고 `masamong backup create`로 사본을 만든 뒤, v1.1.x를 켜기 전에 데이터 폴더의 DB에 아래를 실행한다. 대화 문맥이 비므로 봇은 직전 대화를 잊고, 링크로 이어진 답은 턴 기록에서 본문이 빈다. 저장된 메시지와 기억은 그대로다.
+
+   ```sql
+   BEGIN;
+   DELETE FROM chat_turns;
+   UPDATE turn_log SET body=json_set(body,'$.answer','','$.answer_preview','')
+    WHERE id IN (SELECT holder_id FROM evidence_refs WHERE holder_kind='turn_ev' AND source_id GLOB 'chat:*');
+   UPDATE traces SET body='{}'
+    WHERE id IN (SELECT holder_id FROM evidence_refs WHERE holder_kind='trace' AND source_id IN
+      (SELECT holder_id FROM evidence_refs WHERE holder_kind='turn_ev' AND source_id GLOB 'chat:*'));
+   COMMIT;
+   ```
+
+3. 다시 올릴 때 따로 할 일은 없다. 비운 대화 문맥은 새 턴으로 다시 찬다.
+
 ---
 
 ## 5. 검증 명령

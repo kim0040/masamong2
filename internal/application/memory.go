@@ -1025,8 +1025,15 @@ type ChatInput struct {
 	MaxWait, TurnTimeout time.Duration
 	// started is when ChatTurn began, the zero point of the turn's timings and spans (turn_timing.go).
 	started time.Time
-	// readAsOf is the SettledMark taken before the turn read anything (store.SettleSources). It stays 0,
-	// which excuses nothing, for a turn that came with something already read: a command's result or pictures.
+	// Fragments are the other messages of a burst answered as one turn, and of a call a picture continues: Message
+	// holds their words. MessageID alone would leave those words behind when one of them is deleted or edited.
+	Fragments []string
+	// ReadFrom is the SettledMark the connector took before it ran the command whose result is in Earlier, or
+	// chose the pictures in Images (Service.SettledMark): an edit settled by then is one they could not have seen
+	// the old state of. 0 excuses nothing.
+	ReadFrom int64
+	// readAsOf is the SettledMark taken before the turn read anything (store.SettleSources). A turn that came with
+	// something read before it started has no later number than the one its caller took for that (ReadFrom).
 	readAsOf int64
 }
 
@@ -1319,11 +1326,12 @@ func (s *Service) ChatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	started := time.Now()
 	in.turnID = newID("turn_")
 	in.started = started
-	if len(in.Earlier) == 0 && len(in.Images) == 0 {
-		in.readAsOf = store.SettledMark(s.Store)
+	in.readAsOf = store.SettledMark(s.Store)
+	if len(in.Earlier) > 0 || len(in.Images) > 0 {
+		in.readAsOf = min(in.readAsOf, in.ReadFrom)
 	}
 	ctx = observability.WithTurn(ctx, in.turnID)
-	sources := []string{}
+	sources := append([]string{}, in.Fragments...)
 	in.sourceRefs = &sources
 	in.context = map[string]any{}
 	if len(in.Images) > 0 {
@@ -1397,7 +1405,7 @@ func (s *Service) ChatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		body = s.withLoggingLevel(s.channelPolicy(in.GuildID, in.ChannelID).Logging.Level, outcome, err, body)
 	}
 	s.recordTurn(TurnRecord{ID: res.TurnID, GuildID: in.GuildID, ChannelID: in.ChannelID, SpeakerID: in.SpeakerID, Outcome: outcome, Tools: names, Hits: len(res.Hits),
-		CostUSD: res.CostUSD, LatencyMS: int(time.Since(started).Milliseconds()), Lab: in.DryRun, ReadAsOf: in.readAsOf, Body: body})
+		CostUSD: res.CostUSD, LatencyMS: int(time.Since(started).Milliseconds()), Lab: in.DryRun, ReadAsOf: in.readAsOf, Fragments: in.Fragments, Body: body})
 	return res, err
 }
 
@@ -1544,10 +1552,9 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 			recent = recent[len(recent)-12:]
 		}
 	}
-	if in.sourceRefs != nil {
-		for _, m := range recent {
-			*in.sourceRefs = append(*in.sourceRefs, m.ObservationID)
-		}
+	ambient := make([]string, 0, len(recent))
+	for _, m := range recent {
+		ambient = append(ambient, m.ObservationID)
 	}
 	llm := chatLLM{s: s, routes: routes}
 	maxHistory := 0
@@ -1564,6 +1571,11 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 				in.context[k] = v
 			}
 		}
+	} else if in.sourceRefs != nil {
+		// the recent lines reach the reply only here (RecentRoom below), so only here is it built on them. With the
+		// caller's conversation in their place it is built on the lines that conversation picked (conv.sources). A
+		// line offered to the reference classifier and not picked leaves nothing: it answers with labels only.
+		*in.sourceRefs = append(*in.sourceRefs, ambient...)
 	}
 	toolset := s.chatToolset(voice, in.GuildID, in.ChannelID)
 	_, memTool := toolsetHas(toolset, "memory.search")
@@ -1592,7 +1604,13 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	rt := &chat.Runtime{LLM: llm, Memory: mem, Tools: s.chatTool(in, voice)}
 	persona := draftOr(in, in.DraftStyle, s.personaText(personaFor(in, pol.PersonaRef)))
 	// room memory (P4-3 roommemory_read.go) and explicit memory requests (P4-4 explicit.go)
-	roomMemory := s.turnRoomMemory(ctx, in, pol, voice, history, recent)
+	roomIn := in
+	if in.sourceRefs != nil && attributed {
+		// what room memory takes as already known in the room does not depend on what this reply is built on
+		known := append(slices.Clone(*in.sourceRefs), ambient...)
+		roomIn.sourceRefs = &known
+	}
+	roomMemory := s.turnRoomMemory(ctx, roomIn, pol, voice, history, recent)
 	explicit, explicitCost := s.explicitMemoryTurn(ctx, in, voice, llm, history)
 	if explicit != nil {
 		in.Earlier = append(in.Earlier, *explicit)
@@ -1661,13 +1679,13 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 			sources = *in.sourceRefs
 		}
 		sources = uniqueStrings(append(append(append([]string{}, sources...), lookedUp(res)...), in.MessageID, personRef(in.SpeakerID)))
-		turns := []store.ChatTurn{{Role: "user", Speaker: in.Speaker, Content: in.Message, NativeID: in.MessageID, SpeakerID: in.SpeakerID}}
+		turns := []store.ChatTurn{{Role: "user", Speaker: in.Speaker, Content: in.Message, NativeID: in.MessageID, SpeakerID: in.SpeakerID, Merged: in.Fragments, ReadAsOf: in.readAsOf}}
 		if in.vision != nil && in.vision.Mode == "described" {
 			// the description came from other messages too: deleting one of them removes this turn
 			turns[0].DerivedFrom = in.vision.Sources
 		}
 		if !toolFailureToReplay(res.Tools) {
-			turns = append(turns, store.ChatTurn{Role: "assistant", Content: said, NativeID: in.MessageID, SpeakerID: in.SpeakerID, SourceIDs: sources, ReadAsOf: in.readAsOf})
+			turns = append(turns, store.ChatTurn{Role: "assistant", Content: said, NativeID: in.MessageID, SpeakerID: in.SpeakerID, SourceIDs: sources, Merged: in.Fragments, ReadAsOf: in.readAsOf})
 		}
 		_ = eng.Store.AppendChatTurns(key, turns, 40)
 	}

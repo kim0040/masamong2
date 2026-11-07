@@ -585,6 +585,8 @@ type TurnRecord struct {
 	Lab       bool     `json:"lab"`
 	// ReadAsOf is the turn's SettledMark, taken before it read anything (ChatInput.readAsOf).
 	ReadAsOf int64 `json:"-"`
+	// Fragments are the other messages whose words are in the record's message (ChatInput.Fragments).
+	Fragments []string `json:"-"`
 	// ChannelName is the channel's current Discord name (lists only; empty when the gateway does not know it)
 	ChannelName string         `json:"channel_name,omitempty"`
 	Body        map[string]any `json:"body,omitempty"`
@@ -644,6 +646,11 @@ func (s *Service) recordTurn(t TurnRecord) {
 				return err
 			}
 			blocked, err := store.MessageBlocked(tx, messageID, t.SpeakerID)
+			for _, id := range t.Fragments {
+				if !blocked && err == nil {
+					blocked, err = store.MessageBlocked(tx, id, "")
+				}
+			}
 			if err != nil {
 				return err
 			}
@@ -667,6 +674,11 @@ func (s *Service) recordTurn(t TurnRecord) {
 				return err
 			}
 			if db.IsSQLite() {
+				for _, id := range t.Fragments {
+					if err := indexTurnRefs(tx, t.ID, []string{id}, id); err != nil {
+						return err
+					}
+				}
 				return indexTurnRefs(tx, t.ID, keys, messageID)
 			}
 			return nil

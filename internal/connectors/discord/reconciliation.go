@@ -57,6 +57,10 @@ type messageReconciliation struct {
 	MessageIDs []string  `json:"message_ids"`
 	Content    string    `json:"content,omitempty"`
 	At         time.Time `json:"at"`
+	// SameFiles says the edit kept the message's attachments, as far as the connector can tell. Without it (an old
+	// queue file, a message no longer in the state cache) the edit is applied in full whatever its words: a reply may
+	// be built on a picture the edit took away.
+	SameFiles bool `json:"same_files,omitempty"`
 }
 
 // Keep panic values out of diagnostics: callbacks can carry private message data.
@@ -201,6 +205,12 @@ func (g *Gateway) applyMessageEvent(event messageReconciliation) (err error) {
 	case "edit":
 		if len(event.MessageIDs) != 1 {
 			return errors.New("discord: edit reconciliation must name one message")
+		}
+		if event.SameFiles {
+			kept, err := g.svc.MessageKeptItsWords(event.GuildID, event.ChannelID, event.MessageIDs[0], event.Content, event.At)
+			if err != nil || kept {
+				return err
+			}
 		}
 		return g.svc.MessageEdited(event.GuildID, event.ChannelID, event.MessageIDs[0], event.Content, event.At)
 	case "delete":

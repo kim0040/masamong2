@@ -433,10 +433,14 @@ func leavesHolding(db *storage.Store, obs []string) ([]string, error) {
 }
 
 // processRedactions redacts the copies of everything the jobs name, in one pass for all of them.
-func (s *Service) processRedactions(ctx context.Context, db *storage.Store, jobs []redactionJob) error {
+func (s *Service) processRedactions(ctx context.Context, db *storage.Store, queued []redactionJob) error {
+	jobs, err := s.unfinishedJobs(db, queued)
+	if err != nil {
+		return err
+	}
 	keys := map[string]bool{}
 	var texts, obs, people []string
-	withdrawn := false // a batch with a withdrawal erases by person: nothing is spared then
+	withdrawn := false // a batch with a withdrawal erases by person: no collected row is spared then
 	type candidate struct{ guild, channel, message string }
 	var candidates []candidate
 	// messages only edited in this batch: their collected rows hold no text, so an edit leaves them
@@ -579,16 +583,40 @@ func (s *Service) processRedactions(ctx context.Context, db *storage.Store, jobs
 	if err := s.redactSmallTables(db, keys, match, editedOnly); err != nil {
 		return err
 	}
-	if withdrawn {
-		return nil
+	return s.settleEdits(ctx, db, jobs, queued)
+}
+
+// unfinishedJobs leaves out the edits that are already finished. A job that runs again after its edit settled
+// (a crash, a replay) must not repeat it: the walk from the message goes through the user turn that stayed, to
+// every reply built on it, and by now those are replies on the new words. Writing the tombstones again would also
+// undo the settling and take a new number, refusing turns under way. Any change of the message since then has
+// removed the settled row, so such a job is not taken for finished.
+func (s *Service) unfinishedJobs(db *storage.Store, jobs []redactionJob) ([]redactionJob, error) {
+	if !db.IsSQLite() {
+		return jobs, nil
 	}
-	return s.settleEdits(ctx, db, jobs)
+	out := make([]redactionJob, 0, len(jobs))
+	for _, j := range jobs {
+		if j.Operation == "edit" && len(j.Messages) == 1 && strings.TrimSpace(j.Content) != "" {
+			finished, err := store.EditFinished(db, j.Messages[0], j.At)
+			if err != nil {
+				return nil, err
+			}
+			if finished {
+				continue
+			}
+		}
+		out = append(out, j)
+	}
+	return out, nil
 }
 
 // settleEdits runs last, after everything an edit asks for: from here on a new turn reads only the edited
 // text, and its reply is not refused for the tombstones (store.SettleSources has the reasoning). A message
-// that has another change waiting in the queue, or that is no longer current, is left blocked.
-func (s *Service) settleEdits(ctx context.Context, db *storage.Store, jobs []redactionJob) error {
+// that has another change waiting in the queue, or that is no longer current, is left blocked. The commit also
+// removes the batch's jobs (queued, all of them are done by now), so a job cannot run again after a reply on the
+// new words has been kept.
+func (s *Service) settleEdits(ctx context.Context, db *storage.Store, jobs, queued []redactionJob) error {
 	if !db.IsSQLite() {
 		return nil
 	}
@@ -598,8 +626,14 @@ func (s *Service) settleEdits(ctx context.Context, db *storage.Store, jobs []red
 	}
 	var edits []edit
 	var last int64
-	for _, j := range jobs {
+	var done []any
+	for _, j := range queued {
 		last = max(last, j.id)
+		if j.id != 0 {
+			done = append(done, j.id)
+		}
+	}
+	for _, j := range jobs {
 		if j.Operation != "edit" || strings.TrimSpace(j.Content) == "" || len(j.Messages) != 1 {
 			continue
 		}
@@ -636,7 +670,14 @@ func (s *Service) settleEdits(ctx context.Context, db *storage.Store, jobs []red
 				}
 			}
 		}
-		return store.SettleSources(tx, settled)
+		if err := store.SettleSources(tx, settled); err != nil {
+			return err
+		}
+		if len(done) == 0 {
+			return nil
+		}
+		_, err = tx.Exec(`DELETE FROM redaction_jobs WHERE id IN (`+inList(len(done))+`)`, done...)
+		return err
 	})
 }
 
@@ -700,13 +741,146 @@ func editedSources(tx *sql.Tx, message string) (sources []string, ok bool, err e
 		}
 	}
 	sources = append(append(sources, message), observations...)
-	err = read(`SELECT id FROM chat_turns WHERE native_id=? AND role='user'`, func(r *sql.Rows) error {
+	var speakers []string
+	err = read(`SELECT id,speaker_id FROM chat_turns WHERE native_id=? AND role='user'`, func(r *sql.Rows) error {
 		var id int64
-		err := r.Scan(&id)
+		var speaker string
+		err := r.Scan(&id, &speaker)
 		sources = append(sources, store.ChatLink(id))
+		speakers = append(speakers, speaker)
 		return err
 	})
-	return sources, err == nil, err
+	if err != nil {
+		return nil, false, err
+	}
+	for _, speaker := range speakers { // a channel without capture has no stored copy to say this
+		withdrawn, err := store.MessageBlocked(tx, "", speaker)
+		if err != nil || withdrawn {
+			return nil, false, err
+		}
+	}
+	return sources, true, nil
+}
+
+// A database from before privacy_settled holds tombstones of edits that are finished, and nothing says so: the
+// replies on those messages would stay refused until the tombstones expire. settleOldEdits goes through them once.
+// Those tombstones do not say what they were for (that release wrote no 'erased' tombstone), so a deletion or a
+// withdrawal must be told from an edit by what is left of the message, with no job in the queue for it:
+//
+//   - A deletion empties and marks the stored row (deleted_at), so ObservationCurrent refuses it. A withdrawal does
+//     the same and leaves an account tombstone. A change not applied yet is older in the row than in the tombstone.
+//     The queue keeps a job until its change is applied, so a job for the message keeps it out of this pass.
+//   - In a channel without capture there is no stored row. DeleteMessages removes the message's turns in the
+//     transaction that writes its tombstone, a withdrawal removes the person's turns, and from then on the tombstone
+//     refuses a new turn of that message (it did in that release too). So a user turn still there, written before
+//     the tombstone, means an edit (UPDATE, no DELETE), unless its speaker has an account tombstone.
+//   - With neither row there is nothing to read and nothing to tell: it stays blocked, as does any row these checks
+//     refuse. That includes an edit that kept the words (that release left the stored row's time as it was), and
+//     every leaf: a leaf is cut again under the same ID without what was deleted from it, so its tombstone cannot
+//     say that no deletion passed through it. They only leave the turn history's answer empty until they expire
+//     (the chat context does not hold leaves, see lookedUp).
+//
+// It runs once, in batches, some time after a start (oldEditsDelay), and only when nothing is waiting.
+const (
+	oldEditsKey   = "privacy:old_edits_settled"
+	oldEditsBatch = 200
+)
+
+// settleOldEdits does one batch and reports whether the pass is over.
+func (s *Service) settleOldEdits(ctx context.Context) (bool, error) {
+	db, err := s.adminDB()
+	if err != nil {
+		return false, err
+	}
+	if s.practice || !db.IsSQLite() {
+		return true, nil
+	}
+	var state struct {
+		After string `json:"after"`
+		Done  bool   `json:"done"`
+	}
+	if _, err := s.kvGet(oldEditsKey, &state); err != nil {
+		return false, err
+	}
+	if state.Done {
+		return true, nil
+	}
+	if s.Store.HasPendingEvents("source-change") {
+		return false, nil // a change not yet in the queue may be for one of these messages
+	}
+	last, err := settleOldEditBatch(ctx, db, state.After)
+	if err != nil {
+		return false, err
+	}
+	state.After, state.Done = last, last == ""
+	return state.Done, s.kvSet(oldEditsKey, state)
+}
+
+// settleOldEditBatch settles the finished edits among the next messages with a tombstone and returns the last
+// message it looked at, "" when there are none left.
+func settleOldEditBatch(ctx context.Context, db *storage.Store, after string) (string, error) {
+	rows, err := db.Reader().QueryContext(ctx, `SELECT source_id FROM privacy_tombstones WHERE kind='message' AND source_id>? ORDER BY source_id LIMIT ?`, after, oldEditsBatch)
+	if err != nil {
+		return "", err
+	}
+	var messages []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return "", err
+		}
+		messages = append(messages, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil || len(messages) == 0 {
+		return "", err
+	}
+	err = db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+		waiting, err := sourcesInJobsAfter(tx, 0)
+		if err != nil {
+			return err
+		}
+		var settled []string
+		for _, message := range messages {
+			sources, ok, err := editedSources(tx, message)
+			if err != nil {
+				return err
+			}
+			// the message alone is no proof of anything: no stored row and no turn is also what a deletion leaves
+			if !ok || len(sources) < 2 {
+				continue
+			}
+			for _, id := range sources {
+				ok = ok && !waiting[id]
+			}
+			if !ok {
+				continue
+			}
+			before, err := store.TurnsBeforeTombstone(tx, message)
+			if err != nil {
+				return err
+			}
+			if !before {
+				continue
+			}
+			var done int
+			raw, _ := json.Marshal(sources)
+			// already settled: a new number would refuse the turns under way. Marked as erased: never.
+			if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM privacy_settled WHERE source_id=?) OR EXISTS(SELECT 1 FROM privacy_tombstones WHERE kind='erased' AND source_id IN (SELECT value FROM json_each(?)))`, message, string(raw)).Scan(&done); err != nil {
+				return err
+			}
+			if done == 0 {
+				settled = append(settled, sources...)
+			}
+		}
+		return store.SettleSources(tx, settled)
+	})
+	if err != nil {
+		return "", err
+	}
+	return messages[len(messages)-1], nil
 }
 
 // closeChatLineage adds to keys every chat turn built on them, and tombstones those turns in the same

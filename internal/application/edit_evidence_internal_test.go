@@ -127,7 +127,7 @@ func TestSettlingLeavesAMessageWithAJobWaitingBehindIt(t *testing.T) {
 	if len(jobs) != 3 {
 		t.Fatalf("jobs: %d", len(jobs))
 	}
-	if err := s.settleEdits(context.Background(), db, jobs[:2]); err != nil {
+	if err := s.settleEdits(context.Background(), db, jobs[:2], jobs[:2]); err != nil {
 		t.Fatal(err)
 	}
 	settled := map[string]bool{}
