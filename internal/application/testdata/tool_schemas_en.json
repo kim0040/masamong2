@@ -1,7 +1,7 @@
 [
  {
   "name": "finance__quote",
-  "description": "Current stock price. Use when asked for a company's share price. Not for used or product prices, bare numbers, exchange rates (use finance__fx) or company news (use search__web).",
+  "description": "Current stock price. Use when asked for a company's share price. Not for used or product prices, bare numbers, exchange rates (use finance__fx) or company news (use search__web). When asked why it moved, call search__web too.",
   "parameters": {
    "type": "object",
    "properties": {

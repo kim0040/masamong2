@@ -1,7 +1,7 @@
 [
  {
   "name": "finance__quote",
-  "description": "주식 현재가. 회사 주가나 주식 시세를 물을 때 쓴다. 중고·물건 가격, 숫자만 있는 말, 환율(→ finance__fx), 회사 소식(→ search__web)에는 쓰지 않는다.",
+  "description": "주식 현재가. 회사 주가나 주식 시세를 물을 때 쓴다. 중고·물건 가격, 숫자만 있는 말, 환율(→ finance__fx), 회사 소식(→ search__web)에는 쓰지 않는다. 왜 오르내리는지까지 물으면 search__web도 부른다.",
   "parameters": {
    "type": "object",
    "properties": {

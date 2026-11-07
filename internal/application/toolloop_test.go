@@ -273,19 +273,30 @@ func TestChatTurnInjectedToolFailure(t *testing.T) {
 	}
 }
 
-// A weather call that found its answer ends the loop: the tool's mark, the setting and the status of a
-// real result meet here. chat.loop_final: off asks again, and so does a region the service does not know.
+// A place search that found something ends the loop: the tool's mark, the setting and the status of a real
+// result meet here. chat.loop_final: off asks again, and so does a search that found nothing.
 func TestChatTurnEndsTheLoopOnAFinalToolsResult(t *testing.T) {
-	run := func(t *testing.T, final, region string) (application.ChatResultForTest, int) {
+	kakao := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("query") != "홍대 카페" {
+			_, _ = w.Write([]byte(`{"meta":{"total_count":0},"documents":[]}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"meta":{"total_count":1,"same_name":{"selected_region":"서울 마포구 홍대"}},"documents":[{"place_name":"골목 카페","place_url":"http://place.map.kakao.com/1","address_name":"서울 마포구 1"}]}`))
+	}))
+	defer kakao.Close()
+	t.Setenv("KAKAO_TEST", "kakao-secret")
+	run := func(t *testing.T, final, query string) (application.ChatResultForTest, int) {
 		f := &loopServer{plan: `{"memory_requirement":"none","tool_plan":[]}`, script: []map[string]any{
-			toolCallMsg([2]string{"weather__query", `{"region":"` + region + `"}`}), {"role": "assistant", "content": "-"}}}
+			toolCallMsg([2]string{"places__search", `{"query":"` + query + `"}`}), {"role": "assistant", "content": "-"}}}
 		svc := loopSvc(t, "loop", f)
-		weather := newFakeWeather(t)
 		applyDoc(t, svc, func(d *config.Document) {
-			d.Providers["openmeteo"] = config.Provider{Kind: config.KindOpenMeteo, BaseURL: weather.srv.URL}
+			p := d.Providers["kakao"]
+			p.BaseURL, p.CredentialRef = kakao.URL, "env:KAKAO_TEST"
+			d.Providers["kakao"] = p
 			d.Chat.LoopFinal = final
 		})
-		res, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m1", Message: "날씨 어때?", Speaker: "영희", SpeakerID: "u1", DryRun: true})
+		res, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m1", Message: "홍대 카페 추천해줘", Speaker: "영희", SpeakerID: "u1", DryRun: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -293,13 +304,33 @@ func TestChatTurnEndsTheLoopOnAFinalToolsResult(t *testing.T) {
 		defer f.mu.Unlock()
 		return res, len(f.toolReqs)
 	}
-	if res, asks := run(t, "", "Tokyo"); asks != 1 || res.ToolLoop.Stop != "final" {
+	if res, asks := run(t, "", "홍대 카페"); asks != 1 || res.ToolLoop.Stop != "final" {
 		t.Fatalf("default: asked %d times, trace %+v, tools %+v", asks, res.ToolLoop, res.Tools)
 	}
-	if res, asks := run(t, "off", "Tokyo"); asks != 2 || res.ToolLoop.Stop != "answered" {
+	if res, asks := run(t, "off", "홍대 카페"); asks != 2 || res.ToolLoop.Stop != "answered" {
 		t.Fatalf("off: asked %d times, trace %+v", asks, res.ToolLoop)
 	}
-	if res, asks := run(t, "", "아틀란티스"); asks != 2 || res.ToolLoop.Stop != "answered" {
-		t.Fatalf("unknown region: asked %d times, trace %+v, tools %+v", asks, res.ToolLoop, res.Tools)
+	if res, asks := run(t, "", "없는 동네 카페"); asks != 2 || res.ToolLoop.Stop != "answered" {
+		t.Fatalf("nothing found: asked %d times, trace %+v, tools %+v", asks, res.ToolLoop, res.Tools)
+	}
+}
+
+// A weather call does not end the loop, however short the message: the model asks for a weekend one day at
+// a time, and ending on the first call lost the second day (4 of 4 live runs, 2026-11-07).
+func TestAWeatherCallLeavesTheLoopOpen(t *testing.T) {
+	f := &loopServer{plan: `{"memory_requirement":"none","tool_plan":[]}`, script: []map[string]any{
+		toolCallMsg([2]string{"weather__query", `{"region":"Tokyo","day_offset":0}`}),
+		toolCallMsg([2]string{"weather__query", `{"region":"Tokyo","day_offset":1}`}), {"role": "assistant", "content": "-"}}}
+	svc := loopSvc(t, "loop", f)
+	weather := newFakeWeather(t)
+	applyDoc(t, svc, func(d *config.Document) {
+		d.Providers["openmeteo"] = config.Provider{Kind: config.KindOpenMeteo, BaseURL: weather.srv.URL}
+	})
+	res, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m1", Message: "이번 주말 날씨 어때?", Speaker: "영희", SpeakerID: "u1", DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Tools) != 2 || res.ToolLoop.Stop == "final" {
+		t.Fatalf("trace %+v, tools %+v", res.ToolLoop, res.Tools)
 	}
 }

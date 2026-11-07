@@ -124,7 +124,8 @@ func TestUsageLimitsAndCooldown(t *testing.T) {
 // Final tools end the tool loop on their one result: only tools that read, and a result that needs nothing
 // more. search.web is not among them (chat.loop_final decides it, for a search that found enough), and
 // neither are finance.fx and finance.quote: a short "why is the yen like this" got the rate and no more
-// (3 of 3 live runs, 2026-11-07), though the question is about the reason and that needs a search.
+// (3 of 3 live runs, 2026-11-07), though the question is about the reason and that needs a search. Nor is
+// weather.query: "this weekend" is asked one day at a time, and the first call lost the second (4 of 4).
 func TestFinalToolsOnlyRead(t *testing.T) {
 	var final []string
 	for _, b := range Builtins() {
@@ -135,10 +136,10 @@ func TestFinalToolsOnlyRead(t *testing.T) {
 			}
 		}
 	}
-	if strings.Join(final, " ") != "weather.query places.search" {
+	if strings.Join(final, " ") != "places.search" {
 		t.Fatalf("final tools: %v", final)
 	}
-	if r, _ := Find(Resolve(nil, nil), "weather.query"); !r.Final {
+	if r, _ := Find(Resolve(nil, nil), "places.search"); !r.Final {
 		t.Fatal("Resolve dropped Final")
 	}
 }

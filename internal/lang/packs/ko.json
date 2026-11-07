@@ -212,7 +212,7 @@
       "route": "환율이면 finance.fx",
       "purpose": "환율.",
       "when": "두 통화 사이의 환율을 물을 때 쓴다.",
-      "skip": "주가(→ finance.quote)나 물건 가격에는 쓰지 않는다.",
+      "skip": "주가(→ finance.quote)나 물건 가격에는 쓰지 않는다. 왜 오르내리는지까지 물으면 search.web도 부른다.",
       "params": {
         "base": "물어본 외화의 코드(USD, JPY, EUR 등). \"유로 환율\"이면 EUR. 원화(KRW)를 기준으로 두지 않는다.",
         "symbols": "바꿀 통화 코드, 쉼표로(예: KRW). 말하지 않았으면 비운다."
@@ -223,7 +223,7 @@
       "route": "주가면 finance.quote",
       "purpose": "주식 현재가.",
       "when": "회사 주가나 주식 시세를 물을 때 쓴다.",
-      "skip": "중고·물건 가격, 숫자만 있는 말, 환율(→ finance.fx), 회사 소식(→ search.web)에는 쓰지 않는다.",
+      "skip": "중고·물건 가격, 숫자만 있는 말, 환율(→ finance.fx), 회사 소식(→ search.web)에는 쓰지 않는다. 왜 오르내리는지까지 물으면 search.web도 부른다.",
       "params": {
         "symbol": "티커(예: AAPL, 005930.KS). 확신하지 못하면 먼저 search.web으로 찾는다.",
         "krw": "원화로 바꿔 보여 줄 때 true"

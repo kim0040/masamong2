@@ -29,7 +29,7 @@
     {"id": "weather_busan_tomorrow", "category": "weather", "turns": ["내일 부산 비 와?"], "expect_tools": ["weather.query"], "params": {"weather.query": {"region": "부산", "day_offset": "1"}}},
     {"id": "weather_tokyo", "category": "weather", "turns": ["도쿄 날씨 알려줘"], "expect_tools": ["weather.query"]},
     {"id": "umbrella", "category": "weather", "turns": ["오늘 우산 챙겨야 돼?"], "expect_tools": ["weather.query"]},
-    {"id": "weekend_weather", "category": "weather", "turns": ["이번 주말 서울 날씨 어때?"], "expect_tools": ["weather.query"], "answer_none": ["다시 물어봐", "아직 안 떠", "예보는 아직", "아직 멀", "아직 며칠"]},
+    {"id": "weekend_weather", "category": "weather", "turns": ["이번 주말 서울 날씨 어때?"], "expect_tools": ["weather.query"], "answer_none": ["다시 물어봐", "아직 안 떠", "예보는 아직", "아직 멀", "아직 며칠", "못 봤", "찾아볼까요", "예보까지는", "자료는 없"]},
     {"id": "next_monday", "category": "weather", "turns": ["다음 주 월요일 서울 비 와?"], "expect_tools": ["weather.query"], "answer_none": ["다시 물어봐"]},
 
     {"id": "quake", "category": "disaster", "turns": ["요즘 지진 난 거 있어?"], "expect_tools": ["disasters.query"]},

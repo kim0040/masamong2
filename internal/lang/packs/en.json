@@ -223,7 +223,7 @@
       "route": "stock prices: finance.quote",
       "purpose": "Current stock price.",
       "when": "Use when asked for a company's share price.",
-      "skip": "Not for used or product prices, bare numbers, exchange rates (use finance.fx) or company news (use search.web).",
+      "skip": "Not for used or product prices, bare numbers, exchange rates (use finance.fx) or company news (use search.web). When asked why it moved, call search.web too.",
       "params": {
         "symbol": "Ticker (e.g. AAPL, 005930.KS). If unsure, find it with search.web first.",
         "krw": "true to show it in Korean won"
@@ -234,7 +234,7 @@
       "route": "exchange rates: finance.fx",
       "purpose": "Exchange rates.",
       "when": "Use when asked for the rate between currencies.",
-      "skip": "Not for stock prices (use finance.quote) or product prices.",
+      "skip": "Not for stock prices (use finance.quote) or product prices. When asked why it moved, call search.web too.",
       "params": {
         "base": "Code of the currency asked about (USD, JPY, EUR…). \"Euro rate\" means EUR. Do not put the local currency as the base.",
         "symbols": "Target currency codes, comma-separated (e.g. KRW). Leave out when not said."

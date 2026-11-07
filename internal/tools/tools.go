@@ -128,7 +128,7 @@ var (
 func Builtins() []Builtin {
 	return []Builtin{
 		{ID: "memory.search", Chat: true, Implemented: true, Role: "embed", Inputs: []Input{{Name: "query", Type: "text", Required: true}}},
-		{ID: "weather.query", Feature: "weather", Chat: true, Command: true, Implemented: true, Final: true, Sample: map[string]any{}, Providers: []string{"open_meteo", "kma"},
+		{ID: "weather.query", Feature: "weather", Chat: true, Command: true, Implemented: true, Sample: map[string]any{}, Providers: []string{"open_meteo", "kma"},
 			Inputs: []Input{{Name: "region", Type: "text", Example: "Seoul · Tokyo · Paris"}, {Name: "day_offset", Type: "select", Options: days14}}},
 		{ID: "disasters.query", Feature: "disasters", Chat: true, Command: true, Implemented: true, Sample: map[string]any{}, Providers: []string{"kma"},
 			Inputs: []Input{{Name: "days", Type: "number", Min: 1, Max: 7, Example: "3"}}},
