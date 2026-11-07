@@ -456,6 +456,8 @@
   "cfg.memory.state.hint": "Replies look at what the room is talking about now and its open questions. On by default.",
   "cfg.memory.summaries": "Chunk summaries",
   "cfg.memory.turn_budget_usd": "Memory budget per reply",
+  "cfg.memory.warm_query": "Embed the message ahead of the plan",
+  "cfg.memory.warm_query.hint": "On: in a room with memory on, the message goes to the embedding provider before the bot decides whether to search memory. If it searches, the vector is ready; a turn that does not search has still sent the message once. Off: the message is sent only when a memory search needs it, and the first memory search of a turn may take longer. On by default.",
   "cfg.models": "Models",
   "cfg.participation": "Chiming in",
   "cfg.participation.cooldown_sec": "Cooldown (s)",

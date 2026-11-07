@@ -1291,8 +1291,10 @@ func (g gatedMemory) WarmQuery(ctx context.Context, query string) {
 // dry-run or practice turn, which have no reply to hurry; not on a provider with a daily_limit, because most
 // of these calls end up not needed and would use up a limit the operator set for the calls that are; and not
 // for a person who withdrew consent to being remembered, whose words leave only when a search needs them.
+// memory.warm_query: off turns it off everywhere; it is read from the document of the turn, so a change
+// applies to the next turn without a restart.
 func (s *Service) warmsQueries(doc config.Document, in ChatInput) bool {
-	return !in.DryRun && !s.practice && doc.Providers[doc.Models["embed"].Provider].DailyLimit == 0 && s.MemoryAllowed(in.SpeakerID)
+	return doc.Memory.WarmQueryOn() && !in.DryRun && !s.practice && doc.Providers[doc.Models["embed"].Provider].DailyLimit == 0 && s.MemoryAllowed(in.SpeakerID)
 }
 
 func (g gatedMemory) Search(ctx context.Context, req engine.SearchRequest) (search.Result, error) {

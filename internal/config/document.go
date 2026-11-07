@@ -946,6 +946,10 @@ type MemoryFlags struct {
 	// Cards switches person cards (L3, §5.4.4): promotion of facts that came up on several days into a
 	// short card per server and person, and reading them into replies. on | off, empty = off.
 	Cards string `yaml:"cards,omitempty" json:"cards,omitempty"`
+	// WarmQuery lets a turn embed the calling message before the planner says a memory search is needed,
+	// so the search that follows finds the vector ready. on | off, empty = on. Off sends the message to
+	// the embedding provider only when a search asks for it (see WarmQueryOn).
+	WarmQuery string `yaml:"warm_query,omitempty" json:"warm_query,omitempty"`
 	// MessageVectors also embeds every message of a closed leaf on its own (1024 dimensions at most) and
 	// lets search use those vectors as one more candidate source, so a one-line fact in a long leaf is
 	// found. It costs storage and memory (about 1 KB of RAM per message) and one embedding per message.
@@ -953,8 +957,12 @@ type MemoryFlags struct {
 	MessageVectors *bool `yaml:"message_vectors,omitempty" json:"message_vectors,omitempty"`
 }
 
-// OnOff are the values of the memory.episodes, memory.state and memory.cards switches.
+// OnOff are the values of the memory.episodes, memory.state, memory.cards and memory.warm_query switches.
 var OnOff = []string{"on", "off"}
+
+// WarmQueryOn reports whether a turn may embed its message ahead of the plan (memory.warm_query, default
+// on). The turn's own conditions (practice, a daily_limit, withdrawn consent) still apply on top of it.
+func (m MemoryFlags) WarmQueryOn() bool { return m.WarmQuery != "off" }
 
 // EpisodesOn reports whether replies read related room episodes (memory.episodes, default on).
 func (m MemoryFlags) EpisodesOn() bool { return m.Episodes != "off" }
@@ -1456,7 +1464,7 @@ func parse(raw []byte, problems *[]Problem) (Document, error) {
 			return Document{}, fmt.Errorf("memory.derived_budget_usd must be a USD amount from 0 to 1000")
 		}
 	}
-	for key, v := range map[string]string{"memory.episodes": d.Memory.Episodes, "memory.state": d.Memory.State, "memory.cards": d.Memory.Cards} {
+	for key, v := range map[string]string{"memory.episodes": d.Memory.Episodes, "memory.state": d.Memory.State, "memory.cards": d.Memory.Cards, "memory.warm_query": d.Memory.WarmQuery} {
 		if v != "" && !slices.Contains(OnOff, v) {
 			return Document{}, fmt.Errorf("%s must be on or off", key)
 		}

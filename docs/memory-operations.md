@@ -71,6 +71,7 @@ memory:
   capture: true              # 채널 정책 capture가 켜진 방의 실시간 메시지를 저장
   embed: true                # 배경 색인(닫힌 leaf만)
   retrieve: auto             # off | auto | hybrid | rerank
+  warm_query: on             # on | off. 호출 메시지를 플래너 판단 전에 임베딩 공급자로 미리 보낸다(기본 on). off면 검색이 요구할 때만 보내고 그 턴의 첫 기억 검색이 더 걸릴 수 있다. 턴마다 읽으며 재요약·재임베딩을 일으키지 않는다
   summaries: true            # leaf 요약(검색 신호). 비용의 대부분
   naive_timezone: Asia/Seoul # 카카오처럼 시간대 없는 시각을 어느 시간대로 읽을지 명시
   index_budget_usd: "1.00"   # 배경 색인 한 번의 유료 호출 한도

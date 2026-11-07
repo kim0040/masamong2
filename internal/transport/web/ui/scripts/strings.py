@@ -2547,6 +2547,11 @@ add("", {
     "cfg.memory.state.hint": ("방에서 지금 오가는 화제와 열린 질문을 답변에 참고합니다. 기본은 켬입니다.", "Replies look at what the room is talking about now and its open questions. On by default."),
     "cfg.memory.cards": ("인물 카드 만들기와 쓰기", "Make and use person cards"),
     "cfg.memory.cards.hint": ("여러 날에 걸쳐 나온 사실을 서버마다 사람별 짧은 카드로 모아 답변에 참고합니다. 기본은 꺼짐입니다.", "Facts that came up on several days are kept as a short card per person and server, and replies look at them. Off by default."),
+    "cfg.memory.warm_query": ("질문을 미리 임베딩해 두기", "Embed the message ahead of the plan"),
+    "cfg.memory.warm_query.hint": (
+        "켬: 기억이 켜진 방에서 질문을 받으면, 기억 검색이 필요한지 정하기 전에 질문을 임베딩 공급자로 먼저 보내 둡니다. 검색이 필요하면 바로 이어 쓰고, 필요 없는 턴의 질문도 한 번 보내집니다. 끔: 기억 검색이 질문을 요구할 때만 보냅니다. 그 턴의 첫 기억 검색이 더 걸릴 수 있습니다. 기본은 켬입니다.",
+        "On: in a room with memory on, the message goes to the embedding provider before the bot decides whether to search memory. If it searches, the vector is ready; a turn that does not search has still sent the message once. Off: the message is sent only when a memory search needs it, and the first memory search of a turn may take longer. On by default.",
+    ),
     "cfg.memory.derived_budget_usd": ("방 기억 월 한도 (USD)", "Room memory monthly budget (USD)"),
     "cfg.memory.derived_budget_usd.hint": ("0이면 방 기억을 끕니다. 한도의 80%에서 방 상태 갱신이 먼저 멈추고, 100%에서 에피소드 추출이 멈춥니다. 비워 두면 3.00달러입니다.", "0 turns room memory off. At 80% the room state pauses first; at 100% extraction stops. Empty means 3.00 dollars."),
     "cfg.memory.day_boundary": ("하루가 바뀌는 시각", "Day boundary"),
