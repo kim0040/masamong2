@@ -958,7 +958,6 @@ func (s *Service) usageReset(req action.Request) action.Result {
 // Chat turns (Discord replies and the chat.respond Action)
 // ---------------------------------------------------------------------------
 
-// ChatInput is one message addressed to the bot.
 // The clock of a chat turn, the longest of them (the connector's: a command's follow-up has 180 s in all, a chime-in 2
 // minutes, and a lab turn stores nothing). A turn gets ChatTurnTimeout once it has its place in the channel, and the
 // wait for that place is bounded by ChatQueueWait. ChatTurnCeiling bounds the whole call, whatever happens in between.
@@ -975,6 +974,7 @@ const (
 // a few index rows, a shorter one a reply.
 const chatLinkHold = ChatTurnCeiling + 5*time.Minute
 
+// ChatInput is one message addressed to the bot.
 type ChatInput struct {
 	GuildID, ChannelID string
 	MessageID          string // the Discord message being answered (its edit or deletion follows the turn)
