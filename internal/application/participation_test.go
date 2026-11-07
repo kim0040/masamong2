@@ -248,8 +248,8 @@ func TestParticipationJudgeSilenceAndMovedConversation(t *testing.T) {
 
 func TestParticipationOffersAPlanReminder(t *testing.T) {
 	svc, gw, js := partSvc(t, "conservative")
-	js.set(`{"speak": true, "kind": "event", "score": 0.9, "reason": "plan", "when": "토요일 저녁 7시", "what": "강남 모임"}`)
-	say(svc, "m1", "u1", "토요일 저녁 7시에 강남에서 보자")
+	js.set(`{"speak": true, "kind": "event", "score": 0.9, "reason": "plan", "when": "내일 저녁 7시", "what": "강남 모임"}`) // always ahead: a weekday's evening can already be past
+	say(svc, "m1", "u1", "내일 저녁 7시에 강남에서 보자")
 	log := partLog(t, svc, 1)
 	if log[0]["state"] != "spoken" || gw.postCount() != 1 || !strings.Contains(gw.posts[0], "강남 모임") {
 		t.Fatalf("offer: %+v %v", log[0], gw.posts)
