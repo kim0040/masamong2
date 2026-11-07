@@ -94,6 +94,12 @@ func (s *Service) MessageEdited(guildID, channelID, messageID, content string, a
 		if err != nil || newer {
 			return err
 		}
+		// the same event again: its job is in the queue or done, and doing it twice would take the replies built on
+		// the new words
+		recorded, err := store.EditRecorded(ctx, s.Store.Reader(), messageID, at)
+		if err != nil || recorded {
+			return err
+		}
 	}
 	s.liveEdit(guildID, channelID, messageID, content)
 	s.dropReminderContextMessages([]string{messageID}) // a reminder's copy would keep the old words
@@ -232,6 +238,13 @@ func (s *Service) commitSourceChange(ctx context.Context, guildID, channelID str
 	}
 	j := redactionJob{Guild: guildID, Channel: channelID, Messages: messageIDs, Operation: operation, Content: content, At: at.UTC().Format(time.RFC3339Nano)}
 	err = db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+		if operation == "edit" && len(messageIDs) == 1 && db.IsSQLite() {
+			// a replay of an intent that was committed before the event could be marked done (MessageEdited)
+			recorded, err := store.EditRecorded(ctx, tx, messageIDs[0], at)
+			if err != nil || recorded {
+				return err
+			}
+		}
 		raw, _ := json.Marshal(messageIDs)
 		rows, err := tx.Query(`SELECT observation_id,content FROM memory_observations WHERE platform='discord' AND native_message_id IN (SELECT value FROM json_each(?))`, string(raw))
 		if err != nil {

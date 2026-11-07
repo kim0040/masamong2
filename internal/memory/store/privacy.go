@@ -371,6 +371,9 @@ func SettleSources(tx *sql.Tx, ids []string) error {
 func TurnsBeforeTombstone(tx *sql.Tx, native string) (bool, error) {
 	var raw string
 	if err := tx.QueryRow(`SELECT at FROM privacy_tombstones WHERE kind='message' AND source_id=?`, native).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) { // retention took it after the batch was read
+			return false, nil
+		}
 		return false, err
 	}
 	tombstone, err := time.Parse(time.RFC3339Nano, raw)
@@ -441,6 +444,24 @@ func recordKeptRevision(tx *sql.Tx, native, at string) error {
 	}
 	_, err := tx.Exec(`INSERT INTO message_kept_revisions(native_id,at) VALUES(?,?) ON CONFLICT(native_id) DO UPDATE SET at=MAX(at,excluded.at)`, native, at)
 	return err
+}
+
+// EditRecorded reports whether the message's tombstone already is this revision: its intent has been committed, and
+// its job is in the queue or done. A second delivery of the same event has nothing to add, and writing the tombstone
+// again would undo the settling and take a new number (SettleSources). q is a connection or a transaction.
+func EditRecorded(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, native string, at time.Time) (bool, error) {
+	var raw string
+	err := q.QueryRowContext(ctx, `SELECT at FROM privacy_tombstones WHERE kind='message' AND source_id=?`, native).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	latest, err := time.Parse(time.RFC3339Nano, raw)
+	return err == nil && latest.Equal(at), nil
 }
 
 // KeptRevisionNewer reports whether an edit that kept the message's words is newer than at, so that a change at

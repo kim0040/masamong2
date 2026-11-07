@@ -589,3 +589,57 @@ func TestLiveBlankingStaysWithTheChannelsThatCanReadIt(t *testing.T) {
 		})
 	}
 }
+
+// The same edit event delivered a second time (an intent replayed after a restart, another connector) has nothing to
+// add: writing its tombstone again would undo the settling, the job would run again and take the replies built on
+// the new words, and the new number would refuse the turns under way.
+func TestTheSameEditDeliveredTwiceChangesNothing(t *testing.T) {
+	s := privacyService(t)
+	e, err := s.MemoryEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const key = "discord:g:c"
+	seedEditedTurn(t, s, key, "secret", "alice")
+	at := s.Clock.Now()
+	deliver := func(apply func() error) {
+		t.Helper()
+		if err := apply(); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.DrainRedactions(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	edited := func() error { return s.MessageEdited("g", "c", "secret", "new words", at) }
+	deliver(edited)
+	mark := store.SettledMark(s.Store)
+	if mark == 0 {
+		t.Fatal("nothing settled")
+	}
+	if err := e.Store.AppendChatTurns(key, []store.ChatTurn{
+		{Role: "user", Speaker: "bob", Content: "q", NativeID: "n1", SpeakerID: "bob"},
+		{Role: "assistant", Content: "reply on new words", NativeID: "n1", SpeakerID: "bob", SourceIDs: windowSources(t, s, key), ReadAsOf: mark},
+	}, 40); err != nil {
+		t.Fatal(err)
+	}
+	for name, again := range map[string]func() error{
+		"the service": edited,
+		"a replayed intent": func() error {
+			return s.commitSourceChange(context.Background(), "g", "c", []string{"secret"}, "edit", "new words", at)
+		},
+	} {
+		deliver(again)
+		if n := repliesKept(t, s, "c"); n != 1 {
+			t.Fatalf("%s: the reply on the new words went: %d kept", name, n)
+		}
+		if got := store.SettledMark(s.Store); got != mark {
+			t.Fatalf("%s: the settling got a new number, %d was %d", name, got, mark)
+		}
+	}
+	// a later edit of the same message is another event
+	deliver(func() error { return s.MessageEdited("g", "c", "secret", "newer words", at.Add(time.Minute)) })
+	if n := repliesKept(t, s, "c"); n != 0 {
+		t.Fatalf("a newer edit left %d replies built on the words it replaced", n)
+	}
+}
