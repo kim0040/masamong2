@@ -2,6 +2,7 @@ package discord
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -247,5 +248,45 @@ func TestDMGatewayLimitsNoticeOncePerKindAndUnansweredPrefixConversation(t *test
 	var n int
 	if err := g.svc.Store.DB.QueryRow(`SELECT n FROM tool_usage WHERE tool='dm.chat' AND scope='all'`).Scan(&n); err != nil || n != 1 {
 		t.Fatal("refused DM turns counted")
+	}
+}
+
+// A DM turn whose model call fails used to leave the person without any answer (the error was only
+// logged). It now gets the short failure notice, once.
+func TestDMTurnThatFailsSaysSo(t *testing.T) {
+	g, fake := dmGateway(t, true)
+	doc := g.svc.Doc()
+	raw, _ := config.Marshal(doc)
+	broken, err := config.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := broken.Providers["gateway-test"]
+	p.BaseURL = "http://127.0.0.1:1" // nothing listens there
+	broken.Providers["gateway-test"] = p
+	raw, _ = config.Marshal(broken)
+	if res := g.svc.Execute(context.Background(), action.Request{Action: "config.apply", Input: mustJSON(map[string]any{"yaml": string(raw), "base_revision": g.svc.Revision()})}); !res.OK {
+		t.Fatal("cannot break the fixture's model")
+	}
+	m := dmMessage("dm-fail", "Synthetic request")
+	sendDM(g, m)
+	posts := dmPosts(fake)
+	want, _ := json.Marshal(messages.T(g.noticeLocale(m), "discord.chat.failed"))
+	if len(posts) != 1 || !strings.Contains(posts[0].body, strings.Trim(string(want), `"`)) {
+		t.Fatalf("a failed turn must say so once: %d posts", len(posts))
+	}
+}
+
+// A DM reply of two short paragraphs goes out as two bubbles, like a reply in a server channel (DMs
+// had no reply shape and were always sent whole).
+func TestDMReplySplitsIntoBubbles(t *testing.T) {
+	g, fake := dmGateway(t, false)
+	m := dmMessage("dm-bubbles", "Synthetic request")
+	sent, ids, rep := g.sendShaped(context.Background(), g.sess, "", "dm-fixture", m.Reference(), "first line\nsecond line", "", g.svc.ChannelPolicyFor("", "dm-fixture").Conversation.ReplyShape)
+	if rep.Parts != 2 || rep.Sent != 2 || len(ids) != 2 || sent == "" {
+		t.Fatalf("a DM reply must go out as two bubbles: parts %d sent %d", rep.Parts, rep.Sent)
+	}
+	if posts := dmPosts(fake); len(posts) != 2 {
+		t.Fatalf("posts = %d, want 2", len(posts))
 	}
 }

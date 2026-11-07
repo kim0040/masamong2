@@ -282,6 +282,32 @@ func TestGuardSkipsOptionalStepsButAlwaysAnswers(t *testing.T) {
 	}
 }
 
+// The memory search is held back by the money cap only: a turn whose calls are used up by the planner
+// and its other steps still searches the memory the planner asked for (21 of 21 turns with two web
+// searches lost it). A spent money cap still skips it, and the skip is recorded.
+func TestMemorySearchIgnoresTheCallCountButNotTheMoneyCap(t *testing.T) {
+	run := func(g *Guard) (Result, *fakeMemory) {
+		mem := &fakeMemory{}
+		llm := &notingLLM{fakeLLM{plan: `{"memory_requirement":"required","question_kind":"event","person_targets":[],"tool_plan":[{"tool_name":"memory.search","parameters":{"query":"캠핑"}}]}`}}
+		res, err := (&Runtime{LLM: llm, Memory: mem}).Answer(context.Background(), Request{Message: "캠핑 어디 가기로 했지?", Speaker: "영희",
+			Rooms: []string{"discord:1:10"}, MemoryOn: true, PlannerModel: "planner", ResponseModel: "resp", BudgetUSD: 0.05, Voice: koVoice(), Guard: g})
+		if err != nil || res.Answer == "" {
+			t.Fatalf("no answer: %+v %v", res, err)
+		}
+		return res, mem
+	}
+	// one call allowed, and the planner already made it
+	res, mem := run(&Guard{MaxCalls: 1})
+	if mem.req.Query == "" || res.RagState != "candidates" || len(res.Skipped) != 0 {
+		t.Fatalf("call count held the memory search back: %+v", res)
+	}
+	// the money cap is spent by the planner: the search is skipped and the skip is on record
+	res, mem = run(&Guard{MaxUSD: 0.00005})
+	if mem.req.Query != "" || res.RagState != "memory_unavailable" || len(res.Skipped) != 1 || res.Skipped[0] != "memory.search" {
+		t.Fatalf("money cap must still skip the search: %+v", res)
+	}
+}
+
 // A long result list loses its last items first: the hits the service ranked first stay whole.
 func TestToolResultsKeepTheFirstHitsWhole(t *testing.T) {
 	var items []map[string]any

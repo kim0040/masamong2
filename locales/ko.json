@@ -1132,6 +1132,7 @@
   "features.reason.memory_residency_unfinished": "마지막 재구축은 끝나지 않았어요(마지막 단계: {stage}).",
   "discord.render.help.message": "메시지 메뉴 명령",
   "discord.chat.busy": "대화가 잠시 밀리고 있어요. 조금 뒤에 다시 말해 주세요.",
+  "discord.chat.failed": "지금 답을 만들다 문제가 생겼어요. 잠시 뒤에 다시 말해 주세요.",
   "discord.chat.no_vision": "지금은 사진을 볼 수 없어요. 무엇이 궁금한지 글로 같이 적어 주세요.",
   "discord.chat.image_unreadable": "그 사진은 열어 볼 수 없었어요. PNG나 JPG로 다시 올려 주세요.",
   "discord.chat.restarting": "재시작하는 중이라 이번 말에는 답을 못 했어요. 잠시 뒤에 다시 불러 주세요.",

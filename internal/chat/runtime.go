@@ -247,7 +247,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 	var mem memoryRun
 	if searchMemory {
 		remaining := req.BudgetUSD - res.CostUSD
-		steps = append(steps, step{decide: func() bool { return req.Guard.AllowContext(ctx, "memory.search") },
+		steps = append(steps, step{decide: func() bool { return req.Guard.AllowMoneyContext(ctx, "memory.search") },
 			run: func() { mem = rt.searchMemory(ctx, req, msg, intent, remaining, nowT) }})
 	}
 	runSteps(ctx, req.Guard, steps)

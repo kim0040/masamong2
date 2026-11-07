@@ -462,6 +462,42 @@ func TestChatRefusalNoticesAreLocalizedAndRateLimited(t *testing.T) {
 	}
 }
 
+// A turn that failed for a reason of its own (a model that timed out included) says so to the person who
+// called the bot, with the same wording rules and cooldown as the other notices; a turn that already
+// answered, or was cancelled, says nothing.
+func TestFailedTurnsGetAShortNoticeOnlyWhenNothingWasSaid(t *testing.T) {
+	timeout := fmt.Errorf("provider timeout after 1 attempt(s): %w", context.DeadlineExceeded)
+	for _, tc := range []struct {
+		name    string
+		err     error
+		replied bool
+		want    string
+	}{
+		{"timeout", timeout, false, "discord.chat.failed"},
+		{"other error", errors.New("boom"), false, "discord.chat.failed"},
+		{"already answered", timeout, true, ""},
+		{"cancelled", context.Canceled, false, ""},
+		{"no error", nil, false, ""},
+	} {
+		if got := chatFailureKey(tc.err, tc.replied); got != tc.want {
+			t.Errorf("%s: key = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+	svc := svcForTest(t)
+	SetCatalog(svc.I18n)
+	g := &Gateway{svc: svc, log: slog.New(slog.NewTextHandler(io.Discard, nil)), notices: map[string]time.Time{}}
+	var bodies []string
+	send := func(_ context.Context, msg *discordgo.MessageSend) error { bodies = append(bodies, msg.Content); return nil }
+	m := &discordgo.MessageCreate{Message: &discordgo.Message{ID: "m1", ChannelID: "c1", GuildID: "g1", Author: &discordgo.User{ID: "u1"}}}
+	g.sendChatNoticeWith(context.Background(), m, chatFailureKey(timeout, false), true, send)
+	g.sendChatNoticeWith(context.Background(), m, chatFailureKey(timeout, false), true, send)
+	other := &discordgo.MessageCreate{Message: &discordgo.Message{ID: "m2", ChannelID: "c2", GuildID: "g1", Author: &discordgo.User{ID: "u2"}}}
+	g.sendChatNoticeWith(context.Background(), other, chatFailureKey(timeout, false), false, send) // not called: nothing
+	if len(bodies) != 1 || bodies[0] != messages.T(g.locale("g1"), "discord.chat.failed") {
+		t.Fatalf("notices = %q", bodies)
+	}
+}
+
 func TestSendReplyStopsAfterContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -1132,6 +1132,7 @@
   "features.reason.memory_residency_unfinished": "最近一次重建未完成（最后阶段：{stage}）。",
   "discord.render.help.message": "消息菜单命令",
   "discord.chat.busy": "我正在处理其他回复，请稍后再试。",
+  "discord.chat.failed": "我在准备回复时出了点问题，请稍后再试。",
   "discord.chat.no_vision": "我现在看不到图片。请用文字告诉我你想知道什么。",
   "discord.chat.image_unreadable": "我打不开那张图片。请以 PNG 或 JPG 格式重新发送。",
   "discord.chat.restarting": "我正在重启，没能回复这条消息。请稍后再叫我。",

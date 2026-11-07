@@ -1132,6 +1132,7 @@
   "features.reason.memory_residency_unfinished": "The last rebuild did not finish (last stage: {stage}).",
   "discord.render.help.message": "Message menu command",
   "discord.chat.busy": "I’m catching up on other replies. Please try again shortly.",
+  "discord.chat.failed": "Something went wrong while I was putting together a reply. Please try again in a moment.",
   "discord.chat.no_vision": "I can’t see images right now. Tell me in words what you’d like to know.",
   "discord.chat.image_unreadable": "I couldn’t open that image. Try sending it again as a PNG or JPG.",
   "discord.chat.restarting": "I'm restarting, so I couldn't answer that one. Please ask again in a moment.",

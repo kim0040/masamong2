@@ -1132,6 +1132,7 @@
   "features.reason.memory_residency_unfinished": "直近の再構築は完了しませんでした（最後の段階: {stage}）。",
   "discord.render.help.message": "メッセージメニューのコマンド",
   "discord.chat.busy": "ほかの返信を処理しています。少し待ってからもう一度お試しください。",
+  "discord.chat.failed": "返信を作っている途中で問題が起きました。少し待ってからもう一度お試しください。",
   "discord.chat.no_vision": "今は画像を見ることができません。知りたいことを文字で書いてください。",
   "discord.chat.image_unreadable": "その画像を開けませんでした。PNG か JPG でもう一度送ってください。",
   "discord.chat.restarting": "再起動中のため、今の発言には返事できませんでした。少ししてからもう一度呼んでください。",

@@ -58,7 +58,7 @@ const (
 	roomWindow      = 3000
 	stateLines      = 60
 	extractTokens   = 1400
-	stateTokens     = 900
+	stateTokens     = 1400
 	extractTemp     = 0.2
 	initialLookBack = 24 * time.Hour
 )

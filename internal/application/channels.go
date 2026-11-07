@@ -169,7 +169,7 @@ func (s *Service) ChannelPolicyFor(guildID, channelID string) config.ChannelPoli
 
 func (s *Service) channelPolicy(guildID, channelID string) config.ChannelPolicy {
 	if guildID == "" {
-		pol := config.DefaultChannelPolicy()
+		pol := config.NormalizeChannelPolicy(config.DefaultChannelPolicy())
 		pol.PersonaRef = s.defaultPersonaFor("")
 		pol.Respond, pol.MemoryUse, pol.Attribution, pol.Capture = "always", "off", "off", false
 		return pol
@@ -198,7 +198,9 @@ func (s *Service) ownChannelPolicy(guildID, channelID string) config.ChannelPoli
 			return config.NormalizeChannelPolicy(p)
 		}
 	}
-	pol := config.DefaultChannelPolicy()
+	// no entry of its own: the defaults, with every choice filled in like a saved entry's (an empty
+	// reply_shape would read as "not bubbles", and a direct message or an unlisted channel never split)
+	pol := config.NormalizeChannelPolicy(config.DefaultChannelPolicy())
 	pol.PersonaRef = s.defaultPersonaFor(guildID)
 	return pol
 }

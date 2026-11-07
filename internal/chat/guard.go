@@ -64,11 +64,23 @@ func (g *Guard) Begin() func(float64) {
 // AllowContext waits for model costs under a money cap, then checks the optional step's limits.
 // Waiting follows the turn context; cancellation is not a budget refusal.
 func (g *Guard) AllowContext(ctx context.Context, step string) bool {
+	return g.allowContext(ctx, step, true)
+}
+
+// AllowMoneyContext is AllowContext for a step the call count does not hold back: only the money cap
+// applies. The memory search is one: its own calls (embedding, rerank, the one retry without a time
+// window) are few and fixed, and a turn that spent its calls on the planner and web searches would
+// otherwise never reach the memory the planner asked for.
+func (g *Guard) AllowMoneyContext(ctx context.Context, step string) bool {
+	return g.allowContext(ctx, step, false)
+}
+
+func (g *Guard) allowContext(ctx context.Context, step string, countCalls bool) bool {
 	if g == nil {
 		return ctx.Err() == nil
 	}
 	if g.parent != nil {
-		return g.parent.AllowContext(ctx, step)
+		return g.parent.allowContext(ctx, step, countCalls)
 	}
 	for {
 		g.mu.Lock()
@@ -89,7 +101,7 @@ func (g *Guard) AllowContext(ctx context.Context, step string) bool {
 				return false
 			}
 		}
-		allowed := g.allowLocked(step)
+		allowed := g.allowLocked(step, countCalls)
 		g.mu.Unlock()
 		return allowed
 	}
@@ -159,11 +171,11 @@ func (g *Guard) Allow(step string) bool {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	return g.allowLocked(step)
+	return g.allowLocked(step, true)
 }
 
-func (g *Guard) allowLocked(step string) bool {
-	if (g.MaxUSD > 0 && g.spent >= g.MaxUSD) || (g.MaxCalls > 0 && g.calls >= g.MaxCalls) {
+func (g *Guard) allowLocked(step string, countCalls bool) bool {
+	if (g.MaxUSD > 0 && g.spent >= g.MaxUSD) || (countCalls && g.MaxCalls > 0 && g.calls >= g.MaxCalls) {
 		g.skipped = append(g.skipped, step)
 		return false
 	}

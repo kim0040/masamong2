@@ -1010,6 +1010,10 @@ type ChatInput struct {
 	sourceRefs *[]string
 	// context is the body-free record of how the turn's conversation was chosen (attribution)
 	context map[string]any
+	// MaxWait bounds the wait for the channel's turn and a model slot; a turn that waited longer is
+	// stale and is refused with ErrChatBusy. TurnTimeout bounds the turn itself and starts after that
+	// wait, so a queue does not use up the turn's time. 0 for either: no limit of its own.
+	MaxWait, TurnTimeout time.Duration
 }
 
 // chatRoute is the model and provider behind one chat role.
@@ -1416,11 +1420,24 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	// Channels answer in parallel, one turn at a time within a channel, at most
 	// limits.max_concurrent_turns at once. The limits and budget below are checked after the wait so
 	// they see what the turns ahead of this one spent.
-	release, err := s.turns.enter(ctx, blocks.ChannelKey(in.GuildID, in.ChannelID), s.Doc().Limits.ConcurrentTurns())
+	waitCtx, stopWait := ctx, context.CancelFunc(func() {})
+	if in.MaxWait > 0 {
+		waitCtx, stopWait = context.WithTimeout(ctx, in.MaxWait)
+	}
+	release, err := s.turns.enter(waitCtx, blocks.ChannelKey(in.GuildID, in.ChannelID), s.Doc().Limits.ConcurrentTurns())
+	stopWait()
 	if err != nil {
+		if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+			err = ErrChatBusy // waited too long: the message is stale, the person is told to ask again
+		}
 		return chat.Result{}, err
 	}
 	defer release()
+	if in.TurnTimeout > 0 {
+		var stopTurn context.CancelFunc
+		ctx, stopTurn = context.WithTimeout(ctx, in.TurnTimeout)
+		defer stopTurn()
+	}
 	if in.NameOnly && !in.DryRun && !s.Paused(in.GuildID, in.ChannelID) {
 		// the classifier is a model call and a banter emoji skips the reply: neither where replies are
 		// off or the budget is spent (a name alone gets no budget notice)
