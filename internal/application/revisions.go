@@ -94,13 +94,14 @@ func (s *Service) MessageEdited(guildID, channelID, messageID, content string, a
 		if err != nil || newer {
 			return err
 		}
-		// the same event again: its job is in the queue or done, and doing it twice would take the replies built on
+		// the same event again: its job is in the queue or done, and doing it twice would take the replies that read
 		// the new words
 		recorded, err := store.EditRecorded(ctx, s.Store.Reader(), messageID, at)
 		if err != nil || recorded {
 			return err
 		}
 	}
+	s.flights.edited(messageID, content, at) // before the intent: see turnFlights
 	s.liveEdit(guildID, channelID, messageID, content)
 	s.dropReminderContextMessages([]string{messageID}) // a reminder's copy would keep the old words
 	if err := s.queueSourceChange(guildID, channelID, []string{messageID}, "edit", content, at); err != nil {
@@ -155,6 +156,9 @@ func (s *Service) MessageKeptItsWords(guildID, channelID, messageID, content str
 			return err
 		}
 		kept, err = store.KeepMessageWords(tx, messageID, content, at.UTC().Format(time.RFC3339Nano), windowSame)
+		if kept && err == nil {
+			s.flights.keptWords(messageID, content, at) // in the transaction, as a turn commits in its own
+		}
 		return err
 	})
 	return kept, err

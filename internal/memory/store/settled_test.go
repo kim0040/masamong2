@@ -284,3 +284,62 @@ func TestEditFinishedIsAboutOneRevision(t *testing.T) {
 		t.Fatal("a change after the settling left it finished")
 	}
 }
+
+// A row with the words of an edit made while its turn ran is not refused by that edit, and is by anything later.
+func TestARevisedTurnFollowsItsMessage(t *testing.T) {
+	at := time.Now().UTC()
+	rev := at.Format(time.RFC3339Nano)
+	stamp := func(st *Store, kind string, when time.Time) {
+		t.Helper()
+		if err := st.DB.WithWriter(func(tx *sql.Tx) error { return Tombstone(tx, kind, "m", when.Format(time.RFC3339Nano)) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, c := range map[string]struct {
+		before func(*Store)
+		kept   bool
+	}{
+		"no tombstone yet":   {func(*Store) {}, true},
+		"its own tombstone":  {func(st *Store) { stamp(st, "message", at) }, true},
+		"an older tombstone": {func(st *Store) { stamp(st, "message", at.Add(-time.Minute)) }, true},
+		"a newer tombstone":  {func(st *Store) { stamp(st, "message", at.Add(time.Minute)) }, false},
+		"erased":             {func(st *Store) { stamp(st, "message", at); stamp(st, "erased", at) }, false},
+		"a newer edit that kept the words": {func(st *Store) {
+			if err := st.DB.WithWriter(func(tx *sql.Tx) error {
+				return recordKeptRevision(tx, "m", at.Add(time.Minute).Format(time.RFC3339Nano))
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		"its speaker withdrew": {func(st *Store) {
+			if err := st.DB.WithWriter(func(tx *sql.Tx) error { return Tombstone(tx, "account", "alice", rev) }); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			st := openStore(t)
+			c.before(st)
+			if err := st.AppendChatTurns("k", []ChatTurn{{Role: "user", Speaker: "alice", Content: "new", NativeID: "m", SpeakerID: "alice", Revision: rev}}, 40); err != nil {
+				t.Fatal(err)
+			}
+			var n int
+			if err := st.DB.DB.QueryRow(`SELECT COUNT(*) FROM chat_turns WHERE native_id='m'`).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			if (n == 1) != c.kept {
+				t.Fatalf("%d rows, kept should be %v", n, c.kept)
+			}
+		})
+	}
+	// the same tombstone without a revision refuses the row: that is the turn with the old words
+	st := openStore(t)
+	stamp(st, "message", at)
+	if err := st.AppendChatTurns("k", []ChatTurn{{Role: "user", Content: "old", NativeID: "m", SpeakerID: "alice"}}, 40); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := st.DB.DB.QueryRow(`SELECT COUNT(*) FROM chat_turns`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("a row with no revision past the tombstone: %d, %v", n, err)
+	}
+}

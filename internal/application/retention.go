@@ -200,7 +200,7 @@ func (s *Service) runRetention(ctx context.Context) (map[string]int64, error) {
 				return out, err
 			}
 			// a settled edit means nothing once its tombstones are gone
-			if _, err := s.Store.DB.ExecContext(ctx, `DELETE FROM privacy_settled WHERE NOT EXISTS (SELECT 1 FROM privacy_tombstones t WHERE t.kind IN ('source','message') AND t.source_id=privacy_settled.source_id)`); err != nil {
+			if _, err := s.Store.DB.ExecContext(ctx, `DELETE FROM privacy_settled WHERE NOT EXISTS (SELECT 1 FROM privacy_tombstones t WHERE t.kind IN ('source','message','going') AND t.source_id=privacy_settled.source_id)`); err != nil {
 				return out, err
 			}
 		}

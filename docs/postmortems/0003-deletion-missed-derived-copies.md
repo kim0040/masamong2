@@ -33,6 +33,7 @@ Discord에서 메시지를 지우거나 기억 동의를 철회하면 "그 말�
 - 회귀 테스트: 저장 안 하는 채널의 삭제·수정, 철회 뒤 사본 0건, 참여 기록의 원문 삭제(`internal/application/forget_test.go`).
 - [방어 패턴](../defensive-patterns.md)에 "삭제는 사본마다" 항목을 더했습니다.
 - 후속(2026-11-07): 답 위에 쌓인 답까지 지우는 근거 상속을 복사에서 링크로 바꾸고, 40턴을 넘은 체인의 삭제 전파를 회귀 테스트로 고정했습니다(`internal/application/evidence_chain_test.go`, [방어 패턴](../defensive-patterns.md)의 "파생의 파생").
+- 결정(2026-11-08): 메시지 삭제와 수정의 전파는 그 말을 직접 읽은 답까지로 줄였습니다. 끝까지 따라가는 것은 동의 철회입니다. 근거와 받아들인 위험은 [회고 0006](0006-edited-message-and-looked-up-evidence.md)의 "삭제 전파의 범위"에 있습니다.
 
 ## 교훈
 

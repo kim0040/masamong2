@@ -49,3 +49,44 @@ func (s *Service) KeepLateReplyForTest(guildID, channelID, native, speaker strin
 	}
 	return n > 0
 }
+
+// TurnsInFlightForTest counts the entries of the running turns' registry.
+func (s *Service) TurnsInFlightForTest() int {
+	s.flights.mu.Lock()
+	defer s.flights.mu.Unlock()
+	return len(s.flights.byMessage)
+}
+
+// NoteEditForTest does the first thing MessageEdited does, without the rest: the moment before its intent commits.
+func (s *Service) NoteEditForTest(messageID, words string, at time.Time) {
+	s.flights.edited(messageID, words, at)
+}
+
+// NotedWordsForTest is what the running turns of the message have been told.
+func (s *Service) NotedWordsForTest(messageID string) string {
+	s.flights.mu.Lock()
+	defer s.flights.mu.Unlock()
+	for _, fl := range s.flights.byMessage[messageID] {
+		return fl.words
+	}
+	return ""
+}
+
+// SeedThreadForTest copies the caller's turns of a channel to a new thread.
+func (s *Service) SeedThreadForTest(guildID, parentID, threadID, callerID string) int {
+	return len(s.seedThread(guildID, parentID, threadID, callerID))
+}
+
+// ChannelLineIDsForTest names the lines a turn in the channel would choose its conversation from.
+func (s *Service) ChannelLineIDsForTest(guildID, channelID, messageID string) []string {
+	eng, err := s.MemoryEngine()
+	if err != nil {
+		return nil
+	}
+	lines, _ := s.channelLines(ChatInput{GuildID: guildID, ChannelID: channelID, MessageID: messageID}, eng)
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = l.ID
+	}
+	return out
+}

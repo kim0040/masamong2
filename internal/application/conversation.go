@@ -66,7 +66,7 @@ func (s *Service) callerConversation(ctx context.Context, in ChatInput, eng *eng
 	if mode == "off" || in.MessageID == "" || in.ChannelID == "" {
 		return convContext{}, false
 	}
-	lines := s.channelLines(in, eng)
+	lines, madeFrom := s.channelLines(in, eng)
 	botID := s.botAccount(lines)
 	found := false
 	for _, l := range lines {
@@ -139,6 +139,7 @@ func (s *Service) callerConversation(ctx context.Context, in ChatInput, eng *eng
 		out.sources = append(out.sources, id)
 		if !l.Bot {
 			out.sources = append(out.sources, corpus.DiscordLiveObservationID(room, id))
+			out.sources = append(out.sources, madeFrom[id]...)
 		}
 	}
 	return out, true
@@ -146,8 +147,10 @@ func (s *Service) callerConversation(ctx context.Context, in ChatInput, eng *eng
 
 // channelLines merges what is known of the channel's recent messages: stored messages (capture on), the
 // stored conversation with the bot (its answers keep exactly what reached the channel) and the live window
-// (reply and mention links, the bot's own posts), one line per message.
-func (s *Service) channelLines(in ChatInput, eng *engine.Engine) []conversation.Line {
+// (reply and mention links, the bot's own posts), one line per message. madeFrom lists, by line, the other messages
+// a line that came from a stored turn holds words of (a burst, a picture's description).
+func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conversation.Line, madeFrom map[string][]string) {
+	madeFrom = map[string][]string{}
 	byID := map[string]conversation.Line{}
 	var order []string
 	put := func(l conversation.Line) {
@@ -181,10 +184,12 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) []conversation.
 			case "user":
 				if _, ok := byID[t.NativeID]; !ok {
 					put(conversation.Line{ID: t.NativeID, AuthorID: t.SpeakerID, Author: t.Speaker, At: at, Text: t.Content, Mentions: []string{"bot"}})
+					madeFrom[t.NativeID] = t.DerivedFrom
 				}
 			case "assistant":
 				answered[t.NativeID] = true
-				put(conversation.Line{ID: "turn:" + t.NativeID, Bot: true, ReplyTo: t.NativeID, At: at.Add(time.Millisecond), Text: t.Content})
+				// named by its own link, not by the request's ID: reading the reply is not reading the request
+				put(conversation.Line{ID: "turn:" + t.SourceIDs[0], Bot: true, ReplyTo: t.NativeID, At: at.Add(time.Millisecond), Text: t.Content})
 			}
 		}
 	}
@@ -214,7 +219,7 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) []conversation.
 		}
 		out = append(out, l)
 	}
-	return out
+	return out, madeFrom
 }
 
 // replyWithdrawn reports whether a bot message posted a reply that is not to be built on: its turn's record
