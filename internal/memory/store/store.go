@@ -2109,18 +2109,42 @@ type ChatTurn struct {
 	// taken. So its own message counts as read at that mark too. A live turn's message came from the
 	// connector before its mark, and its tombstone refuses the turn whatever the mark says.
 	Copied bool
+	// Revision says the row holds the words of this revision of its message, an edit made while the turn ran. The
+	// tombstone of that edit does not refuse it (revisedTurnRefused); a later change of the message does.
+	Revision string
 }
 
 // AppendChatTurns commits turns and their source index together, then trims to the last keep turns.
 // A trim interrupted by a crash is repeated by the next append.
 func (s *Store) AppendChatTurns(channelKey string, turns []ChatTurn, keep int) error {
+	var decide func() []ChatTurn
 	if len(turns) > 0 {
+		decide = func() []ChatTurn { return turns }
+	}
+	return s.AppendDecidedChatTurns(channelKey, decide, keep)
+}
+
+// AppendDecidedChatTurns is AppendChatTurns for turns that depend on what happens up to the commit: decide is called
+// inside the write transaction, when no change of the store can come between it and the rows. It may take a short lock
+// of its own, and must not call the store.
+func (s *Store) AppendDecidedChatTurns(channelKey string, decide func() []ChatTurn, keep int) error {
+	if decide != nil {
 		err := s.DB.WithWriter(func(tx *sql.Tx) error {
-			for _, t := range turns {
+			for _, t := range decide() {
 				if !s.tidb() {
 					native, read := t.NativeID, uniqueSources(t.SourceIDs, t.DerivedFrom)
 					if t.Copied {
 						native, read = "", uniqueSources(read, []string{t.NativeID})
+					}
+					if t.Revision != "" {
+						refused, err := revisedTurnRefused(tx, t.NativeID, t.Revision)
+						if err != nil {
+							return err
+						}
+						if refused {
+							continue
+						}
+						native = "" // its own edit's tombstone is what this row answers
 					}
 					blocked, err := MessageBlocked(tx, native, t.SpeakerID)
 					if !blocked && err == nil {

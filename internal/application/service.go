@@ -157,6 +157,7 @@ type Service struct {
 	referenceURL string
 	part         partEngine  // joining conversations unasked (participation.go)
 	live         liveWindow  // the channels' last hours in memory (live.go)
+	flights      turnFlights // the running turns, told of edits to what they answer (turn_flights.go)
 	follow       followState // follow-up windows after a reply (followup.go)
 	threads      threadState // threads and thread offers (threads.go)
 	banter       banterState // playful mentions answered back (banter.go)

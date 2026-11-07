@@ -238,6 +238,17 @@ func currentMessageRevision(tx *sql.Tx, native, at string) (bool, error) {
 	return err != nil || !latest.After(wanted), nil
 }
 
+// revisedTurnRefused reports whether a turn holding the words of revision at (ChatTurn.Revision) is out of date: its
+// message was deleted, or has a newer revision whose words the turn does not hold.
+func revisedTurnRefused(tx *sql.Tx, native, at string) (bool, error) {
+	var erased int
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM privacy_tombstones WHERE kind='erased' AND source_id=?)`, native).Scan(&erased); err != nil || erased > 0 {
+		return erased > 0, err
+	}
+	current, err := currentMessageRevision(tx, native, at)
+	return !current, err
+}
+
 // messageRevisionRecorded reports whether the message's tombstone already is this revision: the intent
 // wrote it before the source was changed, and the worker may have finished the edit since.
 func messageRevisionRecorded(tx *sql.Tx, native, at string) (bool, error) {

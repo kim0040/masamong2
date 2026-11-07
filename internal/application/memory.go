@@ -1035,6 +1035,8 @@ type ChatInput struct {
 	// readAsOf is the SettledMark taken before the turn read anything (store.SettleSources). A turn that came with
 	// something read before it started has no later number than the one its caller took for that (ReadFrom).
 	readAsOf int64
+	// flight learns of changes to the messages the turn holds while it runs (turnFlights).
+	flight *turnFlight
 }
 
 // chatRoute is the model and provider behind one chat role.
@@ -1326,6 +1328,9 @@ func (s *Service) ChatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	started := time.Now()
 	in.turnID = newID("turn_")
 	in.started = started
+	flight, land := s.flyTurn(in)
+	defer land()
+	in.flight = flight
 	in.readAsOf = store.SettledMark(s.Store)
 	if len(in.Earlier) > 0 || len(in.Images) > 0 {
 		in.readAsOf = min(in.readAsOf, in.ReadFrom)
@@ -1687,7 +1692,7 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		if !toolFailureToReplay(res.Tools) {
 			turns = append(turns, store.ChatTurn{Role: "assistant", Content: said, NativeID: in.MessageID, SpeakerID: in.SpeakerID, SourceIDs: sources, Merged: in.Fragments, ReadAsOf: in.readAsOf})
 		}
-		_ = eng.Store.AppendChatTurns(key, turns, 40)
+		_ = eng.Store.AppendDecidedChatTurns(key, func() []store.ChatTurn { return s.flights.toKeep(in.flight, turns) }, 40)
 	}
 	s.logTurn(in, res)
 	if !deliverEnd.IsZero() {
