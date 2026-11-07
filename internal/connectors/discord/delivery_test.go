@@ -485,7 +485,7 @@ func TestRefusalNoticesStayNeutral(t *testing.T) {
 		"es":      {"mes", "límite", "presupuesto"},
 	}
 	for locale, words := range banned {
-		for _, key := range []string{"discord.chat.paused", "discord.chat.busy", "discord.chat.limited", "discord.chat.budget"} {
+		for _, key := range []string{"discord.chat.paused", "discord.chat.busy", "discord.chat.limited", "discord.chat.budget", "discord.chat.failed"} {
 			text, ok := messages.Lookup(locale, key)
 			if !ok || text == "" {
 				t.Errorf("%s has no %s", locale, key)

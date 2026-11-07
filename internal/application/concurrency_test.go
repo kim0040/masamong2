@@ -255,3 +255,45 @@ func TestMemoryEngineSurvivesUnrelatedConfigChanges(t *testing.T) {
 		t.Fatal("memory.summaries changed but the engine was kept")
 	}
 }
+
+// queuedTurn starts a turn in the channel "room", waits until it holds the channel, then runs a second
+// turn behind it with the given limits and returns the second turn's error and the first one's.
+func queuedTurn(t *testing.T, delay time.Duration, behind application.ChatInput) (second, first error) {
+	t.Helper()
+	svc, _ := slowChatSvc(t, delay, nil)
+	done := make(chan error, 1)
+	go func() {
+		_, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "room", Message: "first", Speaker: "u", SpeakerID: "u1"})
+		done <- err
+	}()
+	time.Sleep(30 * time.Millisecond)
+	behind.GuildID, behind.ChannelID, behind.Message, behind.Speaker, behind.SpeakerID = "g", "room", "second", "u", "u2"
+	_, second = svc.ChatTurn(context.Background(), behind)
+	return second, <-done
+}
+
+// The turn's time limit starts when the turn has its place in the channel: a turn that waited behind
+// another one still gets its whole share (it used to be spent in the queue, and the model call that
+// followed failed at once).
+func TestTurnTimeoutStartsAfterTheWait(t *testing.T) {
+	// a turn takes two model calls (about 160 ms); the second waits about as long as the first runs,
+	// so waiting and running together overrun 280 ms but running alone does not
+	second, first := queuedTurn(t, 80*time.Millisecond, application.ChatInput{TurnTimeout: 280 * time.Millisecond})
+	if first != nil || second != nil {
+		t.Fatalf("first: %v, second: %v", first, second)
+	}
+	// the limit still holds once the turn runs
+	second, _ = queuedTurn(t, 80*time.Millisecond, application.ChatInput{TurnTimeout: 40 * time.Millisecond})
+	if !errors.Is(second, context.DeadlineExceeded) {
+		t.Fatalf("a turn past its own limit must fail with a timeout: %v", second)
+	}
+}
+
+// A call that waited longer than MaxWait is stale: it is refused as busy, and the turn ahead of it is
+// not disturbed.
+func TestStaleQueuedTurnIsRefusedAsBusy(t *testing.T) {
+	second, first := queuedTurn(t, 80*time.Millisecond, application.ChatInput{MaxWait: 40 * time.Millisecond})
+	if !errors.Is(second, application.ErrChatBusy) || first != nil {
+		t.Fatalf("second: %v, first: %v", second, first)
+	}
+}

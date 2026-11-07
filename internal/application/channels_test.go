@@ -373,3 +373,22 @@ func TestPoliteDefaultIsOptInForExistingInstances(t *testing.T) {
 		t.Fatal("new instances start polite")
 	}
 }
+
+// A direct message and a channel without an entry of its own read the defaults with every choice filled
+// in, as a saved entry does: an empty reply_shape used to mean "not bubbles", so their replies were
+// never split into bubbles.
+func TestChannelsWithoutAnEntryReplyInBubbles(t *testing.T) {
+	svc := setupSvc(t)
+	if res := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "c1", "respond": "mention"}); !res.OK {
+		t.Fatalf("configure: %+v", res.Error)
+	}
+	for name, pol := range map[string]config.ChannelPolicy{
+		"direct message":                 svc.ChannelPolicyFor("", "dm"),
+		"unlisted server":                svc.ChannelPolicyFor("g-unknown", "c-unknown"),
+		"unlisted channel, known server": svc.ChannelPolicyFor("g1", "c2"),
+	} {
+		if pol.Conversation.ReplyShape != "bubbles" {
+			t.Errorf("%s: reply_shape = %q, want bubbles", name, pol.Conversation.ReplyShape)
+		}
+	}
+}

@@ -127,6 +127,13 @@ const (
 	// finalDeliveryTimeout bounds the last edit or send of a command, on a context that does not carry
 	// the action's own (possibly expired) deadline.
 	finalDeliveryTimeout = 10 * time.Second
+	// A chat turn gets chatTurnTimeout once it has its place in the channel (a turn that draws a picture
+	// takes long on top of planning and answering). The wait for that place is bounded by chatQueueWait:
+	// a message that waited longer is stale and is answered with the "catching up" notice. chatTurnCeiling
+	// bounds the whole call, whatever happens in between.
+	chatTurnTimeout = 180 * time.Second
+	chatQueueWait   = 90 * time.Second
+	chatTurnCeiling = chatQueueWait + chatTurnTimeout + 30*time.Second
 	// interactionAckTimeout: Discord drops an interaction that is not answered within 3 seconds.
 	interactionAckTimeout = 2500 * time.Millisecond
 )
@@ -1917,9 +1924,9 @@ func (g *Gateway) sendCommandCard(base context.Context, s *discordgo.Session, m 
 func (g *Gateway) answer(base context.Context, s *discordgo.Session, m *discordgo.MessageCreate, text string, call turnCall) {
 	addressed, nameOnly, followUp := call.addressed, call.nameOnly, call.followUp
 	visionNotice := ""
-	// a turn that draws a picture takes long (the previous bot's pictures: p90 88 s) on top of planning
-	// and answering
-	ctx, cancel := context.WithTimeout(base, 180*time.Second)
+	// the turn's own time (chatTurnTimeout, the previous bot's pictures: p90 88 s) starts when it has its
+	// place in the channel, not while it waits (ChatInput.TurnTimeout)
+	ctx, cancel := context.WithTimeout(base, chatTurnCeiling)
 	defer cancel()
 	ctx, stopReply := context.WithCancelCause(ctx)
 	defer stopReply(nil)
@@ -1932,11 +1939,11 @@ func (g *Gateway) answer(base context.Context, s *discordgo.Session, m *discordg
 	if !nameOnly {
 		startTyping()
 	}
-	delivered := false
+	delivered, replied := false, false
 	// the reply is posted inside the turn, so the channel's next turn starts after it and the
 	// conversation keeps only what reached Discord
 	_, err := g.svc.ChatTurn(ctx, application.ChatInput{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID, Message: text,
-		Speaker: displayName(m), SpeakerID: m.Author.ID, NameOnly: nameOnly, FollowUp: followUp, Addressed: startTyping,
+		Speaker: displayName(m), SpeakerID: m.Author.ID, MaxWait: chatQueueWait, TurnTimeout: chatTurnTimeout, NameOnly: nameOnly, FollowUp: followUp, Addressed: startTyping,
 		Images: call.images, ImageOnly: call.imageOnly, ImageEarlier: call.imageEarlier, ImageTotal: call.imageTotal, ImageSkipped: call.imageSkipped,
 		OnVisionNotice: func(note string) { visionNotice = note },
 		Deliver: func(deliverCtx context.Context, res chat.Result) string {
@@ -1945,6 +1952,7 @@ func (g *Gateway) answer(base context.Context, s *discordgo.Session, m *discordg
 				g.dropThreadOffer(res.TurnID, "not_sent")
 				return ""
 			}
+			replied = true // from here on the person has been answered, in whole or in part
 			g.postToolArtifacts(deliverCtx, s, m.GuildID, m.ChannelID, m.Reference(), res.Tools)
 			if strings.TrimSpace(res.Answer) == "" {
 				g.log.Warn("discord: chat turn produced no reply text", "tools", len(res.Tools))
@@ -2010,7 +2018,23 @@ func (g *Gateway) answer(base context.Context, s *discordgo.Session, m *discordg
 		return
 	case err != nil:
 		g.log.Warn("discord: chat turn failed", "err", err)
+		// the person called the bot and got nothing: one short line, on a context that does not carry the
+		// turn's own (possibly expired) deadline. Not when the turn already answered, or the daemon stops.
+		if key := chatFailureKey(err, replied); key != "" && base.Err() == nil && !g.stopping.Load() {
+			nctx, ncancel := g.finalContext(base)
+			defer ncancel()
+			g.sendChatNotice(nctx, s, m, key, addressed)
+		}
 	}
+}
+
+// chatFailureKey is the notice for a turn that failed with an unexpected error (a model that timed out
+// included): none once the turn has answered, and none for a cancellation.
+func chatFailureKey(err error, replied bool) string {
+	if err == nil || replied || errors.Is(err, context.Canceled) {
+		return ""
+	}
+	return "discord.chat.failed"
 }
 
 func (g *Gateway) sendBanterReaction(ctx context.Context, s *discordgo.Session, channelID, messageID string, react application.ReactOnly) {

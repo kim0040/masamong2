@@ -90,7 +90,7 @@ func (ts Toolset) without(id string) Toolset {
 }
 
 // PlannerMaxTokens is the output budget for the planner JSON.
-const PlannerMaxTokens = 400
+const PlannerMaxTokens = 600
 
 // renderTools returns the tool menu and the routing hint line for planner rule 2.
 func renderTools(v Voice, ts Toolset) (string, string) {

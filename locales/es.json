@@ -1132,6 +1132,7 @@
   "features.reason.memory_residency_unfinished": "La última reconstrucción no terminó (última etapa: {stage}).",
   "discord.render.help.message": "Comando del menú de mensajes",
   "discord.chat.busy": "Estoy atendiendo otras respuestas. Inténtalo de nuevo en un momento.",
+  "discord.chat.failed": "Algo salió mal mientras preparaba la respuesta. Inténtalo de nuevo en un momento.",
   "discord.chat.no_vision": "Ahora mismo no puedo ver imágenes. Cuéntame con palabras qué quieres saber.",
   "discord.chat.image_unreadable": "No pude abrir esa imagen. Prueba a enviarla de nuevo como PNG o JPG.",
   "discord.chat.restarting": "Me estoy reiniciando y no pude responder a eso. Vuelve a preguntarme en un momento.",
