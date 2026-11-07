@@ -372,3 +372,8 @@ func (s *Service) SlowReadForTest(ctx context.Context, background bool) {
 	l.start = time.Now().Add(-lapSlow - time.Second)
 	l.done()
 }
+
+// RunRetentionForTest runs one retention pass.
+func (s *Service) RunRetentionForTest(ctx context.Context) (map[string]int64, error) {
+	return s.runRetention(ctx)
+}

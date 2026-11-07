@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"strings"
 	"time"
 
@@ -261,6 +262,196 @@ func SourceBlocked(tx *sql.Tx, id string) (bool, error) {
 	var n int
 	err := tx.QueryRow(`SELECT COUNT(*) FROM privacy_tombstones WHERE source_id=? AND kind IN ('source','message')`, id).Scan(&n)
 	return n > 0, err
+}
+
+// sourceChunk keeps each batched lookup well under SQLite's bound-variable limit.
+const sourceChunk = 500
+
+// SourcesBlocked is SourceBlocked for a whole list at once. A source list can be thousands of IDs (older
+// rows are flat), and this runs while the one write connection is held: one statement per chunk, not
+// per ID. A link to a chat turn that is no longer kept also blocks: the turn's own sources are only
+// guaranteed to be followed from a link written while the turn was there (PruneChatHolders).
+func SourcesBlocked(tx *sql.Tx, keys []string) (bool, error) {
+	for lo := 0; lo < len(keys); lo += sourceChunk {
+		chunk := keys[lo:min(len(keys), lo+sourceChunk)]
+		var n int
+		err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM privacy_tombstones WHERE kind IN ('source','message') AND source_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")+`))`, toAny(chunk)...).Scan(&n)
+		if err != nil || n > 0 {
+			return n > 0, err
+		}
+	}
+	return chatLinkGone(tx, keys)
+}
+
+// chatLinkGone reports whether any of the keys is a link to a chat turn that no longer exists.
+func chatLinkGone(tx *sql.Tx, keys []string) (bool, error) {
+	var ids []any
+	for _, key := range keys {
+		digits, ok := strings.CutPrefix(key, chatHolderPrefix)
+		if !ok {
+			continue
+		}
+		id, err := strconv.ParseInt(digits, 10, 64)
+		if err != nil {
+			return true, nil
+		}
+		ids = append(ids, id)
+	}
+	for lo := 0; lo < len(ids); lo += sourceChunk {
+		chunk := ids[lo:min(len(ids), lo+sourceChunk)]
+		var n int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM chat_turns WHERE id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",")+`)`, chunk...).Scan(&n); err != nil {
+			return false, err
+		}
+		if n != len(chunk) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// chatHolderPrefix names a chat turn as a holder in evidence_refs, and as a source of a later turn.
+const chatHolderPrefix = "chat:"
+
+// ChatLink is what a turn built on a chat turn holds instead of a copy of that turn's sources.
+func ChatLink(id int64) string { return chatHolderPrefix + strconv.FormatInt(id, 10) }
+
+// ChatLineage closes the link graph: every chat turn built on any of the keys, directly or through other
+// turns, however long ago those turns left the kept window (their index entries stay while anything
+// links to them, see PruneChatHolders). Call it in a write transaction and tombstone the result there:
+// a turn committed before that transaction is found here, and one committed after it sees the tombstone
+// of the turn it links to and refuses itself.
+func ChatLineage(tx *sql.Tx, keys []string) ([]string, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	raw, err := json.Marshal(keys)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.Query(`WITH RECURSIVE walk(name) AS (
+			SELECT value FROM json_each(?)
+			UNION
+			SELECT h.holder_id FROM walk
+				CROSS JOIN evidence_sources s ON s.source_id=walk.name
+				CROSS JOIN evidence_links l ON l.source=s.id
+				CROSS JOIN evidence_holders h ON h.id=l.holder
+				WHERE h.holder_kind IN ('chat','chat_from')
+		) SELECT name FROM walk WHERE name GLOB 'chat:*'`, string(raw))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// TombstoneSources tombstones many sources in one statement.
+func TombstoneSources(tx *sql.Tx, ids []string, at string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, at); err == nil {
+		at = parsed.UTC().Format("2006-01-02T15:04:05.000000000Z")
+	}
+	raw, err := json.Marshal(ids)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO privacy_tombstones(kind,source_id,at) SELECT 'source',value,? FROM json_each(?) WHERE true ON CONFLICT(kind,source_id) DO UPDATE SET at=MAX(privacy_tombstones.at,excluded.at)`, at, string(raw))
+	return err
+}
+
+// PruneChatHolders removes the index entries of chat turns that are gone and that nothing still kept
+// builds on. A turn past the kept window stays indexed while a later turn links to it (the promise is
+// that deleting a source reaches every reply built on it, however old), so the entries of one chain go
+// when its last reply goes. It computes the whole set in one read, so a chain thousands of turns deep is
+// not unwound one layer per pass, and it is safe to act on later: nothing new links to a turn that is
+// gone (SourcesBlocked).
+func (s *Store) PruneChatHolders(ctx context.Context, batch int) (int64, error) {
+	// the join order is fixed: walking from each kept turn is a few indexed lookups, scanning every chat
+	// link for each of them is quadratic in the chain (postmortem 0004)
+	rows, err := s.DB.Reader().QueryContext(ctx, `WITH RECURSIVE kept(name) AS (
+			SELECT src.source_id FROM evidence_sources src
+				CROSS JOIN evidence_links l ON l.source=src.id
+				CROSS JOIN evidence_holders h ON h.id=l.holder
+				WHERE src.source_id GLOB 'chat:*' AND (h.holder_kind NOT IN ('chat','chat_from')
+					OR EXISTS (SELECT 1 FROM chat_turns t WHERE t.id=CAST(substr(h.holder_id,6) AS INTEGER)))
+			UNION
+			SELECT src.source_id FROM kept
+				CROSS JOIN evidence_holders h ON h.holder_id=kept.name AND h.holder_kind IN ('chat','chat_from')
+				CROSS JOIN evidence_links l ON l.holder=h.id
+				CROSS JOIN evidence_sources src ON src.id=l.source
+				WHERE src.source_id GLOB 'chat:*'
+		) SELECT h.id FROM evidence_holders h
+			WHERE h.holder_kind IN ('chat','chat_from')
+				AND NOT EXISTS (SELECT 1 FROM chat_turns t WHERE t.id=CAST(substr(h.holder_id,6) AS INTEGER))
+				AND h.holder_id NOT IN (SELECT name FROM kept)`)
+	if err != nil {
+		return 0, err
+	}
+	var holders []any
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		holders = append(holders, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	for lo := 0; lo < len(holders); lo += sourceChunk {
+		chunk := holders[lo:min(len(holders), lo+sourceChunk)]
+		// bounded by rows, not holders: a holder written by an earlier release has thousands of entries
+		query := `DELETE FROM evidence_links WHERE (source,holder) IN (SELECT source,holder FROM evidence_links WHERE holder IN (` + strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ",") + `) LIMIT ?)`
+		for {
+			res, err := s.DB.DB.ExecContext(ctx, query, append(append([]any{}, chunk...), batch)...)
+			if err != nil {
+				return total, err
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return total, err
+			}
+			total += n
+			if n < int64(batch) {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return total, ctx.Err()
+			case <-time.After(50 * time.Millisecond): // others get the write connection in between
+			}
+		}
+	}
+	return total, nil
+}
+
+// uniqueSources joins source lists, in first-seen order, without repeats or empty IDs.
+func uniqueSources(lists ...[]string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, list := range lists {
+		for _, id := range list {
+			if id != "" && !seen[id] {
+				seen[id] = true
+				out = append(out, id)
+			}
+		}
+	}
+	return out
 }
 
 func MessageBlocked(tx *sql.Tx, native, account string) (bool, error) {

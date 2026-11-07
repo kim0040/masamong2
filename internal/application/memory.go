@@ -1354,7 +1354,7 @@ func (s *Service) ChatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		"answer_preview": clip(res.Answer, 280), "answer": clip(res.Answer, 4000), "timing_ms": res.Timing,
 		"memory_state": res.Assess.MemoryState, "intent_source": res.Intent.Source, "tools": res.Tools,
 		"plan": res.Plan.ToolPlan, "hits": hitBrief(res.Hits), "ranking": res.Retrieve["applied"],
-		"context": map[string]any{"observation_ids": sources, "attribution": in.context}}
+		"context": map[string]any{"observation_ids": uniqueStrings(sources), "attribution": in.context}}
 	if err != nil && outcome != "reacted" && outcome != "not_addressed" && outcome != "canceled" && outcome != "no_vision" { // decisions, not failures
 		body["error"] = err.Error()
 	}
@@ -1506,6 +1506,9 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 			history = append(history, chat.Turn{Role: t.Role, Speaker: t.Speaker, Content: t.Content, At: at})
 			if in.sourceRefs != nil {
 				*in.sourceRefs = append(*in.sourceRefs, t.SourceIDs...)
+				if t.Role == "user" && t.NativeID != "" {
+					*in.sourceRefs = append(*in.sourceRefs, corpus.DiscordLiveObservationID(room, t.NativeID))
+				}
 			}
 		}
 	}
@@ -1642,7 +1645,7 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		if in.sourceRefs != nil {
 			sources = *in.sourceRefs
 		}
-		sources = append(append([]string{}, sources...), in.MessageID, personRef(in.SpeakerID))
+		sources = uniqueStrings(append(append(append([]string{}, sources...), lookedUp(res)...), in.MessageID, personRef(in.SpeakerID)))
 		turns := []store.ChatTurn{{Role: "user", Speaker: in.Speaker, Content: in.Message, NativeID: in.MessageID, SpeakerID: in.SpeakerID}}
 		if in.vision != nil && in.vision.Mode == "described" {
 			// the description came from other messages too: deleting one of them removes this turn
@@ -1658,6 +1661,19 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		noteTurnTiming(&res, "post_send", int(time.Since(deliverEnd).Milliseconds()))
 	}
 	return res, nil
+}
+
+// lookedUp lists the messages a reply retrieved (its hits and tool results): the reply is built on them as
+// much as on the conversation, so deleting one takes the reply out of the chat context. Messages, not
+// leaves: deleting a message tombstones the leaf that held it, the leaf's ID comes back when the room is
+// cut again, and a later reply on the new leaf has read nothing deleted.
+func lookedUp(res chat.Result) []string {
+	raw, _ := json.Marshal(map[string]any{"hits": hitBrief(res.Hits), "tools": res.Tools})
+	var body any
+	_ = json.Unmarshal(raw, &body)
+	var ids []string
+	walkEvidence(body, func(_ map[string]any, found []string) { ids = append(ids, found...) })
+	return ids
 }
 
 // toolFailureToReplay keeps a failed tool exchange from becoming an answer the bot cites again in an
@@ -1724,15 +1740,12 @@ func (s *Service) logTurn(in ChatInput, res chat.Result) {
 		if err != nil {
 			return err
 		}
-		for _, key := range keys {
-			blocked, err := store.SourceBlocked(tx, key)
-			if err != nil {
-				return err
-			}
-			if blocked {
-				delete(body, "retrieval")
-				break
-			}
+		blocked, err := store.SourcesBlocked(tx, keys)
+		if err != nil {
+			return err
+		}
+		if blocked {
+			delete(body, "retrieval")
 		}
 		raw, _ = json.Marshal(body)
 		if _, err := tx.Exec(`INSERT INTO traces(id,body,created_at,evidence_state) VALUES(?,?,?,1)`, id, string(raw), s.Clock.Now().UTC().Format(time.RFC3339)); err != nil {

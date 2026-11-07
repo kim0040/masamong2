@@ -12,7 +12,7 @@ import (
 	"masamong/internal/storage"
 )
 
-func openStore(t *testing.T) *Store {
+func openStore(t testing.TB) *Store {
 	t.Helper()
 	db, err := storage.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {

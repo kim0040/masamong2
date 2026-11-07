@@ -161,7 +161,6 @@ func (s *Service) runRetention(ctx context.Context) (map[string]int64, error) {
 			res, err := s.Store.DB.ExecContext(ctx, `DELETE FROM evidence_links WHERE (source,holder) IN
 				(SELECT links.source,links.holder FROM evidence_links links JOIN evidence_holders r ON r.id=links.holder WHERE
 				(r.holder_kind IN ('turn_ev','turn_msg') AND NOT EXISTS (SELECT 1 FROM turn_log t WHERE t.id=r.holder_id AND t.body<>'{}')) OR
-				(r.holder_kind IN ('chat','chat_from') AND NOT EXISTS (SELECT 1 FROM chat_turns t WHERE t.id=CAST(substr(r.holder_id,6) AS INTEGER))) OR
 				(r.holder_kind='participation' AND NOT EXISTS (SELECT 1 FROM participation_log p WHERE p.id=r.holder_id)) OR
 				(r.holder_kind='cache' AND NOT EXISTS (SELECT 1 FROM memory_embed_cache c WHERE c.cache_key=r.holder_id)) OR
 				(r.holder_kind='lab' AND NOT EXISTS (SELECT 1 FROM lab_reviews l WHERE l.id=r.holder_id)) OR
@@ -175,6 +174,12 @@ func (s *Service) runRetention(ctx context.Context) (map[string]int64, error) {
 			return res.RowsAffected()
 		})
 		out["evidence_refs"] = n
+		if err != nil {
+			return out, fmt.Errorf("evidence_refs: %w", err)
+		}
+		// After the turn entries above: a chat turn stays indexed while a turn record links to it too.
+		n, err = eng.Store.PruneChatHolders(ctx, pruneBatch)
+		out["evidence_refs"] += n
 		// Tombstones survive pending jobs, then expire with turn retention. Consent and observation
 		// tombstones continue to prevent captured or imported messages from reappearing.
 		if d := days["turns"]; d >= 0 && !s.Store.HasPendingEvents("capture") && !s.Store.HasPendingEvents("source-change") {
