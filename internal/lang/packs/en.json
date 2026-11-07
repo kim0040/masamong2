@@ -264,13 +264,13 @@
       "description": "Web search (news, latest information, fact checks). parameters.query, fresh (day/week/month, when only recent pages will do)",
       "route": "news, today's topics, latest information, or facts that change over time (who holds a post now, rankings, prices): search.web",
       "purpose": "Web search (news, latest information, fact checks).",
-      "when": "Use for search requests, today's or recent news, who holds a post now, facts that change (rankings, prices, results), or when another tool failed. Also for used prices and what an item costs now. For a news roundup or summary, or comparing and researching several sources, give depth=deep; for news and current affairs, topic=news.",
+      "when": "Use for search requests, today's or recent news, who holds a post now, facts that change (rankings, prices, results), or when another tool failed. Also for used prices and what an item costs now. For news and current affairs, give topic=news. Give depth=deep only when asked outright for a news roundup or summary, or for comparing and researching several sources.",
       "skip": "Not for word meanings, common knowledge, arithmetic, translation or small talk.",
       "params": {
         "query": "Search words: key terms only, in the message's language.",
         "size": "Number of results (usually leave out)",
         "fresh": "day, week or month when only recent pages will do",
-        "depth": "How hard to search. quick: one fact checked fast (a date, a price, who). Usually leave out (standard). deep: a news roundup, a comparison, 'look into it properly', anything needing many sources (slower and costlier)",
+        "depth": "How hard to search. Usually leave out (standard), also for a light one-thing question like 'why did it go up?' or 'what is that?'. quick: one fact checked fast (a date, a price, who). deep: only when asked outright for a news roundup or summary, a comparison of sources, or 'look into it properly' (slower and costlier; if there is no answer within 15 seconds the next search service is tried)",
         "topic": "news: when looking for news articles or current affairs (usually with fresh). Otherwise leave out"
       }
     },

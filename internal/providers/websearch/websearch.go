@@ -9,26 +9,35 @@
 //	tinyfish GET  api.search.tinyfish.ai          X-API-Key  results[].title/url/snippet/site_name/date
 //	kakao    GET  dapi.kakao.com/v2/search/web   KakaoAK    documents[].title/contents/url/datetime (Daum)
 //
-// The first four are built for language models (Tavily, Linkup, Exa return page text chosen for the
+// The first three are built for language models (Tavily, Linkup, Exa return page text chosen for the
 // query; Serper is Google's result page). Brave is its own independent index ($5 per 1,000, $5 of
-// free credit a month); TinyFish is free up to 12,000 searches a day. Kakao is Daum's index: strongest for Korean pages, snippets
-// only. Formats were read from each service's API reference on 2026-09-30 and again on 2026-10-15,
-// when the depths and the news searches were added:
+// free credit a month); TinyFish is free up to 12,000 searches a day (30 requests a minute). Kakao is
+// Daum's index: strongest for Korean pages, snippets only. Formats were read from each service's API
+// reference on 2026-09-30, 2026-10-15 (the depths and the news searches were added) and again on
+// 2026-11-07, when each was also called live (Exa, TinyFish, Linkup and Kakao; the other three have
+// no key here, so their formats are the references' alone):
 //
 //	depth    quick                 standard (default)     deep
 //	tavily   search_depth fast     basic                  advanced (2 credits), 3 chunks, detailed answer
-//	linkup   depth fast            standard               deep (several passes)
-//	exa      type fast             auto                   deep-lite (about 4 s)
+//	linkup   depth fast            standard               deep (several passes; 7–41 s measured)
+//	exa      type fast             auto                   deep-lite (1.5–2 s, $0.012)
 //	serper   one Google page whatever the depth
 //	brave    web search        web + extra_snippets   GET /res/v1/llm/context (text chunks taken from the pages)
 //	tinyfish one page whatever the depth
 //	kakao    one Daum page whatever the depth
 //
 //	news: tavily topic=news, exa category=news, serper POST /news (news[]), brave GET /res/v1/news/search,
-//	tinyfish domain_type=news. Linkup and Kakao have no news search: search.web asks them after the
-//	others for news (NewsSearch). Kakao's newest-first order was tried and dropped (2026-10-15): for
-//	"국제 정세" it ranked unrelated new posts first.
-//	Brave and TinyFish were read on 2026-10-15 (Brave's own brave-search-skills reference, docs.tinyfish.ai).
+//	tinyfish domain_type=news (a headline, an outlet and a date; the snippet is mostly empty). Linkup and
+//	Kakao have no news search: search.web asks them after the others for news (NewsSearch). Kakao's
+//	newest-first order was tried and dropped (2026-10-15): for "국제 정세" it ranked unrelated new posts first.
+//
+//	dates: Exa, Tavily (include_published_date), Serper, Brave and Kakao date their results, TinyFish does
+//	for news and some pages (RFC 1123 or ISO), Linkup never does (its results have no date field).
+//
+//	not used, though the references list them: Linkup depth flash (alpha, 0.8 s against fast's 1.1 s),
+//	Exa types instant ($0.004, cheaper than fast's $0.007), deep and deep-reasoning, userLocation, Tavily
+//	search_depth ultra-fast (one summary per page) and topic finance, TinyFish include/exclude_domains,
+//	after/before_date and page, Kakao sort=recency and page, Brave Api-Version pinning.
 package websearch
 
 import (
@@ -161,11 +170,28 @@ func New(kind string, client *providers.Client, baseURL string, cred providers.C
 	return nil, fmt.Errorf("websearch: unknown kind %q", kind)
 }
 
+// size is how many results to ask for: 1–10, 5 when none is given; more than ten is ten (the schema's
+// limit), not the default.
 func size(n int) int {
-	if n < 1 || n > 10 {
+	switch {
+	case n < 1:
 		return 5
+	case n > 10:
+		return 10
 	}
 	return n
+}
+
+// lead puts an outlet's name ahead of a snippet; a result with no snippet (TinyFish news is a headline,
+// an outlet and a date) is just the outlet.
+func lead(name, text string) string {
+	switch {
+	case name == "":
+		return text
+	case strings.TrimSpace(text) == "":
+		return name
+	}
+	return name + " — " + text
 }
 
 func clip(s string) string {
@@ -236,7 +262,8 @@ type tavily struct {
 func (t *tavily) Kind() string     { return "tavily" }
 func (t *tavily) Configured() bool { return t.cred.Present() }
 func (t *tavily) Search(ctx context.Context, q Query) (Response, error) {
-	body := map[string]any{"query": q.Text, "max_results": size(q.Max), "search_depth": pick(q.Depth, "fast", "basic", "advanced"), "include_answer": "basic"}
+	body := map[string]any{"query": q.Text, "max_results": size(q.Max), "search_depth": pick(q.Depth, "fast", "basic", "advanced"), "include_answer": "basic",
+		"include_published_date": true} // general results carry no date otherwise (news always does)
 	if q.Depth == DepthDeep {
 		body["chunks_per_source"], body["include_answer"] = 3, "advanced"
 	}
@@ -444,11 +471,7 @@ func ParseSerperNews(obj map[string]json.RawMessage) (Response, error) {
 		if r.Link == "" {
 			continue
 		}
-		snippet := r.Snippet
-		if r.Source != "" {
-			snippet = r.Source + " — " + snippet
-		}
-		out.Results = append(out.Results, Result{Title: r.Title, URL: r.Link, Snippet: clip(snippet), Published: r.Date})
+		out.Results = append(out.Results, Result{Title: r.Title, URL: r.Link, Snippet: clip(lead(r.Source, r.Snippet)), Published: r.Date})
 	}
 	return out, nil
 }

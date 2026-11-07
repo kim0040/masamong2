@@ -377,3 +377,10 @@ func (s *Service) SlowReadForTest(ctx context.Context, background bool) {
 func (s *Service) RunRetentionForTest(ctx context.Context) (map[string]int64, error) {
 	return s.runRetention(ctx)
 }
+
+// SetSearchDeadlineForTest shortens how long search.web waits for one service at a depth; it returns the restore.
+func SetSearchDeadlineForTest(depth string, d time.Duration) func() {
+	old := searchDeadline[depth]
+	searchDeadline[depth] = d
+	return func() { searchDeadline[depth] = old }
+}

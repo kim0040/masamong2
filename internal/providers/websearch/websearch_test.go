@@ -272,3 +272,96 @@ func TestBraveAndTinyFishKeys(t *testing.T) {
 		srv.Close()
 	}
 }
+
+// Answers shaped like the ones the services returned on 2026-11-07, with the text replaced by made-up
+// values: extra fields, nulls and empty snippets are read without error and give the pages.
+func TestSampleResponsesPerService(t *testing.T) {
+	obj := func(raw string) map[string]json.RawMessage {
+		var m map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(raw), &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	t.Run("exa", func(t *testing.T) {
+		res, err := ParseExa(obj(`{"requestId":"r1","resolvedSearchType":"","results":[
+			{"id":"https://a.example/1","title":"가짜 제목","url":"https://a.example/1","publishedDate":"2026-11-06T09:00:00.000Z","author":null,"image":"https://a.example/i.png","favicon":"https://a.example/f.ico","highlights":["첫째 조각","둘째 조각"],"highlightScores":[0.5,0.4]},
+			{"id":"https://b.example/2","title":"","url":"https://b.example/2","publishedDate":null,"author":"x","highlights":[]}],
+			"costDollars":{"total":0.012}}`))
+		if err != nil || len(res.Results) != 2 || res.Results[0].Snippet != "첫째 조각 … 둘째 조각" || res.Results[0].Published != "2026-11-06T09:00:00.000Z" || res.Results[1].Published != "" {
+			t.Fatalf("%+v %v", res, err)
+		}
+		if res.CostUSD == nil || *res.CostUSD != 0.012 {
+			t.Fatalf("cost: %v", res.CostUSD)
+		}
+		if res, _ := ParseExa(obj(`{"results":[]}`)); res.CostUSD != nil || len(res.Results) != 0 {
+			t.Fatalf("no cost field: %+v", res)
+		}
+	})
+	t.Run("linkup", func(t *testing.T) {
+		res, err := ParseLinkup(obj(`{"results":[{"type":"text","name":"가짜 이름","url":"https://l.example/1","content":"가짜 본문","favicon":"https://l.example/f.ico"},{"type":"image","name":"사진","url":"https://l.example/p.png"}]}`))
+		if err != nil || len(res.Results) != 1 || res.Results[0].Title != "가짜 이름" || res.Results[0].Published != "" {
+			t.Fatalf("%+v %v", res, err)
+		}
+	})
+	t.Run("tinyfish news without a snippet", func(t *testing.T) {
+		res, err := ParseTinyFish(obj(`{"query":"q","results":[{"position":1,"site_name":"n.example","title":"가짜 기사","snippet":"","url":"https://n.example/1","date":"Fri, 06 Nov 2026 18:48:00 GMT","publisher":"가짜일보"},{"position":2,"site_name":"w.example","title":"가짜 문서","snippet":"가짜 요약","url":"https://w.example/2"}],"total_results":2,"page":0}`))
+		if err != nil || len(res.Results) != 2 || res.Results[0].Snippet != "가짜일보" || res.Results[0].Published != "Fri, 06 Nov 2026 18:48:00 GMT" || res.Results[1].Snippet != "가짜 요약" {
+			t.Fatalf("%+v %v", res, err)
+		}
+	})
+	t.Run("tavily", func(t *testing.T) {
+		res, err := ParseTavily(obj(`{"query":"q","answer":null,"images":[],"results":[{"title":"가짜","url":"https://t.example/1","content":"가짜 본문","score":0.8,"raw_content":null,"published_date":null,"favicon":"x","id":"a1"}],"response_time":"1.2","usage":{"credits":1},"request_id":"r"}`))
+		if err != nil || len(res.Results) != 1 || res.Results[0].Published != "" || res.Answer != "" {
+			t.Fatalf("%+v %v", res, err)
+		}
+	})
+}
+
+// Tavily is asked for the dates of general results too (news always has them).
+func TestTavilyAsksForPublishedDates(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(raw, &got)
+		_, _ = w.Write([]byte(`{"results":[]}`))
+	}))
+	defer srv.Close()
+	c := providers.NewClient(5*time.Second, nil)
+	c.MaxRetries = 0
+	t.Setenv("K", "k")
+	cred, _ := providers.Resolve("env:K")
+	s, _ := New("tavily", c, srv.URL, cred)
+	if _, err := s.Search(context.Background(), Query{Text: "환율"}); err != nil || got["include_published_date"] != true {
+		t.Fatalf("%v %v", got, err)
+	}
+}
+
+// How many results are asked for: 1–10, five when none is asked, and more than ten is ten.
+func TestSizeBounds(t *testing.T) {
+	for in, want := range map[int]int{-3: 5, 0: 5, 1: 1, 5: 5, 10: 10, 11: 10, 50: 10} {
+		if got := size(in); got != want {
+			t.Errorf("size(%d) = %d, want %d", in, got, want)
+		}
+	}
+}
+
+// Brave's context endpoint lists a source's age as [full date, YYYY-MM-DD, relative age, ISO timestamp]
+// (the timestamp is new since 2026-07-31); the machine-readable one is taken, and a page with no known
+// date has none.
+func TestBraveDate(t *testing.T) {
+	for _, tc := range []struct {
+		age  []string
+		want string
+	}{
+		{[]string{"Monday, January 15, 2024", "2024-01-15", "380 days ago", "2024-01-15T13:45:02Z"}, "2024-01-15T13:45:02Z"},
+		{[]string{"Monday, January 15, 2024", "2024-01-15", "380 days ago"}, "2024-01-15"},
+		{[]string{}, ""},
+		{nil, ""},
+		{[]string{"", "", "", ""}, ""},
+	} {
+		if got := braveDate(tc.age); got != tc.want {
+			t.Errorf("braveDate(%q) = %q, want %q", tc.age, got, tc.want)
+		}
+	}
+}

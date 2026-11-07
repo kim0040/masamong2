@@ -626,6 +626,34 @@ func (s *Service) quoteBySearch(ctx context.Context, req action.Request, symbol,
 	return action.OK(req, out), true
 }
 
+// searchDeadline is how long search.web waits for one service, by depth, before it moves to the next
+// one (the whole call, retries included). Measured live on 2026-11-07, one request each:
+//
+//	quick/standard   Exa 0.4–1.8 s, Linkup fast and standard 0.7–1.6 s, Kakao under 0.12 s, TinyFish
+//	                 0.2–2.5 s without a date filter (once 4.5 s, cold), but 6.5–8.2 s in 9 of 11 calls
+//	                 with one (recency_minutes or after_date)
+//	deep             Exa deep-lite 1.5–1.9 s; Linkup deep 6.9, 9.0, 9.3, 25.8 and 41.3 s (and a tool loop
+//	                 that took 66 s)
+//
+// Before this limit a service that was slow held the turn: the 15 s HTTP limit (registry.go) cut each
+// attempt and the client retried it twice, so one hung service cost 3 × 15 s plus the waits (46 s in the
+// test of this file). quick and standard sit above the slowest date-filtered TinyFish search (8.2 s)
+// with a little room, so a service that is merely slow still answers; deep is the HTTP limit itself, so
+// a deep search that has not answered by then is handed on rather than waited for.
+var searchDeadline = map[string]time.Duration{
+	websearch.DepthQuick:    8 * time.Second,
+	websearch.DepthStandard: 10 * time.Second,
+	websearch.DepthDeep:     15 * time.Second,
+}
+
+// searchTimeout is searchDeadline for a depth ("" is standard).
+func searchTimeout(depth string) time.Duration {
+	if d, ok := searchDeadline[depth]; ok {
+		return d
+	}
+	return searchDeadline[websearch.DepthStandard]
+}
+
 // search asks the search services in order; one that fails or finds nothing hands over to the next.
 // The answer says which service found the pages (source/provider) and which were passed over.
 // Input: query, size (1–10), fresh (day|week|month), depth (quick|standard|deep: speed against
@@ -659,7 +687,11 @@ func (s *Service) search(ctx context.Context, req action.Request) action.Result 
 	if depth == websearch.DepthDeep {
 		size = 8 // a deeper search is asked to look wider
 	}
-	q := websearch.Query{Text: query, Max: intVal(in, "size", size), Fresh: strVal(in, "fresh", ""), Depth: depth, Topic: topic}
+	fresh := strings.ToLower(strVal(in, "fresh", ""))
+	if fresh != "day" && fresh != "week" && fresh != "month" {
+		fresh = "" // a word the schema does not offer ("hour": Tavily answers 400 to it)
+	}
+	q := websearch.Query{Text: query, Max: intVal(in, "size", size), Fresh: fresh, Depth: depth, Topic: topic}
 	if topic == websearch.TopicNews && len(order) > 1 {
 		// news: the services with a news search of their own first (dated articles), the rest after
 		reg := s.Registry()
@@ -681,10 +713,17 @@ func (s *Service) search(ctx context.Context, req action.Request) action.Result 
 			continue
 		}
 		sr := s.Registry().Search[id]
-		res, err := sr.Search(ctx, q)
+		callCtx, cancel := context.WithTimeout(ctx, searchTimeout(depth))
+		res, err := sr.Search(callCtx, q)
+		timedOut := callCtx.Err() != nil && ctx.Err() == nil // this service's limit, not the turn's
+		cancel()
 		s.noteProvider(id, err)
 		if err != nil {
-			tried = append(tried, map[string]any{"provider": id, "reason": "error", "detail": clip(err.Error(), 200)})
+			reason := "error"
+			if timedOut {
+				reason = "timeout"
+			}
+			tried = append(tried, map[string]any{"provider": id, "reason": reason, "detail": clip(err.Error(), 200)})
 			lastID, lastErr = id, err
 			continue
 		}
