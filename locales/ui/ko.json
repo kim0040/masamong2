@@ -345,7 +345,7 @@
   "cfg.chat": "대화",
   "cfg.chat.desc": "답 한 번을 어떻게 처리할지",
   "cfg.chat.loop_final": "도구 결과로 끝내는 조건",
-  "cfg.chat.loop_final.hint": "결과 하나로 답이 되는 도구가 성공하면 더 찾을지 묻는 호출을 건너뛰어 답이 빨라집니다. 웹 검색까지 켜면 결과가 충분할 때 검색도 한 번으로 끝냅니다.",
+  "cfg.chat.loop_final.hint": "짧은 질문에서 결과 하나로 답이 되는 도구가 성공하면 더 찾을지 묻는 호출을 건너뛰어 답이 빨라집니다. 웹 검색까지 켜면 결과가 충분할 때 검색도 한 번으로 끝냅니다.",
   "cfg.chat.loop_final.v.off": "항상 한 번 더 확인",
   "cfg.chat.loop_final.v.search": "웹 검색까지",
   "cfg.chat.loop_final.v.tools": "날씨·환율·시세·장소 (기본)",

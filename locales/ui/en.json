@@ -345,7 +345,7 @@
   "cfg.chat": "Chat",
   "cfg.chat.desc": "How a reply is made",
   "cfg.chat.loop_final": "When a tool result ends the lookup",
-  "cfg.chat.loop_final.hint": "When a tool whose one result is the answer succeeds, the call asking whether to look further is skipped and replies come faster. With web search, a search that found enough also ends there.",
+  "cfg.chat.loop_final.hint": "In a short question, when a tool whose one result is the answer succeeds, the call asking whether to look further is skipped and replies come faster. With web search, a search that found enough also ends there.",
   "cfg.chat.loop_final.v.off": "Always check once more",
   "cfg.chat.loop_final.v.search": "Web search too",
   "cfg.chat.loop_final.v.tools": "Weather, exchange rates, quotes, places (default)",
