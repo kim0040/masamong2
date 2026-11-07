@@ -62,6 +62,9 @@ type scenarioOutcome struct {
 	Parse    string           `json:"plan_parse"`
 	CostUSD  float64          `json:"cost_usd"`
 	Loop     *chat.LoopTrace  `json:"tool_loop,omitempty"`
+	// Search is what each web search turned out as: the service that answered, the depth and topic asked,
+	// and the services passed over (with why), so a run shows which one carried the answers.
+	Search []map[string]any `json:"search,omitempty"`
 }
 
 // TestLiveScenarios runs the usage scenarios (testdata/scenarios_ko.json) through the whole product
@@ -73,6 +76,11 @@ type scenarioOutcome struct {
 //
 //	MASAMONG_LIVE_KEYS_DIR=~/keys MASAMONG_SCENARIO_REPORT=/tmp/report.json \
 //	  go test ./internal/application -run TestLiveScenarios -v -timeout 30m
+//
+// MASAMONG_LIVE_SEARCH picks the search services (key file names, in the order tried) and sets
+// web_search.order to them, so a run goes through the services as production does:
+// MASAMONG_LIVE_SEARCH=exa,tinyfish,linkup,kakao. A service without a key file is left out. Without it
+// the run uses linkup and kakao, as before. Each scenario's report lists which service answered.
 //
 // MASAMONG_SCENARIO_FILE runs another file (a held-out set written after the fixes, to check they were
 // not fitted to these sentences); MASAMONG_SCENARIO_DROP leaves services out ("finnhub,kakao") to see
@@ -148,7 +156,24 @@ func TestLiveScenarios(t *testing.T) {
 		step("providers.add", map[string]any{"host": host})
 	}
 	drop := "," + os.Getenv("MASAMONG_SCENARIO_DROP") + ","
-	for _, id := range []string{host, "linkup", "kakao", "kma", "finnhub", "exchangerate"} {
+	searchIDs := []string{"linkup", "kakao"}
+	if v := os.Getenv("MASAMONG_LIVE_SEARCH"); v != "" {
+		searchIDs = nil
+		for _, id := range strings.Split(v, ",") {
+			if id = strings.TrimSpace(id); id == "" || strings.Contains(drop, ","+id+",") {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(dir, id)); err != nil {
+				t.Logf("search service %s has no key file, left out", id)
+				continue
+			}
+			if _, ok := svc.Doc().Providers[id]; !ok {
+				t.Fatalf("MASAMONG_LIVE_SEARCH: %q is not a provider id", id)
+			}
+			searchIDs = append(searchIDs, id)
+		}
+	}
+	for _, id := range append(append([]string{host}, searchIDs...), "kma", "finnhub", "exchangerate") {
 		if strings.Contains(drop, ","+id+",") {
 			continue
 		}
@@ -166,6 +191,14 @@ func TestLiveScenarios(t *testing.T) {
 	}
 	applyLocale(t, svc, suite.Locale)
 	ops := []any{}
+	if os.Getenv("MASAMONG_LIVE_SEARCH") != "" && len(searchIDs) > 0 {
+		order := make([]any, len(searchIDs))
+		for i, id := range searchIDs {
+			order[i] = id
+		}
+		ops = append(ops, map[string]any{"path": []any{"web_search", "order"}, "value": order})
+		t.Logf("web_search.order = %v", searchIDs)
+	}
 	for _, id := range suite.EnableTools {
 		ops = append(ops, map[string]any{"path": []any{"tools", id, "enabled"}, "value": true})
 	}
@@ -257,6 +290,9 @@ func TestLiveScenarios(t *testing.T) {
 			mark = "FAIL"
 		}
 		t.Logf("%s %-24s tools=%v %dms %v %s", mark, o.ID, o.Tools, o.Millis, o.Timing, strings.Join(o.Problems, "; "))
+		for _, sr := range o.Search {
+			t.Logf("   search.web -> %v (depth %v, topic %v, %v results, passed over %v)", sr["provider"], sr["depth"], sr["topic"], sr["results"], sr["passed_over"])
+		}
 	}
 	cats := make([]string, 0, len(byCat))
 	for c := range byCat {
@@ -271,6 +307,11 @@ func TestLiveScenarios(t *testing.T) {
 		raw, _ := json.MarshalIndent(outcomes, "", " ")
 		_ = os.WriteFile(path, raw, 0o600)
 	}
+}
+
+func asSlice(v any) []any {
+	s, _ := v.([]any)
+	return s
 }
 
 func applyLocale(t *testing.T, svc *application.Service, loc string) {
@@ -325,6 +366,10 @@ func checkScenario(o scenarioOutcome, res application.ChatResultForTest, sc live
 	o.Answer, o.RagState, o.Intent, o.CostUSD, o.Timing, o.Parse = res.Answer, res.RagState, res.Intent.Source, res.CostUSD, res.Timing, res.Plan.ParseState
 	for _, tr := range res.Tools {
 		o.Tools = append(o.Tools, tr.Tool)
+		if tr.Tool == "search.web" {
+			o.Search = append(o.Search, map[string]any{"ok": tr.OK, "provider": tr.Data["provider"], "depth": tr.Data["depth"], "topic": tr.Data["topic"],
+				"results": len(asSlice(tr.Data["results"])), "passed_over": tr.Data["passed_over"], "error": tr.Error})
+		}
 	}
 	for _, st := range res.Plan.ToolPlan {
 		o.Plan = append(o.Plan, map[string]any{"tool": st.Tool, "parameters": st.Parameters})

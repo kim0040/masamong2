@@ -2,11 +2,13 @@ package application_test
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"masamong/internal/application"
 )
@@ -173,5 +175,63 @@ func TestQuoteFallsBackToSearchOutsideTheQuotePlan(t *testing.T) {
 	}
 	if us := out(t, svc, "finance.quote", map[string]any{"symbol": "AAPL"}); us["source"] != "finnhub" || us["price"] != "337.35" {
 		t.Fatalf("a US symbol keeps the live quote: %v", us)
+	}
+}
+
+// A service that is slow does not hold the turn: after its limit for the depth the search goes on to
+// the next one, and the answer says the first timed out (before, the 15 s HTTP limit cut each attempt
+// and the client retried it twice).
+func TestSlowSearchServiceIsPassedOver(t *testing.T) {
+	var slowHits atomic.Int32
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		slowHits.Add(1)
+		// read the body so the server notices the caller hanging up; then hang until it does
+		_, _ = io.Copy(io.Discard, r.Body)
+		select {
+		case <-r.Context().Done():
+		case <-time.After(20 * time.Second):
+		}
+	}))
+	defer slow.Close()
+	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"organic":[{"title":"가평 캠핑장","link":"https://camp.example/1","snippet":"강 보이는 자리","position":1}]}`))
+	}))
+	defer fast.Close()
+	svc := setupSvc(t)
+	pointAt(t, svc, "tavily", slow.URL, "T_KEY", "k")
+	pointAt(t, svc, "serper", fast.URL, "S_KEY", "k")
+	for _, c := range []struct{ asked, limit string }{{"quick", "quick"}, {"", "standard"}, {"deep", "deep"}} {
+		restore := application.SetSearchDeadlineForTest(c.limit, 150*time.Millisecond)
+		before := slowHits.Load()
+		started := time.Now()
+		res := out(t, svc, "search.web", map[string]any{"query": "캠핑", "depth": c.asked})
+		restore()
+		if took := time.Since(started); took > 3*time.Second {
+			t.Fatalf("depth %q: the slow service held the search for %v", c.asked, took)
+		}
+		passed, _ := json.Marshal(res["passed_over"])
+		if res["provider"] != "serper" || slowHits.Load() != before+1 || !strings.Contains(string(passed), `"provider":"tavily"`) || !strings.Contains(string(passed), `"reason":"timeout"`) {
+			t.Fatalf("depth %q: the slow service must be tried once and passed over: %v (hits %d)", c.asked, res, slowHits.Load()-before)
+		}
+	}
+}
+
+// A freshness word the schema does not offer is dropped, not sent on (Tavily answers 400 to "hour").
+func TestSearchDropsUnknownFreshness(t *testing.T) {
+	var got map[string]any
+	tavily := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		got = nil
+		_ = json.Unmarshal(raw, &got)
+		_, _ = w.Write([]byte(`{"results":[{"title":"T","url":"https://t.example/1","content":"본문"}]}`))
+	}))
+	defer tavily.Close()
+	svc := setupSvc(t)
+	pointAt(t, svc, "tavily", tavily.URL, "T_KEY", "k")
+	for fresh, want := range map[string]any{"hour": nil, "": nil, "Week": "week", "day": "day"} {
+		out(t, svc, "search.web", map[string]any{"query": "캠핑", "fresh": fresh})
+		if got["time_range"] != want {
+			t.Errorf("fresh %q: time_range = %v, want %v", fresh, got["time_range"], want)
+		}
 	}
 }

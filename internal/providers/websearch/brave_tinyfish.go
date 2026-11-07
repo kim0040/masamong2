@@ -102,8 +102,8 @@ type braveResult struct {
 
 func (r braveResult) result(source bool) Result {
 	text := strings.Join(append([]string{r.Description}, r.ExtraSnippets...), " … ")
-	if source && r.Profile.Name != "" {
-		text = r.Profile.Name + " — " + text
+	if source {
+		text = lead(r.Profile.Name, text)
 	}
 	when := r.PageAge
 	if when == "" {
@@ -153,7 +153,6 @@ func ParseBraveNews(obj map[string]json.RawMessage) (Response, error) {
 }
 
 // ParseBraveContext reads {"grounding":{"generic":[{url,title,snippets[]}]}, "sources":{url:{age:[…]}}}.
-// The last age entry is the ISO date.
 func ParseBraveContext(obj map[string]json.RawMessage) (Response, error) {
 	var g struct {
 		Generic []struct {
@@ -175,12 +174,22 @@ func ParseBraveContext(obj map[string]json.RawMessage) (Response, error) {
 			continue
 		}
 		res := Result{Title: r.Title, URL: r.URL, Snippet: clip(strings.Join(r.Snippets, " … "))}
-		if age := sources[r.URL].Age; len(age) > 0 {
-			res.Published = age[len(age)-1]
-		}
+		res.Published = braveDate(sources[r.URL].Age)
 		out.Results = append(out.Results, res)
 	}
 	return out, nil
+}
+
+// braveDate picks the machine-readable date out of a source's age list: [full date, YYYY-MM-DD, relative
+// age, ISO 8601 timestamp] (the timestamp came in 2026-07-31; before that the list had three). The
+// timestamp when there is one, else the plain date, else nothing (a page with no known date has none).
+func braveDate(age []string) string {
+	for _, i := range []int{3, 1} {
+		if i < len(age) && len(age[i]) >= 10 && age[i][4] == '-' && age[i][7] == '-' {
+			return age[i]
+		}
+	}
+	return ""
 }
 
 // stripMarks removes the <strong> marks Brave puts around matched words when decorations are on.
@@ -247,11 +256,7 @@ func ParseTinyFish(obj map[string]json.RawMessage) (Response, error) {
 		if r.URL == "" {
 			continue
 		}
-		text := r.Snippet
-		if r.Publisher != "" {
-			text = r.Publisher + " — " + text
-		}
-		out.Results = append(out.Results, Result{Title: r.Title, URL: r.URL, Snippet: clip(text), Published: r.Date})
+		out.Results = append(out.Results, Result{Title: r.Title, URL: r.URL, Snippet: clip(lead(r.Publisher, r.Snippet)), Published: r.Date})
 	}
 	return out, nil
 }
