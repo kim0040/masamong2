@@ -140,3 +140,38 @@ func TestAnEditOlderThanTheNewestChangesNothing(t *testing.T) {
 		}
 	})
 }
+
+// An edit that kept the words overtakes an older one after MessageEdited looked: only the writer can tell. The stored
+// words refuse the older edit, so a job for it would take the reply on words that never changed.
+func TestAnEditOlderThanOneThatKeptTheWordsTakesNoReply(t *testing.T) {
+	s := privacyService(t)
+	e, err := s.MemoryEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const key = "discord:g:c"
+	seedEditedTurn(t, s, key, "secret", "alice")
+	var words string
+	if err := s.Store.DB.QueryRow(`SELECT content FROM chat_turns WHERE native_id='secret' AND role='user'`).Scan(&words); err != nil {
+		t.Fatal(err)
+	}
+	t1 := time.Now().Add(-2 * time.Minute)
+	if ok, err := s.MessageKeptItsWords("g", "c", "secret", words, t1.Add(time.Minute)); err != nil || !ok {
+		t.Fatalf("kept revision: %v %v", ok, err)
+	}
+	if err := e.Store.AppendChatTurns(key, []store.ChatTurn{{Role: "assistant", Content: "reply on the kept words", NativeID: "n1", SpeakerID: "bob", SourceIDs: []string{"secret"}, ReadAsOf: store.SettledMark(s.Store)}}, 40); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.commitSourceChange(context.Background(), "g", "c", []string{"secret"}, "edit", "older words", t1); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := e.EditContext(context.Background(), "secret", "older words", t1); err != nil || changed {
+		t.Fatalf("the stored words took an older edit: %v %v", changed, err)
+	}
+	if err := s.DrainRedactions(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if n := repliesKept(t, s, "c"); n != 2 { // the seeded reply on those words too
+		t.Errorf("%d replies kept, want 2", n)
+	}
+}

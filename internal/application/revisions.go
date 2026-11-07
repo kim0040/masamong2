@@ -254,9 +254,13 @@ func (s *Service) commitSourceChange(ctx context.Context, guildID, channelID str
 			if err != nil || recorded {
 				return err
 			}
-			// or of an edit a newer one overtook after MessageEdited looked
+			// or of an edit a newer one overtook after MessageEdited looked: one that changed the words, or one that kept
+			// them, which leaves no tombstone. The stored words refuse either, and the job must not take the replies on them.
 			superseded, err := store.EditSuperseded(ctx, tx, messageIDs[0], at)
 			if err != nil || superseded {
+				return err
+			}
+			if superseded, err = store.KeptRevisionNewer(ctx, tx, messageIDs[0], at); err != nil || superseded {
 				return err
 			}
 		}
