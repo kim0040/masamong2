@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 )
@@ -218,4 +219,69 @@ func TestAPassCancelledBeforeTheMarkLeavesNothing(t *testing.T) {
 		t.Fatal("a cancelled pass left marks")
 	}
 	wantBlocked(t, st, false, link)
+}
+
+// An edit drops what ties the message's own row to other messages, and nothing more: the row's own entries, a thread's
+// copy of it, and any other message's ties stay.
+func TestAnEditDropsOnlyItsRowsTies(t *testing.T) {
+	st := openStore(t)
+	const key = "discord:g:c"
+	if err := st.AppendChatTurns(key, []ChatTurn{
+		{Role: "user", Speaker: "alice", Content: "first\nlast", NativeID: "last", SpeakerID: "alice", Merged: []string{"first"}, DerivedFrom: []string{"pictured"}},
+		{Role: "user", Speaker: "bob", Content: "other", NativeID: "other", SpeakerID: "bob", Merged: []string{"first"}},
+	}, 40); err != nil {
+		t.Fatal(err)
+	}
+	var row, other int64
+	if err := st.DB.DB.QueryRow(`SELECT id FROM chat_turns WHERE native_id='last'`).Scan(&row); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DB.DB.QueryRow(`SELECT id FROM chat_turns WHERE native_id='other'`).Scan(&other); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AppendChatTurns("discord:g:thread", []ChatTurn{
+		{Role: "user", Speaker: "alice", Content: "first\nlast", NativeID: "last", SpeakerID: "alice", SourceIDs: []string{ChatLink(row)}, Copied: true},
+	}, 40); err != nil {
+		t.Fatal(err)
+	}
+	var copied int64
+	if err := st.DB.DB.QueryRow(`SELECT id FROM chat_turns WHERE native_id='last' AND channel_key='discord:g:thread'`).Scan(&copied); err != nil {
+		t.Fatal(err)
+	}
+	refs := func(kind string, id int64) []string {
+		t.Helper()
+		rows, err := st.DB.DB.Query(`SELECT source_id FROM evidence_refs WHERE holder_kind=? AND holder_id=? ORDER BY 1`, kind, ChatLink(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []string
+		for rows.Next() {
+			var s string
+			if err := rows.Scan(&s); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+	own := refs("chat", row)
+	if len(own) == 0 || len(refs("chat_from", row)) != 2 {
+		t.Fatalf("setup: chat %v, chat_from %v", own, refs("chat_from", row))
+	}
+	if _, _, err := st.EditMessageContext(context.Background(), "discord", "last", "new words", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if got := refs("chat_from", row); len(got) != 0 {
+		t.Errorf("the edited row is still tied to %v", got)
+	}
+	if got := refs("chat", row); !slices.Equal(got, own) {
+		t.Errorf("the row's own entries: %v, were %v", got, own)
+	}
+	if got := refs("chat_from", copied); !slices.Equal(got, []string{ChatLink(row)}) {
+		t.Errorf("the thread's copy: %v", got)
+	}
+	if got := refs("chat_from", other); !slices.Equal(got, []string{"first"}) {
+		t.Errorf("another message's ties: %v", got)
+	}
 }

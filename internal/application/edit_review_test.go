@@ -619,3 +619,62 @@ func TestALineOfTheCallersConversationIsWhatAReplyIsBuiltOn(t *testing.T) {
 		t.Fatalf("deleting a line of the caller's conversation left the reply: %d kept", assistantTurns(t, svc, "c"))
 	}
 }
+
+// Edited, the row of a burst holds the last message's new words alone. Deleting an earlier message of the burst has
+// nothing of it left to take: not the row, not a reply that read only the new words.
+func TestAnEditedMergedRowHasNoOldPieces(t *testing.T) {
+	setup := func(t *testing.T) (*application.Service, string) {
+		t.Helper()
+		svc, prompts := quietSvc(t)
+		mergedTurn(t, svc, "c")
+		changeSource(t, svc, "edit", "last", "alice")
+		drain(t, svc)
+		before := prompts.calls()
+		res, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "after-edit", Message: "next question", Speaker: "bob", SpeakerID: "bob"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if prompts.sawSince(before, "first words") || !prompts.sawSince(before, "corrected words") {
+			t.Fatal("the next prompt was to read the new words only: this proves nothing")
+		}
+		if !answerKept(t, svc, res.TurnID) {
+			t.Fatal("the reply on the new words was refused")
+		}
+		return svc, res.TurnID
+	}
+	for _, change := range []string{"delete", "edit", "blank"} {
+		t.Run(change+" the earlier message", func(t *testing.T) {
+			svc, reply := setup(t)
+			changeSource(t, svc, change, "first", "alice")
+			drain(t, svc)
+			if n := chainCount(t, svc, `SELECT COUNT(*) FROM chat_turns WHERE native_id='last' AND role='user' AND content='corrected words'`); n != 1 {
+				t.Errorf("the edited row went with a message it no longer holds: %d", n)
+			}
+			if !answerKept(t, svc, reply) {
+				t.Error("the reply that read only the new words went with it")
+			}
+		})
+	}
+	t.Run("delete the edited message", func(t *testing.T) {
+		svc, reply := setup(t)
+		changeSource(t, svc, "delete", "last", "alice")
+		drain(t, svc)
+		if n := chainCount(t, svc, `SELECT COUNT(*) FROM chat_turns WHERE native_id='last'`); n != 0 {
+			t.Errorf("%d rows of the deleted message stayed", n)
+		}
+		if answerKept(t, svc, reply) {
+			t.Error("the reply that read it stayed")
+		}
+	})
+	t.Run("withdraw", func(t *testing.T) {
+		svc, reply := setup(t)
+		changeSource(t, svc, "withdraw", "last", "alice")
+		drain(t, svc)
+		if n := chainCount(t, svc, `SELECT COUNT(*) FROM chat_turns WHERE native_id='last'`); n != 0 {
+			t.Errorf("a withdrawal left %d rows of the person's edited message", n)
+		}
+		if answerKept(t, svc, reply) {
+			t.Error("a withdrawal left the reply on it")
+		}
+	})
+}

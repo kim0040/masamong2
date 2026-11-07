@@ -531,6 +531,15 @@ func (s *Store) EditMessageContext(ctx context.Context, platform, nativeID, cont
 		if _, err := tx.Exec(`DELETE FROM chat_turns WHERE native_id=? AND role<>'user'`, nativeID); err != nil {
 			return err
 		}
+		if !s.tidb() {
+			// a burst answered as one turn, or a turn with a picture's description: the row now holds these words alone,
+			// so nothing is left of the other messages to go with them. Its own entries stay, and a withdrawal finds it
+			// by them; a thread's copy stays tied to the row it copies.
+			if _, err := tx.Exec(`DELETE FROM evidence_refs WHERE holder_kind='chat_from' AND source_id NOT GLOB 'chat:*'
+				AND holder_id IN (SELECT 'chat:'||id FROM chat_turns WHERE native_id=? AND role='user')`, nativeID); err != nil {
+				return err
+			}
+		}
 		var old string
 		err := tx.QueryRow(`SELECT observation_id, room, content FROM memory_observations
 			WHERE platform=? AND native_message_id=? AND deleted_at=''`, platform, nativeID).Scan(&rev.ObservationID, &rev.Room, &old)
