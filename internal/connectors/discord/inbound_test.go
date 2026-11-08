@@ -280,11 +280,12 @@ func TestDeletingTheOnlyPendingMessageDropsTheRequest(t *testing.T) {
 
 func TestDeletingOnePendingMessageKeepsTheOtherPiece(t *testing.T) {
 	g, tr := inboundGateway(t)
+	holdWindows(t) // a slow runner could end the window before the deletion arrived, and both pieces went out
 	g.onMessage(nil, mention("delete-first", "u", "first piece"))
 	follow := &discordgo.MessageCreate{Message: &discordgo.Message{ID: "keep-second", GuildID: "g", ChannelID: "c", Content: "second piece", Author: &discordgo.User{ID: "u"}}}
 	g.onMessage(nil, follow)
 	g.onMessageDelete(nil, &discordgo.MessageDelete{Message: &discordgo.Message{ID: "delete-first", GuildID: "g", ChannelID: "c"}})
-	time.Sleep(150 * time.Millisecond)
+	waitFor(t, 8*time.Second, func() bool { return len(tr.list()) > 0 })
 	if got := tr.list(); len(got) != 1 || got[0] != "second piece" {
 		t.Fatalf("remaining pending request = %q", got)
 	}
@@ -348,6 +349,7 @@ func followMark(g *Gateway, id string) bool {
 
 func TestBulkDeleteDropsPendingPiecesAndTheirFollowMarks(t *testing.T) {
 	g, tr := inboundGateway(t)
+	holdWindows(t) // the window must outlast the deletion on a slow runner
 	g.messageEventApply = func(messageReconciliation) error { return nil }
 	g.cancelPictures = func(string, []string) {}
 	g.onMessage(nil, mention("bulk-1", "u", "first piece"))
@@ -367,7 +369,7 @@ func TestBulkDeleteDropsPendingPiecesAndTheirFollowMarks(t *testing.T) {
 	g.onMessage(nil, mention("bulk-3", "u", "kept piece"))
 	g.merge.add(&discordgo.MessageCreate{Message: &discordgo.Message{ID: "bulk-4", GuildID: "g", ChannelID: "c", Content: "dropped piece", Author: &discordgo.User{ID: "u"}}}, false)
 	g.onMessageDeleteBulk(nil, &discordgo.MessageDeleteBulk{Messages: []string{"bulk-4", "unrelated"}, GuildID: "g", ChannelID: "c"})
-	time.Sleep(150 * time.Millisecond)
+	waitFor(t, 8*time.Second, func() bool { return len(tr.list()) > 0 })
 	if got := tr.list(); len(got) != 1 || got[0] != "<@bot> kept piece" {
 		t.Fatalf("remaining request after a partial bulk delete = %q", got)
 	}
