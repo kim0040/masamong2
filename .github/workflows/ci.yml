@@ -76,7 +76,7 @@ jobs:
 
   windows:
     runs-on: windows-latest
-    timeout-minutes: 75
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
@@ -84,8 +84,8 @@ jobs:
           go-version-file: go.mod
       - run: go vet ./...
       # the application package alone runs past go test's default 10 minutes on the Windows runner
-      # (23 min on 2026-10-12, over 30 on a slow runner the same day)
-      - run: go test ./... -count=1 -timeout 45m
+      # (23 min on 2026-10-12, over 30 on a slow runner the same day; 34 to 39 min at v1.1.1, and one run passed 45)
+      - run: go test ./... -count=1 -timeout 70m
       - name: noweb build
         run: |
           go vet -tags noweb ./cmd/... ./internal/transport/web/...
