@@ -158,7 +158,8 @@ func TestWithdrawnConsentEmbedsOnlyWhenThePlanSearches(t *testing.T) {
 func TestTurnCostIncludesTheEmbeddingAheadOfThePlan(t *testing.T) {
 	for _, tc := range []struct {
 		name, plan string
-	}{{"plan searches nothing", warmNone}, {"plan searches", warmSearch}} {
+		rows       int // planner, embedding and answer; a search adds the reranker's (the ledger is written after the turn returns)
+	}{{"plan searches nothing", warmNone, 3}, {"plan searches", warmSearch, 4}} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, f := warmSvc(t, tc.plan)
 			f.holdPlan.Store(true)
@@ -169,7 +170,7 @@ func TestTurnCostIncludesTheEmbeddingAheadOfThePlan(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			turn, ledger := turnLedger(t, svc, res.TurnID, 3, 0)
+			turn, ledger := turnLedger(t, svc, res.TurnID, tc.rows, 0)
 			var sum, embed float64
 			embeds := 0
 			for _, r := range rows(ledger["llm_calls"]) {
