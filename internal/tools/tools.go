@@ -102,9 +102,9 @@ type Builtin struct {
 	// that writes or is Once.
 	Parallel bool
 	// MaxFeeUSD is the most one call pays a service of its own (0 = nothing or not known). Under a money cap
-	// a call holds it instead of making the turn's next steps wait for its fee (chat Guard holds). A web
-	// search's is its deep search's; a chat turn holds the bound of the call's depth (application
-	// searchFeeBounds).
+	// a call holds it instead of making the turn's next steps wait for its fee (chat Guard holds). A chat
+	// turn replaces the bound of search.web and finance.quote with what the configured search order may
+	// cost for the call's depth (application searchFees).
 	MaxFeeUSD float64
 	Sample    map[string]any
 	Inputs    []Input

@@ -482,20 +482,85 @@ func toolPays(r tools.Resolved) bool {
 	return r.Uses == "model" || r.ID == "search.web" || r.ID == "finance.quote"
 }
 
-// searchFeeBounds is the most one web search pays at each depth: the dearest of the services' own prices
-// for that depth, with some room (2026-11: Exa instant 0.004, auto 0.007, deep 0.012; Tavily advanced about
-// 0.016; Linkup deep 0.05–0.055). A chat turn's call holds it while it runs (chat Guard holds); the highest is
-// tools.Builtin.MaxFeeUSD of search.web.
-var searchFeeBounds = map[string]float64{websearch.DepthQuick: 0.005, websearch.DepthStandard: 0.01, websearch.DepthDeep: 0.06}
+// searchFees is what bounds the fee of one search.web call: the services it may ask (searchOrder, by id
+// and kind), first to last, as the configuration names them when the turn's tools are offered.
+type searchFees struct{ ids, kinds []string }
 
-// searchFeeBound is searchFeeBounds for a call's depth; a depth the search does not take is the standard
-// search, as search.web reads it.
-func searchFeeBound(params map[string]any) float64 {
-	depth, _ := params["depth"].(string)
-	if fee, ok := searchFeeBounds[strings.ToLower(strings.TrimSpace(depth))]; ok {
-		return fee
+// searchFees reads the search order of the configuration.
+func (s *Service) searchFees() searchFees {
+	reg := s.Registry()
+	var f searchFees
+	for _, id := range s.searchOrder() {
+		f.ids, f.kinds = append(f.ids, id), append(f.kinds, reg.Search[id].Kind())
 	}
-	return searchFeeBounds[websearch.DepthStandard]
+	return f
+}
+
+// bound is the most one search with these parameters pays: the sum, over every service it may ask, of
+// what one search at the call's depth costs there (websearch.SearchFee). A search asks the next service
+// when one finds nothing, and a service may charge for finding nothing, so each service it may reach
+// counts. A depth the search does not take is the standard one, as search.web reads it; a provider the
+// call names (and the order has) is the only service asked.
+func (f searchFees) bound(params map[string]any) float64 {
+	depth, _ := params["depth"].(string)
+	depth = strings.ToLower(strings.TrimSpace(depth))
+	if depth != websearch.DepthQuick && depth != websearch.DepthDeep {
+		depth = websearch.DepthStandard
+	}
+	extra := 0
+	for _, q := range strSlice(params, "queries") {
+		if strings.TrimSpace(q) != "" {
+			extra++
+		}
+	}
+	only, _ := params["provider"].(string)
+	if !slices.Contains(f.ids, only) {
+		only = ""
+	}
+	sum := 0.0
+	for i, kind := range f.kinds {
+		if only == "" || f.ids[i] == only {
+			sum += websearch.SearchFee(kind, depth, extra)
+		}
+	}
+	return sum
+}
+
+// most is the dearest call's bound: a deep search with every reworded query the services run.
+func (f searchFees) most() float64 {
+	queries := make([]any, websearch.MaxExtra)
+	for i := range queries {
+		queries[i] = "q"
+	}
+	return f.bound(map[string]any{"depth": websearch.DepthDeep, "queries": queries})
+}
+
+// quoteBound is the most finance.quote pays: the standard search its fallback makes (quoteBySearch).
+func (f searchFees) quoteBound(map[string]any) float64 { return f.bound(nil) }
+
+// withFeeBounds gives a chat turn's search.web and finance.quote the bound of what they may pay with this
+// configuration's search order. One that can pay nothing here (no search service, or only free ones) does
+// not pay: it neither holds money nor makes the steps after it wait.
+func (f searchFees) withFeeBounds(info chat.ToolInfo) chat.ToolInfo {
+	if !info.Pays {
+		return info
+	}
+	var bound func(map[string]any) float64
+	var most float64
+	switch info.ID {
+	case "search.web":
+		bound, most = f.bound, f.most()
+	case "finance.quote":
+		bound, most = f.quoteBound, f.quoteBound(nil)
+	default:
+		return info
+	}
+	if most <= 0 {
+		info.Pays, info.MaxFeeUSD, info.FeeBound = false, 0, nil
+		return info
+	}
+	info.MaxFeeUSD, info.FeeBound = most, bound
+	return info
 }
 
 // toolInfo renders one tool for the planner in the voice's language.
@@ -504,9 +569,6 @@ func toolInfo(r tools.Resolved, p *lang.Pack, params []tools.Param) chat.ToolInf
 		Pays: toolPays(r), Parallel: r.Parallel}
 	if info.Pays {
 		info.MaxFeeUSD = r.MaxFeeUSD // a bound on a tool that pays nothing would only hold money for nothing
-		if r.ID == "search.web" {
-			info.FeeBound = searchFeeBound
-		}
 	}
 	t := p.Tools[r.ID]
 	if info.Description == "" {
@@ -605,6 +667,7 @@ func intRange(options []string) (int, int, bool) {
 func (s *Service) chatToolset(v chat.Voice, guildID, channelID string) chat.Toolset {
 	ts := chat.Toolset{Known: map[string]bool{}}
 	inv := &action.Invoker{Via: "chat", GuildID: guildID, ChannelID: channelID}
+	fees := s.searchFees()
 	for _, r := range s.toolRegistry() {
 		if r.ID == "chat.respond" {
 			continue
@@ -616,7 +679,7 @@ func (s *Service) chatToolset(v chat.Voice, guildID, channelID string) chat.Tool
 		if ok, _ := s.toolAllowedHere(r, inv); !ok {
 			continue
 		}
-		ts.Enabled = append(ts.Enabled, toolInfo(r, v.Pack, s.Doc().Tools[r.ID].Params))
+		ts.Enabled = append(ts.Enabled, fees.withFeeBounds(toolInfo(r, v.Pack, s.Doc().Tools[r.ID].Params)))
 	}
 	return ts
 }
