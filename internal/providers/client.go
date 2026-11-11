@@ -382,6 +382,7 @@ func (c *Client) do(ctx context.Context, method, rawURL string, headers map[stri
 	}
 	start := time.Now()
 	var last *Error
+	sent := false // an attempt so far may have reached the server
 	for attempt := 1; attempt <= attempts; attempt++ {
 		var rdr io.Reader
 		if body != nil {
@@ -402,21 +403,26 @@ func (c *Client) do(ctx context.Context, method, rawURL string, headers map[stri
 		resp, data, readErr, err := c.attempt(req)
 		if err != nil {
 			last = classify(err, redacted, attempt)
+			sent = sent || !last.NotSent
+			last.NotSent = !sent // an earlier attempt that may have been sent makes the request "sent"
 			if last.Kind == "cancelled" || last.Kind == "redirect" || attempt == attempts {
 				return nil, last
 			}
 			if err := c.wait(ctx, attempt); err != nil {
-				return nil, &Error{Kind: waitKind(err), URL: redacted, Attempts: attempt, Err: err}
+				// the wait before the next attempt ended: sent only if an attempt so far was
+				return nil, &Error{Kind: waitKind(err), URL: redacted, Attempts: attempt, Err: err, NotSent: last.NotSent && !sent}
 			}
 			continue
 		}
 		if readErr != nil {
 			last = classify(readErr, redacted, attempt)
+			last.NotSent, sent = false, true // the server answered
 			if last.Kind == "cancelled" || attempt == attempts {
 				return nil, last
 			}
 			if err := c.wait(ctx, attempt); err != nil {
-				return nil, &Error{Kind: waitKind(err), URL: redacted, Attempts: attempt, Err: err}
+				// the wait before the next attempt ended: sent only if an attempt so far was
+				return nil, &Error{Kind: waitKind(err), URL: redacted, Attempts: attempt, Err: err, NotSent: last.NotSent && !sent}
 			}
 			continue
 		}
@@ -466,10 +472,12 @@ func lasting(ctx context.Context, status int, body []byte) bool {
 // success, error and panic; retry sleeps are in do, after both defers have run.
 func (c *Client) attempt(req *http.Request) (resp *http.Response, data []byte, readErr, err error) {
 	if err = c.enter(req.Context()); err != nil {
+		err = beforeSend{err} // still waiting for a slot: nothing was sent
 		return
 	}
 	defer c.leave()
 	if err = req.Context().Err(); err != nil {
+		err = beforeSend{err}
 		return
 	}
 	resp, err = c.HTTP.Do(req)
@@ -584,8 +592,19 @@ func classify(err error, redacted string, attempt int) *Error {
 	return &Error{Kind: "connection", URL: redacted, Attempts: attempt, Err: errors.New(redactMessage(err.Error(), redacted)), NotSent: notSent(err)}
 }
 
-// notSent reports an error from before the request could be written: the dial or the name lookup failed.
+// beforeSend marks an error that ended a request before it was handed to HTTP (the wait for a slot).
+type beforeSend struct{ err error }
+
+func (b beforeSend) Error() string { return b.err.Error() }
+func (b beforeSend) Unwrap() error { return b.err }
+
+// notSent reports an error from before the request could be written: it never reached HTTP (beforeSend),
+// or the dial or the name lookup failed.
 func notSent(err error) bool {
+	var bs beforeSend
+	if errors.As(err, &bs) {
+		return true
+	}
 	var oe *net.OpError
 	if errors.As(err, &oe) && oe.Op == "dial" {
 		return true

@@ -58,8 +58,8 @@ func TestGateBoundsRequestsInFlight(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	_, err := one.Get(ctx, srv.URL, nil)
-	if e, ok := err.(*Error); !ok || e.Kind != "timeout" {
-		t.Fatalf("waiting past the deadline: %v", err)
+	if e, ok := err.(*Error); !ok || e.Kind != "timeout" || !e.NotSent {
+		t.Fatalf("waiting past the deadline for a slot is a timeout of a request never sent: %#v", err)
 	}
 }
 
