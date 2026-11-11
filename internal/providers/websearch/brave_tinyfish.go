@@ -47,7 +47,9 @@ func (b *brave) Configured() bool { return b.cred.Present() }
 
 // Search uses the news search for news, the LLM context endpoint (chunks taken from the pages, not the
 // result page's one-line description) for a deep search, and the web search otherwise.
-func (b *brave) Search(ctx context.Context, q Query) (Response, error) {
+func (b *brave) Search(ctx context.Context, q Query) (Response, error) { return fanOut(ctx, q, b.one) }
+
+func (b *brave) one(ctx context.Context, q Query) (Response, error) {
 	v := url.Values{}
 	v.Set("q", q.Text)
 	if hasHangul(q.Text) {
@@ -218,40 +220,14 @@ func (t *tinyfish) Kind() string     { return "tinyfish" }
 func (t *tinyfish) Configured() bool { return t.cred.Present() }
 
 // Search asks one page (about ten results; the API takes no count) of the web or, for news, of news
-// articles. TinyFish has no depth setting, but a deep search asks pages 0 and 1 at once (twenty
-// candidates, cut to the size asked for) and every search with a purpose passes the member's question,
-// which the service ranks by.
+// articles. TinyFish has no depth setting; a deep search runs the reworded queries beside the main one
+// (fanOut) and keeps the first results of the merge, cut to the size asked for.
 func (t *tinyfish) Search(ctx context.Context, q Query) (Response, error) {
-	if q.Depth != DepthDeep {
-		return t.page(ctx, q, 0)
-	}
-	type answer struct {
-		res Response
-		err error
-	}
-	second := make(chan answer, 1)
-	go func() {
-		res, err := t.page(ctx, q, 1)
-		second <- answer{res, err}
-	}()
-	first, err := t.page(ctx, q, 0)
-	next := <-second
-	switch {
-	case err != nil:
-		return Response{}, err
-	case next.err != nil:
-		return first, nil // page 0 answers; page 1 was a bonus
-	}
-	merged := first
-	merged.Results = MergeResults(first.Results, next.res.Results)
-	if len(merged.Results) > size(q.Max) {
-		merged.Results = merged.Results[:size(q.Max)]
-	}
-	return merged, nil
+	return fanOut(ctx, q, t.page)
 }
 
-// page asks one page of results (0 is the first; the request has no page parameter then).
-func (t *tinyfish) page(ctx context.Context, q Query, page int) (Response, error) {
+// page asks the first page of results of one query.
+func (t *tinyfish) page(ctx context.Context, q Query) (Response, error) {
 	v := url.Values{}
 	v.Set("query", q.Text)
 	if hasHangul(q.Text) {
@@ -263,15 +239,6 @@ func (t *tinyfish) page(ctx context.Context, q Query, page int) (Response, error
 	}
 	if m := tinyfishMinutes[q.Fresh]; m > 0 {
 		v.Set("recency_minutes", strconv.Itoa(m))
-	}
-	if page > 0 {
-		v.Set("page", strconv.Itoa(page))
-	}
-	if purpose := strings.TrimSpace(q.Purpose); purpose != "" {
-		if r := []rune(purpose); len(r) > 2000 {
-			purpose = string(r[:2000])
-		}
-		v.Set("purpose", purpose)
 	}
 	obj, err := get(ctx, t.c, strings.TrimRight(t.base, "/")+"/?"+v.Encode(), map[string]string{"X-API-Key": t.cred.Value()})
 	if err != nil {

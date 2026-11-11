@@ -3,7 +3,6 @@ package websearch
 import (
 	"context"
 	"errors"
-	"sync"
 
 	"masamong/internal/providers"
 	"masamong/internal/providers/decode"
@@ -26,20 +25,10 @@ func NewJinaFetcher(r *Reader) Fetcher {
 func (j *jinaFetch) Kind() string { return "jina_reader" }
 
 func (j *jinaFetch) Fetch(ctx context.Context, urls []string, maxChars int) ([]Fetched, error) {
-	var mu sync.Mutex
-	var svc error
-	out := gather(ctx, len(urls), func(ctx context.Context, i int) Fetched {
-		f, err := j.one(ctx, urls[i], maxChars)
-		if err != nil {
-			mu.Lock()
-			if svc == nil {
-				svc = err
-			}
-			mu.Unlock()
-		}
-		return f
+	out, errs := gather(ctx, len(urls), func(ctx context.Context, i int) (Fetched, error) {
+		return j.one(ctx, urls[i], maxChars)
 	})
-	return finishFetch(urls, out, svc)
+	return finishFetch(urls, out, serviceError(errs))
 }
 
 func (j *jinaFetch) one(ctx context.Context, raw string, maxChars int) (Fetched, error) {
@@ -62,6 +51,8 @@ func (j *jinaFetch) one(ctx context.Context, raw string, maxChars int) (Fetched,
 	case errors.As(err, &pe) && (pe.Status == 402 || pe.Status == 429 || pe.Status >= 500):
 		f.Err = "service"
 		return f, err
+	case errors.As(err, &pe) && pe.Kind == "too_large":
+		f.Err = "error" // this page's answer was too big: the page's failure, not the Reader's
 	case errors.As(err, &pe) && pe.Kind == "timeout":
 		f.Err = "timeout"
 	case errors.As(err, &pe) && pe.Status == 0:

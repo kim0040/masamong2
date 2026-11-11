@@ -389,7 +389,7 @@ func TestExaPageTextRidesAlongOnlyWhenAsked(t *testing.T) {
 		t.Errorf("standard with pages: %v", got.body)
 	}
 	got, _ = serve(t, "exa", reply, Query{Text: "x", Full: true, Depth: DepthDeep, Extra: []string{" 둘째 질의 ", "", "a", "b", "c"}})
-	if c := contents(got.body); c["text"].(map[string]any)["maxCharacters"] != float64(4000) || got.body["type"] != "deep" || c["maxAgeHours"] != nil {
+	if c := contents(got.body); c["text"].(map[string]any)["maxCharacters"] != float64(4000) || got.body["type"] != "deep-lite" || c["maxAgeHours"] != nil {
 		t.Errorf("deep with pages: %v", got.body)
 	}
 	if aq, _ := got.body["additionalQueries"].([]any); len(aq) != 3 || aq[0] != "둘째 질의" || aq[2] != "b" {
@@ -445,50 +445,6 @@ func TestTavilyChunksAndBraveDeepParameters(t *testing.T) {
 		if !strings.Contains(got.qs, p) {
 			t.Errorf("brave deep lacks %s: %s", p, got.qs)
 		}
-	}
-}
-
-func TestTinyFishPurposeAndDeepPages(t *testing.T) {
-	var mu sync.Mutex
-	var queries []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		queries = append(queries, r.URL.RawQuery)
-		mu.Unlock()
-		if r.URL.Query().Get("page") == "1" {
-			_, _ = w.Write([]byte(`{"results":[{"title":"P1b","url":"https://www.a.example/2/","snippet":"dup"},{"title":"P1c","url":"https://c.example/3","snippet":"s3"}]}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"results":[{"title":"P0a","url":"https://a.example/1","snippet":"s1"},{"title":"P0b","url":"https://a.example/2","snippet":"s2"}]}`))
-	}))
-	defer srv.Close()
-	c := providers.NewClient(5*time.Second, nil)
-	c.MaxRetries = 0
-	t.Setenv("K", "k")
-	cred, _ := providers.Resolve("env:K")
-	s, _ := New("tinyfish", c, srv.URL, cred)
-
-	res, err := s.Search(context.Background(), Query{Text: "삼성 실적", Purpose: "삼성전자 3분기 실적이 어땠는지 알려줘", Max: 8})
-	if err != nil || len(res.Results) != 2 {
-		t.Fatalf("standard asks one page: %v %+v", err, res)
-	}
-	if len(queries) != 1 || !strings.Contains(queries[0], "purpose=") || strings.Contains(queries[0], "page=") {
-		t.Fatalf("standard request: %v", queries)
-	}
-	queries = nil
-	res, err = s.Search(context.Background(), Query{Text: "삼성 실적", Depth: DepthDeep, Max: 8})
-	if err != nil || len(queries) != 2 {
-		t.Fatalf("deep asks pages 0 and 1: %v %v", err, queries)
-	}
-	var titles []string
-	for _, r := range res.Results {
-		titles = append(titles, r.Title)
-	}
-	if strings.Join(titles, ",") != "P0a,P1b,P1c" { // P0b is the same page as P1b under another address
-		t.Fatalf("merged by rank, duplicates dropped: %v", titles)
-	}
-	if strings.Contains(strings.Join(queries, " "), "purpose=") {
-		t.Fatalf("no purpose given, none sent: %v", queries)
 	}
 }
 

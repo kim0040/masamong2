@@ -18,6 +18,12 @@ type Fetched struct {
 	Title     string
 	Content   string
 	Truncated bool
-	// Err is why the page has no content: "" (it has), timeout, blocked, login, empty, not_public, error.
+	// Err is why the page has no content: "" (it has), timeout, blocked, login, empty, not_public, error,
+	// service (the fetch service itself failed for this page).
 	Err string
+	// Target is true when the fetch service itself reported Err for this address (the page's own host
+	// timed out, blocked the reader or wants a login). Our cut-offs (a soft or hard deadline, a page still
+	// queued, a cancelled turn) and the service's failures leave it false; only a Target failure says
+	// anything about the host (HostCache).
+	Target bool
 }

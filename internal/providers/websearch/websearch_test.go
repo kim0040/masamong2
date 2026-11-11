@@ -164,7 +164,7 @@ func TestDepthAndNewsPerService(t *testing.T) {
 			}
 		}},
 		{"exa", Query{Text: "x", Depth: DepthDeep, Topic: TopicNews, Fresh: "week"}, `{"results":[]}`, func(t *testing.T, s seen, _ Response) {
-			if s.body["type"] != "deep" || s.body["category"] != "news" || s.body["startPublishedDate"] == nil {
+			if s.body["type"] != "deep-lite" || s.body["category"] != "news" || s.body["startPublishedDate"] == nil {
 				t.Errorf("deep news: %v", s.body)
 			}
 		}},

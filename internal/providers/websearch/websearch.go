@@ -20,11 +20,15 @@
 //	depth    quick                 standard (default)     deep
 //	tavily   search_depth fast     basic, 3 chunks        advanced (2 credits), 3 chunks, detailed answer
 //	linkup   depth flash           standard               deep (7–41 s, $0.05; several passes)
-//	exa      type instant          auto                   deep (7–9 s, $0.012) + additionalQueries
+//	exa      type instant          auto                   deep-lite (~4 s, $0.012) + additionalQueries
 //	serper   one Google page whatever the depth
 //	brave    web search        web + extra_snippets   GET /res/v1/llm/context (text chunks taken from the pages)
 //	tinyfish one page whatever the depth
-//	kakao    one Daum page whatever the depth
+//	kakao    one Daum page             one Daum page          Daum web + Daum blogs for the main query
+//
+//	deep also runs up to MaxExtra reworded queries (Query.Extra) beside the main one: Exa takes them in
+//	its request, Linkup plans its own, every other service gets a request of its own for each (fanOut);
+//	Requests says how many requests that is, the quota and the fee are reserved by it.
 //
 //	news: tavily topic=news, exa category=news, serper POST /news (news[]), brave GET /res/v1/news/search,
 //	tinyfish domain_type=news (a headline, an outlet and a date; the snippet is mostly empty). Linkup and
@@ -34,8 +38,8 @@
 //	dates: Exa, Tavily (include_published_date), Serper, Brave and Kakao date their results, TinyFish does
 //	for news and some pages (RFC 1123 or ISO), Linkup never does (its results have no date field).
 //
-//	not used, though the references list them: Linkup depth flash (alpha, 0.8 s against fast's 1.1 s),
-//	Exa types instant ($0.004, cheaper than fast's $0.007), deep and deep-reasoning, userLocation, Tavily
+//	not used, though the references list them: Exa types lite (instant's replacement; its parameter list
+//	is shorter and it was not measured here), deep and deep-reasoning, userLocation, Tavily
 //	search_depth ultra-fast (one summary per page) and topic finance, TinyFish include/exclude_domains,
 //	after/before_date and page, Kakao sort=recency and page, Brave Api-Version pinning.
 package websearch
@@ -91,10 +95,14 @@ type Query struct {
 	// Full asks a service that can for the page text of each result (Exa contents.text, which costs
 	// nothing more on /search) for the passages a chat search builds. Unset, nothing extra is asked.
 	Full bool
-	// Purpose is the question the member asked, where a service ranks better knowing it (TinyFish).
-	Purpose string
-	// Extra holds up to three reworded queries a deep Exa search runs beside Text (additionalQueries).
+	// Extra holds up to three reworded queries a deep search runs beside Text: Exa takes them in its
+	// own request (additionalQueries), Linkup's deep search plans its own, and every other service runs
+	// up to MaxExtra of them as requests of its own beside the main one (RewordedQueries, fanOut).
 	Extra []string
+	// Requests is how many requests the caller reserved (the daily quota) for this search, the main
+	// query's first; 0 means as many as Requests(kind, depth, extra) says. A service sends fewer when
+	// it was given fewer, the main query before its reworded ones.
+	Requests int
 }
 
 // Depths and topics search.web accepts.
@@ -141,6 +149,9 @@ type Response struct {
 	Results []Result
 	Answer  string
 	CostUSD *float64 // when the service reports it (Exa)
+	// Requests is how many requests of the search the service answered (what it may have charged for,
+	// empty answers included); 0 is one when the search succeeded.
+	Requests int
 }
 
 // Searcher is one configured search service.
@@ -302,9 +313,11 @@ type tavily struct {
 	cred providers.Credential
 }
 
-func (t *tavily) Kind() string     { return "tavily" }
-func (t *tavily) Configured() bool { return t.cred.Present() }
-func (t *tavily) Search(ctx context.Context, q Query) (Response, error) {
+func (t *tavily) Kind() string                                          { return "tavily" }
+func (t *tavily) Configured() bool                                      { return t.cred.Present() }
+func (t *tavily) Search(ctx context.Context, q Query) (Response, error) { return fanOut(ctx, q, t.one) }
+
+func (t *tavily) one(ctx context.Context, q Query) (Response, error) {
 	body := map[string]any{"query": q.Text, "max_results": size(q.Max), "search_depth": pick(q.Depth, "fast", "basic", "advanced"), "include_answer": "basic",
 		"include_published_date": true} // general results carry no date otherwise (news always does)
 	if q.Depth != DepthQuick {
@@ -420,15 +433,18 @@ func (e *exa) Search(ctx context.Context, q Query) (Response, error) {
 	if q.Full {
 		contents["text"] = map[string]any{"maxCharacters": pick(q.Depth, 3000, 3000, 4000)}
 	}
-	if q.Fresh == "day" {
-		contents["maxAgeHours"] = 24 // a crawl from today, not the cached copy
+	if q.Fresh == "day" && q.Full && q.Depth != DepthQuick {
+		contents["maxAgeHours"] = 24 // a crawl from today, not the cached copy: only for a search that reads pages, never the light ones
 	}
-	body := map[string]any{"query": q.Text, "type": pick(q.Depth, "instant", "auto", "deep"), "numResults": size(q.Max),
+	// instant is marked legacy in Exa's reference (lite replaces it) but stays served and is what the
+	// quick prices and timings here were measured on; deep-lite is the deep search (about 4 s, the same
+	// content as deep in 2026-11-11's comparison)
+	body := map[string]any{"query": q.Text, "type": pick(q.Depth, "instant", "auto", "deep-lite"), "numResults": size(q.Max),
 		"contents": contents}
 	if q.Topic == TopicNews {
 		body["category"] = "news"
 	}
-	if extra := cleanExtra(q.Extra); q.Depth == DepthDeep && len(extra) > 0 {
+	if extra := RewordedQueries(q); len(extra) > 0 {
 		body["additionalQueries"] = extra // only the deep types take them
 	}
 	if since, ok := freshSince(q.Fresh, time.Now()); ok {
@@ -486,9 +502,11 @@ type serper struct {
 	cred providers.Credential
 }
 
-func (s *serper) Kind() string     { return "serper" }
-func (s *serper) Configured() bool { return s.cred.Present() }
-func (s *serper) Search(ctx context.Context, q Query) (Response, error) {
+func (s *serper) Kind() string                                          { return "serper" }
+func (s *serper) Configured() bool                                      { return s.cred.Present() }
+func (s *serper) Search(ctx context.Context, q Query) (Response, error) { return fanOut(ctx, q, s.one) }
+
+func (s *serper) one(ctx context.Context, q Query) (Response, error) {
 	body := map[string]any{"q": q.Text, "num": size(q.Max)}
 	if hasHangul(q.Text) {
 		body["gl"], body["hl"] = "kr", "ko"
@@ -590,32 +608,59 @@ func (d *daum) Kind() string     { return "kakao_search" }
 func (d *daum) Configured() bool { return d.a.Configured() }
 func (d *daum) Search(ctx context.Context, q Query) (Response, error) {
 	if q.Depth != DepthDeep {
-		return d.web(ctx, q)
+		return d.single(ctx, q)
 	}
-	// deep: Daum web and Daum blogs at once (same key); the blog posts are Korean-heavy and readable
+	// deep: the main query asks Daum web and Daum blogs at once (same key; the blog posts are
+	// Korean-heavy and readable) and the reworded queries ask the web only; with a single request
+	// reserved the main query asks the web alone
+	blog := q.Requests == 0 || q.Requests >= 2
+	main := 1
+	if blog {
+		main = 2
+	}
+	return fanOutWith(ctx, q, main, func(ctx context.Context, q Query) (Response, error) { return d.deepMain(ctx, q, blog) }, d.web)
+}
+
+// single is one web request, counted.
+func (d *daum) single(ctx context.Context, q Query) (Response, error) {
+	res, err := d.web(ctx, q)
+	if err == nil {
+		res.Requests = 1
+	}
+	return res, err
+}
+
+// deepMain is the main query of a deep search: web and blog merged, cut to the size asked.
+func (d *daum) deepMain(ctx context.Context, q Query, blog bool) (Response, error) {
+	if !blog {
+		return d.single(ctx, q)
+	}
 	type answer struct {
 		res Response
 		err error
 	}
-	blog := make(chan answer, 1)
+	bc := make(chan answer, 1)
 	go func() {
-		res, err := d.blog(ctx, q)
-		blog <- answer{res, err}
+		res, err := safely(ctx, q, d.blog)
+		bc <- answer{res, err}
 	}()
-	web, err := d.web(ctx, q)
-	b := <-blog
+	web, err := safely(ctx, q, d.web)
+	b := <-bc
 	switch {
 	case err != nil && b.err != nil:
 		return Response{}, err
 	case err != nil:
+		b.res.Requests = 1
 		return b.res, nil
 	case b.err != nil:
+		web.Requests = 1
 		return web, nil
 	}
 	web.Results = MergeResults(web.Results, b.res.Results)
-	if len(web.Results) > 10 {
-		web.Results = web.Results[:10]
+	if len(web.Results) > size(q.Max) {
+		web.Results = web.Results[:size(q.Max)]
 	}
+	web.Requests = 2
 	return web, nil
 }
 

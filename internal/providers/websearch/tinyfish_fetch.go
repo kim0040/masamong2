@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"masamong/internal/providers"
@@ -45,20 +44,10 @@ func (t *tinyfishFetch) Fetch(ctx context.Context, urls []string, maxChars int) 
 	if maxChars <= 0 {
 		maxChars = 6000
 	}
-	var mu sync.Mutex
-	var svc error
-	out := gather(ctx, len(urls), func(ctx context.Context, i int) Fetched {
-		f, err := t.one(ctx, urls[i], maxChars)
-		if err != nil {
-			mu.Lock()
-			if svc == nil || (errors.Is(err, ErrAuth) && !errors.Is(svc, ErrAuth)) {
-				svc = err
-			}
-			mu.Unlock()
-		}
-		return f
+	out, errs := gather(ctx, len(urls), func(ctx context.Context, i int) (Fetched, error) {
+		return t.one(ctx, urls[i], maxChars)
 	})
-	return finishFetch(urls, out, svc)
+	return finishFetch(urls, out, serviceError(errs))
 }
 
 // finishFetch puts each page's address in and decides whether the service's failure is the call's.
@@ -102,11 +91,19 @@ func fetchErrKind(code string, status int) string {
 		switch status {
 		case 401:
 			return "login"
-		case 403, 429:
+		case 403:
 			return "blocked"
 		}
+		// 429 and the rest: the host's rate limit is a bad minute, not a closed door
 	}
 	return "error" // page_not_found, target_unreachable, content_too_large, invalid_url, ...
+}
+
+// report puts the service's error code for the address into the page. It says the target caused the
+// failure (Fetched.Target) when the service named a timeout, a block or a login for that address.
+func (f *Fetched) report(code string, status int) {
+	f.Err = fetchErrKind(code, status)
+	f.Target = f.Err == "timeout" || f.Err == "blocked" || f.Err == "login"
 }
 
 type fetchBody struct {
@@ -148,13 +145,16 @@ func (t *tinyfishFetch) one(ctx context.Context, raw string, maxChars int) (Fetc
 				page.Err = "service"
 				return page, err // 402: the day's allowance is used; 429: the rate limit
 			case pe.Kind == "timeout":
-				page.Err = "timeout"
+				page.Err = "timeout" // the request to the service timed out: ours, not the page's
+				return page, nil
+			case pe.Kind == "too_large":
+				page.Err = "error" // this page's answer was over the client's limit: the page's failure, not the service's
 				return page, nil
 			case pe.Status >= 400: // refused for this address: its error list says why
 				if resp != nil {
 					var b fetchBody
 					if json.Unmarshal(resp.Body, &b) == nil && len(b.Errors) > 0 {
-						page.Err = fetchErrKind(b.Errors[0].Error, b.Errors[0].Status)
+						page.report(b.Errors[0].Error, b.Errors[0].Status)
 						return page, nil
 					}
 				}
@@ -187,7 +187,7 @@ func (t *tinyfishFetch) one(ctx context.Context, raw string, maxChars int) (Fetc
 		return page, nil
 	}
 	if len(b.Errors) > 0 {
-		page.Err = fetchErrKind(b.Errors[0].Error, b.Errors[0].Status)
+		page.report(b.Errors[0].Error, b.Errors[0].Status)
 		return page, nil
 	}
 	page.Err = "empty"

@@ -186,9 +186,9 @@ func TestSearchFetchFailureKeepsSnippetsAndHealth(t *testing.T) {
 		health bool // the fetch service's health records an error
 	}{
 		{"page error", 200, func(u string) string { return `{"results":[],"errors":[{"url":"` + u + `","error":"bot_blocked"}]}` }, "blocked", false},
-		{"service error", 500, func(string) string { return `{"error":"boom"}` }, "service", true},
-		{"allowance used", 402, func(string) string { return `{"error":"daily allowance used"}` }, "service", true},
-		{"key refused", 401, func(string) string { return `{"error":"no"}` }, "service", true},
+		{"service error", 500, func(string) string { return `{"error":"boom"}` }, "unavailable", true},
+		{"allowance used", 402, func(string) string { return `{"error":"daily allowance used"}` }, "unavailable", true},
+		{"key refused", 401, func(string) string { return `{"error":"no"}` }, "unavailable", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			svc, _ := withFetch(t, 3, hostOf, func(u string) (int, string, time.Duration) { return tc.status, tc.body(u), 0 })
@@ -374,9 +374,13 @@ func newSlowSearch(t *testing.T, delay time.Duration, status int, title, link st
 }
 
 // Every depth is served by the first service of the order in its own mode; the next one is asked only
-// when that one fails or finds nothing. Deep waits up to 45 s for a service.
+// when that one fails or finds nothing. Deep waits up to 15 s for a service (Linkup's slow deep search
+// 45 s), 50 s for the whole search.
 func TestDeepSearchUsesOneServiceAtATime(t *testing.T) {
-	if got := application.SearchDeadlineForTest("deep"); got != 45*time.Second {
+	if got := application.SearchDeadlineForTest("linkup", "deep"); got != 45*time.Second {
+		t.Fatalf("linkup deep deadline %v", got)
+	}
+	if got := application.SearchDeadlineForTest("exa", "deep"); got != 15*time.Second {
 		t.Fatalf("deep deadline %v", got)
 	}
 	first := newSlowSearch(t, 0, 200, "A", "https://a.example/1")

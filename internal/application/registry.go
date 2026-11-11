@@ -109,7 +109,7 @@ func (r *Registry) pageFetcher(ws config.WebSearch) websearch.Fetcher {
 func (r *Registry) reserveN(id string, n int) int { return r.Quota.ReserveN(id, n) }
 
 // searchHTTPTimeout is the HTTP limit of the search services' requests: above the longest wait for one
-// service (searchDeadline, deep: Linkup's deep search took 41 s), so that limit, not this one, ends a call.
+// service (searchDeadlineKind: Linkup's deep search took 41 s and gets 45), so that limit, not this one, ends a call.
 const searchHTTPTimeout = 50 * time.Second
 
 // followTransport sends through the transport its client has at the moment of each request, so a copy of
@@ -315,6 +315,11 @@ func (r *Registry) reserve(id string) error {
 	return nil
 }
 
+// probeTimeout bounds one connection check, whatever the caller's context allows: the search services'
+// HTTP limit is 50 s and the client retries, so a hung service would otherwise keep the console button
+// waiting for minutes. A variable so a test can shorten it.
+var probeTimeout = 15 * time.Second
+
 // Probe makes the cheapest real request for provider id so 'providers test' proves the credential works.
 func (r *Registry) Probe(ctx context.Context, id string) (map[string]any, error) {
 	st, ok := r.byID[id]
@@ -324,6 +329,8 @@ func (r *Registry) Probe(ctx context.Context, id string) (map[string]any, error)
 	if err := r.reserve(id); err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	defer cancel()
 	start := time.Now()
 	out := map[string]any{"id": id, "kind": st.Kind}
 	var err error

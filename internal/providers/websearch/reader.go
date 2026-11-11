@@ -34,6 +34,9 @@ func NewReader(client *providers.Client, baseURL string, cred providers.Credenti
 	return &Reader{c: client, base: strings.TrimRight(baseURL, "/"), cred: cred}
 }
 
+// Keyed is whether the reader has a key (without one Jina allows 20 requests a minute).
+func (r *Reader) Keyed() bool { return r != nil && r.cred.Present() }
+
 // Page is one read page.
 type Page struct {
 	Title     string
