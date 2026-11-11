@@ -18,6 +18,59 @@ The console binds to **the loopback interface (`127.0.0.1`) only**. No port is o
 
 On Windows, the commands the console shows you (sign in again, sign out, "the service is stopped") are written for the shell you are likely in: PowerShell as `& "C:\...\masamong.exe" open` with a `cmd.exe` form beside it when it differs. The login page prints the home folder as `$env:USERPROFILE` / `%USERPROFILE%`, not your account's real path.
 
+### Opening the console of a remote server (start here)
+
+Even when Masamong runs on a server without a screen (a VPS, a box at home), you open the console in **your own computer's browser**. Nothing on the server has to be opened in the firewall. The SSH login you already use carries an encrypted passage (an SSH tunnel) between your computer and the server, and the console comes through it.
+
+**What you need**
+
+- From a terminal on your computer, `ssh user@server` logs you in to the server. macOS, Linux and Windows 10 or later ship with `ssh` (on Windows, run it in PowerShell).
+- `masamong` installed on your computer too ([Installation](https://github.com/kim0040/masamong2/wiki/Installation)). Installing is enough; no bot setup and no running service. If you cannot install it there, see [Opening it with ssh alone](#opening-it-with-ssh-alone) below.
+
+**Step 1: check the SSH login**
+
+```bash
+ssh user@server          # you should reach the server's prompt without a password, or after typing one once
+exit
+```
+
+`user` is your user name on the server and `server` its address (IP or domain). The first time you connect, ssh asks `Are you sure you want to continue connecting (yes/no)?`. If it is your server, type `yes`.
+
+**Step 2: connect from your computer**
+
+```bash
+masamong connect user@server
+```
+
+- If Masamong is stopped on the server, this starts it.
+- A moment later your browser opens on the console, **already signed in**. There is no password to type. The terminal prints `opened the console at http://127.0.0.1:<port>`.
+- If you log in with a password or a key passphrase, you may be asked twice (once to fetch the sign-in link from the server, once for the tunnel).
+
+**Step 3: close it when you are done**
+
+Press `Ctrl+C` in the terminal or close the terminal window. Only the tunnel closes; **the bot keeps running on the server.** Next time, step 2 is all you need.
+
+**Common cases**
+
+- **The same address every time**: `masamong connect user@server --port 8787` always opens `http://127.0.0.1:8787`, so you can bookmark it.
+- **You log in with a specific key file** (as in `ssh -i ~/.ssh/mykey user@server`): `masamong connect` has no `-i` option. Give the server a nickname once in `~/.ssh/config` on your computer (`%USERPROFILE%\.ssh\config` on Windows) and connect with the nickname. If SSH is not on port 22, add a `Port` line.
+
+  ```text
+  Host my-masamong
+      HostName 203.0.113.10
+      User user
+      IdentityFile ~/.ssh/mykey
+      # Port 2222
+  ```
+
+  ```bash
+  ssh my-masamong                  # check that the nickname logs you in first
+  masamong connect my-masamong
+  ```
+
+- **Masamong is installed somewhere else on the server**: pass its path, e.g. `--remote_command /opt/masamong/bin/masamong`.
+- **The server uses another data folder**: pass it, e.g. `--remote_data_root /srv/masamong`.
+
 ### How `connect` works
 
 1. It logs in to the server over SSH and runs `masamong open --no-browser` there (starting the daemon if needed).
@@ -31,7 +84,35 @@ On Windows, the commands the console shows you (sign in again, sign out, "the se
 | `--remote_data_root /srv/masamong` | The server's data folder |
 | `--remote_command /opt/masamong/bin/masamong` | Path of `masamong` on the server (default search: `~/.local/bin`, then `/usr/local/bin`) |
 
-With SSH key login on the server, you can manage it without opening the console port in the firewall.
+`connect` runs your computer's own `ssh`, so everything in `~/.ssh/config` (key files, ports, jump hosts) applies. With SSH key login on the server, you can manage it without opening the console port in the firewall.
+
+### Opening it with ssh alone
+
+When you cannot install Masamong on your computer (a work laptop, say), one `ssh` command makes the tunnel.
+
+1. **Find the server's console port**: on the server, run `masamong status --output json` and look at `"bind"`. The default is `127.0.0.1:8787`, which the example below uses.
+2. **Open the tunnel from your computer**:
+
+   ```bash
+   ssh -N -L 8787:127.0.0.1:8787 user@server
+   ```
+
+   The first `8787` is the port on your computer; `127.0.0.1:8787` after it is the console's address inside the server (the `bind` from step 1). `-N` means "no command, tunnel only", so **it prints nothing and just waits. That is normal.** Leave that window open. With a key file, add it: `ssh -i ~/.ssh/mykey -N -L …`.
+3. **Open it in the browser**: go to `http://127.0.0.1:8787`. On the sign-in screen, paste the value that `masamong admin token` prints on the server.
+4. **Close it**: `Ctrl+C` in the tunnel window. The bot keeps running on the server.
+
+If port 8787 is already taken on your computer, ssh says `bind [127.0.0.1]:8787: Address already in use`. Change only the first number (`-L 9000:127.0.0.1:8787`) and open `http://127.0.0.1:9000`.
+
+### When the remote connection fails
+
+| What the terminal says | Cause and fix |
+|---|---|
+| `Permission denied (publickey)`, or the password prompt keeps coming back | The SSH login itself fails. Check that `ssh user@server` works on its own; with a separate key file, use the `~/.ssh/config` nickname above. |
+| `Connection timed out`, `Could not resolve hostname` | Wrong server address or SSH port, or the server is unreachable. Check the address and `Port`. |
+| `remote open failed: … masamong: command not found` | The server cannot find `masamong`. Find its path with `which masamong` on the server and pass it as `--remote_command <path>`. |
+| `unexpected reply from remote masamong` | A shell startup file on the server (`.bashrc` and the like) may print a greeting that gets mixed into the reply. Make it print nothing in non-interactive shells, or use the ssh-only way above. |
+| `SSH tunnel opened but the remote console did not become healthy` | The tunnel is up but the console on the server does not answer. Check it on the server with `masamong status` and `masamong doctor`. |
+| The browser does not open | Copy the address after `open this address in your browser:` from the terminal into a browser. |
 
 ### Through a Tailscale name
 

@@ -162,7 +162,9 @@ loginctl enable-linger $USER   # 注销后继续运行（只需一次）
 masamong connect user@server
 ```
 
-即使在服务器上，控制台也只监听 `127.0.0.1`，因此无需开放任何端口。
+运行 `masamong connect` 后，浏览器会打开已登录的控制台。用完后按 `Ctrl+C` 关闭（机器人在服务器上继续运行）。即使在服务器上，控制台也只监听 `127.0.0.1`，因此无需开放任何端口。
+
+第一次使用？请按 [Wiki › Admin console](https://github.com/kim0040/masamong2/wiki/Admin-Console) 中的 “Opening the console of a remote server”（英文）操作：其中逐步说明了使用单独 SSH 密钥文件的情况、电脑上没有 masamong 时只用 `ssh` 打开的方法，以及各条错误信息的处理办法。
 </details>
 
 <details>

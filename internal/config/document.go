@@ -1286,7 +1286,7 @@ func Default(instanceID, dataDir string) Document {
 			"rerank":   {Provider: "openrouter", Model: "voyageai/rerank-2.5-lite"},
 		},
 		Limits: Limits{
-			Profile: "lite", MonthlyBudgetUSD: "10.00", PerRequestBudgetUSD: "0.03", MaxExternalAttempts: 6,
+			Profile: "lite", MonthlyBudgetUSD: "10.00", PerRequestBudgetUSD: "0.03", MaxExternalAttempts: 10,
 		},
 		Memory: MemoryFlags{Capture: false, Extract: false, Embed: true, Retrieve: "auto", Summaries: true,
 			NaiveTimezone: "Asia/Seoul", IndexBudgetUSD: "1.00", TurnBudgetUSD: "0.05", IndexIntervalMin: 10,

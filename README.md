@@ -162,7 +162,9 @@ loginctl enable-linger $USER   # keep running after you log out (once)
 masamong connect user@server
 ```
 
-Even on a server the console listens on `127.0.0.1` only, so no port has to be opened.
+`masamong connect` opens the console in your browser, already signed in. Press `Ctrl+C` when you are done (the bot keeps running on the server). Even on a server the console listens on `127.0.0.1` only, so no port has to be opened.
+
+First time? Follow "Opening the console of a remote server" in [Wiki › Admin console](https://github.com/kim0040/masamong2/wiki/Admin-Console): it covers a separate SSH key file, opening it with `ssh` alone when Masamong is not on your computer, and what to do for each error message.
 </details>
 
 <details>

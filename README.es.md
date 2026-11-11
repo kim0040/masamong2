@@ -161,7 +161,9 @@ loginctl enable-linger $USER   # sigue en ejecución al cerrar sesión (una sola
 masamong connect user@server
 ```
 
-Incluso en un servidor, la consola escucha solo en `127.0.0.1`, así que no hay que abrir ningún puerto.
+`masamong connect` abre la consola en tu navegador con la sesión ya iniciada. Cuando termines, pulsa `Ctrl+C` (el bot sigue funcionando en el servidor). Incluso en un servidor, la consola escucha solo en `127.0.0.1`, así que no hay que abrir ningún puerto.
+
+¿Primera vez? Sigue «Opening the console of a remote server» en [Wiki › Admin console](https://github.com/kim0040/masamong2/wiki/Admin-Console) (en inglés): explica paso a paso cómo usar un archivo de clave SSH aparte, cómo abrirla solo con `ssh` si no tienes masamong en tu ordenador y qué hacer ante cada mensaje de error.
 </details>
 
 <details>

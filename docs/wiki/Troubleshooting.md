@@ -65,7 +65,7 @@ In **Conversations**, look at each step's time (planner, tools, memory search, r
 ## The console does not open
 
 - If `masamong open` does not open a browser, copy the one-time link printed in the terminal into a browser.
-- For a remote server, run `masamong connect user@host` on your computer. If `masamong` is not on the server's standard PATH, give its full path with `--remote_command`.
+- For a remote server, run `masamong connect user@host` on your computer. If `masamong` is not on the server's standard PATH, give its full path with `--remote_command`. A separate SSH key file, opening it with `ssh` alone, and a fix for each error message are in [Admin console › Opening the console of a remote server](https://github.com/kim0040/masamong2/wiki/Admin-Console).
 - If the interface does not render, the light page `http://127.0.0.1:8787/lite` still offers status and restart.
 - If port 8787 is taken, the service takes a free local port by itself (a warning in the log says so) and `masamong open` finds it; the address is also in `daemon.json` in the data folder. To pin a port, set `admin.web.bind` to another local one (e.g. `127.0.0.1:8790`).
 - If the console asks you to sign in again (after "Log out", or when the session ended), its sign-in screen shows the command to run for your system: `masamong open` in bash or zsh, or `& "C:\...\masamong.exe" open` for PowerShell with a `cmd.exe` form beside it. The token itself is the file `admin/web-token` in the data folder (`%APPDATA%\Masamong\admin\web-token` on Windows; `masamong admin token` prints it). The light `/lite` page signs in with a form that sends the token in the request body, not in the address, so it stays out of the browser history and logs.

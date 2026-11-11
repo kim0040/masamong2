@@ -162,7 +162,9 @@ loginctl enable-linger $USER   # 로그아웃해도 계속 돌게 (한 번만)
 masamong connect user@server
 ```
 
-관리 화면은 서버에서도 `127.0.0.1`에만 열리므로 포트를 바깥에 열 필요가 없습니다.
+`masamong connect`를 실행하면 브라우저에 로그인된 관리 화면이 열립니다. 다 쓰면 `Ctrl+C`로 닫습니다(봇은 서버에서 계속 돌아갑니다). 관리 화면은 서버에서도 `127.0.0.1`에만 열리므로 포트를 바깥에 열 필요가 없습니다.
+
+처음이라면 [위키 › 관리 콘솔](https://github.com/kim0040/masamong2/wiki/관리-콘솔)의 "원격 서버의 콘솔 열기"를 따라 하세요. SSH 키 파일을 따로 쓰는 경우, 내 컴퓨터에 masamong 없이 `ssh`만으로 여는 방법, 오류 메시지별 해결이 단계별로 있습니다.
 </details>
 
 <details>

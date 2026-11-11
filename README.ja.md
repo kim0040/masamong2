@@ -162,7 +162,9 @@ loginctl enable-linger $USER   # ログアウト後も動かす（1回だけ）
 masamong connect user@server
 ```
 
-サーバー上でもコンソールは`127.0.0.1`だけをリッスンするため、ポートを開ける必要はありません。
+`masamong connect`を実行すると、ログイン済みのコンソールがブラウザで開きます。使い終わったら`Ctrl+C`で閉じます（ボットはサーバーで動き続けます）。サーバー上でもコンソールは`127.0.0.1`だけをリッスンするため、ポートを開ける必要はありません。
+
+初めての場合は[Wiki › Admin console](https://github.com/kim0040/masamong2/wiki/Admin-Console)の「Opening the console of a remote server」（英語）を見てください。SSH鍵ファイルを別に指定する場合、自分のパソコンにmasamongを入れずに`ssh`だけで開く方法、エラーメッセージごとの対処を順に説明しています。
 </details>
 
 <details>
