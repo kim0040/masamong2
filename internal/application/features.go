@@ -1439,31 +1439,63 @@ func withoutBotNames(query string, names []string) string {
 	if len(names) == 0 {
 		return query
 	}
-	isName := func(word string) bool {
-		w := strings.ToLower(strings.Trim(word, "\"'“”‘’「」『』,.!?:;~"))
-		for _, n := range names {
-			n = strings.ToLower(strings.TrimSpace(n))
-			if n == "" {
-				continue
+	// a word compared: lower case, without quotes anywhere ("“마사몽”아" is 마사몽아) or punctuation at its edges
+	fold := func(word string) string {
+		word = strings.Map(func(r rune) rune {
+			if strings.ContainsRune("\"'“”‘’「」『』", r) {
+				return -1
 			}
-			if w == n {
+			return r
+		}, word)
+		return strings.ToLower(strings.Trim(word, ",.!?:;~"))
+	}
+	last := func(w, n string) bool { // the name's last word, alone or with a call or subject ending
+		if w == n {
+			return true
+		}
+		if rest, ok := strings.CutPrefix(w, n); ok {
+			switch rest {
+			case "아", "야", "이", "가", "은", "는", "님", "이가", "한테", "에게":
 				return true
-			}
-			if rest, ok := strings.CutPrefix(w, n); ok {
-				switch rest {
-				case "아", "야", "이", "가", "은", "는", "님", "이가", "한테", "에게":
-					return true
-				}
 			}
 		}
 		return false
 	}
 	words := strings.Fields(query)
-	kept := words[:0:0]
-	for _, w := range words {
-		if !isName(w) {
-			kept = append(kept, w)
+	folded := make([]string, len(words))
+	for i, w := range words {
+		folded[i] = fold(w)
+	}
+	// the length in words of a name starting at word i (a name of several words, "Masamong Bot", too)
+	nameAt := func(i int) int {
+		longest := 0
+		for _, n := range names {
+			parts := strings.Fields(strings.ToLower(n))
+			if len(parts) == 0 || i+len(parts) > len(words) {
+				continue
+			}
+			ok := true
+			for k, part := range parts {
+				if k == len(parts)-1 {
+					ok = ok && last(folded[i+k], part)
+				} else {
+					ok = ok && folded[i+k] == part
+				}
+			}
+			if ok && len(parts) > longest {
+				longest = len(parts) // the longest name there: "Masamong Bot" over "Masamong"
+			}
 		}
+		return longest
+	}
+	kept := words[:0:0]
+	for i := 0; i < len(words); {
+		if n := nameAt(i); n > 0 {
+			i += n
+			continue
+		}
+		kept = append(kept, words[i])
+		i++
 	}
 	if len(kept) == 0 || len(kept) == len(words) {
 		return query

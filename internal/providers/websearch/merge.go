@@ -70,6 +70,9 @@ func MergeResults(lists ...[]Result) []Result {
 				}
 			}
 			if dup {
+				if _, seen := at[key]; !seen {
+					at[key] = i // this address is a copy of the page kept: met again, it is merged too
+				}
 				k := &out[i]
 				if k.Text == "" {
 					k.Text = r.Text
@@ -82,6 +85,11 @@ func MergeResults(lists ...[]Result) []Result {
 				}
 				if k.Title == "" {
 					k.Title = r.Title
+				}
+				if alias := sameText(CanonicalURL(k.URL), *k); alias != "" {
+					if _, seen := at[alias]; !seen {
+						at[alias] = i // the kept page now has the title and snippet a copy is known by
+					}
 				}
 				continue
 			}
@@ -96,7 +104,8 @@ func MergeResults(lists ...[]Result) []Result {
 
 // sameText is the key a page is a copy of another under: its site, title and the start of its snippet,
 // folded. Pages of one site often share a title (a school's notices are all "입학정보"), so the snippet
-// must match too; a result without a title or a snippet long enough to tell is only itself ("").
+// must match too, and a title under eight characters or a snippet under twenty is too short to tell a
+// copy from another notice: such a result is only itself ("").
 func sameText(canonical string, r Result) string {
 	fold := func(s string, n int) string {
 		s = strings.ToLower(strings.Join(strings.Fields(s), " "))
@@ -109,7 +118,9 @@ func sameText(canonical string, r Result) string {
 	if len([]rune(title)) < 8 || len([]rune(snippet)) < 20 {
 		return ""
 	}
-	host := strings.TrimPrefix(canonical, "https://")
-	host, _, _ = strings.Cut(host, "/")
-	return "same:" + host + "|" + title + "|" + snippet
+	u, err := url.Parse(canonical)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	return "same:" + u.Host + "|" + title + "|" + snippet
 }

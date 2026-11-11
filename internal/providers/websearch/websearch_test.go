@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -286,12 +287,12 @@ func TestResearchPerService(t *testing.T) {
 			}
 		}},
 		{"serper", Query{Text: "three dimensional time", Topic: TopicResearch, Fresh: "week"},
-			`{"organic":[{"title":"Three-dimensional time","link":"https://w.example/doi/1","publicationInfo":"G Kletetschka - Reports in Advances of Physical Sciences, 2025","snippet":"This paper introduces","year":2025,"citedBy":49}]}`,
+			fmt.Sprintf(`{"organic":[{"title":"Three-dimensional time","link":"https://w.example/doi/1","publicationInfo":"G Kletetschka - Reports in Advances of Physical Sciences, %[1]d","snippet":"This paper introduces","year":%[1]d,"citedBy":49}]}`, time.Now().Year()),
 			func(t *testing.T, s seen, res Response) {
 				if s.path != "/scholar" || s.body["tbs"] != nil {
 					t.Errorf("serper: %s %v", s.path, s.body)
 				}
-				if len(res.Results) != 1 || res.Results[0].Published != "2025" || !strings.HasPrefix(res.Results[0].Snippet, "G Kletetschka") {
+				if len(res.Results) != 1 || res.Results[0].Published != strconv.Itoa(time.Now().Year()) || !strings.HasPrefix(res.Results[0].Snippet, "G Kletetschka") {
 					t.Errorf("serper reply: %+v", res)
 				}
 			}},
@@ -363,6 +364,73 @@ func TestMergeDropsSameSiteCopies(t *testing.T) {
 	want := []string{"https://kr.investing.com/equities/spacex", "https://ipsi.cbnu.ac.kr/a", "https://ipsi.cbnu.ac.kr/b", "https://other.example/spacex", "https://kr.investing.com/x", "https://kr.investing.com/y"}
 	if !slices.Equal(urls, want) {
 		t.Fatalf("got %v\nwant %v", urls, want)
+	}
+}
+
+// A copy's address is merged again when it comes back with another snippet (a reworded query), and the
+// pages behind a site's root with a query string ("/?p=1") are one site.
+func TestMergeRemembersCopiesAndRootQueries(t *testing.T) {
+	long := "2027학년도 편입학 모집요강 안내입니다 자세히 보세요"
+	got := MergeResults([]Result{
+		{Title: "충북대학교 편입학 모집요강", URL: "https://s.example/a", Snippet: long},
+		{Title: "충북대학교 편입학 모집요강", URL: "https://s.example/b", Snippet: long},
+		{Title: "충북대학교 편입학 모집요강", URL: "https://s.example/b", Snippet: "다른 질의가 받은 같은 쪽의 다른 발췌문입니다 여기"},
+		{Title: "워드프레스 공지 제목입니다", URL: "https://w.example/?p=1", Snippet: long},
+		{Title: "워드프레스 공지 제목입니다", URL: "https://w.example/?p=2", Snippet: long},
+	})
+	var urls []string
+	for _, r := range got {
+		urls = append(urls, r.URL)
+	}
+	if want := []string{"https://s.example/a", "https://w.example/?p=1"}; !slices.Equal(urls, want) {
+		t.Fatalf("got %v, want %v", urls, want)
+	}
+}
+
+// The word for papers is added unless the query already asks for them as a whole word: "paperclip",
+// "newspaper" and "journalism" do not.
+func TestResearchWords(t *testing.T) {
+	for in, want := range map[string]string{
+		"paperclip maximizer": "paperclip maximizer paper",
+		"newspaper bias":      "newspaper bias paper",
+		"journalism ethics":   "journalism ethics paper",
+		"transformer papers":  "transformer papers",
+		"sleep studies 2025":  "sleep studies 2025",
+		"arXiv: diffusion":    "arXiv: diffusion",
+		"수면 연구":               "수면 연구",
+		"수면과 기억":              "수면과 기억 논문",
+	} {
+		if got := researchWords(in); got != want {
+			t.Errorf("%q: got %q, want %q", in, got, want)
+		}
+	}
+}
+
+// Google Scholar takes no recency window, so a recent research search keeps the papers from the year the
+// window starts (and those without a year).
+func TestSerperScholarKeepsRecentYears(t *testing.T) {
+	year := time.Now().AddDate(0, 0, -31).Year()
+	reply := fmt.Sprintf(`{"organic":[{"title":"old","link":"https://a.example/1","snippet":"s","year":2017},{"title":"new","link":"https://a.example/2","snippet":"s","year":%d},{"title":"undated","link":"https://a.example/3","snippet":"s"}]}`, year)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(reply)) }))
+	defer srv.Close()
+	c := providers.NewClient(5*time.Second, nil)
+	c.MaxRetries = 0
+	t.Setenv("K", "k")
+	cred, _ := providers.Resolve("env:K")
+	s, _ := New("serper", c, srv.URL, cred)
+	var titles []string
+	res, err := s.Search(context.Background(), Query{Text: "x", Topic: TopicResearch, Fresh: "month"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range res.Results {
+		titles = append(titles, r.Title)
+	}
+	if !slices.Equal(titles, []string{"new", "undated"}) {
+		t.Fatalf("fresh: %v", titles)
+	}
+	if res, _ := s.Search(context.Background(), Query{Text: "x", Topic: TopicResearch}); len(res.Results) != 3 {
+		t.Fatalf("any year: %+v", res.Results)
 	}
 }
 

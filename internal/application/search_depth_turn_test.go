@@ -147,8 +147,13 @@ func TestSearchLeavesOutTheBotsName(t *testing.T) {
 		{"마사몽2 출시", "마사몽2 출시"},
 		{"마사몽의 뜻", "마사몽의 뜻"},
 		{"SpaceX 주가", "SpaceX 주가"},
+		{"“마사몽”아 스페이스X 주가", "스페이스X 주가"},
+		{"MASAMONG, SpaceX", "SpaceX"},
+		{"masamongish SpaceX", "masamongish SpaceX"},
+		{"Masamong Bot SpaceX stock", "SpaceX stock"},
+		{"Bot SpaceX stock", "Bot SpaceX stock"},
 	} {
-		if got := withoutBotNames(c.in, names); got != c.want {
+		if got := withoutBotNames(c.in, append(names, "Masamong Bot")); got != c.want {
 			t.Errorf("%q: got %q, want %q", c.in, got, c.want)
 		}
 	}

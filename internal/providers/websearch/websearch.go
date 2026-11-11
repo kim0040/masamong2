@@ -58,6 +58,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"masamong/internal/providers"
 	"masamong/internal/providers/decode"
@@ -144,8 +145,15 @@ var scholarlyDomains = []string{
 // Korean query, "paper" otherwise, unless the query already names papers or studies.
 func researchWords(text string) string {
 	low := strings.ToLower(text)
-	for _, w := range []string{"논문", "연구", "학술", "paper", "study", "studies", "journal", "arxiv", "preprint"} {
+	for _, w := range []string{"논문", "연구", "학술"} {
 		if strings.Contains(low, w) {
+			return text
+		}
+	}
+	// English words whole: "paperclip", "newspaper" and "journalism" do not ask for papers
+	for _, w := range strings.FieldsFunc(low, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
+		switch w {
+		case "paper", "papers", "study", "studies", "journal", "journals", "arxiv", "preprint", "preprints":
 			return text
 		}
 	}
@@ -581,8 +589,8 @@ func (s *serper) one(ctx context.Context, q Query) (Response, error) {
 	case TopicNews:
 		path = "/news" // Google News: news[].title/link/snippet/date/source
 	case TopicResearch:
-		path = "/scholar" // Google Scholar: organic[].title/link/snippet/publicationInfo/year
-		delete(body, "tbs")
+		path = "/scholar"   // Google Scholar: organic[].title/link/snippet/publicationInfo/year
+		delete(body, "tbs") // Scholar takes no recency window: the year filters below instead
 	}
 	obj, err := post(ctx, s.c, s.base+path, map[string]string{"X-API-KEY": s.cred.Value()}, body)
 	if err != nil {
@@ -592,7 +600,11 @@ func (s *serper) one(ctx context.Context, q Query) (Response, error) {
 	case "/news":
 		return ParseSerperNews(obj)
 	case "/scholar":
-		return ParseSerperScholar(obj)
+		res, err := ParseSerperScholar(obj)
+		if since, ok := freshSince(q.Fresh, time.Now()); ok && err == nil {
+			res.Results = fromYear(res.Results, since.Year()) // recent papers only: from the year the window starts
+		}
+		return res, err
 	}
 	return ParseSerper(obj)
 }
@@ -644,6 +656,18 @@ func ParseSerperScholar(obj map[string]json.RawMessage) (Response, error) {
 		out.Results = append(out.Results, res)
 	}
 	return out, nil
+}
+
+// fromYear keeps the papers of a year or later (Published holds the year; a paper without one is kept).
+func fromYear(results []Result, year int) []Result {
+	kept := results[:0:0]
+	for _, r := range results {
+		if y, err := strconv.Atoi(r.Published); err == nil && y < year {
+			continue
+		}
+		kept = append(kept, r)
+	}
+	return kept
 }
 
 // ParseSerper reads {"answerBox":{answer|snippet}, "organic":[{title,link,snippet,date}]}.
