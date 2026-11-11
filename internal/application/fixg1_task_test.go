@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"masamong/internal/application"
 	"masamong/internal/clock"
@@ -87,8 +86,8 @@ func TestScheduledTaskReadsNoPagesAndClipsItsRecord(t *testing.T) {
 		}
 	}
 
-	// a planner that asks for pages gets them from the service's own text (Exa opens no page): the record
-	// keeps 200 runes of each
+	// a planner that asks for pages still gets none for a task (searchPages), even from a service whose
+	// results carry page text; a record would clip any passage to 200 runes (TestTurnRecordClipsPassages)
 	text := strings.Repeat("가평 캠핑장은 강 옆에 있고 1박에 4만 원입니다. ", 60)
 	exa := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := json.Marshal(map[string]any{"results": []any{map[string]any{"title": "E1", "url": "https://c.example/1", "highlights": []string{"h"}, "text": text}},
@@ -99,8 +98,7 @@ func TestScheduledTaskReadsNoPagesAndClipsItsRecord(t *testing.T) {
 	plan = `{"memory_requirement":"none","question_kind":"other","tool_plan":[{"tool_name":"search.web","parameters":{"query":"가평 캠핑장 요금","pages":2}}]}`
 	body = taskWithSearch(t, plan, func(svc *application.Service) { pointAt(t, svc, "exa", exa.URL, "E_KEY", "k") })
 	item := recordedSearch(t, body)[0].(map[string]any)
-	passage, _ := item["passage"].(string)
-	if passage == "" || utf8.RuneCountInString(passage) > 201 || item["passage_runes"] == nil {
-		t.Fatalf("recorded passage of %d runes: %v", utf8.RuneCountInString(passage), item)
+	if item["passage"] != nil || item["read"] != nil {
+		t.Fatalf("a task read pages although the planner asked: %v", item)
 	}
 }
