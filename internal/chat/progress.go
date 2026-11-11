@@ -13,7 +13,7 @@ import (
 type Progress struct {
 	Stage    string // ProgressSearch | ProgressDeep | ProgressMore
 	Round    int    // the tool loop round (1 for the planner path)
-	Searches int    // web searches started in that round
+	Searches int    // web searches the round asked for
 }
 
 // Progress stages.
@@ -71,4 +71,26 @@ func searchProgress(round int, searches []map[string]any) Progress {
 func deepParams(params map[string]any) bool {
 	depth, _ := params["depth"].(string)
 	return strings.EqualFold(strings.TrimSpace(depth), "deep")
+}
+
+// roundProgress tells a round's stage as its web searches are let in (admitTool): a search the turn's
+// limits refuse starts nothing, so it says nothing. The stage is searchProgress of the searches let in so
+// far, each stage told once (progressOnce): deep only once a deep search is let in. A round whose
+// ordinary search is let in before its deep one tells search, then deep.
+type roundProgress struct {
+	report   func(Progress) // nil: no listener
+	round    int
+	asked    int // the round's searches
+	admitted []map[string]any
+}
+
+// admit notes that one of the round's searches (its parameters) was let in.
+func (p *roundProgress) admit(params map[string]any) {
+	if p == nil || p.report == nil {
+		return
+	}
+	p.admitted = append(p.admitted, params)
+	st := searchProgress(p.round, p.admitted)
+	st.Searches = p.asked
+	p.report(st)
 }

@@ -527,6 +527,7 @@ func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message,
 		// each tool what it spent; the results stay in the model's order
 		var steps []step
 		var searches []map[string]any
+		told := &roundProgress{report: progress, round: round} // the stage is told as searches are let in
 		for _, lc := range calls {
 			if !lc.run {
 				continue
@@ -561,6 +562,9 @@ func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message,
 					return false
 				}
 				l.Guard.Note(0) // what the tool pays for is added by the tool (Guard.Spend)
+				if lc.id == webSearchTool {
+					told.admit(lc.params)
+				}
 				return true
 			}, run: func() {
 				r := runTool(ctx, l.Guard, l.Run, lc.id, lc.params)
@@ -570,9 +574,7 @@ func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message,
 				lc.result = &r
 			}})
 		}
-		if progress != nil && len(searches) > 0 {
-			progress(searchProgress(round, searches))
-		}
+		told.asked = len(searches)
 		runSteps(ctx, l.Guard, steps)
 		for _, lc := range calls {
 			switch {

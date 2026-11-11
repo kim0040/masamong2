@@ -267,6 +267,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 	planned := make([]*ToolResult, len(res.Assess.Steps))
 	var steps []step
 	var searches []map[string]any
+	told := &roundProgress{report: req.OnProgress, round: 1} // the stage is told as searches are let in
 	var toolsEnd time.Time
 	var endMu sync.Mutex
 	for i, st := range res.Assess.Steps {
@@ -294,6 +295,9 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 					return false
 				}
 				req.Guard.Note(0) // what the tool pays for is added by the tool (Guard.Spend)
+				if st.Tool == webSearchTool {
+					told.admit(st.Parameters)
+				}
 				return true
 			}, run: func() {
 				defer sp.begin("tool:" + st.Tool)()
@@ -321,9 +325,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 				mem = rt.searchMemory(ctx, req, msg, intent, remaining, nowT)
 			}})
 	}
-	if req.OnProgress != nil && len(searches) > 0 {
-		req.OnProgress(searchProgress(1, searches))
-	}
+	told.asked = len(searches)
 	runSteps(ctx, req.Guard, steps)
 	if early != nil {
 		mem = early.wait()
@@ -403,8 +405,9 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 	res.CostUSD += completion.CostUSD
 	if err != nil && errclass.Of(err) == errclass.ContextLength && ctx.Err() == nil {
 		// the prompt is longer than the model takes: once more with less of it. Half the conversation and
-		// half the memory hits, no room memory and no ambient chat; the system prompt, the tool results and
-		// the member's message stay. The hits the room memory covered come back with their state.
+		// half the memory hits, no room memory and no ambient chat, and the tool results back to the room of
+		// a turn without page text (toolBlockMax: the passages are cut first); the system prompt, the tool
+		// results and the member's message stay. The hits the room memory covered come back with their state.
 		slog.Default().WarnContext(ctx, "chat: answer prompt too long for the model, retrying once with less context", "reason", string(errclass.ContextLength))
 		res.AnswerRetry = string(errclass.ContextLength)
 		hist := req.History
@@ -417,7 +420,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 		msgs = BuildAnswerMessages(v, AnswerInput{
 			System: system, History: hist, MaxHistory: len(hist),
 			Hits: res.Hits, RagState: res.RagState, Tools: res.Tools, Speaker: req.Speaker, Message: msg, Intent: intent, Now: local,
-			DeepSearch: deep,
+			DeepSearch: deep, ToolBudget: toolBlockMax,
 		})
 		withImages(msgs, req.Images)
 		completion, err = rt.complete(ctx, req.ResponseModel, msgs, answerBudget, 0.2)

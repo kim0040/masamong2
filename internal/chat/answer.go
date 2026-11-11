@@ -347,6 +347,9 @@ type AnswerInput struct {
 	// DeepSearch marks a turn whose web search looked deep (depth deep): the tool results get the most
 	// room and the reply is asked for a synthesis (chat.tool_conclusion_deep) instead of a short answer.
 	DeepSearch bool
+	// ToolBudget, when above 0, is the room the tool results get instead of toolBlockBudget's (the retry of
+	// an answer whose prompt was too long takes it back to toolBlockMax).
+	ToolBudget int
 }
 
 // BuildAnswerMessages is engine._build_chat_messages with the friend framing.
@@ -409,7 +412,11 @@ func BuildAnswerMessages(v Voice, in AnswerInput) []Msg {
 				other = append(other, t)
 			}
 		}
-		toolBlock = toolJSON(usable, other, toolBlockBudget(append(append([]ToolResult(nil), usable...), other...), in.DeepSearch))
+		budget := in.ToolBudget
+		if budget <= 0 {
+			budget = toolBlockBudget(append(append([]ToolResult(nil), usable...), other...), in.DeepSearch)
+		}
+		toolBlock = toolJSON(usable, other, budget)
 		if assumedValues(in.Tools) && strings.TrimSpace(c.ToolAssumed) != "" {
 			// a tool filled a value nobody said (the weather's area): the reply says so (principle 7)
 			toolBlock += "\n" + c.ToolAssumed
