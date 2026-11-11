@@ -67,6 +67,17 @@ type ToolInfo struct {
 	// MaxFeeUSD is the most one call can pay a service (0 = unknown). Under a money cap a paying step with
 	// a known bound holds that much instead of making the next steps wait for it (Guard holds).
 	MaxFeeUSD float64 `json:"-"`
+	// FeeBound, when set, is MaxFeeUSD for one call's parameters (a deep web search costs more than a quick
+	// one); it is asked when the call is decided.
+	FeeBound func(params map[string]any) float64 `json:"-"`
+}
+
+// feeBound is the most one call with these parameters can pay a service (0 = unknown).
+func feeBound(info ToolInfo, params map[string]any) float64 {
+	if info.FeeBound != nil {
+		return info.FeeBound(params)
+	}
+	return info.MaxFeeUSD
 }
 
 // Toolset is what the planner may use in this turn. Enabled is offered in order; Known lists every

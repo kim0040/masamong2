@@ -1,7 +1,9 @@
 package chat
 
 import (
+	"bytes"
 	"encoding/json"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -41,19 +43,55 @@ type ToolResult struct {
 	Error  string         `json:"error,omitempty"`
 }
 
-// toolBlockMax is how much of the answer prompt the tool results may take, in runes.
-const toolBlockMax = 3500
+// How much of the answer prompt the tool results may take, in runes (toolBlockBudget).
+const (
+	// toolBlockMax is the room when no result carries text read from a page: snippets and short answers.
+	toolBlockMax = 3500
+	// toolBlockPages is the room when search results carry passages of their pages: about three pages of
+	// 1,500 runes for each of two searches, with their snippets.
+	toolBlockPages = 12000
+	// toolBlockDeep is the room when the turn searched deep: more pages, longer passages, more results.
+	toolBlockDeep = 20000
+)
 
-// toolJSON renders the tool results for the answer prompt. When they do not fit in toolBlockMax, every
-// result keeps its tool, ok, status and error, and the data that does not fit is cut from its end, the
+// toolBlockBudget is the room the tool results get: toolBlockMax unless a search result carries a passage,
+// so a turn without page text renders exactly as before; more for passages, most for a deep search.
+func toolBlockBudget(results []ToolResult, deep bool) int {
+	switch {
+	case !slices.ContainsFunc(results, hasPassages):
+		return toolBlockMax
+	case deep:
+		return toolBlockDeep
+	}
+	return toolBlockPages
+}
+
+// hasPassages reports whether a result's results list carries text read from a page (passage).
+func hasPassages(r ToolResult) bool {
+	for _, it := range resultItems(r.Data) {
+		if p, _ := it["passage"].(string); strings.TrimSpace(p) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// toolJSON renders the tool results for the answer prompt. When they do not fit in budget, the passages
+// read from pages are cut first (fitPassages), so every search result keeps its title, url and snippet as
+// long as passages are left to cut. When that is not enough, every result keeps its tool, ok, status and
+// error, and the data that does not fit is cut from its end, the
 // way a reader stops reading: a list loses its last items first, a text its last words ("…"). The block
 // stays valid JSON, the results keep the order the service ranked them in (the first search hits stay
 // whole), and one tool's long output no longer hides the outcome of the tools after it. Small results
 // keep all their data; the room left goes to the large ones. Results that fit are rendered as before.
-func toolJSON(usable, other []ToolResult) string {
+func toolJSON(usable, other []ToolResult, budget int) string {
 	raw, _ := json.Marshal(map[string]any{"usable": usable, "not_success": other})
-	if utf8.RuneCount(raw) <= toolBlockMax {
+	if utf8.RuneCount(raw) <= budget {
 		return string(raw)
+	}
+	usable, other, cut, fits := fitPassages(usable, other, budget)
+	if fits {
+		return cut
 	}
 	all := append(append([]ToolResult(nil), usable...), other...)
 	// the envelopes first (tool, ok, status, error); the data shares what is left
@@ -93,18 +131,95 @@ func toolJSON(usable, other []ToolResult) string {
 		return string(out)
 	}
 	empty := make([]int, len(all))
-	room := toolBlockMax - utf8.RuneCountInString(block(empty)) - 16*len(all) // "data":…,"truncated":true
+	room := budget - utf8.RuneCountInString(block(empty)) - 16*len(all) // "data":…,"truncated":true
 	for room > 0 {
 		shares := fillShares(sizes, room)
 		out := block(shares)
-		if n := utf8.RuneCountInString(out); n <= toolBlockMax {
+		if n := utf8.RuneCountInString(out); n <= budget {
 			return out
 		} else {
-			room -= n - toolBlockMax
+			room -= n - budget
 		}
 	}
 	out := []rune(block(empty))
-	return string(out[:min(toolBlockMax, len(out))])
+	return string(out[:min(budget, len(out))])
+}
+
+// fitPassages cuts the passages of the results until the block takes at most budget runes, longest first:
+// every passage longer than one common length is cut to it ("…"), so short passages stay whole and long ones
+// lose the most; the length is the longest that fits, found by halving. Nothing else of a result changes.
+// It returns the results with the cut passages (their data copied, never changed) and the block. When the
+// block does not fit even without any passage, it returns the results without passages and fits false, and
+// the caller cuts the rest; results without passages are returned as they came.
+func fitPassages(usable, other []ToolResult, budget int) (u, o []ToolResult, block string, fits bool) {
+	all := append(append([]ToolResult(nil), usable...), other...)
+	type passage struct {
+		item map[string]any
+		text []rune
+	}
+	var refs []passage
+	longest := 0
+	for i, t := range all {
+		if !hasPassages(t) {
+			continue
+		}
+		data, ok := copyData(t.Data)
+		if !ok {
+			continue // what cannot be copied is not changed: the caller's cut handles it
+		}
+		for _, it := range resultItems(data) {
+			if p, ok := it["passage"].(string); ok && p != "" {
+				refs = append(refs, passage{it, []rune(p)})
+				longest = max(longest, len(refs[len(refs)-1].text))
+			}
+		}
+		all[i].Data = data
+	}
+	if len(refs) == 0 {
+		return usable, other, "", false
+	}
+	render := func(limit int) string {
+		for _, p := range refs {
+			switch {
+			case len(p.text) <= limit:
+				p.item["passage"] = string(p.text)
+			case limit <= 0:
+				delete(p.item, "passage")
+			default:
+				p.item["passage"] = string(p.text[:limit]) + "…"
+			}
+		}
+		out, _ := json.Marshal(map[string]any{"usable": all[:len(usable)], "not_success": all[len(usable):]})
+		return string(out)
+	}
+	if utf8.RuneCountInString(render(0)) > budget {
+		return all[:len(usable)], all[len(usable):], "", false
+	}
+	lo, hi := 0, longest
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if utf8.RuneCountInString(render(mid)) <= budget {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return all[:len(usable)], all[len(usable):], render(lo), true
+}
+
+// copyData is a deep copy of a tool's data in its JSON shape (numbers keep their exact text).
+func copyData(data map[string]any) (map[string]any, bool) {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return nil, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var out map[string]any
+	if dec.Decode(&out) != nil || out == nil {
+		return nil, false
+	}
+	return out, true
 }
 
 // fillShares splits room between results: those smaller than an even share keep everything, the rest
@@ -229,6 +344,9 @@ type AnswerInput struct {
 	// Now is the current time in the channel's zone; zero leaves the prompt as evaluated (no time line,
 	// no line ages)
 	Now time.Time
+	// DeepSearch marks a turn whose web search looked deep (depth deep): the tool results get the most
+	// room and the reply is asked for a synthesis (chat.tool_conclusion_deep) instead of a short answer.
+	DeepSearch bool
 }
 
 // BuildAnswerMessages is engine._build_chat_messages with the friend framing.
@@ -291,7 +409,7 @@ func BuildAnswerMessages(v Voice, in AnswerInput) []Msg {
 				other = append(other, t)
 			}
 		}
-		toolBlock = toolJSON(usable, other)
+		toolBlock = toolJSON(usable, other, toolBlockBudget(append(append([]ToolResult(nil), usable...), other...), in.DeepSearch))
 		if assumedValues(in.Tools) && strings.TrimSpace(c.ToolAssumed) != "" {
 			// a tool filled a value nobody said (the weather's area): the reply says so (principle 7)
 			toolBlock += "\n" + c.ToolAssumed
@@ -304,9 +422,15 @@ func BuildAnswerMessages(v Voice, in AnswerInput) []Msg {
 			// a reminder or task: ask what is still missing, confirm only what the result says was set
 			toolBlock += "\n" + c.ToolSchedule
 		}
-		if searchResults(in.Tools) && strings.TrimSpace(c.ToolConclusion) != "" {
-			// a web search answered: the conclusion comes first, sources are not listed one by one
-			toolBlock += "\n" + c.ToolConclusion
+		if conclusion := c.ToolConclusion; searchResults(in.Tools) {
+			// a web search answered: the conclusion comes first, sources are not listed one by one. After a
+			// deep search the conclusion leads a synthesis of what was asked, sources named in passing.
+			if in.DeepSearch && strings.TrimSpace(c.ToolConclusionDeep) != "" {
+				conclusion = c.ToolConclusionDeep
+			}
+			if strings.TrimSpace(conclusion) != "" {
+				toolBlock += "\n" + conclusion
+			}
 		}
 	}
 	var recent []string

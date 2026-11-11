@@ -1,5 +1,13 @@
 package chat
 
+import (
+	"slices"
+	"strings"
+	"sync"
+
+	"masamong/internal/crash"
+)
+
 // Progress tells the connector how far a turn's web search has got, so a turn that searches long can
 // say it is still looking (the interim line). It carries no text of the turn.
 type Progress struct {
@@ -17,3 +25,50 @@ const (
 	// ProgressMore: a second round of searches started (the first did not find enough).
 	ProgressMore = "more"
 )
+
+// webSearchTool is the tool whose calls a turn's Progress counts.
+const webSearchTool = "search.web"
+
+// progressOnce is a turn's OnProgress passing each stage on at most once. A listener that panics is
+// logged, never felt by the goroutine of the loop or of the planner's steps that called it. nil for none.
+func progressOnce(fn func(Progress)) func(Progress) {
+	if fn == nil {
+		return nil
+	}
+	var mu sync.Mutex
+	sent := map[string]bool{}
+	return func(p Progress) {
+		mu.Lock()
+		seen := sent[p.Stage]
+		sent[p.Stage] = true
+		mu.Unlock()
+		if seen {
+			return
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				_ = crash.Error(nil, "chat progress", r)
+			}
+		}()
+		fn(p)
+	}
+}
+
+// searchProgress is the stage of a round that starts web searches (their parameters): deep when one of
+// them asks for depth deep, more from the loop's second round on, else search.
+func searchProgress(round int, searches []map[string]any) Progress {
+	p := Progress{Stage: ProgressSearch, Round: round, Searches: len(searches)}
+	switch {
+	case slices.ContainsFunc(searches, deepParams):
+		p.Stage = ProgressDeep
+	case round >= 2:
+		p.Stage = ProgressMore
+	}
+	return p
+}
+
+// deepParams reports whether a web search's parameters ask for depth deep.
+func deepParams(params map[string]any) bool {
+	depth, _ := params["depth"].(string)
+	return strings.EqualFold(strings.TrimSpace(depth), "deep")
+}

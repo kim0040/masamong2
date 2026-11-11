@@ -21,6 +21,12 @@ import (
 // models in flight to finish, following cancellation. A step that pays for
 // itself (ToolInfo.Pays) is waited for before the steps after it are checked, so the money cap sees
 // what it spent as it did when the steps ran one after another.
+//
+// A paying step whose fee has a known bound (ToolInfo.MaxFeeUSD) holds that bound instead
+// (AllowHoldingContext): the steps after it count the hold as spent and do not wait for it, so several
+// web searches run at once. A step that the holds alone would refuse waits until one is released and is
+// then checked against what was really spent. Since a bound is never less than the fee, the steps
+// allowed are exactly the ones allowed when the steps ran one after another.
 type Guard struct {
 	MaxUSD   float64 // 0: no money cap
 	MaxCalls int     // 0: no call cap
@@ -33,6 +39,8 @@ type Guard struct {
 	skipped []string
 	paid    float64 // what tools paid for that no model-call total holds (a web search), see Paid
 	paying  int     // steps that pay for themselves (ToolInfo.Pays) under way: their fee is not in spent yet
+	held    float64 // the bounds held by steps under way (AllowHoldingContext): their fees are not in spent yet
+	holds   int     // how many steps hold a bound
 	maxCall float64 // the dearest model call that has ended so far
 	parent  *Guard  // a step's own guard (child) passes everything on to the turn's
 }
@@ -93,7 +101,8 @@ func (g *Guard) BeginPaid() func() {
 
 // WaitSpent returns when no model call and no step that pays for itself is under way, or ctx ends: from then
 // on what the turn has been charged so far is known (PaidTotal, MaxCall), and a search can be told a budget
-// that counts it. Without a money cap AllowMoneyContext does not wait for them, so this does.
+// that counts it. Without a money cap AllowMoneyContext does not wait for them, so this does. A step that
+// holds a bound (AllowHoldingContext) is not waited for: HeldTotal counts it.
 func (g *Guard) WaitSpent(ctx context.Context) {
 	if g == nil {
 		return
@@ -135,7 +144,7 @@ func (g *Guard) MaxCall() float64 {
 // AllowContext waits for model costs under a money cap, then checks the optional step's limits.
 // Waiting follows the turn context; cancellation is not a budget refusal.
 func (g *Guard) AllowContext(ctx context.Context, step string) bool {
-	ok, _ := g.allowContext(ctx, step, true, false)
+	ok, _ := g.allowContext(ctx, step, true, false, 0)
 	return ok
 }
 
@@ -143,7 +152,58 @@ func (g *Guard) AllowContext(ctx context.Context, step string) bool {
 // allowed it is under way in the same breath (BeginPaid), so a step that looks at the money in between
 // cannot miss its fee; end must be called once the step is over. end is never nil.
 func (g *Guard) AllowPayingContext(ctx context.Context, step string, pays bool) (ok bool, end func()) {
-	return g.allowContext(ctx, step, true, pays)
+	return g.allowContext(ctx, step, true, pays, 0)
+}
+
+// AllowHoldingContext is AllowPayingContext for a step that pays at most maxUSD (ToolInfo.MaxFeeUSD > 0).
+// Allowed, it holds maxUSD until release: the steps checked after it count the hold as spent instead of
+// waiting for its fee, so it runs beside them and makes no one wait (it is not under way the way a
+// BeginPaid step is). The step still reports what it really paid with Spend and Paid. release must be
+// called once the step is over, whatever came of it (cancelled, failed or panicked); a second call does
+// nothing. release is never nil.
+func (g *Guard) AllowHoldingContext(ctx context.Context, step string, maxUSD float64) (ok bool, release func()) {
+	return g.allowContext(ctx, step, true, false, max(maxUSD, 0))
+}
+
+// WaitHeld returns when no step holds a bound any more (AllowHoldingContext), or ctx ends: from then on
+// what they paid is in PaidTotal.
+func (g *Guard) WaitHeld(ctx context.Context) {
+	if g == nil {
+		return
+	}
+	for ; g.parent != nil; g = g.parent {
+	}
+	for {
+		g.mu.Lock()
+		if g.holds == 0 || ctx.Err() != nil {
+			g.mu.Unlock()
+			return
+		}
+		if g.changed == nil {
+			g.changed = make(chan struct{})
+		}
+		changed := g.changed
+		g.mu.Unlock()
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// HeldTotal is what the steps under way hold of the turn's money (AllowHoldingContext): fees on their way
+// that PaidTotal does not have yet. A step adds its fee before it lets go of its hold, so a caller that
+// reads HeldTotal before PaidTotal counts every fee at least once.
+func (g *Guard) HeldTotal() float64 {
+	if g == nil {
+		return 0
+	}
+	for ; g.parent != nil; g = g.parent {
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.held
 }
 
 // AllowMoneyContext is AllowContext for a step the call count does not hold back: only the money cap
@@ -151,17 +211,19 @@ func (g *Guard) AllowPayingContext(ctx context.Context, step string, pays bool) 
 // window) are few and fixed, and a turn that spent its calls on the planner and web searches would
 // otherwise never reach the memory the planner asked for.
 func (g *Guard) AllowMoneyContext(ctx context.Context, step string) bool {
-	ok, _ := g.allowContext(ctx, step, false, false)
+	ok, _ := g.allowContext(ctx, step, false, false, 0)
 	return ok
 }
 
-func (g *Guard) allowContext(ctx context.Context, step string, countCalls, pays bool) (bool, func()) {
+// allowContext checks one step. pays makes an allowed step count as under way (paying); hold > 0 makes
+// it hold that much instead (held).
+func (g *Guard) allowContext(ctx context.Context, step string, countCalls, pays bool, hold float64) (bool, func()) {
 	noEnd := func() {}
 	if g == nil {
 		return ctx.Err() == nil, noEnd
 	}
 	if g.parent != nil {
-		return g.parent.allowContext(ctx, step, countCalls, pays)
+		return g.parent.allowContext(ctx, step, countCalls, pays, hold)
 	}
 	for {
 		g.mu.Lock()
@@ -169,7 +231,9 @@ func (g *Guard) allowContext(ctx context.Context, step string, countCalls, pays 
 			g.mu.Unlock()
 			return false, noEnd
 		}
-		if g.MaxUSD > 0 && (g.models > 0 || g.paying > 0) {
+		// a fee or a model cost still to come is waited for; so are the holds when they alone would refuse
+		// the step: once one is let go, its real fee may leave room, as it would have one step after another
+		if g.MaxUSD > 0 && (g.models > 0 || g.paying > 0 || g.holds > 0 && g.spent < g.MaxUSD && g.spent+g.held >= g.MaxUSD) {
 			if g.changed == nil {
 				g.changed = make(chan struct{})
 			}
@@ -184,23 +248,44 @@ func (g *Guard) allowContext(ctx context.Context, step string, countCalls, pays 
 		}
 		allowed := g.allowLocked(step, countCalls)
 		end := noEnd
-		if allowed && pays {
+		switch {
+		case allowed && pays:
 			g.paying++
 			var once sync.Once
 			end = func() {
 				once.Do(func() {
 					g.mu.Lock()
 					g.paying--
-					if g.changed != nil {
-						close(g.changed)
-						g.changed = nil
+					g.changedLocked()
+					g.mu.Unlock()
+				})
+			}
+		case allowed && hold > 0:
+			g.held += hold
+			g.holds++
+			var once sync.Once
+			end = func() {
+				once.Do(func() {
+					g.mu.Lock()
+					g.held -= hold
+					if g.holds--; g.holds == 0 {
+						g.held = 0 // no rounding left behind
 					}
+					g.changedLocked()
 					g.mu.Unlock()
 				})
 			}
 		}
 		g.mu.Unlock()
 		return allowed, end
+	}
+}
+
+// changedLocked wakes the admissions and WaitSpent calls that wait for something under way to end.
+func (g *Guard) changedLocked() {
+	if g.changed != nil {
+		close(g.changed)
+		g.changed = nil
 	}
 }
 
@@ -294,8 +379,10 @@ func (g *Guard) Allow(step string) bool {
 	return g.allowLocked(step, true)
 }
 
+// allowLocked refuses a step once the turn has spent its money, the bounds held by the steps under way
+// counted as spent, or made its calls.
 func (g *Guard) allowLocked(step string, countCalls bool) bool {
-	if (g.MaxUSD > 0 && g.spent >= g.MaxUSD) || (countCalls && g.MaxCalls > 0 && g.calls >= g.MaxCalls) {
+	if (g.MaxUSD > 0 && g.spent+g.held >= g.MaxUSD) || (countCalls && g.MaxCalls > 0 && g.calls >= g.MaxCalls) {
 		g.skipped = append(g.skipped, step)
 		return false
 	}
@@ -330,9 +417,29 @@ func GuardFrom(ctx context.Context) *Guard {
 }
 
 // ToolParallel is how many of a turn's optional steps (the tool calls of one loop round, or the
-// planner's tools and the memory search) run at once. Calls of the same tool run in model order.
+// planner's tools and the memory search) run at once. Calls of the same tool run in model order, except
+// those of a tool that may run beside itself (ToolInfo.Parallel: several web searches of one round).
 // Hosts with tight limits also use the process governor (providers.Client.WithProviderGate).
 const ToolParallel = 4
+
+// stepKey is what a tool call waits on in runSteps: its predecessor of the same tool, or nothing for a
+// tool whose calls may run at once.
+func stepKey(info ToolInfo, tool string) string {
+	if info.Parallel {
+		return ""
+	}
+	return tool
+}
+
+// admitTool checks one tool call against the turn's limits: a call whose fee has a bound (feeBound) holds
+// it (AllowHoldingContext), one that pays otherwise counts as under way (AllowPayingContext). end must be
+// called once the call is over; it is never nil.
+func admitTool(ctx context.Context, g *Guard, tool string, info ToolInfo, params map[string]any) (ok bool, end func()) {
+	if bound := feeBound(info, params); info.Pays && bound > 0 {
+		return g.AllowHoldingContext(ctx, tool, bound)
+	}
+	return g.AllowPayingContext(ctx, tool, info.Pays)
+}
 
 // step is one optional step of a turn: decide checks the turn's limits (and notes the call), run does
 // the work.
@@ -340,19 +447,21 @@ type step struct {
 	decide   func() bool
 	run      func()
 	pays     bool      // spends money of its own (ToolInfo.Pays)
-	hold     *paidHold // set by decide when it made the step count as under way (AllowPayingContext)
-	key      string    // calls of the same tool wait for their predecessor in model order
+	maxFee   float64   // the most it pays (ToolInfo.MaxFeeUSD); 0 = not known
+	hold     *paidHold // set by decide when it made the step count as under way or hold its bound (admitTool)
+	key      string    // calls of the same tool wait for their predecessor in model order ("" = none)
 	cancel   func()
 	reserved bool
 }
 
-// paidHold carries the end of a paying step's BeginPaid from its decide to runSteps.
+// paidHold carries the end of a paying step's BeginPaid, or the release of its hold, from its decide to
+// runSteps.
 type paidHold struct{ end func() }
 
 // runSteps decides steps in model order and runs at most ToolParallel together, serializing each key.
-// When the turn has a money cap, a step that pays is waited for before the next step is decided, so the
-// allowed calls are never more permissive than sequential execution. It follows cancellation and
-// returns when every started step has finished.
+// When the turn has a money cap, a step that pays an unknown fee is waited for before the next step is
+// decided; one with a bound holds it instead (Guard), so the allowed calls are never more permissive than
+// sequential execution. It follows cancellation and returns when every started step has finished.
 func runSteps(ctx context.Context, g *Guard, steps []step) {
 	slots := make(chan struct{}, ToolParallel)
 	var wg sync.WaitGroup
@@ -375,7 +484,7 @@ func runSteps(ctx context.Context, g *Guard, steps []step) {
 		endPaid := func() {}
 		switch {
 		case s.hold != nil && s.hold.end != nil:
-			endPaid = s.hold.end // decide has made it count already
+			endPaid = s.hold.end // decide has made it count (or hold) already
 		case s.pays:
 			endPaid = g.BeginPaid() // its fee is not spent yet: the steps that look at the money wait for it
 		}
@@ -425,8 +534,8 @@ func runSteps(ctx context.Context, g *Guard, steps []step) {
 			}
 			s.run()
 		}()
-		if s.pays && g.capsMoney() {
-			wg.Wait()
+		if s.pays && s.maxFee <= 0 && g.capsMoney() {
+			wg.Wait() // its fee is not known: what it spends decides the steps after it
 		}
 	}
 	wg.Wait()

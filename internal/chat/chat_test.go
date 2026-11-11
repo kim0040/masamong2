@@ -199,7 +199,7 @@ func TestToolResultsStayWholeJSONWhenClipped(t *testing.T) {
 		{Tool: "weather.query", OK: true, Status: "ok", Data: map[string]any{"temp_c": 21}},
 	}
 	other := []ToolResult{{Tool: "images.generate", OK: false, Status: "failed", Error: "quota"}}
-	out := toolJSON(usable, other)
+	out := toolJSON(usable, other, toolBlockMax)
 	if n := len([]rune(out)); n > toolBlockMax {
 		t.Fatalf("over the limit: %d", n)
 	}
@@ -217,7 +217,7 @@ func TestToolResultsStayWholeJSONWhenClipped(t *testing.T) {
 		t.Fatalf("a failure after a long result is kept: %+v", got.NotSuccess)
 	}
 	// results that fit are rendered as before
-	small := toolJSON(usable[1:], nil)
+	small := toolJSON(usable[1:], nil, toolBlockMax)
 	want, _ := json.Marshal(map[string]any{"usable": usable[1:], "not_success": []ToolResult(nil)})
 	if small != string(want) {
 		t.Fatalf("small block changed: %s", small)
@@ -316,7 +316,7 @@ func TestToolResultsKeepTheFirstHitsWhole(t *testing.T) {
 	}
 	usable := []ToolResult{{Tool: "search.web", OK: true, Status: "ok", Data: map[string]any{"results": items, "answer": "요약"}},
 		{Tool: "weather.query", OK: true, Data: map[string]any{"temp_c": 18}}}
-	out := toolJSON(usable, nil)
+	out := toolJSON(usable, nil, toolBlockMax)
 	var got struct {
 		Usable []struct {
 			Tool      string         `json:"tool"`

@@ -99,7 +99,8 @@ type Request struct {
 	TurnStart time.Time
 	// OnProgress hears how far the turn's web search has got (progress.go), so the connector can say a
 	// long turn is still looking. It is called from the loop's or the planner path's goroutine, at most
-	// once per stage, never in shadow mode, and must not block. nil = nobody listens.
+	// once per stage, never for the shadow loop (which runs nothing), and must not block. nil = nobody
+	// listens.
 	OnProgress func(Progress)
 }
 
@@ -161,6 +162,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 	res := Result{Timing: map[string]int{}, RagState: string(retrieval.StateNotAttempted)}
 	sp := newSpanLog(req.TurnStart)
 	ctx = WithGuard(ctx, req.Guard)
+	req.OnProgress = progressOnce(req.OnProgress) // one call per stage across the loop and the planner's steps
 	tz := req.TZ
 	if tz == nil {
 		tz = time.UTC
@@ -260,10 +262,11 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 	}
 	// the planner's tools and the memory search run at once (runSteps): each is checked against the
 	// turn's limits in plan order (the memory search last, unless it started ahead of the loop's end);
-	// results keep the plan's order. The memory search does wait for the tools that pay for themselves,
-	// so that it is told what they leave.
+	// results keep the plan's order. The memory search does wait for the tools that pay an unknown fee,
+	// and counts what the others hold, so that it is told what they leave.
 	planned := make([]*ToolResult, len(res.Assess.Steps))
 	var steps []step
+	var searches []map[string]any
 	var toolsEnd time.Time
 	var endMu sync.Mutex
 	for i, st := range res.Assess.Steps {
@@ -273,10 +276,13 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 				break
 			}
 			info, _ := req.Tools.find(st.Tool)
+			if st.Tool == webSearchTool {
+				searches = append(searches, st.Parameters)
+			}
 			cancel := func() { planned[i] = &ToolResult{Tool: st.Tool, Status: "cancelled"} }
 			hold := &paidHold{}
-			steps = append(steps, step{key: st.Tool, reserved: true, cancel: cancel, pays: info.Pays, hold: hold, decide: func() bool {
-				allowed, endPaid := req.Guard.AllowPayingContext(ctx, st.Tool, info.Pays)
+			steps = append(steps, step{key: stepKey(info, st.Tool), reserved: true, cancel: cancel, pays: info.Pays, maxFee: feeBound(info, st.Parameters), hold: hold, decide: func() bool {
+				allowed, endPaid := admitTool(ctx, req.Guard, st.Tool, info, st.Parameters)
 				hold.end = endPaid
 				if !allowed {
 					if ctx.Err() != nil {
@@ -307,11 +313,16 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 		spent := res.CostUSD
 		steps = append(steps, step{decide: func() bool { return req.Guard.AllowMoneyContext(ctx, "memory.search") },
 			run: func() {
-				// the fees of the steps decided before this one count too, whether they have ended yet or not
+				// the fees of the steps decided before this one count too, whether they have ended yet or not:
+				// an unknown fee is waited for, a bound still held counts in full
 				req.Guard.WaitSpent(ctx)
+				remaining := memoryBudget(ctx, req.Guard, func() float64 { return req.BudgetUSD - spent - feesSoFar(req.Guard) })
 				defer sp.begin("memory")()
-				mem = rt.searchMemory(ctx, req, msg, intent, req.BudgetUSD-spent-req.Guard.PaidTotal(), nowT)
+				mem = rt.searchMemory(ctx, req, msg, intent, remaining, nowT)
 			}})
+	}
+	if req.OnProgress != nil && len(searches) > 0 {
+		req.OnProgress(searchProgress(1, searches))
 	}
 	runSteps(ctx, req.Guard, steps)
 	if early != nil {
@@ -377,13 +388,17 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 		res.Room = &roomTrace
 	}
 	system := ComposeSystem(v, req.Persona, req.Rules, req.AgentPrompt)
+	deep := deepSearched(res.ToolLoop, loopRan, res.Assess.Steps, planned)
 	msgs := BuildAnswerMessages(v, AnswerInput{
 		System: system, History: req.History, MaxHistory: maxHistory,
 		Hits: res.Hits, RagState: res.RagState, Tools: res.Tools, Speaker: req.Speaker, Message: msg, Intent: intent,
-		RecentRoom: req.RecentRoom, RoomMemory: roomBlock, Now: local,
+		RecentRoom: req.RecentRoom, RoomMemory: roomBlock, Now: local, DeepSearch: deep,
 	})
 	withImages(msgs, req.Images)
 	answerBudget := answerTokenLimit(msg, v.pack().Tag)
+	if deep {
+		answerBudget = answerBudget * 3 / 2 // a synthesis of several pages and aspects takes more words
+	}
 	completion, err := rt.complete(ctx, req.ResponseModel, msgs, answerBudget, 0.2)
 	res.CostUSD += completion.CostUSD
 	if err != nil && errclass.Of(err) == errclass.ContextLength && ctx.Err() == nil {
@@ -402,6 +417,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 		msgs = BuildAnswerMessages(v, AnswerInput{
 			System: system, History: hist, MaxHistory: len(hist),
 			Hits: res.Hits, RagState: res.RagState, Tools: res.Tools, Speaker: req.Speaker, Message: msg, Intent: intent, Now: local,
+			DeepSearch: deep,
 		})
 		withImages(msgs, req.Images)
 		completion, err = rt.complete(ctx, req.ResponseModel, msgs, answerBudget, 0.2)
@@ -482,8 +498,9 @@ func (rt *Runtime) startEarlyMemory(ctx context.Context, req Request, msg string
 			// first call of the loop is the only thing the turn can price the rest of the loop by. The tools of a
 			// second plan (a loop that failed, shadow mode) are not decided yet, and are not counted.
 			req.Guard.WaitSpent(ctx)
+			remaining := memoryBudget(ctx, req.Guard, func() float64 { return earlyRemaining(req, spent, loop) })
 			defer sp.begin("memory")()
-			e.mem = rt.searchMemory(ctx, req, msg, intent, earlyRemaining(req, spent, loop), nowT)
+			e.mem = rt.searchMemory(ctx, req, msg, intent, remaining, nowT)
 		}
 	}()
 	return e
@@ -528,7 +545,46 @@ func earlyRemaining(req Request, planCost float64, loop *loopRun) float64 {
 			ahead += MaxLoopRounds * feeAllowanceUSD
 		}
 	}
-	return req.BudgetUSD - planCost - req.Guard.PaidTotal() - ahead
+	return req.BudgetUSD - planCost - feesSoFar(req.Guard) - ahead
+}
+
+// feesSoFar is what the turn's tools have paid plus what the ones under way hold (Guard.HeldTotal). The
+// holds are read first: a tool adds its fee before it lets go of its hold, so no fee is missed (one in
+// between counts twice, which leaves the search less, never more).
+func feesSoFar(g *Guard) float64 {
+	held := g.HeldTotal()
+	return held + g.PaidTotal()
+}
+
+// memoryBudget is what a memory search may count on (left). When the bounds held by the tools under way
+// alone take that below what the reranker needs (retrieval's MinRemainingBudgetUSD), the search waits for
+// them to end and counts what they really paid: a deep web search holds far more than it usually pays, and
+// a search told what the bound leaves would go without its reranker. Waiting for the fee is what the
+// search did before fees had bounds.
+func memoryBudget(ctx context.Context, g *Guard, left func() float64) float64 {
+	floor := retrieval.DefaultAutoPolicy.MinRemainingBudgetUSD
+	if l, held := left(), g.HeldTotal(); held > 0 && l < floor && l+held >= floor {
+		g.WaitHeld(ctx)
+	}
+	return left()
+}
+
+// deepSearched reports whether a web search of the turn that found something asked for depth deep: in the
+// loop's calls when the loop chose the tools, or in the plan's steps.
+func deepSearched(loop *LoopTrace, loopRan bool, steps []Step, planned []*ToolResult) bool {
+	if loopRan && loop != nil {
+		for _, s := range loop.Steps {
+			if s.Tool == webSearchTool && s.State == "ran" && deepParams(s.Params) {
+				return true
+			}
+		}
+	}
+	for i, st := range steps {
+		if st.Tool == webSearchTool && i < len(planned) && planned[i] != nil && planned[i].OK && deepParams(st.Parameters) {
+			return true
+		}
+	}
+	return false
 }
 
 // wait is the search's result, once it has ended.

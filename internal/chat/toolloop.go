@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -56,9 +57,9 @@ const (
 // ToolParam is one parameter of a tool as the loop's function schema shows it.
 type ToolParam struct {
 	Name     string
-	Type     string   // string | integer | number | boolean ("" = string)
+	Type     string   // string | integer | number | boolean | array (of strings) ("" = string)
 	Enum     []string // closed values (strings)
-	Min, Max *int     // bounds of an integer
+	Min, Max *int     // bounds of an integer; Max is the most items of an array
 	Required bool
 	Hint     string // how to fill it (language pack)
 }
@@ -75,11 +76,13 @@ type ToolSpec struct {
 func FunctionName(id string) string { return strings.ReplaceAll(id, ".", "__") }
 
 type schemaProp struct {
-	Type        string   `json:"type"`
-	Description string   `json:"description,omitempty"`
-	Enum        []string `json:"enum,omitempty"`
-	Minimum     *int     `json:"minimum,omitempty"`
-	Maximum     *int     `json:"maximum,omitempty"`
+	Type        string      `json:"type"`
+	Description string      `json:"description,omitempty"`
+	Enum        []string    `json:"enum,omitempty"`
+	Minimum     *int        `json:"minimum,omitempty"`
+	Maximum     *int        `json:"maximum,omitempty"`
+	Items       *schemaProp `json:"items,omitempty"`
+	MaxItems    *int        `json:"maxItems,omitempty"`
 }
 
 type schemaObject struct {
@@ -156,6 +159,9 @@ func ToolSchemas(ts Toolset) []ToolSpec {
 			}
 			if typ == "integer" || typ == "number" {
 				prop.Minimum, prop.Maximum = p.Min, p.Max
+			}
+			if typ == "array" {
+				prop.Items, prop.MaxItems = &schemaProp{Type: "string"}, p.Max
 			}
 			obj.Properties[p.Name] = prop
 			if req[p.Name] {
@@ -306,6 +312,9 @@ type ToolLoop struct {
 	// asks for independent things in one round, so those are all there. What it would have called in a next
 	// round because of a result (the weather first, then a place for that weather) is not asked for.
 	Final string
+	// OnProgress hears a round that starts web searches (Request.OnProgress), each stage once; nil, and
+	// never called when Record, for nobody.
+	OnProgress func(Progress)
 }
 
 // finalRound reports whether the round's calls settle the turn: each ran and found what it looked for,
@@ -462,6 +471,10 @@ func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message,
 	if s, ok := l.LLM.(StableToolsLLM); ok {
 		stable = s.StableTools(l.Role)
 	}
+	progress := progressOnce(l.OnProgress)
+	if l.Record {
+		progress = nil // a shadow loop runs nothing
+	}
 	var frozen []ToolSpec // the list a binding answer was given (stable roles)
 	for round := 1; round <= MaxLoopRounds; round++ {
 		var offer []ToolSpec
@@ -513,22 +526,27 @@ func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message,
 		// the model's order, and runs with its own child guard, so the call ledger gives
 		// each tool what it spent; the results stay in the model's order
 		var steps []step
+		var searches []map[string]any
 		for _, lc := range calls {
 			if !lc.run {
 				continue
 			}
+			if lc.id == webSearchTool {
+				searches = append(searches, lc.params)
+			}
+			info := infos[lc.id]
 			cancel := func() {
 				lc.run = false
 				lc.step.State, lc.step.Reason = "not_run", "cancelled"
 				lc.result = &ToolResult{Tool: lc.id, Status: "cancelled"}
 			}
 			hold := &paidHold{}
-			steps = append(steps, step{key: lc.id, reserved: true, cancel: cancel, pays: infos[lc.id].Pays, hold: hold, decide: func() bool {
+			steps = append(steps, step{key: stepKey(info, lc.id), reserved: true, cancel: cancel, pays: info.Pays, maxFee: feeBound(info, lc.params), hold: hold, decide: func() bool {
 				if ctx.Err() != nil {
 					cancel()
 					return false
 				}
-				allowed, endPaid := l.Guard.AllowPayingContext(ctx, lc.id, infos[lc.id].Pays)
+				allowed, endPaid := admitTool(ctx, l.Guard, lc.id, info, lc.params)
 				hold.end = endPaid
 				if !allowed {
 					if ctx.Err() != nil {
@@ -551,6 +569,9 @@ func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message,
 				}
 				lc.result = &r
 			}})
+		}
+		if progress != nil && len(searches) > 0 {
+			progress(searchProgress(round, searches))
 		}
 		runSteps(ctx, l.Guard, steps)
 		for _, lc := range calls {
@@ -662,6 +683,15 @@ func (l ToolLoop) prepare(c LoopCall, round, idx int, byName map[string]string, 
 		}
 		params[k] = v
 	}
+	for _, p := range allowedParams(info) {
+		if v, ok := params[p.Name]; ok && p.Type == "array" {
+			if list := stringList(v, p.Max); len(list) > 0 {
+				params[p.Name] = list
+			} else {
+				delete(params, p.Name)
+			}
+		}
+	}
 	lc.params = params
 	lc.step.Params = params
 	var missing []string
@@ -689,6 +719,29 @@ func (l ToolLoop) prepare(c LoopCall, round, idx int, byName map[string]string, 
 	}
 	lc.run = true // the turn's limits are checked right before it runs (Guard)
 	return lc
+}
+
+// stringList is an array parameter as the tool takes it: its texts trimmed, empty ones and anything but
+// text dropped, at most max of them (nil: no bound). A lone text, which small models send for a list of
+// one, is a list of one.
+func stringList(v any, max *int) []any {
+	var in []any
+	switch x := v.(type) {
+	case []any:
+		in = x
+	case string:
+		in = []any{x}
+	}
+	var out []any
+	for _, it := range in {
+		if s, ok := it.(string); ok && strings.TrimSpace(s) != "" {
+			if max != nil && len(out) >= *max {
+				break
+			}
+			out = append(out, strings.TrimSpace(s))
+		}
+	}
+	return out
 }
 
 func clipName(s string) string {
@@ -829,9 +882,9 @@ func normalizedArgs(params map[string]any) string {
 	return string(raw)
 }
 
-// loopResultMessage is what the loop model reads of one result: the answer model's view of it, cut to
-// loopResultChars, marked as untrusted data, its texts cleaned and the whole fenced with the turn's
-// nonce (untrusted.go).
+// loopResultMessage is what the loop model reads of one result: the answer model's view of it without
+// the page text of search results (resultsWithoutPages), cut to loopResultChars, marked as untrusted
+// data, its texts cleaned and the whole fenced with the turn's nonce (untrusted.go).
 func loopResultMessage(r ToolResult, nonce string) string {
 	env := map[string]any{"tool": r.Tool, "untrusted_data": true, "ok": r.OK}
 	if r.Status != "" {
@@ -841,11 +894,68 @@ func loopResultMessage(r ToolResult, nonce string) string {
 		e := []rune(cleanToolText(r.Error))
 		env["error"] = string(e[:min(200, len(e))])
 	}
-	if data := cleanToolData(r.Data); len(data) > 0 {
+	if data := resultsWithoutPages(cleanToolData(r.Data)); len(data) > 0 {
 		env["data"] = data
 	}
 	raw, _ := json.Marshal(fitTail(env, loopResultChars))
 	return fenceToolResult(nonce, string(raw))
+}
+
+// pageKeys are the keys of a search result that carry text read from its page (a passage, a service's
+// page text). The answer reads them; the loop model does not: it only judges whether more is needed, which
+// titles, snippets and the read flag tell, and in loopResultChars a page's text would push the other
+// results out of its view (fitTail drops a list's last items first).
+var pageKeys = []string{"passage", "text"}
+
+// resultsWithoutPages is data whose results list has no page text. Data without any is returned as it
+// came; otherwise data and the results with page text are copied, never changed.
+func resultsWithoutPages(data map[string]any) map[string]any {
+	items := resultItems(data)
+	found := false
+	for _, it := range items {
+		for _, k := range pageKeys {
+			_, has := it[k]
+			found = found || has
+		}
+	}
+	if !found {
+		return data
+	}
+	list := make([]any, len(items))
+	for i, it := range items {
+		c := make(map[string]any, len(it))
+		for k, v := range it {
+			if !slices.Contains(pageKeys, k) {
+				c[k] = v
+			}
+		}
+		list[i] = c
+	}
+	out := make(map[string]any, len(data))
+	for k, v := range data {
+		out[k] = v
+	}
+	out["results"] = list
+	return out
+}
+
+// resultItems is the results list of a tool's data (a web search's), each item as an object; nil when
+// the data has no list of objects.
+func resultItems(data map[string]any) []map[string]any {
+	var items []map[string]any
+	switch list := data["results"].(type) {
+	case []any:
+		for _, it := range list {
+			m, ok := it.(map[string]any)
+			if !ok {
+				return nil
+			}
+			items = append(items, m)
+		}
+	case []map[string]any:
+		items = list
+	}
+	return items
 }
 
 func fallbackReason(err error) string {
@@ -933,6 +1043,9 @@ func (rt *Runtime) startLoop(ctx context.Context, req Request, msg, timeRef stri
 	default:
 		lr.done = make(chan struct{})
 		l := ToolLoop{LLM: llm, Run: rt.Tools, Role: role, Voice: req.Voice, Guard: req.Guard, Record: mode == ToolModeShadow, Final: req.LoopFinal}
+		if mode == ToolModeLoop {
+			l.OnProgress = req.OnProgress
+		}
 		go func() {
 			defer close(lr.done)
 			lr.results, lr.trace, lr.err = l.Do(ctx, others, req.History, msg, timeRef)
