@@ -69,7 +69,7 @@ func TestSearchDepthSchema(t *testing.T) {
 		}
 		return nil
 	}
-	if n := find("chat", "progress"); n == nil || len(n.Enum) != len(ProgressModes) || n.Implied != "slow" {
+	if n := find("chat", "progress"); n == nil || len(n.Enum) != len(ProgressModes) || n.Implied != "deep" {
 		t.Fatalf("chat.progress schema: %+v", n)
 	}
 	if n := find("web_search", "fetch"); n == nil || len(n.Enum) != len(FetchKinds) {

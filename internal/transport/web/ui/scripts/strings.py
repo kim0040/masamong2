@@ -2345,8 +2345,8 @@ add("cfg", {
     "chat.loop_final.v.tools": ("장소 (기본)", "Places (default)"), "chat.loop_final.v.search": ("웹 검색까지", "Web search too"), "chat.loop_final.v.off": ("항상 한 번 더 확인", "Always check once more"),
     "chat.loop_final.hint": ("짧은 질문에서 장소 검색처럼 결과 하나로 답이 되는 도구가 성공하면 더 찾을지 묻는 호출을 건너뛰어 답이 빨라집니다. 웹 검색까지 켜면 결과가 충분할 때 검색도 한 번으로 끝냅니다.", "In a short question, when a tool whose one result is the answer (places) succeeds, the call asking whether to look further is skipped and replies come faster. With web search, a search that found enough also ends there."),
     "chat.progress": ("“찾아보는 중” 한마디", "The “still looking” line"),
-    "chat.progress.v.slow": ("느릴 때 (기본)", "When slow (default)"), "chat.progress.v.deep": ("깊은 검색만", "Deep search only"), "chat.progress.v.off": ("끔", "Off"),
-    "chat.progress.hint": ("검색이 길어질 때 올렸다가 답 전에 지우는 한 줄입니다. 도구 화면에서도 바꿀 수 있습니다.", "A line put up when a search runs long and deleted before the answer. Also on the Tools page."),
+    "chat.progress.v.slow": ("느릴 때도", "Also when slow"), "chat.progress.v.deep": ("깊은 검색만 (기본)", "Deep search only (default)"), "chat.progress.v.off": ("끔", "Off"),
+    "chat.progress.hint": ("깊게 검색할 때 올렸다가 답 전에 지우는 한 줄입니다. '느릴 때도'를 고르면 평범한 검색이 몇 초 넘게 걸릴 때도 올립니다. 도구 화면에서도 바꿀 수 있습니다.", "A line put up during a deep search and deleted before the answer. With 'Also when slow' it also appears when an ordinary search takes more than a few seconds. Also on the Tools page."),
     "chat.vision": ("이미지 이해", "Image understanding"),
     "chat.vision.v.auto": ("자동 (기본)", "Auto (default)"), "chat.vision.v.off": ("끔", "Off"),
     "chat.vision.hint": ("봇을 부를 때 첨부한 사진만 읽습니다. 도구 화면에서도 바꿀 수 있습니다.", "Only pictures attached when someone calls the bot are read. Also on the Tools page."),
@@ -2363,7 +2363,7 @@ add("tools", {
 # the "still looking" line (chat.progress) on the Tools page and the pages a web search reads (web_search.*)
 add("tools", {
     "progress.title": ("“찾아보는 중” 한마디", "The “still looking” line"),
-    "progress.v.slow": ("느릴 때 (기본)", "When slow (default)"), "progress.v.deep": ("깊은 검색만", "Deep search only"), "progress.v.off": ("끔", "Off"),
+    "progress.v.slow": ("느릴 때도", "Also when slow"), "progress.v.deep": ("깊은 검색만 (기본)", "Deep search only (default)"), "progress.v.off": ("끔", "Off"),
     "progress.hint.slow": ("깊은 검색이나 두 번째 검색 단계에서는 바로, 일반 검색은 8초가 지나도 답이 없으면 짧은 안내 한 줄을 올리고 답이 나가기 전에 지웁니다. 알림은 가지 않습니다.",
                            "A short line goes up at once for a deep search or a second round of searching, and for an ordinary search still unanswered after 8 seconds. It is deleted before the answer and sends no notification."),
     "progress.hint.deep": ("깊은 검색이나 두 번째 검색 단계에서만 안내 한 줄을 올리고 답이 나가기 전에 지웁니다.", "Only a deep search or a second round of searching puts up the line; it is deleted before the answer."),

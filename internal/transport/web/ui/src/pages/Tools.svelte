@@ -79,11 +79,11 @@
   async function setVision(v: boolean) {
     await patchConfig([v ? { path: ['chat', 'vision'], op: 'unset' } : { path: ['chat', 'vision'], value: 'off' }], { success: t('tools.vision.saved') })
   }
-  // the "still looking" line (config chat.progress): "slow" is the default and is stored as unset
+  // the "still looking" line (config chat.progress): "deep" is the default and is stored as unset
   type Progress = 'slow' | 'deep' | 'off'
-  const progress = $derived<Progress>((cfg.doc?.chat?.progress as Progress) || 'slow')
+  const progress = $derived<Progress>((cfg.doc?.chat?.progress as Progress) || 'deep')
   async function setProgress(v: Progress) {
-    await patchConfig([v === 'slow' ? { path: ['chat', 'progress'], op: 'unset' } : { path: ['chat', 'progress'], value: v }], { success: t('tools.progress.saved') })
+    await patchConfig([v === 'deep' ? { path: ['chat', 'progress'], op: 'unset' } : { path: ['chat', 'progress'], value: v }], { success: t('tools.progress.saved') })
   }
 </script>
 
@@ -132,7 +132,7 @@
         <p class="xs muted">{t(`tools.progress.hint.${progress}`)}</p>
       </div>
       <div class="model-select"><Select aria-labelledby="tool-progress-title" value={progress} onchange={(e) => setProgress(e.currentTarget.value as Progress)} options={[
-        { value: 'slow', label: t('tools.progress.v.slow') }, { value: 'deep', label: t('tools.progress.v.deep') }, { value: 'off', label: t('tools.progress.v.off') }]} /></div>
+        { value: 'deep', label: t('tools.progress.v.deep') }, { value: 'slow', label: t('tools.progress.v.slow') }, { value: 'off', label: t('tools.progress.v.off') }]} /></div>
     </div>
   </section>
 {/if}

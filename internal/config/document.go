@@ -1096,19 +1096,18 @@ type ChatSettings struct {
 	// are read; nothing looks at a room's pictures in the background.
 	Vision string `yaml:"vision,omitempty" json:"vision,omitempty"`
 	// Progress is when the bot posts a short "still looking" line during a turn that searches the web,
-	// deleted before the answer: "slow" (the default: at once for a deep search or a second round of
-	// searches, else when a search turn is still unanswered after a few seconds), "deep" (only those two)
-	// or "off".
+	// deleted before the answer: "deep" (the default: at once for a deep search or a second round of
+	// searches), "slow" (those, and also a search turn still unanswered after a few seconds) or "off".
 	Progress string `yaml:"progress,omitempty" json:"progress,omitempty"`
 }
 
-// ProgressModes are the values chat.progress accepts besides empty (slow).
+// ProgressModes are the values chat.progress accepts besides empty (deep).
 var ProgressModes = []string{"slow", "deep", "off"}
 
 // ProgressMode is the effective chat.progress.
 func (c ChatSettings) ProgressMode() string {
 	if c.Progress == "" {
-		return "slow"
+		return "deep"
 	}
 	return c.Progress
 }
@@ -1286,7 +1285,7 @@ func Default(instanceID, dataDir string) Document {
 			"rerank":   {Provider: "openrouter", Model: "voyageai/rerank-2.5-lite"},
 		},
 		Limits: Limits{
-			Profile: "lite", MonthlyBudgetUSD: "10.00", PerRequestBudgetUSD: "0.03", MaxExternalAttempts: 10,
+			Profile: "lite", MonthlyBudgetUSD: "10.00", PerRequestBudgetUSD: "0.15", MaxExternalAttempts: 10,
 		},
 		Memory: MemoryFlags{Capture: false, Extract: false, Embed: true, Retrieve: "auto", Summaries: true,
 			NaiveTimezone: "Asia/Seoul", IndexBudgetUSD: "1.00", TurnBudgetUSD: "0.05", IndexIntervalMin: 10,
