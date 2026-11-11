@@ -762,6 +762,9 @@ func (s *Service) paySearch(ctx context.Context, kind, depth string, t searchTry
 		if n == 0 && t.err == nil {
 			n = 1
 		}
+		if t.err != nil && maybeCharged(t.err) {
+			n++ // the request may have reached the service and been charged although its answer was lost
+		}
 		usd = websearch.Fee(kind, depth) * float64(n)
 	}
 	if usd <= 0 {
@@ -770,6 +773,17 @@ func (s *Service) paySearch(ctx context.Context, kind, depth string, t searchTry
 	s.recordSpend("search", usd)
 	chat.GuardFrom(ctx).Spend(usd)
 	chat.GuardFrom(ctx).Paid(usd) // the turn's cost counts the fee too (Guard.Paid)
+}
+
+// maybeCharged reports whether a failed search request may still have been charged: it timed out or lost
+// its connection after it may have been sent. An HTTP error answer, a request never sent, and anything
+// that is not the client's error (a limit of ours) were not.
+func maybeCharged(err error) bool {
+	var pe *providers.Error
+	if !errors.As(err, &pe) {
+		return false
+	}
+	return (pe.Kind == "timeout" || pe.Kind == "connection") && !pe.NotSent
 }
 
 // searchRun is what a search has met so far, for the answer when no service had pages.

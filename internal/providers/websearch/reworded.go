@@ -61,9 +61,9 @@ func fanOut(ctx context.Context, q Query, one searchFn) (Response, error) {
 
 // fanOutWith runs main (the main query, which sends mainRequests requests) beside one request per
 // reworded query. The answers are merged with the main query's first (MergeResults) and cut to the size
-// asked. A reworded query that fails is dropped; the main query failing fails the search (the error
-// still says how many requests were answered, Response.Requests, for the fee). Response.Requests counts
-// every request answered.
+// asked. A reworded query that fails is dropped. When the main query fails, what the reworded queries found
+// is the answer; the search fails only when they found nothing either (the error still says how many
+// requests were answered, Response.Requests, for the fee). Response.Requests counts every request answered.
 func fanOutWith(ctx context.Context, q Query, mainRequests int, main, one searchFn) (Response, error) {
 	extras := q.rewordedFor(mainRequests)
 	if len(extras) == 0 {
@@ -98,7 +98,22 @@ func fanOutWith(ctx context.Context, q Query, mainRequests int, main, one search
 		}
 	}
 	if err != nil {
-		return Response{Requests: answered}, err
+		// the main query failed: the reworded ones ask about the same thing, so what they found (already
+		// paid for) answers the search; only when none found anything does the search fail
+		var lists [][]Result
+		for _, a := range got {
+			if a.err == nil && len(a.res.Results) > 0 {
+				lists = append(lists, a.res.Results)
+			}
+		}
+		if len(lists) == 0 {
+			return Response{Requests: answered}, err
+		}
+		merged := MergeResults(lists...)
+		if n := size(q.Max); len(merged) > n {
+			merged = merged[:n]
+		}
+		return Response{Results: merged, Requests: answered}, nil
 	}
 	lists := [][]Result{res.Results}
 	for _, a := range got {

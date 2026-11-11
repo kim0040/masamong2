@@ -17,7 +17,7 @@ func searchResult(status string, ok bool, items ...any) chat.ToolResult {
 func TestReplyKeptWhenOneSearchFailedAndAnotherSucceeded(t *testing.T) {
 	good := searchResult("ok", true, map[string]any{"title": "t"})
 	failed := chat.ToolResult{Tool: "search.web", OK: false, Status: "error", Error: "timeout"}
-	empty := searchResult("no_results", true)
+	empty := searchResult("empty", true) // what search.web answers when no service found anything
 	weatherDown := chat.ToolResult{Tool: "weather.query", OK: true, Status: "unconfigured"}
 	same := func(r chat.ToolResult, query string) chat.ToolResult {
 		data := map[string]any{}
@@ -37,9 +37,11 @@ func TestReplyKeptWhenOneSearchFailedAndAnotherSucceeded(t *testing.T) {
 		{"one search that worked", []chat.ToolResult{good}, false},
 		{"one search that failed", []chat.ToolResult{failed}, true},
 		{"one search that found nothing", []chat.ToolResult{empty}, true},
-		{"a failed search beside a good one", []chat.ToolResult{failed, good}, false},
-		{"an empty search beside a good one", []chat.ToolResult{good, empty}, false},
-		{"a refused search beside a good one", []chat.ToolResult{{Tool: "search.web", OK: false, Status: "refused"}, good}, false},
+		// a query that is not known proves nothing: the failure still counts
+		{"a failed search beside a good one, queries unknown", []chat.ToolResult{failed, good}, true},
+		{"a refused search beside a good one, queries unknown", []chat.ToolResult{{Tool: "search.web", OK: false, Status: "refused"}, same(good, "apple")}, true},
+		{"an empty search for the same query is no recovery", []chat.ToolResult{same(failed, "apple"), same(empty, "apple")}, true},
+		{"an empty search, then a good one for the same query", []chat.ToolResult{same(empty, "apple"), same(good, "apple")}, false},
 		{"only failed searches", []chat.ToolResult{failed, empty}, true},
 		{"a good search but another tool failed", []chat.ToolResult{good, failed, weatherDown}, true},
 		{"another tool failed alone", []chat.ToolResult{weatherDown}, true},
@@ -51,6 +53,25 @@ func TestReplyKeptWhenOneSearchFailedAndAnotherSucceeded(t *testing.T) {
 		if got := toolFailureToReplay(tc.results); got != tc.drop {
 			t.Errorf("%s: toolFailureToReplay = %v, want %v", tc.name, got, tc.drop)
 		}
+	}
+}
+
+// A failed web search carries the query it was asked, so it can be matched with a later search for the same
+// words; other tools and results that already say their query are left alone.
+func TestFailedSearchKeepsItsQuery(t *testing.T) {
+	failed := withSearchQuery(chat.ToolResult{Tool: "search.web", Status: "unavailable"}, "search.web", map[string]any{"query": "Apple"})
+	if q, _ := failed.Data["query"].(string); q != "Apple" {
+		t.Fatalf("failed search lost its query: %v", failed.Data)
+	}
+	kept := withSearchQuery(chat.ToolResult{Tool: "search.web", OK: true, Data: map[string]any{"query": "own"}}, "search.web", map[string]any{"query": "asked"})
+	if kept.Data["query"] != "own" {
+		t.Fatalf("query replaced: %v", kept.Data)
+	}
+	if w := withSearchQuery(chat.ToolResult{Tool: "weather.query"}, "weather.query", map[string]any{"query": "x"}); w.Data != nil {
+		t.Fatalf("other tool changed: %v", w.Data)
+	}
+	if !toolFailureToReplay([]chat.ToolResult{failed}) || toolFailureToReplay([]chat.ToolResult{failed, withSearchQuery(chat.ToolResult{Tool: "search.web", OK: true, Data: map[string]any{"results": []any{1}}}, "search.web", map[string]any{"query": " apple"})}) {
+		t.Fatal("a failed search recovered by the same query must not drop the reply")
 	}
 }
 

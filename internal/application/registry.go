@@ -212,6 +212,9 @@ func buildRegistry(doc config.Document, log *slog.Logger, now func() time.Time) 
 	// the search services get their own copy of the client with the longer limit (it shares the
 	// connections); everything else keeps the 15 s one
 	searchClient := *client
+	// one attempt a request: a search service may charge for a request whose answer was lost, and a quiet
+	// retry would charge again beyond the turn's hold; the next service in the order is the retry
+	searchClient.MaxRetries = 0
 	searchHTTP := *client.HTTP
 	searchHTTP.Timeout = searchHTTPTimeout
 	searchHTTP.Transport = followTransport{client.HTTP} // whatever the shared client's transport is, now or later

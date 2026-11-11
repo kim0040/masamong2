@@ -698,6 +698,29 @@ const (
 	viaTask = "task"
 )
 
+// withSearchQuery gives a web search's result the query it was asked when the result does not carry it (a
+// failure has no output), so a failed search can be matched with a later one for the same words
+// (toolFailureToReplay).
+func withSearchQuery(out chat.ToolResult, tool string, params map[string]any) chat.ToolResult {
+	if tool != "search.web" {
+		return out
+	}
+	q, _ := params["query"].(string)
+	if strings.TrimSpace(q) == "" {
+		return out
+	}
+	if have, _ := out.Data["query"].(string); have != "" {
+		return out
+	}
+	data := make(map[string]any, len(out.Data)+1)
+	for k, v := range out.Data {
+		data[k] = v
+	}
+	data["query"] = q
+	out.Data = data
+	return out
+}
+
 // turnTool is chatTool for a turn from via (viaChat or viaTask).
 func (s *Service) turnTool(in ChatInput, v chat.Voice, via string) chat.ToolRunner {
 	return func(ctx context.Context, tool string, params map[string]any) (out chat.ToolResult) {
@@ -723,6 +746,7 @@ func (s *Service) turnTool(in ChatInput, v chat.Voice, via string) chat.ToolRunn
 			if call.Status == "" {
 				call.Status = "ok"
 			}
+			out = withSearchQuery(out, tool, params)
 			if data, err := json.Marshal(out.Data); err == nil && out.Data != nil {
 				call.ResultChars = len(data)
 			}

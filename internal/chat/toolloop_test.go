@@ -475,10 +475,10 @@ func TestAnswerSaysWhatAToolAssumed(t *testing.T) {
 }
 
 // A reply built from a web search leads with its conclusion and does not list sources: the answer's tool
-// block carries the note (ko and en), only for a usable search result. Weather, a failed search and a
+// block carries the note (every language), only for a usable search result. Weather, a failed search and a
 // reminder do not (so the Korean golden, which has weather, is unchanged).
 func TestAnswerFromASearchLeadsWithTheConclusion(t *testing.T) {
-	for _, tag := range []string{"ko", "en"} {
+	for _, tag := range []string{"ko", "en", "ja", "es", "zh-Hans"} {
 		p, _ := lang.Get(tag)
 		if strings.TrimSpace(p.Chat.ToolConclusion) == "" {
 			t.Fatalf("%s has no tool_conclusion text", tag)

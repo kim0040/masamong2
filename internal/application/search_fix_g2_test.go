@@ -414,3 +414,45 @@ func TestScheduledTaskSearchReadsNoPages(t *testing.T) {
 		t.Fatalf("a chat turn still reads: %+v", res.Output)
 	}
 }
+
+// A search request is sent once: the client does not quietly retry it (a paid service could charge each
+// attempt beyond the turn's hold). One that timed out after it was sent may have been charged, so it is
+// counted at list price; one the service refused with an HTTP error is not.
+func TestSearchRequestIsSentOnceAndALostAnswerIsCharged(t *testing.T) {
+	defer application.SetSearchLimitsForTest("standard", 300*time.Millisecond, 2*time.Second, 50*time.Millisecond)()
+	hung := hungService(t, 30*time.Second, "")
+	tf := newRecorder(t, func(string) string { return `{"results":[{"title":"T","url":"https://t.example/1","snippet":"s"}]}` })
+	svc := setupSvc(t)
+	pointAt(t, svc, "linkup", hung.srv.URL, "L_KEY", "k")
+	pointAt(t, svc, "tinyfish", tf.srv.URL, "TF_KEY", "k")
+	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"web_search", "order"}, "value": []any{"linkup", "tinyfish"}}}}); !r.OK {
+		t.Fatalf("order: %+v", r.Error)
+	}
+	g := &chat.Guard{MaxUSD: 1}
+	if res := searchWith(svc, g, map[string]any{"query": "캠핑"}); !res.OK || res.Output["provider"] != "tinyfish" {
+		t.Fatalf("%+v", res.Output)
+	}
+	if hung.hits.Load() != 1 {
+		t.Fatalf("the timed-out request was sent %d times", hung.hits.Load())
+	}
+	if !near(g.PaidTotal(), 0.0055) || !near(monthSpend(t, svc), 0.0055) {
+		t.Fatalf("paid %v, month %v: a request whose answer was lost counts at Linkup's list price", g.PaidTotal(), monthSpend(t, svc))
+	}
+
+	var hits atomic.Int32
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1); w.WriteHeader(502) }))
+	defer bad.Close()
+	svc = setupSvc(t)
+	pointAt(t, svc, "linkup", bad.URL, "L_KEY", "k")
+	pointAt(t, svc, "tinyfish", tf.srv.URL, "TF_KEY", "k")
+	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"web_search", "order"}, "value": []any{"linkup", "tinyfish"}}}}); !r.OK {
+		t.Fatalf("order: %+v", r.Error)
+	}
+	g = &chat.Guard{MaxUSD: 1}
+	if res := searchWith(svc, g, map[string]any{"query": "캠핑"}); !res.OK || res.Output["provider"] != "tinyfish" {
+		t.Fatalf("%+v", res.Output)
+	}
+	if hits.Load() != 1 || g.PaidTotal() != 0 {
+		t.Fatalf("a 502 is sent %d times and costs %v; want once and nothing", hits.Load(), g.PaidTotal())
+	}
+}

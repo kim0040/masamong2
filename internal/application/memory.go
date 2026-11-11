@@ -1750,16 +1750,17 @@ func lookedUp(res chat.Result) []string {
 // unrelated turn. The user message remains in context; the current turn's tool result is still shown.
 // A failed web search does not count when another web search of the same turn succeeded for the same
 // query (trimmed, case-folded): the answer then rests on the one that did. A failed search for a
-// different query still counts, as does any other tool's failure.
+// different query still counts, as does one whose query is not known (a call the limits refused), and any
+// other tool's failure. A search that found nothing ("empty") is a failure, not a success.
 func toolFailureToReplay(results []chat.ToolResult) bool {
 	succeeded := map[string]bool{}
 	for _, result := range results {
-		if result.Tool == "search.web" && !toolFailed(result) {
-			succeeded[foldedSearchQuery(result)] = true
+		if q := foldedSearchQuery(result); result.Tool == "search.web" && q != "" && !toolFailed(result) {
+			succeeded[q] = true
 		}
 	}
 	for _, result := range results {
-		if result.Tool == "search.web" && succeeded[foldedSearchQuery(result)] {
+		if q := foldedSearchQuery(result); result.Tool == "search.web" && q != "" && succeeded[q] {
 			continue
 		}
 		if toolFailed(result) {
@@ -1770,7 +1771,7 @@ func toolFailureToReplay(results []chat.ToolResult) bool {
 }
 
 // foldedSearchQuery is the query a search.web result was asked, trimmed and case-folded, so two
-// searches for the same words compare equal. An absent query is empty, and empty matches empty.
+// searches for the same words compare equal. An absent query is empty and matches nothing.
 func foldedSearchQuery(result chat.ToolResult) string {
 	if result.Data == nil {
 		return ""
@@ -1786,7 +1787,7 @@ func toolFailed(result chat.ToolResult) bool {
 		status, _ = result.Data["status"].(string)
 	}
 	switch status {
-	case "unconfigured", "unavailable", "no_results", "no_area", "not_found", "error":
+	case "unconfigured", "unavailable", "no_results", "empty", "no_area", "not_found", "error":
 		return true
 	}
 	return !result.OK

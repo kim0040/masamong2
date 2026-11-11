@@ -231,13 +231,25 @@ func TestRewordedQueryFailureAndPanic(t *testing.T) {
 	if err != nil || len(res.Results) != 1 || res.Requests != 1 {
 		t.Fatalf("reworded failing or panicking: only the main answer remains: %v %+v", err, res)
 	}
+	// the main query failing: the reworded queries' results (paid for) answer the search
 	res, err = fanOut(context.Background(), q, one("main", ""))
-	if err == nil || res.Requests != 2 {
-		t.Fatalf("main failing: %v %+v", err, res)
+	if err != nil || res.Requests != 2 || len(res.Results) != 2 {
+		t.Fatalf("main failing, reworded found pages: %v %+v", err, res)
 	}
 	res, err = fanOut(context.Background(), q, one("", "main"))
+	if err != nil || res.Requests != 2 || len(res.Results) != 2 {
+		t.Fatalf("a panic in the main query, reworded found pages: %v %+v", err, res)
+	}
+	// nothing found anywhere: the main query's error, with the requests answered for the fee
+	none := func(ctx context.Context, q Query) (Response, error) {
+		if q.Text == "main" {
+			return Response{}, fmt.Errorf("boom")
+		}
+		return Response{}, nil
+	}
+	res, err = fanOut(context.Background(), q, none)
 	if err == nil || res.Requests != 2 {
-		t.Fatalf("a panic in the main query is its error: %v %+v", err, res)
+		t.Fatalf("main failing and reworded empty: %v %+v", err, res)
 	}
 	res, err = fanOut(context.Background(), Query{Text: "main"}, one("", "main"))
 	if err == nil {
