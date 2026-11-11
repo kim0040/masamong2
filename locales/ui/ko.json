@@ -3562,7 +3562,7 @@
   "tools.partial.weather.query": "API 키 없이 전 세계 날씨(Open-Meteo)를 기본 제공합니다. 기상청 API 키를 등록하면 한국 현재 날씨 및 특보가 더 정확해집니다.",
   "tools.progress.hint.deep": "깊은 검색이나 두 번째 검색 단계에서만 안내 한 줄을 올리고 답이 나가기 전에 지웁니다.",
   "tools.progress.hint.off": "안내 없이 답만 보냅니다.",
-  "tools.progress.hint.slow": "깊은 검색이나 두 번째 검색 단계에서는 바로, 일반 검색은 8초가 지나도 답이 없으면 짧은 안내 한 줄을 올리고 답이 나가기 전에 지웁니다. 알림은 가지 않습니다.",
+  "tools.progress.hint.slow": "깊은 검색이나 두 번째 검색 단계에서는 바로, 일반 검색은 12초가 지나도 답이 없으면 짧은 안내 한 줄을 올리고 답이 나가기 전에 지웁니다. 알림은 가지 않습니다.",
   "tools.progress.saved": "안내 설정을 바꿨습니다",
   "tools.progress.title": "“찾아보는 중” 한마디",
   "tools.progress.v.deep": "깊은 검색만 (기본)",

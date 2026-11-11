@@ -2364,8 +2364,8 @@ add("tools", {
 add("tools", {
     "progress.title": ("“찾아보는 중” 한마디", "The “still looking” line"),
     "progress.v.slow": ("느릴 때도", "Also when slow"), "progress.v.deep": ("깊은 검색만 (기본)", "Deep search only (default)"), "progress.v.off": ("끔", "Off"),
-    "progress.hint.slow": ("깊은 검색이나 두 번째 검색 단계에서는 바로, 일반 검색은 8초가 지나도 답이 없으면 짧은 안내 한 줄을 올리고 답이 나가기 전에 지웁니다. 알림은 가지 않습니다.",
-                           "A short line goes up at once for a deep search or a second round of searching, and for an ordinary search still unanswered after 8 seconds. It is deleted before the answer and sends no notification."),
+    "progress.hint.slow": ("깊은 검색이나 두 번째 검색 단계에서는 바로, 일반 검색은 12초가 지나도 답이 없으면 짧은 안내 한 줄을 올리고 답이 나가기 전에 지웁니다. 알림은 가지 않습니다.",
+                           "A short line goes up at once for a deep search or a second round of searching, and for an ordinary search still unanswered after 12 seconds. It is deleted before the answer and sends no notification."),
     "progress.hint.deep": ("깊은 검색이나 두 번째 검색 단계에서만 안내 한 줄을 올리고 답이 나가기 전에 지웁니다.", "Only a deep search or a second round of searching puts up the line; it is deleted before the answer."),
     "progress.hint.off": ("안내 없이 답만 보냅니다.", "No line; only the answer is sent."),
     "progress.saved": ("안내 설정을 바꿨습니다", "The “still looking” setting changed"),

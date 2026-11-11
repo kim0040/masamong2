@@ -3562,7 +3562,7 @@
   "tools.partial.weather.query": "Worldwide weather works without a key (Open-Meteo); a KMA key makes Korean current conditions more precise.",
   "tools.progress.hint.deep": "Only a deep search or a second round of searching puts up the line; it is deleted before the answer.",
   "tools.progress.hint.off": "No line; only the answer is sent.",
-  "tools.progress.hint.slow": "A short line goes up at once for a deep search or a second round of searching, and for an ordinary search still unanswered after 8 seconds. It is deleted before the answer and sends no notification.",
+  "tools.progress.hint.slow": "A short line goes up at once for a deep search or a second round of searching, and for an ordinary search still unanswered after 12 seconds. It is deleted before the answer and sends no notification.",
   "tools.progress.saved": "The “still looking” setting changed",
   "tools.progress.title": "The “still looking” line",
   "tools.progress.v.deep": "Deep search only (default)",
