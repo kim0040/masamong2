@@ -1324,8 +1324,15 @@ func (g *Gateway) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return // Discord replayed it (RESUME): no second capture, no second reply
 	}
 	if m.Author.Bot {
-		if p := g.botID.Load(); p != nil && *p == m.Author.ID && g.interims.ownCreate(m.ChannelID, m.ID, m.Content) {
-			return // the "still looking" line: not captured, not a sign the channel moved on
+		if p := g.botID.Load(); p != nil && *p == m.Author.ID {
+			if ours, drop := g.interims.ownCreate(m.ChannelID, m.ID, m.Content); ours {
+				if drop {
+					// the send returned no answer, but Discord still created the line. Take it
+					// back and do not count it as the channel moving on.
+					g.deleteInterimLine(s, m.ChannelID, m.ID)
+				}
+				return
+			}
 		}
 		if p := g.botID.Load(); p != nil && *p == m.Author.ID && m.GuildID != "" {
 			// the bot's own message: participation counts it as the channel moving on

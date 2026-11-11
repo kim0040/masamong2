@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	"masamong/internal/action"
 	"masamong/internal/chat"
 	"masamong/internal/config"
+	"masamong/internal/memory/engine"
 	"masamong/locales"
 )
 
@@ -33,12 +35,16 @@ type restEvent struct {
 // restLog is a fake Discord that numbers the messages posted and keeps every call in order. gate, when set,
 // holds the first post until it is closed; failPost refuses the posts it names (by number, from 1).
 type restLog struct {
-	mu       sync.Mutex
-	events   []restEvent
-	posts    int
-	failPost map[int]bool
-	gate     chan struct{}
-	entered  chan struct{}
+	mu          sync.Mutex
+	events      []restEvent
+	posts       int
+	failPost    map[int]bool
+	losePost    map[int]bool // the post was accepted but the REST answer never came back
+	failDelete  int          // the first N deletes fail
+	deletes     int
+	historyBody string
+	gate        chan struct{}
+	entered     chan struct{}
 }
 
 func (r *restLog) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -70,6 +76,7 @@ func (r *restLog) RoundTrip(req *http.Request) (*http.Response, error) {
 			ev.parseSet, ev.Parse = true, sent.Mentions.Parse
 		}
 		fail := r.failPost[n]
+		lose := r.losePost[n]
 		gate, entered := r.gate, r.entered
 		if n == 1 {
 			r.gate, r.entered = nil, nil
@@ -89,12 +96,28 @@ func (r *restLog) RoundTrip(req *http.Request) (*http.Response, error) {
 		if fail {
 			return reply(http.StatusForbidden, `{"code":50013,"message":"Missing Permissions"}`), nil
 		}
+		if lose {
+			return nil, context.DeadlineExceeded
+		}
 		return reply(http.StatusOK, fmt.Sprintf(`{"id":"i%d"}`, n)), nil
 	case req.Method == http.MethodDelete:
 		r.mu.Lock()
+		r.deletes++
+		failDelete := r.deletes <= r.failDelete
 		r.events = append(r.events, restEvent{Method: req.Method, Path: req.URL.Path})
 		r.mu.Unlock()
+		if failDelete {
+			return reply(http.StatusInternalServerError, `{"message":"delete failed"}`), nil
+		}
 		return reply(http.StatusNoContent, ""), nil
+	case req.Method == http.MethodGet && strings.Contains(req.URL.Path, "/messages"):
+		r.mu.Lock()
+		body := r.historyBody
+		r.mu.Unlock()
+		if body == "" {
+			body = `[]`
+		}
+		return reply(http.StatusOK, body), nil
 	}
 	return reply(http.StatusOK, `{}`), nil
 }
@@ -271,20 +294,21 @@ func TestInterimIsClearedOnEveryExit(t *testing.T) {
 	}
 }
 
-// In slow mode an ordinary search posts only if the turn is still unanswered when the timer runs out.
+// In slow mode an ordinary search posts only if the turn is still unanswered when the timer runs out,
+// and the line is a first-round one. A second round of searches, in slow mode, uses that same set.
 func TestInterimSlowModeWaitsForTheTimer(t *testing.T) {
 	g, log, clock := interimFixture(t, "slow")
 	m := answerMessage("질문")
 	ip := makeInterim(g, clock, context.Background(), m)
 	ip.show(chat.Progress{Stage: chat.ProgressSearch, Round: 1, Searches: 1})
 	ip.show(chat.Progress{Stage: chat.ProgressSearch, Round: 1, Searches: 2}) // one timer per turn
-	if len(log.list()) != 0 || clock.timers != 1 || clock.delay != 8*time.Second {
-		t.Fatalf("a search must only arm one 8 s timer: events %d, timers %d, delay %v", len(log.list()), clock.timers, clock.delay)
+	if len(log.list()) != 0 || clock.timers != 1 || clock.delay != interimSlowDelay {
+		t.Fatalf("a search must only arm one %s timer: events %d, timers %d, delay %v", interimSlowDelay, len(log.list()), clock.timers, clock.delay)
 	}
 	clock.fire()
 	texts := interimTexts(g, m)
-	if got := log.shape(texts); !slices.Equal(got, []string{"POST interim"}) || log.list()[0].Content != messages.T(g.noticeLocale(m), "discord.chat.interim_more.1") {
-		t.Fatalf("the unanswered turn must get the second-set line: %q", got)
+	if got := log.shape(texts); !slices.Equal(got, []string{"POST interim"}) || log.list()[0].Content != messages.T(g.noticeLocale(m), "discord.chat.interim.1") {
+		t.Fatalf("the unanswered turn must get a first-round line: %q, text %q", got, log.list()[0].Content)
 	}
 	ip.clear()
 	if got := log.shape(texts); !slices.Equal(got, []string{"POST interim", "DELETE i1"}) {
@@ -299,6 +323,15 @@ func TestInterimSlowModeWaitsForTheTimer(t *testing.T) {
 	clock2.fire()
 	if len(log2.list()) != 0 {
 		t.Fatalf("a turn answered in time posted %+v", log2.list())
+	}
+
+	// a second round still speaks at once, with a first-round line rather than a "still looking further" one
+	g3, log3, _ := interimFixture(t, "slow")
+	ip3 := makeInterim(g3, &fakeClock{}, context.Background(), m)
+	ip3.show(chat.Progress{Stage: chat.ProgressMore, Round: 2, Searches: 1})
+	ip3.posts.Wait()
+	if len(log3.list()) != 1 || log3.list()[0].Content != messages.T(g3.noticeLocale(m), "discord.chat.interim.1") {
+		t.Fatalf("slow mode posted %+v", log3.list())
 	}
 }
 
@@ -448,7 +481,7 @@ func TestInterimEventsAreNeitherCapturedNorReconciled(t *testing.T) {
 	ip.show(chat.Progress{Stage: chat.ProgressDeep})
 	ip.posts.Wait()
 	text := log.list()[0].Content
-	if !g.interims.ownCreate("c", "i1", text) {
+	if ours, drop := g.interims.ownCreate("c", "i1", text); !ours || drop {
 		t.Fatal("the line's own create event is not recognised")
 	}
 	create := &discordgo.MessageCreate{Message: &discordgo.Message{ID: "i1", ChannelID: "c", GuildID: "g", Content: text, Author: &discordgo.User{ID: bot, Bot: true}}}
@@ -479,25 +512,25 @@ func TestInterimRegistry(t *testing.T) {
 	t.Run("event first", func(t *testing.T) {
 		var r interimRegistry
 		r.expect("c", "text")
-		if !r.ownCreate("c", "id", "text") {
+		if ours, _ := r.ownCreate("c", "id", "text"); !ours {
 			t.Fatal("pending text not recognised")
 		}
 		r.bind("c", "text", "id") // the REST answer comes second
-		if r.ownCreate("c", "other", "text") {
+		if ours, _ := r.ownCreate("c", "other", "text"); ours {
 			t.Fatal("one expectation matched two messages")
 		}
-		if !r.deleted("id") || r.deleted("id") {
-			t.Fatal("the delete is skipped once")
+		if !r.deleted("id") || !r.deleted("id") {
+			t.Fatal("a second delete of the line must still be swallowed")
 		}
 	})
 	t.Run("answer first", func(t *testing.T) {
 		var r interimRegistry
 		r.expect("c", "text")
 		r.bind("c", "text", "id")
-		if !r.ownCreate("c", "id", "text") {
+		if ours, _ := r.ownCreate("c", "id", "text"); !ours {
 			t.Fatal("bound ID not recognised")
 		}
-		if r.ownCreate("c", "other", "text") {
+		if ours, _ := r.ownCreate("c", "other", "text"); ours {
 			t.Fatal("a bound line left its expectation behind")
 		}
 	})
@@ -505,11 +538,20 @@ func TestInterimRegistry(t *testing.T) {
 		var r interimRegistry
 		r.expect("c", "text")
 		r.expect("c", "text")
-		if r.ownCreate("d", "x", "text") || r.ownCreate("c", "x", "other") {
-			t.Fatal("matched the wrong channel or text")
+		if ours, _ := r.ownCreate("d", "x", "text"); ours {
+			t.Fatal("matched the wrong channel")
 		}
-		if !r.ownCreate("c", "a", "text") || !r.ownCreate("c", "b", "text") || r.ownCreate("c", "c", "text") {
-			t.Fatal("two lines with one text")
+		if ours, _ := r.ownCreate("c", "x", "other"); ours {
+			t.Fatal("matched the wrong text")
+		}
+		if ours, _ := r.ownCreate("c", "a", "text"); !ours {
+			t.Fatal("the first of two lines with one text")
+		}
+		if ours, _ := r.ownCreate("c", "b", "text"); !ours {
+			t.Fatal("the second of two lines with one text")
+		}
+		if ours, _ := r.ownCreate("c", "c", "text"); ours {
+			t.Fatal("two lines with one text matched a third")
 		}
 	})
 	t.Run("old entries are forgotten", func(t *testing.T) {
@@ -517,11 +559,70 @@ func TestInterimRegistry(t *testing.T) {
 		r.expect("c", "text")
 		r.bind("c", "other", "id")
 		r.mu.Lock()
-		r.pending[interimKey("c", "text")] = interimPending{n: 1, at: time.Now().Add(-2 * interimIDTTL)}
+		r.pending[interimKey("c", "text")] = []interimSlot{{token: 1, at: time.Now().Add(-2 * interimIDTTL)}}
 		r.ids["id"] = time.Now().Add(-2 * interimIDTTL)
 		r.mu.Unlock()
-		if r.ownCreate("c", "id", "text") {
+		if ours, _ := r.ownCreate("c", "id", "text"); ours {
 			t.Fatal("an expired entry still matched")
+		}
+	})
+	t.Run("delete before create, and a duplicate delete", func(t *testing.T) {
+		var r interimRegistry
+		r.expect("c", "text")
+		r.bind("c", "text", "id")
+		if !r.deleted("id") {
+			t.Fatal("the line's delete was not recognised")
+		}
+		if ours, drop := r.ownCreate("c", "id", "text"); !ours || drop {
+			t.Fatal("a create of a deleted line must be ours and not deleted again")
+		}
+		if !r.deleted("id") {
+			t.Fatal("a duplicate delete must be swallowed")
+		}
+	})
+	t.Run("bulk delete before create", func(t *testing.T) {
+		var r interimRegistry
+		r.expect("c", "text")
+		r.bind("c", "text", "id")
+		if kept := r.withoutInterims([]string{"id", "x"}); len(kept) != 1 || kept[0] != "x" {
+			t.Fatalf("bulk delete kept %v", kept)
+		}
+		if ours, drop := r.ownCreate("c", "id", "text"); !ours || drop {
+			t.Fatal("a create after the bulk delete must still be ours")
+		}
+		// the tombstone also swallows a later bulk delete
+		if kept := r.withoutInterims([]string{"id", "y"}); len(kept) != 1 || kept[0] != "y" {
+			t.Fatalf("a second bulk delete kept %v", kept)
+		}
+	})
+	t.Run("a tombstone expires", func(t *testing.T) {
+		var r interimRegistry
+		r.mu.Lock()
+		r.tombstones = map[string]time.Time{"id": time.Now().Add(-2 * interimTombstoneTTL)}
+		r.mu.Unlock()
+		if ours, _ := r.ownCreate("c", "id", "text"); ours || r.deleted("id") {
+			t.Fatal("an expired tombstone matched")
+		}
+		if kept := r.withoutInterims([]string{"id"}); len(kept) != 1 || kept[0] != "id" {
+			t.Fatalf("an expired tombstone was filtered from a bulk delete: %v", kept)
+		}
+	})
+	t.Run("an ambiguous expectation expires", func(t *testing.T) {
+		var r interimRegistry
+		token := r.expect("c", "text")
+		if id := r.lose(token); id != "" {
+			t.Fatal("nothing was created yet")
+		}
+		r.mu.Lock()
+		slots := r.pending[interimKey("c", "text")]
+		if len(slots) != 1 || !slots[0].ambiguous {
+			t.Fatalf("the lost send did not stay registered: %+v", slots)
+		}
+		slots[0].at = time.Now().Add(-2 * interimAmbiguousTTL)
+		r.pending[interimKey("c", "text")] = slots
+		r.mu.Unlock()
+		if ours, _ := r.ownCreate("c", "late", "text"); ours {
+			t.Fatal("an expired lost send still matched")
 		}
 	})
 }
@@ -571,5 +672,163 @@ func TestDeepSearchReplyIsTrimmedLater(t *testing.T) {
 	standard := []chat.ToolResult{{Tool: "search.web", OK: true, Data: map[string]any{"depth": "standard"}}, {Tool: "weather.query", OK: true}}
 	if !deepSearched(deep) || deepSearched(standard) || deepSearched(nil) {
 		t.Fatal("deepSearched")
+	}
+}
+
+// botCreate is a create event for the bot's own message, as the gateway would see it.
+func botCreate(channelID, id, text string) *discordgo.MessageCreate {
+	return &discordgo.MessageCreate{Message: &discordgo.Message{ID: id, ChannelID: channelID, GuildID: "g", Content: text,
+		Author: &discordgo.User{ID: "bot-id", Username: "masamong", Bot: true}}}
+}
+
+func armInterimBot(g *Gateway) {
+	bot := "bot-id"
+	g.botID.Store(&bot)
+	g.cfg.MessageContent = true
+}
+
+// A send whose REST answer never comes back may still have created the line. The create is deleted
+// and not observed, whether it arrives while the call is still out or after the error returns.
+func TestInterimAmbiguousSendIsDeletedWhenTheCreateArrives(t *testing.T) {
+	line := func(g *Gateway, m *discordgo.MessageCreate) string {
+		return messages.T(g.noticeLocale(m), "discord.chat.interim.1")
+	}
+	t.Run("create before the error", func(t *testing.T) {
+		g, log, clock := interimFixture(t, "deep")
+		armInterimBot(g)
+		m := answerMessage("질문")
+		gate, entered := make(chan struct{}), make(chan struct{})
+		log.gate, log.entered = gate, entered
+		log.losePost = map[int]bool{1: true}
+		ip := makeInterim(g, clock, context.Background(), m)
+		ip.show(chat.Progress{Stage: chat.ProgressDeep})
+		<-entered
+		g.onMessage(g.sess, botCreate(m.ChannelID, "made", line(g, m)))
+		close(gate)
+		ip.posts.Wait()
+		if got := log.shape(interimTexts(g, m)); !slices.Equal(got, []string{"POST interim", "DELETE made"}) {
+			t.Fatalf("calls %q", got)
+		}
+		var applied []messageReconciliation
+		g.messageEventApply = func(e messageReconciliation) error { applied = append(applied, e); return nil }
+		g.onMessageDelete(nil, &discordgo.MessageDelete{Message: &discordgo.Message{ID: "made", ChannelID: m.ChannelID, GuildID: "g"}})
+		if len(applied) != 0 {
+			t.Fatalf("the line's delete was reconciled: %+v", applied)
+		}
+	})
+	t.Run("create after the error", func(t *testing.T) {
+		g, log, clock := interimFixture(t, "deep")
+		armInterimBot(g)
+		m := answerMessage("질문")
+		log.losePost = map[int]bool{1: true}
+		ip := makeInterim(g, clock, context.Background(), m)
+		ip.show(chat.Progress{Stage: chat.ProgressDeep})
+		ip.posts.Wait()
+		if len(log.list()) != 1 {
+			t.Fatalf("the lost send deleted early: %+v", log.list())
+		}
+		g.onMessage(g.sess, botCreate(m.ChannelID, "late", line(g, m)))
+		deadline := time.Now().Add(3 * time.Second)
+		for time.Now().Before(deadline) && !slices.Equal(log.shape(interimTexts(g, m)), []string{"POST interim", "DELETE late"}) {
+			time.Sleep(10 * time.Millisecond)
+		}
+		if got := log.shape(interimTexts(g, m)); !slices.Equal(got, []string{"POST interim", "DELETE late"}) {
+			t.Fatalf("calls %q", got)
+		}
+		// a later bot message that is not the line is left alone
+		g.onMessage(g.sess, botCreate(m.ChannelID, "answer", "응, 알겠어."))
+		time.Sleep(30 * time.Millisecond)
+		if got := log.shape(interimTexts(g, m)); !slices.Equal(got, []string{"POST interim", "DELETE late"}) {
+			t.Fatalf("a normal bot message was deleted: %q", got)
+		}
+	})
+}
+
+// A delete Discord does not accept is tried once more, after a short pause.
+func TestInterimDeleteIsRetriedOnce(t *testing.T) {
+	g, log, clock := interimFixture(t, "deep")
+	log.failDelete = 1
+	m := answerMessage("질문")
+	ip := makeInterim(g, clock, context.Background(), m)
+	var waited time.Duration
+	ip.retryWait = func(d time.Duration) { waited = d }
+	ip.show(chat.Progress{Stage: chat.ProgressDeep})
+	ip.posts.Wait()
+	ip.clear()
+	if waited != interimDeleteRetry {
+		t.Fatalf("retry pause %s", waited)
+	}
+	if got := log.shape(interimTexts(g, m)); !slices.Equal(got, []string{"POST interim", "DELETE i1", "DELETE i1"}) {
+		t.Fatalf("calls %q", got)
+	}
+}
+
+// discordSnowflake is the smallest message ID Discord could assign at t.
+func discordSnowflake(t time.Time) string {
+	ms := t.UnixMilli() - 1420070400000
+	if ms < 0 {
+		ms = 0
+	}
+	return strconv.FormatUint(uint64(ms)<<22, 10)
+}
+
+// Backfill reads channel history, and a "still looking" line can be sitting in that history. The
+// catch-up stores no bot message (backfill.go skips m.Bot), so the line is not captured. A person's
+// message that happens to use the same words is stored.
+func TestBackfillDoesNotCaptureAnInterimLine(t *testing.T) {
+	g, log, _ := interimFixture(t, "deep")
+	doc := g.svc.Doc()
+	doc.Memory.Capture = true
+	doc.Discord.MessageContent = true
+	gs := doc.Guilds["g"]
+	ch := gs.Channels["c"]
+	ch.Capture = true
+	gs.Channels["c"] = ch
+	doc.Guilds["g"] = gs
+	applyDoc(t, g, doc)
+	g.connected.Store(true)
+	g.svc.Discord = g
+
+	now := time.Now().UTC()
+	anchor := discordSnowflake(now.Add(-time.Hour))
+	lineID := discordSnowflake(now.Add(-30 * time.Minute))
+	personID := discordSnowflake(now.Add(-20 * time.Minute))
+	quoteID := discordSnowflake(now.Add(-10 * time.Minute))
+	line := messages.T("ko", "discord.chat.interim.1")
+	eng, err := g.svc.MemoryEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", MessageID: anchor, AuthorID: "u1", AuthorName: "yeonghui", Content: "먼저", At: now.Add(-time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	msg := func(id, author, content string, bot bool, at time.Time) string {
+		return fmt.Sprintf(`{"id":%q,"channel_id":"c","content":%q,"timestamp":%q,"author":{"id":%q,"username":"n","bot":%t},"attachments":[],"mention_roles":[]}`,
+			id, content, at.Format(time.RFC3339Nano), author, bot)
+	}
+	log.historyBody = "[" + strings.Join([]string{
+		msg(quoteID, "u1", line, false, now.Add(-10*time.Minute)),
+		msg(personID, "u1", "이어서", false, now.Add(-20*time.Minute)),
+		msg(lineID, "bot-id", line, true, now.Add(-30*time.Minute)),
+		msg(anchor, "u1", "먼저", false, now.Add(-time.Hour)),
+	}, ",") + "]"
+
+	rep, err := g.svc.Backfill(context.Background(), "test", "g", "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Stored != 2 {
+		t.Fatalf("stored %d, want the person's two messages and not the line: %+v", rep.Stored, rep)
+	}
+	msgs, err := eng.Store.RecentMessages(engine.RoomKey("g", "c"), 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var texts []string
+	for _, m := range msgs {
+		texts = append(texts, m.Content)
+	}
+	if !slices.Equal(texts, []string{"먼저", "이어서", line}) {
+		t.Fatalf("room holds %q", texts)
 	}
 }
