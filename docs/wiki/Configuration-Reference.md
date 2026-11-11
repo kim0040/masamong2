@@ -155,8 +155,8 @@ The default `dimensions` is **1024** (since 2026-10-13). Measured on three real 
 |---|---|---|
 | `profile` | `lite` | Profile name |
 | `monthly_budget_usd` | `"10.00"` | This month's model spend cap; replies stop past it. The Usage page or `masamong usage reset` can restart this month's count from now without changing daily history or provider usage and key limits. Months are counted in UTC (in Korea a new month starts at 09:00 on the 1st) |
-| `per_request_budget_usd` | `"0.03"` | **Budget per reply.** Once a reply has spent this, its remaining tools and memory search are skipped; the reply itself (and the other chat model standing in when one fails) still runs. A step that alone costs more (a picture) is not refused, only what comes after it |
-| `max_external_attempts` | `6` (1–20) | **Outside calls per reply** (model calls, tools, memory search). Past it, the remaining tools and memory search are skipped as above. The skipped steps show in the turn record |
+| `per_request_budget_usd` | `"0.15"` (was 0.03) | **Budget per reply.** Once a reply has spent this, its remaining tools and memory search are skipped; the reply itself (and the other chat model standing in when one fails) still runs. A step that alone costs more (a picture) is not refused, only what comes after it |
+| `max_external_attempts` | `10` (1–20; was 6) | **Outside calls per reply** (model calls, tools, memory search). Past it, the remaining tools and memory search are skipped as above. The skipped steps show in the turn record. **The new defaults (0.15 and 10) apply only when the config file does not set these keys**: an install that already has them keeps its values, so raise them yourself (Maintenance › Config & history, or `config apply`) if deep searches get skipped |
 | `budget_alert_percent` | `80` | When the console starts warning about the budget |
 | `max_concurrent_turns` | `8` (1–64) | **Replies running at the same time.** [Concurrency and performance](https://github.com/kim0040/masamong2/wiki/Concurrency-and-Performance) |
 
@@ -196,6 +196,7 @@ Model calls reserve the call count at their start and add cost at completion. Wi
 | `tool_mode` | `loop` | How a reply picks its tools (`loop` is the default since it came out more accurate on the live regression sets of 2026-10-11). `planner`: the memory planner's plan names them. `shadow`: the planner still picks, and the native tool loop runs beside it only to record what it would have called (`tool_shadow` in the turn record). `loop`: the tool loop picks with native tool calling (at most 3 rounds, every call through the same checks and limits) and the planner only decides the memory search. A model that takes no tools falls back to `planner` for that reply. Also on the Tools page |
 | `loop_final` | `tools` | When the tool loop ends without asking its model once more. `tools`: in a short message (six words or fewer), when the round's calls are all of tools whose one result is the answer (`places.search`) and all found what they looked for. A failure, an empty or partial result, or a quote answered by a web search still asks. `search`: also when `search.web` found at least 3 results with text, unless the model searched with `depth: deep` or the message has a link. `off`: always asks. A request whose next call depends on a result ("find a cafe near here, then look up its reviews") can end at its first tool; set `off` if those are common |
 | `vision` | `auto` | Image understanding. `auto`: reads only the pictures sent when someone calls the bot (including those on the message they reply to or forward, at most 3 per reply). A picture posted just before a separate call (within 2 minutes), or sent alone within 45 seconds after a call that had none, counts as part of that call. An answer model that takes pictures sees them; otherwise another chat model describes them in 2–4 sentences inside the message. `off`: pictures are not read. No other pictures in the room are looked at, and pictures are not stored. Also on the Tools page |
+| `progress` | `deep` | The short "still looking" line. `deep`: posted as a reply, without a notification, when a deep search or a second round of searches starts. `slow`: those, and also when an ordinary search turn is still unanswered after 12 seconds. `off`: never. The line is deleted before the answer and is never stored in memory or counted for participation. Moderation bots may log the deletion. Also on the Tools page |
 
 ## dm
 
@@ -422,6 +423,10 @@ A new version shows under **Maintenance** and in the notifications (info).
 | Key | Default | Meaning |
 |---|---|---|
 | `order` | (none) | The order the web search tool uses search services in (provider names). Empty uses the services with keys in the order Tavily → Linkup → Exa → Serper → Brave → TinyFish → Kakao |
+| `read_pages` | `3` (0–10) | Result pages a chat search at standard depth reads for passages. `0`: snippets only. Quick reads none. `/search`, scheduled tasks and the quote's search fallback never read pages |
+| `deep_pages` | `6` (0–10) | The same for a deep search |
+| `fetch` | (auto) | The page reader: `tinyfish`, `jina` or `off`. Empty: TinyFish when it has a key, otherwise Jina Reader. Results that already carry the service's own text need no fetch |
+| `fetch_daily_limit` | `800` (0–5000; 0 = default) | Pages read a day. TinyFish Fetch is free up to 1,000 URLs a day |
 
 When a service errors or finds nothing, the next one is tried. Results record which service found them (`provider`) and which were passed over (`passed_over`). Reordering with the arrows under **Tools → Web search** in the console is easier.
 
