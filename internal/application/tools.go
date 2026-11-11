@@ -114,7 +114,7 @@ func (s *Service) toolAllowedHere(r tools.Resolved, inv *action.Invoker) (bool, 
 		return false, "tool.channel_off"
 	}
 	switch inv.Via {
-	case "chat":
+	case viaChat, viaTask:
 		if !r.Chat && !(has && override) {
 			return false, "tool.not_for_surface"
 		}
@@ -168,7 +168,7 @@ func (s *Service) gateTool(req action.Request) (action.Request, *action.Result) 
 		res := action.Fail(req, errcode.FeatureDisabled, "tool.disabled", s.msg(req, "tool.disabled", "tool", r.ID), map[string]any{"tool": r.ID, "reason": r.Reason})
 		return req, &res
 	}
-	if inv := req.Invoker; inv != nil && (inv.Via == "chat" || inv.Via == "command") && s.Paused(inv.GuildID, inv.ChannelID) {
+	if inv := req.Invoker; inv != nil && (inv.Via == viaChat || inv.Via == viaTask || inv.Via == "command") && s.Paused(inv.GuildID, inv.ChannelID) {
 		res := action.Fail(req, errcode.FeatureDisabled, "runtime.paused", s.msg(req, "runtime.paused"), map[string]any{"tool": r.ID})
 		return req, &res
 	}
@@ -687,6 +687,19 @@ func (s *Service) chatToolset(v chat.Voice, guildID, channelID string) chat.Tool
 // chatTool runs a planner-chosen tool through Execute, as the chat surface of the calling user.
 // Scope-bound tools get the channel's scope injected; a dry-run turn does not create state.
 func (s *Service) chatTool(in ChatInput, v chat.Voice) chat.ToolRunner {
+	return s.turnTool(in, v, viaChat)
+}
+
+// Where a turn's tool calls come from (action.Invoker.Via): a member's chat turn, or a scheduled task's
+// run (runTask). A task's call passes the same channel, surface and pause checks as a chat call, but it is
+// not a member waiting in the chat: its web search reads no pages unless asked (searchPages).
+const (
+	viaChat = "chat"
+	viaTask = "task"
+)
+
+// turnTool is chatTool for a turn from via (viaChat or viaTask).
+func (s *Service) turnTool(in ChatInput, v chat.Voice, via string) chat.ToolRunner {
 	return func(ctx context.Context, tool string, params map[string]any) (out chat.ToolResult) {
 		began := time.Now()
 		_, spentBefore, _ := chat.GuardFrom(ctx).Totals()
@@ -732,6 +745,11 @@ func (s *Service) chatTool(in ChatInput, v chat.Voice) chat.ToolRunner {
 		if in.DryRun && r.Writes {
 			return chat.ToolResult{Tool: tool, OK: true, Status: "dry_run", Data: map[string]any{"status": "dry_run", "note": "not executed in a dry-run turn", "parameters": p}}
 		}
+		if via == viaTask && s.BlockedIn(in.GuildID, in.SpeakerID) {
+			// a chat call of a blocked member is refused by the Discord gate (gateDiscord); a task's is
+			// refused here, the same way
+			return chatView(action.Fail(action.Request{Action: tool}, errcode.PermissionDenied, "access.blocked", "", nil))
+		}
 		if s.chatToolFault(in.ChannelID, tool) {
 			call.Class = errclass.Unknown
 			return chat.ToolResult{Tool: tool, OK: false, Status: "unavailable"} // a test's injected outage
@@ -744,7 +762,7 @@ func (s *Service) chatTool(in ChatInput, v chat.Voice) chat.ToolRunner {
 		raw, _ := json.Marshal(p)
 		ctx = withChatOrigin(ctx, chatOrigin{MessageID: in.MessageID}) // where a background picture is posted (imagequeue.go)
 		res = s.Execute(ctx, action.Request{Action: tool, Input: raw, Locale: v.Pack.Tag, RequestID: "chat",
-			Invoker: &action.Invoker{Via: "chat", GuildID: in.GuildID, ChannelID: in.ChannelID, UserID: in.SpeakerID}})
+			Invoker: &action.Invoker{Via: via, GuildID: in.GuildID, ChannelID: in.ChannelID, UserID: in.SpeakerID}})
 		out = chatView(res)
 		if out.Tool == "" {
 			out.Tool = tool

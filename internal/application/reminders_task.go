@@ -198,7 +198,7 @@ func (s *Service) runTask(ctx context.Context, r reminder, at time.Time, locale 
 	if per := parseUSD(doc.Limits.PerRequestBudgetUSD, 0); per > 0 && per < maxUSD {
 		maxUSD = per
 	}
-	rt := &chat.Runtime{LLM: chatLLM{s: s, routes: routes}, Tools: s.chatTool(in, voice)}
+	rt := &chat.Runtime{LLM: chatLLM{s: s, routes: routes}, Tools: s.turnTool(in, voice, viaTask)} // no pages read (searchPages)
 	res, err := rt.Answer(ctx, chat.Request{
 		Message: r.Task, Speaker: r.OwnerName, Persona: persona, Rules: rules, AgentPrompt: doc.Memory.AgentPrompt,
 		Tools: toolset, Voice: voice, PlannerModel: "planner", LoopModel: doc.Chat.LoopRole(), ResponseModel: "response",
@@ -223,7 +223,7 @@ func (s *Service) runTask(ctx context.Context, r reminder, at time.Time, locale 
 	}
 	body := map[string]any{"scheduled": map[string]any{"reminder_id": r.ID, "occurrence": at.UTC().Format(time.RFC3339)},
 		"message": clip(r.Task, 400), "speaker": r.OwnerName, "answer_preview": clip(res.Answer, 280), "answer": clip(res.Answer, 4000),
-		"tools": res.Tools, "timing_ms": res.Timing, "intent_source": res.Intent.Source}
+		"tools": recordTools(res.Tools), "timing_ms": res.Timing, "intent_source": res.Intent.Source}
 	if err != nil {
 		body["error"] = err.Error()
 	}
