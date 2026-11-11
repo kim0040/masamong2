@@ -3,6 +3,7 @@ package websearch
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -162,6 +163,23 @@ func TestLiveSearchServices(t *testing.T) {
 			if NewsSearch(services[id].Kind()) {
 				if row := run(id, "news week ko", Query{Text: "코스피 시황", Max: 3, Topic: TopicNews, Fresh: "week"}); row.err != "" || row.results == 0 || row.dated == 0 {
 					t.Errorf("%s news: %+v", id, row)
+				}
+			}
+			// papers: every service answers a research search its own way (its search of papers, preferred
+			// scholarly sites or the word for papers); the titles are logged to judge them by eye
+			for _, rq := range []struct{ name, text string }{{"research ko", "시간이 3차원이라는 물리학"}, {"research en", "three dimensional time physics"}} {
+				row, res := measure(services[id], Query{Text: rq.text, Max: 5, Topic: TopicResearch})
+				row.service, row.combo = id, rq.name
+				t.Logf("%s", row.markdown())
+				for _, r := range res.Results {
+					host := r.URL
+					if u, err := url.Parse(r.URL); err == nil {
+						host = u.Host
+					}
+					t.Logf("    %s | %s | %s", host, r.Published, r.Title)
+				}
+				if row.err != "" || row.results == 0 {
+					t.Errorf("%s %s: %+v", id, rq.name, row)
 				}
 			}
 		}

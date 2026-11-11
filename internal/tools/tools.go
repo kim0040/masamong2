@@ -151,9 +151,9 @@ func Builtins() []Builtin {
 			Providers: websearch.Kinds,
 			Inputs: []Input{{Name: "query", Type: "text", Required: true}, {Name: "size", Type: "number", Min: 1, Max: 10, Example: "5"},
 				{Name: "fresh", Type: "select", Options: fresh},
-				// quick: one fact; deep: a wider, slower look (a digest, a comparison); news: news articles
+				// quick: one fact; deep: a wider, slower look (a digest, a comparison); news: press coverage; research: papers
 				{Name: "depth", Type: "select", Options: []string{"quick", "standard", "deep"}},
-				{Name: "topic", Type: "select", Options: []string{"general", "news"}},
+				{Name: "topic", Type: "select", Options: []string{"general", "news", "research"}},
 				// with depth deep: the same question asked from other angles, searched in the same call
 				{Name: "queries", Type: "list", Max: 3},
 				{Name: "provider", Type: "provider"}}},

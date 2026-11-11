@@ -76,7 +76,7 @@
  },
  {
   "name": "search__web",
-  "description": "Web search (news, latest information, fact checks). Use for search requests, today's or recent news, who holds a post now, facts that change (rankings, prices, results), or when another tool failed. Also for used prices and what an item costs now. For news and current affairs, give topic=news. Give depth=deep for summaries, comparisons and other questions with several sides, or when asked to look in detail or look further. Not for word meanings, common knowledge, arithmetic, translation or small talk.",
+  "description": "Web search (news, latest information, fact checks). Use for search requests, today's or recent news, who holds a post now, facts that change (rankings, prices, results), or when another tool failed. Also for used prices and what an item costs now. Give topic=news only when looking for press coverage, and topic=research for papers and studies; official notices, admissions and job postings are not news. Give depth=deep for summaries, comparisons and other questions with several sides, or when asked to look in detail or look further. Not for word meanings, common knowledge, arithmetic, translation or small talk.",
   "parameters": {
    "type": "object",
    "properties": {
@@ -118,10 +118,11 @@
     },
     "topic": {
      "type": "string",
-     "description": "news: when looking for news articles or current affairs (usually with fresh). Otherwise leave out",
+     "description": "news: press coverage (incidents, controversies, announcements, elections, match reports). research: papers, studies and scholarly sources. Otherwise leave out: official notices, admissions and job postings, schedules, products, prices and specs, records, people, places and organizations, how-tos. For an official notice of a school, agency or company, put site:domain in the query",
      "enum": [
       "general",
-      "news"
+      "news",
+      "research"
      ]
     }
    },

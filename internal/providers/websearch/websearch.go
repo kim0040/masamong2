@@ -35,6 +35,11 @@
 //	Kakao have no news search: search.web asks them after the others for news (NewsSearch). Kakao's
 //	newest-first order was tried and dropped (2026-10-15): for "국제 정세" it ranked unrelated new posts first.
 //
+//	research: exa category="research paper", tinyfish domain_type=research_paper (pub_year_min for
+//	freshness), serper POST /scholar (organic[] with publicationInfo and year), tavily include_domains of
+//	scholarly sites with include_domains_mode prefer; linkup, brave and kakao have no search of papers and
+//	are asked for papers in the query's words (researchWords). Read from the references 2026-11-12.
+//
 //	dates: Exa, Tavily (include_published_date), Serper, Brave and Kakao date their results, TinyFish does
 //	for news and some pages (RFC 1123 or ISO), Linkup never does (its results have no date field).
 //
@@ -111,7 +116,44 @@ const (
 	DepthStandard = "standard"
 	DepthDeep     = "deep"
 	TopicNews     = "news"
+	// TopicResearch asks for papers and studies: the services with a search of scholarly works of their own
+	// use it (Exa category research paper, TinyFish research_paper, Serper Google Scholar), Tavily prefers
+	// scholarly sites and still searches the rest, and the others are asked for papers in the query's words.
+	TopicResearch = "research"
 )
+
+// ResearchSearch reports whether a kind has a search of its own for papers (Query.Topic research).
+func ResearchSearch(kind string) bool {
+	switch kind {
+	case "exa", "tinyfish", "serper":
+		return true
+	}
+	return false
+}
+
+// scholarlyDomains are the sites Tavily prefers for a research search (include_domains_mode prefer: it
+// still searches the rest of the web): preprint servers, publishers, indexes and the Korean ones.
+var scholarlyDomains = []string{
+	"arxiv.org", "biorxiv.org", "medrxiv.org", "semanticscholar.org", "openreview.net", "aclanthology.org",
+	"ncbi.nlm.nih.gov", "nature.com", "science.org", "sciencedirect.com", "springer.com", "wiley.com",
+	"ieeexplore.ieee.org", "dl.acm.org", "ssrn.com", "researchgate.net", "plos.org", "mdpi.com",
+	"dbpia.co.kr", "kci.go.kr", "riss.kr", "scienceon.kisti.re.kr", "koreascience.kr",
+}
+
+// researchWords asks a service without a search of papers for them in the query itself: "논문" for a
+// Korean query, "paper" otherwise, unless the query already names papers or studies.
+func researchWords(text string) string {
+	low := strings.ToLower(text)
+	for _, w := range []string{"논문", "연구", "학술", "paper", "study", "studies", "journal", "arxiv", "preprint"} {
+		if strings.Contains(low, w) {
+			return text
+		}
+	}
+	if hasHangul(text) {
+		return text + " 논문"
+	}
+	return text + " paper"
+}
 
 // pick is the service's own word (or number) for a depth: quick, standard (anything else) or deep.
 func pick[T any](depth string, quick, standard, deep T) T {
@@ -335,6 +377,10 @@ func (t *tavily) one(ctx context.Context, q Query) (Response, error) {
 	} else if hasHangul(q.Text) {
 		body["country"] = "south korea" // a boost, not a filter (general topic only)
 	}
+	if q.Topic == TopicResearch {
+		// no search of papers: the scholarly sites first, the rest of the web still searched
+		body["include_domains"], body["include_domains_mode"] = scholarlyDomains, "prefer"
+	}
 	if q.Fresh != "" {
 		body["time_range"] = q.Fresh
 	}
@@ -378,7 +424,11 @@ type linkup struct {
 func (l *linkup) Kind() string     { return "linkup" }
 func (l *linkup) Configured() bool { return l.cred.Present() }
 func (l *linkup) Search(ctx context.Context, q Query) (Response, error) {
-	body := map[string]any{"q": q.Text, "depth": pick(q.Depth, "flash", "standard", "deep"), "outputType": "searchResults", "maxResults": size(q.Max)}
+	text := q.Text
+	if q.Topic == TopicResearch {
+		text = researchWords(text) // no search of papers; a domain filter would leave Korean ones out
+	}
+	body := map[string]any{"q": text, "depth": pick(q.Depth, "flash", "standard", "deep"), "outputType": "searchResults", "maxResults": size(q.Max)}
 	if from := freshFrom(q.Fresh, time.Now()); from != "" {
 		body["fromDate"] = from
 	}
@@ -445,8 +495,11 @@ func (e *exa) Search(ctx context.Context, q Query) (Response, error) {
 	// content as deep in 2026-11-11's comparison)
 	body := map[string]any{"query": q.Text, "type": pick(q.Depth, "instant", "auto", "deep-lite"), "numResults": size(q.Max),
 		"contents": contents}
-	if q.Topic == TopicNews {
+	switch q.Topic {
+	case TopicNews:
 		body["category"] = "news"
+	case TopicResearch:
+		body["category"] = "research paper"
 	}
 	if extra := RewordedQueries(q); len(extra) > 0 {
 		body["additionalQueries"] = extra // only the deep types take them
@@ -523,16 +576,23 @@ func (s *serper) one(ctx context.Context, q Query) (Response, error) {
 	case "month":
 		body["tbs"] = "qdr:m"
 	}
-	path, list := "/search", "organic"
-	if q.Topic == TopicNews {
-		path, list = "/news", "news" // Google News: news[].title/link/snippet/date/source
+	path := "/search"
+	switch q.Topic {
+	case TopicNews:
+		path = "/news" // Google News: news[].title/link/snippet/date/source
+	case TopicResearch:
+		path = "/scholar" // Google Scholar: organic[].title/link/snippet/publicationInfo/year
+		delete(body, "tbs")
 	}
 	obj, err := post(ctx, s.c, s.base+path, map[string]string{"X-API-KEY": s.cred.Value()}, body)
 	if err != nil {
 		return Response{}, err
 	}
-	if list == "news" {
+	switch path {
+	case "/news":
 		return ParseSerperNews(obj)
+	case "/scholar":
+		return ParseSerperScholar(obj)
 	}
 	return ParseSerper(obj)
 }
@@ -555,6 +615,33 @@ func ParseSerperNews(obj map[string]json.RawMessage) (Response, error) {
 			continue
 		}
 		out.Results = append(out.Results, Result{Title: r.Title, URL: r.Link, Snippet: clip(lead(r.Source, r.Snippet)), Published: r.Date})
+	}
+	return out, nil
+}
+
+// ParseSerperScholar reads Google Scholar's {"organic":[{title,link,snippet,publicationInfo,year,citedBy}]};
+// the authors and venue lead the snippet and the year stands for the date.
+func ParseSerperScholar(obj map[string]json.RawMessage) (Response, error) {
+	var rows []struct {
+		Title           string `json:"title"`
+		Link            string `json:"link"`
+		Snippet         string `json:"snippet"`
+		PublicationInfo string `json:"publicationInfo"`
+		Year            int    `json:"year"`
+	}
+	if err := json.Unmarshal(obj["organic"], &rows); err != nil {
+		return Response{}, fmt.Errorf("%w: serper scholar", decode.ErrUnexpected)
+	}
+	var out Response
+	for _, r := range rows {
+		if r.Link == "" {
+			continue
+		}
+		res := Result{Title: r.Title, URL: r.Link, Snippet: clip(lead(r.PublicationInfo, r.Snippet))}
+		if r.Year > 0 {
+			res.Published = strconv.Itoa(r.Year)
+		}
+		out.Results = append(out.Results, res)
 	}
 	return out, nil
 }
@@ -669,8 +756,17 @@ func (d *daum) deepMain(ctx context.Context, q Query, blog bool) (Response, erro
 }
 
 func (d *daum) web(ctx context.Context, q Query) (Response, error) {
-	res, err := d.a.SearchWeb(ctx, q.Text, size(q.Max))
+	res, err := d.a.SearchWeb(ctx, daumText(q), size(q.Max))
 	return d.response(res, err)
+}
+
+// daumText is the query Daum is sent: Daum has no search of papers or news of its own, so a research
+// search asks for papers in its words.
+func daumText(q Query) string {
+	if q.Topic == TopicResearch {
+		return researchWords(q.Text)
+	}
+	return q.Text
 }
 
 // blog asks Daum's blog search (/v2/search/blog), whose documents have the shape of the web ones.
@@ -679,7 +775,7 @@ func (d *daum) blog(ctx context.Context, q Query) (Response, error) {
 		return Response{}, providers.ErrNoCredential
 	}
 	v := url.Values{}
-	v.Set("query", strings.TrimSpace(q.Text))
+	v.Set("query", strings.TrimSpace(daumText(q)))
 	v.Set("size", strconv.Itoa(size(q.Max)))
 	resp, err := d.a.Client.Get(ctx, d.a.BaseURL+"/v2/search/blog?"+v.Encode(), map[string]string{"Authorization": "KakaoAK " + d.a.Cred.Value()})
 	if err != nil {

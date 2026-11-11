@@ -46,7 +46,8 @@ func CanonicalURL(raw string) string {
 
 // MergeResults interleaves result lists by rank (every list's first result, then every list's second,
 // in the order the lists are given) and drops a page already taken under another address of it
-// (CanonicalURL). The page kept is the first one met; what it lacks (text, date, snippet) is filled
+// (CanonicalURL), or a copy of it on the same site under another path (the same title and the same
+// snippet: sameText). The page kept is the first one met; what it lacks (text, date, snippet) is filled
 // from the copy that was dropped. The order is fixed by the inputs alone.
 func MergeResults(lists ...[]Result) []Result {
 	var out []Result
@@ -60,7 +61,15 @@ func MergeResults(lists ...[]Result) []Result {
 			more = true
 			r := list[rank]
 			key := CanonicalURL(r.URL)
-			if i, dup := at[key]; dup {
+			i, dup := at[key]
+			if !dup {
+				if alias := sameText(key, r); alias != "" {
+					if i, dup = at[alias]; !dup {
+						at[alias] = len(out)
+					}
+				}
+			}
+			if dup {
 				k := &out[i]
 				if k.Text == "" {
 					k.Text = r.Text
@@ -83,4 +92,24 @@ func MergeResults(lists ...[]Result) []Result {
 			return out
 		}
 	}
+}
+
+// sameText is the key a page is a copy of another under: its site, title and the start of its snippet,
+// folded. Pages of one site often share a title (a school's notices are all "입학정보"), so the snippet
+// must match too; a result without a title or a snippet long enough to tell is only itself ("").
+func sameText(canonical string, r Result) string {
+	fold := func(s string, n int) string {
+		s = strings.ToLower(strings.Join(strings.Fields(s), " "))
+		if rs := []rune(s); len(rs) > n {
+			s = string(rs[:n])
+		}
+		return s
+	}
+	title, snippet := fold(r.Title, 200), fold(r.Snippet, 80)
+	if len([]rune(title)) < 8 || len([]rune(snippet)) < 20 {
+		return ""
+	}
+	host := strings.TrimPrefix(canonical, "https://")
+	host, _, _ = strings.Cut(host, "/")
+	return "same:" + host + "|" + title + "|" + snippet
 }

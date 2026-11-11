@@ -1007,6 +1007,10 @@ func (s *Service) search(ctx context.Context, req action.Request) action.Result 
 	if query == "" {
 		return action.Fail(req, errcode.InvalidInput, "generic.error", "query required", nil)
 	}
+	// what is searched: the query without the bot's name (the result keeps the query as asked, which the
+	// replay rule compares searches by)
+	names := s.Doc().BotNames()
+	text := withoutBotNames(query, names)
 	order := s.searchOrder()
 	if want := strVal(in, "provider", ""); want != "" {
 		if !slices.Contains(order, want) {
@@ -1022,8 +1026,8 @@ func (s *Service) search(ctx context.Context, req action.Request) action.Result 
 	if depth != "" && depth != websearch.DepthQuick && depth != websearch.DepthStandard && depth != websearch.DepthDeep {
 		depth = "" // a word the services do not take: the standard search
 	}
-	if topic != websearch.TopicNews {
-		topic = ""
+	if topic != websearch.TopicNews && topic != websearch.TopicResearch {
+		topic = "" // general, or a word the services do not take
 	}
 	size := 5
 	if depth == websearch.DepthDeep {
@@ -1038,8 +1042,8 @@ func (s *Service) search(ctx context.Context, req action.Request) action.Result 
 		fresh = "" // a word the schema does not offer and that names no span of days
 	}
 	pages := s.searchPages(in, req, depth)
-	q := websearch.Query{Text: query, Max: intVal(in, "size", size), Fresh: fresh, Depth: depth, Topic: topic, Full: pages > 0,
-		Extra: strSlice(in, "queries")}
+	q := websearch.Query{Text: text, Max: intVal(in, "size", size), Fresh: fresh, Depth: depth, Topic: topic, Full: pages > 0,
+		Extra: withoutBotNamesAll(strSlice(in, "queries"), names)}
 	if topic == websearch.TopicNews && len(order) > 1 {
 		// news: the services with a news search of their own first (dated articles), the rest after
 		reg := s.Registry()
@@ -1059,10 +1063,10 @@ func (s *Service) search(ctx context.Context, req action.Request) action.Result 
 		}
 		return s.providerFail(req, run.lastID, run.lastErr)
 	}
-	results := win.res.Results
+	results := websearch.MergeResults(win.res.Results) // one service's own copies of a page (same site, title and snippet)
 	var reads []pageRead
 	if pages > 0 && len(results) > 0 {
-		reads = s.readPages(ctx, query, depth, results, pages, readsOwnPages(win.sr.Kind()))
+		reads = s.readPages(ctx, text, depth, results, pages, readsOwnPages(win.sr.Kind()))
 	}
 	items := make([]any, 0, len(results))
 	pagesRead := 0
@@ -1423,6 +1427,58 @@ func tallyOut(r poll.Result) []any {
 	out := make([]any, 0, len(r.ByOption))
 	for _, t := range r.ByOption {
 		out = append(out, map[string]any{"option_id": t.OptionID, "label": t.Label, "votes": t.Votes, "ratio": t.Ratio})
+	}
+	return out
+}
+
+// withoutBotNames takes the names people call the bot by out of a search query: "마사몽 젠슨 황 근황" is a
+// question to the bot about Jensen Huang, and the web knows nothing of the bot's name. A word is the name
+// with or without quotes, a call ending (마사몽아, 마사몽이) or a trailing comma. A query that is only the
+// name, or whose name is part of a longer word, is kept as it is.
+func withoutBotNames(query string, names []string) string {
+	if len(names) == 0 {
+		return query
+	}
+	isName := func(word string) bool {
+		w := strings.ToLower(strings.Trim(word, "\"'“”‘’「」『』,.!?:;~"))
+		for _, n := range names {
+			n = strings.ToLower(strings.TrimSpace(n))
+			if n == "" {
+				continue
+			}
+			if w == n {
+				return true
+			}
+			if rest, ok := strings.CutPrefix(w, n); ok {
+				switch rest {
+				case "아", "야", "이", "가", "은", "는", "님", "이가", "한테", "에게":
+					return true
+				}
+			}
+		}
+		return false
+	}
+	words := strings.Fields(query)
+	kept := words[:0:0]
+	for _, w := range words {
+		if !isName(w) {
+			kept = append(kept, w)
+		}
+	}
+	if len(kept) == 0 || len(kept) == len(words) {
+		return query
+	}
+	return strings.Join(kept, " ")
+}
+
+// withoutBotNamesAll is withoutBotNames for each reworded query, in a new list (the call's own is kept).
+func withoutBotNamesAll(queries []string, names []string) []string {
+	if len(queries) == 0 {
+		return queries
+	}
+	out := make([]string, len(queries))
+	for i, q := range queries {
+		out[i] = withoutBotNames(q, names)
 	}
 	return out
 }

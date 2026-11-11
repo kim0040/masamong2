@@ -8,6 +8,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -474,5 +475,37 @@ func TestSearchRequestIsSentOnceAndALostAnswerIsCharged(t *testing.T) {
 	}
 	if !near(g.PaidTotal(), 0.0055) || !near(monthSpend(t, svc), 0.0055) {
 		t.Fatalf("paid %v, month %v: an unreadable answer counts at Linkup's list price", g.PaidTotal(), monthSpend(t, svc))
+	}
+}
+
+// The service is asked without the bot's name, a research search reaches it as one (TinyFish's search of
+// papers), and the result keeps the query as it was asked.
+func TestSearchAsksWithoutTheBotsNameAndForPapers(t *testing.T) {
+	var qs []string
+	var mu sync.Mutex
+	tf := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		qs = append(qs, r.URL.RawQuery)
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{"results":[{"title":"Three-dimensional time","url":"https://w.example/doi/1","snippet":"This paper introduces","authors":["G Kletetschka"],"year":2025}]}`))
+	}))
+	defer tf.Close()
+	svc := setupSvc(t)
+	pointAt(t, svc, "tinyfish", tf.URL, "TF_KEY", "k")
+	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"web_search", "order"}, "value": []any{"tinyfish"}}}}); !r.OK {
+		t.Fatalf("order: %+v", r.Error)
+	}
+	res := searchWith(svc, &chat.Guard{MaxUSD: 1}, map[string]any{"query": "마사몽 시간이 3차원이라는 논문", "topic": "research"})
+	if !res.OK || res.Output["query"] != "마사몽 시간이 3차원이라는 논문" || res.Output["topic"] != "research" {
+		t.Fatalf("%+v", res.Output)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(qs) != 1 {
+		t.Fatalf("requests: %v", qs)
+	}
+	v, _ := url.ParseQuery(qs[0])
+	if v.Get("query") != "시간이 3차원이라는 논문" || v.Get("domain_type") != "research_paper" {
+		t.Fatalf("asked %v", v)
 	}
 }

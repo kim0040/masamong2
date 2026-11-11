@@ -7,6 +7,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -241,6 +244,125 @@ func TestDepthAndNewsPerService(t *testing.T) {
 			}
 			tc.check(t, got, res)
 		})
+	}
+}
+
+// A research search reaches each service in its own way: a search of papers where the service has one
+// (Exa category, TinyFish research_paper with the year for freshness, Serper's Google Scholar), Tavily's
+// preferred scholarly sites (the rest of the web still searched), and the word for papers in the query
+// for Linkup, Brave and Daum, unless the query already asks for them.
+func TestResearchPerService(t *testing.T) {
+	type seen struct {
+		path string
+		body map[string]any
+		qs   url.Values
+	}
+	year := strconv.Itoa(time.Now().AddDate(0, 0, -31).Year())
+	cases := []struct {
+		kind  string
+		q     Query
+		reply string
+		check func(t *testing.T, s seen, res Response)
+	}{
+		{"exa", Query{Text: "three dimensional time", Topic: TopicResearch, Fresh: "month"}, `{"results":[]}`, func(t *testing.T, s seen, _ Response) {
+			if s.body["category"] != "research paper" || s.body["startPublishedDate"] == nil {
+				t.Errorf("exa: %v", s.body)
+			}
+		}},
+		{"tavily", Query{Text: "시간 3차원 논문", Topic: TopicResearch}, `{"results":[]}`, func(t *testing.T, s seen, _ Response) {
+			doms, _ := s.body["include_domains"].([]any)
+			if s.body["include_domains_mode"] != "prefer" || len(doms) < 10 || s.body["topic"] != nil || s.body["query"] != "시간 3차원 논문" {
+				t.Errorf("tavily: %v", s.body)
+			}
+		}},
+		{"linkup", Query{Text: "시간이 3차원", Topic: TopicResearch}, `{"results":[]}`, func(t *testing.T, s seen, _ Response) {
+			if s.body["q"] != "시간이 3차원 논문" || s.body["includeDomains"] != nil {
+				t.Errorf("linkup: %v", s.body)
+			}
+		}},
+		{"linkup", Query{Text: "three dimensional time study", Topic: TopicResearch}, `{"results":[]}`, func(t *testing.T, s seen, _ Response) {
+			if s.body["q"] != "three dimensional time study" {
+				t.Errorf("a query naming studies is kept: %v", s.body)
+			}
+		}},
+		{"serper", Query{Text: "three dimensional time", Topic: TopicResearch, Fresh: "week"},
+			`{"organic":[{"title":"Three-dimensional time","link":"https://w.example/doi/1","publicationInfo":"G Kletetschka - Reports in Advances of Physical Sciences, 2025","snippet":"This paper introduces","year":2025,"citedBy":49}]}`,
+			func(t *testing.T, s seen, res Response) {
+				if s.path != "/scholar" || s.body["tbs"] != nil {
+					t.Errorf("serper: %s %v", s.path, s.body)
+				}
+				if len(res.Results) != 1 || res.Results[0].Published != "2025" || !strings.HasPrefix(res.Results[0].Snippet, "G Kletetschka") {
+					t.Errorf("serper reply: %+v", res)
+				}
+			}},
+		{"brave", Query{Text: "three dimensional time", Topic: TopicResearch}, `{"query":{"original":"x"},"web":{"results":[]}}`, func(t *testing.T, s seen, _ Response) {
+			if s.path != "/res/v1/web/search" || s.qs.Get("q") != "three dimensional time paper" {
+				t.Errorf("brave: %s %v", s.path, s.qs)
+			}
+		}},
+		{"tinyfish", Query{Text: "three dimensional time", Topic: TopicResearch, Fresh: "month"},
+			`{"results":[{"position":1,"title":"Three-dimensional time","url":"https://w.example/doi/1","snippet":"This paper introduces","authors":["G Kletetschka"],"venue":"Reports in Advances of Physical Sciences","year":2025,"cited_by_count":49}],"total_results":1,"page":0}`,
+			func(t *testing.T, s seen, res Response) {
+				if s.qs.Get("domain_type") != "research_paper" || s.qs.Get("pub_year_min") != year || s.qs.Get("recency_minutes") != "" {
+					t.Errorf("tinyfish: %v", s.qs)
+				}
+				if len(res.Results) != 1 || res.Results[0].Published != "2025" || res.Results[0].Snippet != "G Kletetschka, Reports in Advances of Physical Sciences — This paper introduces" {
+					t.Errorf("tinyfish reply: %+v", res)
+				}
+			}},
+		{"kakao_search", Query{Text: "시간이 3차원", Topic: TopicResearch}, `{"documents":[],"meta":{"total_count":0}}`, func(t *testing.T, s seen, _ Response) {
+			if s.qs.Get("query") != "시간이 3차원 논문" {
+				t.Errorf("kakao: %s %v", s.path, s.qs)
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.kind, func(t *testing.T) {
+			var got seen
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				raw, _ := io.ReadAll(r.Body)
+				got = seen{path: r.URL.Path, qs: r.URL.Query()}
+				_ = json.Unmarshal(raw, &got.body)
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.reply))
+			}))
+			defer srv.Close()
+			c := providers.NewClient(5*time.Second, nil)
+			c.MaxRetries = 0
+			t.Setenv("K", "k")
+			cred, _ := providers.Resolve("env:K")
+			s, err := New(tc.kind, c, srv.URL, cred)
+			if err != nil {
+				t.Fatal(err)
+			}
+			res, err := s.Search(context.Background(), tc.q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.check(t, got, res)
+		})
+	}
+}
+
+// Copies of one page under other paths of its site (the same title and snippet) are dropped; pages of
+// one site that share a title but say different things are all kept.
+func TestMergeDropsSameSiteCopies(t *testing.T) {
+	got := MergeResults([]Result{
+		{Title: "Space Exploration Technologies 주가, 오늘", URL: "https://kr.investing.com/equities/spacex", Snippet: "실시간 시세와 차트, 뉴스를 확인하세요 2026"},
+		{Title: "충북대학교 입학정보", URL: "https://ipsi.cbnu.ac.kr/a", Snippet: "2027학년도 편입학 모집요강 안내입니다 자세히"},
+		{Title: "Space Exploration Technologies 주가, 오늘", URL: "https://kr.investing.com/equities/spacex-chart", Snippet: "실시간 시세와 차트, 뉴스를 확인하세요 2026"},
+		{Title: "충북대학교 입학정보", URL: "https://ipsi.cbnu.ac.kr/b", Snippet: "2027학년도 편입학 원서접수 일정 공지입니다"},
+		{Title: "Space Exploration Technologies 주가, 오늘", URL: "https://other.example/spacex", Snippet: "실시간 시세와 차트, 뉴스를 확인하세요 2026"},
+		{Title: "짧은", URL: "https://kr.investing.com/x", Snippet: "s"},
+		{Title: "짧은", URL: "https://kr.investing.com/y", Snippet: "s"},
+	})
+	var urls []string
+	for _, r := range got {
+		urls = append(urls, r.URL)
+	}
+	want := []string{"https://kr.investing.com/equities/spacex", "https://ipsi.cbnu.ac.kr/a", "https://ipsi.cbnu.ac.kr/b", "https://other.example/spacex", "https://kr.investing.com/x", "https://kr.investing.com/y"}
+	if !slices.Equal(urls, want) {
+		t.Fatalf("got %v\nwant %v", urls, want)
 	}
 }
 

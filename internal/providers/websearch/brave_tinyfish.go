@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"masamong/internal/providers"
 	"masamong/internal/providers/decode"
@@ -51,7 +53,11 @@ func (b *brave) Search(ctx context.Context, q Query) (Response, error) { return 
 
 func (b *brave) one(ctx context.Context, q Query) (Response, error) {
 	v := url.Values{}
-	v.Set("q", q.Text)
+	text := q.Text
+	if q.Topic == TopicResearch {
+		text = researchWords(text) // Brave has no search of papers: asked for in the query's words
+	}
+	v.Set("q", text)
 	if hasHangul(q.Text) {
 		v.Set("country", "KR")
 		v.Set("search_lang", "ko")
@@ -234,10 +240,18 @@ func (t *tinyfish) page(ctx context.Context, q Query) (Response, error) {
 		v.Set("location", "KR")
 		v.Set("language", "ko")
 	}
-	if q.Topic == TopicNews {
+	switch q.Topic {
+	case TopicNews:
 		v.Set("domain_type", "news")
+	case TopicResearch:
+		v.Set("domain_type", "research_paper") // authors, venue, year and citations come with each paper
 	}
-	if m := tinyfishMinutes[q.Fresh]; m > 0 {
+	if q.Topic == TopicResearch {
+		// papers take no recency window: the year the window starts in is the earliest year asked
+		if since, ok := freshSince(q.Fresh, time.Now()); ok {
+			v.Set("pub_year_min", strconv.Itoa(since.Year()))
+		}
+	} else if m := tinyfishMinutes[q.Fresh]; m > 0 {
 		v.Set("recency_minutes", strconv.Itoa(m))
 	}
 	obj, err := get(ctx, t.c, strings.TrimRight(t.base, "/")+"/?"+v.Encode(), map[string]string{"X-API-Key": t.cred.Value()})
@@ -259,6 +273,10 @@ func ParseTinyFish(obj map[string]json.RawMessage) (Response, error) {
 		Snippet   string `json:"snippet"`
 		Date      string `json:"date"`
 		Publisher string `json:"publisher"`
+		// a research_paper search's papers: who wrote them, where and when
+		Authors []string `json:"authors"`
+		Venue   string   `json:"venue"`
+		Year    int      `json:"year"`
 	}
 	if err := json.Unmarshal(obj["results"], &rows); err != nil {
 		return Response{}, fmt.Errorf("%w: tinyfish results", decode.ErrUnexpected)
@@ -268,7 +286,16 @@ func ParseTinyFish(obj map[string]json.RawMessage) (Response, error) {
 		if r.URL == "" {
 			continue
 		}
-		out.Results = append(out.Results, Result{Title: r.Title, URL: r.URL, Snippet: clip(lead(r.Publisher, r.Snippet)), Published: r.Date})
+		by := r.Publisher
+		if len(r.Authors) > 0 || r.Venue != "" {
+			by = strings.Join(append(slices.Clone(r.Authors[:min(len(r.Authors), 3)]), r.Venue), ", ")
+			by = strings.Trim(by, ", ")
+		}
+		when := r.Date
+		if when == "" && r.Year > 0 {
+			when = strconv.Itoa(r.Year)
+		}
+		out.Results = append(out.Results, Result{Title: r.Title, URL: r.URL, Snippet: clip(lead(by, r.Snippet)), Published: when})
 	}
 	return out, nil
 }

@@ -228,7 +228,8 @@
       "route": "noticias, temas del día, información reciente o hechos que cambian con el tiempo (quién ocupa un cargo ahora, clasificaciones, precios): search.web",
       "params": {
         "depth": "Cuánto buscar. Normalmente déjalo vacío (standard: también lee las páginas principales), también para una pregunta ligera sobre una sola cosa como '¿por qué subió?' o '¿qué es eso?'. quick: solo cuando basta con un valor actual (un precio, el tiempo, un resultado, una fecha) y no hay nada que explicar. Si dudas, déjalo vacío. deep: resúmenes y comparaciones, preguntas de 'por qué' o 'cómo pasó' con varios aspectos, preguntas de investigación, peticiones como 'en detalle', 'busca más' o 'a fondo', y un seguimiento que dice que la respuesta anterior se quedó corta.",
-        "queries": "Solo con deep: de 1 a 3 búsquedas más que plantean la misma pregunta desde otros ángulos (en el idioma de query). Si no, déjalo vacío."
+        "queries": "Solo con deep: de 1 a 3 búsquedas más que plantean la misma pregunta desde otros ángulos (en el idioma de query). Si no, déjalo vacío.",
+        "topic": "news: cobertura de prensa (sucesos, polémicas, anuncios, elecciones, resultados de partidos). research: artículos científicos, estudios y fuentes académicas. Si no, déjalo vacío: avisos oficiales, admisiones y ofertas de empleo, calendarios, productos, precios y especificaciones, récords, personas, lugares y organizaciones, guías. Para un aviso oficial de una escuela, organismo o empresa, pon site:dominio en la query"
       }
     },
     "web.read": {

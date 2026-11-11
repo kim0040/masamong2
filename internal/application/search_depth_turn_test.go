@@ -132,3 +132,28 @@ func TestTurnRecordOfPagelessSearchIsUntouched(t *testing.T) {
 		t.Fatal("nil in, nil out")
 	}
 }
+
+// The names the bot is called by are taken out of what is searched (the web knows nothing of them); a
+// query that is only the name, or a word that merely starts with it, is left as it is.
+func TestSearchLeavesOutTheBotsName(t *testing.T) {
+	names := []string{"마사몽", "masamong"}
+	for _, c := range []struct{ in, want string }{
+		{"마사몽 젠슨황 불륜 논란", "젠슨황 불륜 논란"},
+		{"홍민석 혁명 마사몽", "홍민석 혁명"},
+		{`"마사몽" "짜장면" 전주`, `"짜장면" 전주`},
+		{"마사몽아, 스페이스X 주가", "스페이스X 주가"},
+		{"Masamong SpaceX stock", "SpaceX stock"},
+		{"마사몽", "마사몽"},
+		{"마사몽2 출시", "마사몽2 출시"},
+		{"마사몽의 뜻", "마사몽의 뜻"},
+		{"SpaceX 주가", "SpaceX 주가"},
+	} {
+		if got := withoutBotNames(c.in, names); got != c.want {
+			t.Errorf("%q: got %q, want %q", c.in, got, c.want)
+		}
+	}
+	in := []string{"마사몽 a", "b"}
+	if out := withoutBotNamesAll(in, names); out[0] != "a" || in[0] != "마사몽 a" {
+		t.Fatalf("reworded queries: %v (the call's list must stay as it was: %v)", out, in)
+	}
+}
