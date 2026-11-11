@@ -12,12 +12,22 @@ func searchResult(status string, ok bool, items ...any) chat.ToolResult {
 }
 
 // A turn can search several times at once. A search that failed or came back empty does not keep the reply
-// out of the conversation while another search of the turn succeeded; any other tool's failure still does.
+// out of the conversation while another search of the same query succeeded. A failed search for a different
+// query does, and so does any other tool's failure. Results that name no query share the empty query.
 func TestReplyKeptWhenOneSearchFailedAndAnotherSucceeded(t *testing.T) {
 	good := searchResult("ok", true, map[string]any{"title": "t"})
 	failed := chat.ToolResult{Tool: "search.web", OK: false, Status: "error", Error: "timeout"}
 	empty := searchResult("no_results", true)
 	weatherDown := chat.ToolResult{Tool: "weather.query", OK: true, Status: "unconfigured"}
+	same := func(r chat.ToolResult, query string) chat.ToolResult {
+		data := map[string]any{}
+		for k, v := range r.Data {
+			data[k] = v
+		}
+		data["query"] = query
+		r.Data = data
+		return r
+	}
 	for _, tc := range []struct {
 		name    string
 		results []chat.ToolResult
@@ -33,6 +43,10 @@ func TestReplyKeptWhenOneSearchFailedAndAnotherSucceeded(t *testing.T) {
 		{"only failed searches", []chat.ToolResult{failed, empty}, true},
 		{"a good search but another tool failed", []chat.ToolResult{good, failed, weatherDown}, true},
 		{"another tool failed alone", []chat.ToolResult{weatherDown}, true},
+		{"the same query, aside from case and space", []chat.ToolResult{same(failed, "  Apple "), same(good, "apple")}, false},
+		{"a failed search for another subject", []chat.ToolResult{same(good, "alpha"), same(failed, "beta")}, true},
+		{"an empty search for another subject", []chat.ToolResult{same(good, "alpha"), same(empty, "beta")}, true},
+		{"one subject found, another refused", []chat.ToolResult{same(good, "alpha"), same(chat.ToolResult{Tool: "search.web", OK: false, Status: "refused"}, "beta")}, true},
 	} {
 		if got := toolFailureToReplay(tc.results); got != tc.drop {
 			t.Errorf("%s: toolFailureToReplay = %v, want %v", tc.name, got, tc.drop)

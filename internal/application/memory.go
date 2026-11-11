@@ -1748,17 +1748,18 @@ func lookedUp(res chat.Result) []string {
 
 // toolFailureToReplay keeps a failed tool exchange from becoming an answer the bot cites again in an
 // unrelated turn. The user message remains in context; the current turn's tool result is still shown.
-// A turn can search several times at once: a search that failed or was refused does not count while
-// another web search of the same turn succeeded, because the answer then rests on the one that did.
+// A failed web search does not count when another web search of the same turn succeeded for the same
+// query (trimmed, case-folded): the answer then rests on the one that did. A failed search for a
+// different query still counts, as does any other tool's failure.
 func toolFailureToReplay(results []chat.ToolResult) bool {
-	searched := false
+	succeeded := map[string]bool{}
 	for _, result := range results {
 		if result.Tool == "search.web" && !toolFailed(result) {
-			searched = true
+			succeeded[foldedSearchQuery(result)] = true
 		}
 	}
 	for _, result := range results {
-		if searched && result.Tool == "search.web" {
+		if result.Tool == "search.web" && succeeded[foldedSearchQuery(result)] {
 			continue
 		}
 		if toolFailed(result) {
@@ -1766,6 +1767,16 @@ func toolFailureToReplay(results []chat.ToolResult) bool {
 		}
 	}
 	return false
+}
+
+// foldedSearchQuery is the query a search.web result was asked, trimmed and case-folded, so two
+// searches for the same words compare equal. An absent query is empty, and empty matches empty.
+func foldedSearchQuery(result chat.ToolResult) string {
+	if result.Data == nil {
+		return ""
+	}
+	q, _ := result.Data["query"].(string)
+	return strings.ToLower(strings.TrimSpace(q))
 }
 
 // toolFailed reports whether one tool result is a failure, a refusal or an empty answer.
