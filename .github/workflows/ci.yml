@@ -140,15 +140,16 @@ jobs:
     needs: changes
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       # under the race detector the application package runs past go test's default 10 minutes (it timed
-      # out there on 2026-10-05 and 10-12 without any race reported)
-      - run: go test -race ./... -count=1 -timeout 40m
+      # out there on 2026-10-05 and 10-12 without any race reported); it took 37 min at v1.1.1 and passed
+      # 40 at v1.2.0 (2026-11-11, still running tests, no race reported)
+      - run: go test -race ./... -count=1 -timeout 65m
 
   load:
     # 45 s of mixed traffic against the real service (fake model): fails on leaked goroutines or
