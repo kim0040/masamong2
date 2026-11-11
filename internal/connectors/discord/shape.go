@@ -25,7 +25,11 @@ const (
 	bubbleMaxRunes = 280 // a bubble reply is short; anything longer is sent as one message
 	trimAt         = 700 // a reply this long is trimmed
 	trimHead       = 420 // the first part keeps whole paragraphs up to about this many characters
-	moreKeep       = time.Hour
+	// a reply built on a deep search is a synthesis of several pages: it is the point of the turn, so it is
+	// trimmed later and shows more before the button
+	trimAtDeep   = 1800
+	trimHeadDeep = 1200
+	moreKeep     = time.Hour
 )
 
 var (
@@ -76,9 +80,12 @@ func listy(line string) bool {
 
 // trimReply cuts a long reply after its first paragraphs; rest is "" when it is short enough or has no
 // paragraph break to cut at (the reply is then sent whole, split by Discord's limit as before).
-func trimReply(text string) (head, rest string) {
+func trimReply(text string) (head, rest string) { return trimReplyAt(text, trimAt, trimHead) }
+
+// trimReplyAt is trimReply with the length that starts a trim and the length of the part shown.
+func trimReplyAt(text string, at, shown int) (head, rest string) {
 	text = strings.TrimSpace(text)
-	if len([]rune(text)) < trimAt || strings.Contains(text, "```") {
+	if len([]rune(text)) < at || strings.Contains(text, "```") {
 		return text, ""
 	}
 	paras := strings.Split(text, "\n\n")
@@ -88,7 +95,7 @@ func trimReply(text string) (head, rest string) {
 	n, cut := 0, 0
 	for i, p := range paras {
 		r := len([]rune(p))
-		if i > 0 && n+r > trimHead {
+		if i > 0 && n+r > shown {
 			break
 		}
 		n += r
@@ -153,6 +160,12 @@ func (s *moreStore) take(messageID string) (moreEntry, bool) {
 // said before the answer (the partial-picture notice): it is the first line or bubble, and a trimmed
 // reply keeps it in the part shown, so no path hides it.
 func (g *Gateway) sendShaped(ctx context.Context, s *discordgo.Session, guildID, channelID string, ref *discordgo.MessageReference, text, lead, shape string) (string, []string, deliveryReport) {
+	return g.sendShapedFor(ctx, s, guildID, channelID, ref, text, lead, shape, false)
+}
+
+// sendShapedFor is sendShaped for a reply that may rest on a deep search (deep): such a reply is trimmed at
+// a greater length. Bubbles are unchanged.
+func (g *Gateway) sendShapedFor(ctx context.Context, s *discordgo.Session, guildID, channelID string, ref *discordgo.MessageReference, text, lead, shape string, deep bool) (string, []string, deliveryReport) {
 	lead = strings.Join(strings.Fields(lead), " ")
 	if shape == "plain" {
 		return g.sendReply(ctx, s, guildID, channelID, ref, withLead(lead, text))
@@ -162,7 +175,11 @@ func (g *Gateway) sendShaped(ctx context.Context, s *discordgo.Session, guildID,
 			return g.sendBubbles(ctx, s, guildID, channelID, ref, parts)
 		}
 	}
-	head, rest := trimReply(text)
+	at, shown := trimAt, trimHead
+	if deep {
+		at, shown = trimAtDeep, trimHeadDeep
+	}
+	head, rest := trimReplyAt(text, at, shown)
 	head = withLead(lead, head)
 	said, ids, rep := g.sendReply(ctx, s, guildID, channelID, ref, head)
 	if rest != "" && len(ids) > 0 && rep.Sent == rep.Parts {
@@ -266,4 +283,16 @@ func (g *Gateway) noticeLocale(m *discordgo.MessageCreate) string {
 		}
 	}
 	return g.locale(m.GuildID)
+}
+
+// deepSearched reports whether the turn's answer rests on a deep web search.
+func deepSearched(results []chat.ToolResult) bool {
+	for _, r := range results {
+		if r.Tool == "search.web" && r.OK {
+			if depth, _ := r.Data["depth"].(string); depth == "deep" {
+				return true
+			}
+		}
+	}
+	return false
 }

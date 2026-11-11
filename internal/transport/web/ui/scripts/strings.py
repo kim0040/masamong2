@@ -2201,6 +2201,11 @@ add("cfg", {
     "web_search": ("웹 검색", "Web search"),
     "web_search.desc": ("인터넷 검색 도구가 검색 서비스를 쓰는 순서입니다. 도구 → 인터넷 검색 화면에서 화살표로 바꾸는 편이 쉽습니다.", "The order the web search tool tries its services in. Easier to change with the arrows under Tools → Web search."),
     "web_search.order": ("검색 서비스 순서", "Search service order"),
+    "web_search.read_pages": ("검색 한 번에 읽는 페이지 수", "Pages read per search"), "web_search.read_pages.hint": ("기본 3개, 0이면 요약만 씁니다.", "Default 3; 0 uses snippets only."),
+    "web_search.deep_pages": ("깊은 검색에서 읽는 페이지 수", "Pages read for a deep search"), "web_search.deep_pages.hint": ("기본 6개.", "Default 6."),
+    "web_search.fetch": ("페이지를 읽는 서비스", "Page reader"), "web_search.fetch.hint": ("비우면 TinyFish 키가 있을 때 TinyFish, 없으면 Jina Reader.", "Empty: TinyFish when it has a key, otherwise Jina Reader."),
+    "web_search.fetch.v.tinyfish": ("TinyFish", "TinyFish"), "web_search.fetch.v.jina": ("Jina Reader", "Jina Reader"), "web_search.fetch.v.off": ("읽지 않음", "Off"),
+    "web_search.fetch_daily_limit": ("하루에 읽는 페이지 상한", "Pages read per day, at most"), "web_search.fetch_daily_limit.hint": ("0이면 기본 800개.", "0 means the default of 800."),
     "web_search.order.hint": ("공급자 이름을 쉼표로 (예: tavily, serper, kakao). 비우면 키가 있는 서비스를 Tavily → Linkup → Exa → Serper → Brave → TinyFish → 카카오 순으로 씁니다.", "Provider names, comma-separated (e.g. tavily, serper, kakao). Empty: every service with a key, Tavily → Linkup → Exa → Serper → Brave → TinyFish → Kakao."),
 })
 add("cfg", {
@@ -2339,6 +2344,9 @@ add("cfg", {
     "chat.loop_final": ("도구 결과로 끝내는 조건", "When a tool result ends the lookup"),
     "chat.loop_final.v.tools": ("장소 (기본)", "Places (default)"), "chat.loop_final.v.search": ("웹 검색까지", "Web search too"), "chat.loop_final.v.off": ("항상 한 번 더 확인", "Always check once more"),
     "chat.loop_final.hint": ("짧은 질문에서 장소 검색처럼 결과 하나로 답이 되는 도구가 성공하면 더 찾을지 묻는 호출을 건너뛰어 답이 빨라집니다. 웹 검색까지 켜면 결과가 충분할 때 검색도 한 번으로 끝냅니다.", "In a short question, when a tool whose one result is the answer (places) succeeds, the call asking whether to look further is skipped and replies come faster. With web search, a search that found enough also ends there."),
+    "chat.progress": ("“찾아보는 중” 한마디", "The “still looking” line"),
+    "chat.progress.v.slow": ("느릴 때 (기본)", "When slow (default)"), "chat.progress.v.deep": ("깊은 검색만", "Deep search only"), "chat.progress.v.off": ("끔", "Off"),
+    "chat.progress.hint": ("검색이 길어질 때 올렸다가 답 전에 지우는 한 줄입니다. 도구 화면에서도 바꿀 수 있습니다.", "A line put up when a search runs long and deleted before the answer. Also on the Tools page."),
     "chat.vision": ("이미지 이해", "Image understanding"),
     "chat.vision.v.auto": ("자동 (기본)", "Auto (default)"), "chat.vision.v.off": ("끔", "Off"),
     "chat.vision.hint": ("봇을 부를 때 첨부한 사진만 읽습니다. 도구 화면에서도 바꿀 수 있습니다.", "Only pictures attached when someone calls the bot are read. Also on the Tools page."),
@@ -2351,6 +2359,28 @@ add("tools", {
     "vision.hint.off": ("사진을 읽지 않습니다. 사진만 보내고 부르면 지금은 사진을 볼 수 없다고 짧게 답합니다.", "Pictures are not read. Someone who calls the bot with only a picture is told it cannot see pictures right now."),
     "vision.switch": ("부를 때 첨부한 사진 읽기", "Read pictures sent with a call"),
     "vision.saved": ("이미지 이해 설정을 바꿨습니다", "Image understanding changed"),
+})
+# the "still looking" line (chat.progress) on the Tools page and the pages a web search reads (web_search.*)
+add("tools", {
+    "progress.title": ("“찾아보는 중” 한마디", "The “still looking” line"),
+    "progress.v.slow": ("느릴 때 (기본)", "When slow (default)"), "progress.v.deep": ("깊은 검색만", "Deep search only"), "progress.v.off": ("끔", "Off"),
+    "progress.hint.slow": ("깊은 검색이나 두 번째 검색 단계에서는 바로, 일반 검색은 8초가 지나도 답이 없으면 짧은 안내 한 줄을 올리고 답이 나가기 전에 지웁니다. 알림은 가지 않습니다.",
+                           "A short line goes up at once for a deep search or a second round of searching, and for an ordinary search still unanswered after 8 seconds. It is deleted before the answer and sends no notification."),
+    "progress.hint.deep": ("깊은 검색이나 두 번째 검색 단계에서만 안내 한 줄을 올리고 답이 나가기 전에 지웁니다.", "Only a deep search or a second round of searching puts up the line; it is deleted before the answer."),
+    "progress.hint.off": ("안내 없이 답만 보냅니다.", "No line; only the answer is sent."),
+    "progress.saved": ("안내 설정을 바꿨습니다", "The “still looking” setting changed"),
+})
+add("tool", {
+    "pages_title": ("페이지 본문 읽기", "Reading the pages"),
+    "pages_desc": ("검색 결과에 본문이 따로 오지 않으면 결과 페이지를 열어 질문과 관련된 부분을 읽고 답에 씁니다. 대화에서 부른 검색에만 적용됩니다. 검색 명령은 그대로 제목과 요약만 보여 줍니다.",
+                   "When a result comes without its text, the page is opened and the part that matches the question is read for the answer. Applies to searches made in chat only; the search command still shows titles and snippets."),
+    "pages_read": ("검색 한 번에 읽는 페이지 수", "Pages read per search"), "pages_read.hint": ("기본 3개. 0이면 페이지를 열지 않고 요약만 씁니다. 최대 10개.", "Default 3. 0 uses snippets only. Up to 10."),
+    "pages_deep": ("깊은 검색에서 읽는 페이지 수", "Pages read for a deep search"), "pages_deep.hint": ("기본 6개. 질문이 어려워 깊은 검색을 할 때만 씁니다. 최대 10개.", "Default 6. Used only when a hard question gets a deep search. Up to 10."),
+    "pages_fetch": ("페이지를 읽는 서비스", "Page reader"),
+    "pages_fetch.v.auto": ("자동 (기본)", "Automatic (default)"), "pages_fetch.v.tinyfish": ("TinyFish", "TinyFish"), "pages_fetch.v.jina": ("Jina Reader", "Jina Reader"), "pages_fetch.v.off": ("읽지 않음", "Off"),
+    "pages_fetch.hint": ("자동은 TinyFish 키가 있으면 TinyFish를, 없으면 Jina Reader를 씁니다. 읽지 않음이면 요약만 씁니다.", "Automatic uses TinyFish when it has a key, otherwise Jina Reader. Off uses snippets only."),
+    "pages_cap": ("하루에 읽는 페이지 상한", "Pages read per day, at most"), "pages_cap.hint": ("기본 800개. TinyFish 무료 한도는 하루 1,000개입니다. 다 쓰면 그날은 요약만 씁니다. 최대 5,000개.", "Default 800. TinyFish is free up to 1,000 a day. When used up, snippets only for the rest of the day. Up to 5,000."),
+    "pages_saved": ("페이지 읽기 설정을 저장했습니다", "Page reading saved"),
 })
 add("role", {
     "vision": ("이미지 인식", "Image understanding"),

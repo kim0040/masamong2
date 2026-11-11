@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"masamong/internal/action"
 	"masamong/internal/chat"
@@ -1401,7 +1402,7 @@ func (s *Service) ChatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	}
 	body := map[string]any{"message": clip(message, messageMax), "message_id": in.MessageID, "speaker": in.Speaker, "rag_state": res.RagState,
 		"answer_preview": clip(res.Answer, 280), "answer": clip(res.Answer, 4000), "timing_ms": res.Timing,
-		"memory_state": res.Assess.MemoryState, "intent_source": res.Intent.Source, "tools": res.Tools,
+		"memory_state": res.Assess.MemoryState, "intent_source": res.Intent.Source, "tools": recordTools(res.Tools),
 		"plan": res.Plan.ToolPlan, "hits": hitBrief(res.Hits), "ranking": res.Retrieve["applied"],
 		"context": map[string]any{"observation_ids": uniqueStrings(sources), "attribution": in.context}}
 	if err != nil && outcome != "reacted" && outcome != "not_addressed" && outcome != "canceled" && outcome != "no_vision" { // decisions, not failures
@@ -1670,6 +1671,7 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		BudgetUSD: parseUSD(doc.Memory.TurnBudgetUSD, 0.05), Earlier: in.Earlier,
 		Guard:      &chat.Guard{MaxUSD: parseUSD(doc.Limits.PerRequestBudgetUSD, 0), MaxCalls: doc.Limits.MaxExternalAttempts},
 		MaxHistory: maxHistory, ToolMode: s.toolMode(), LoopFinal: doc.Chat.LoopFinalMode(), RoomMemory: roomMemory, Images: images, TurnStart: in.started,
+		OnProgress: in.OnProgress, // nil-safe in the runtime; a lab or dry-run turn passes it on when set
 	})
 	noteTurnTiming(&res, "queue_wait", queueWait)
 	res.CostUSD += conv.costUSD + explicitCost + visionCost
@@ -1746,21 +1748,116 @@ func lookedUp(res chat.Result) []string {
 
 // toolFailureToReplay keeps a failed tool exchange from becoming an answer the bot cites again in an
 // unrelated turn. The user message remains in context; the current turn's tool result is still shown.
+// A turn can search several times at once: a search that failed or was refused does not count while
+// another web search of the same turn succeeded, because the answer then rests on the one that did.
 func toolFailureToReplay(results []chat.ToolResult) bool {
+	searched := false
 	for _, result := range results {
-		status := result.Status
-		if status == "" {
-			status, _ = result.Data["status"].(string)
+		if result.Tool == "search.web" && !toolFailed(result) {
+			searched = true
 		}
-		switch status {
-		case "unconfigured", "unavailable", "no_results", "no_area", "not_found", "error":
-			return true
+	}
+	for _, result := range results {
+		if searched && result.Tool == "search.web" {
+			continue
 		}
-		if !result.OK {
+		if toolFailed(result) {
 			return true
 		}
 	}
 	return false
+}
+
+// toolFailed reports whether one tool result is a failure, a refusal or an empty answer.
+func toolFailed(result chat.ToolResult) bool {
+	status := result.Status
+	if status == "" {
+		status, _ = result.Data["status"].(string)
+	}
+	switch status {
+	case "unconfigured", "unavailable", "no_results", "no_area", "not_found", "error":
+		return true
+	}
+	return !result.OK
+}
+
+// recordPassageRunes is how much of a page's text a turn record keeps: the page belongs to a third party and
+// a deep search reads several, so the record would otherwise grow by 10–20 thousand characters a turn and
+// show them in the console. The model saw the whole passage; the record only needs to show what was read.
+const recordPassageRunes = 200
+
+// recordTools returns the turn's tool results as the record keeps them: every search result's passage cut
+// to recordPassageRunes, with passage_runes giving its full length. Results without passages (every
+// search that read no pages) come back untouched, and res.Tools itself is never changed.
+func recordTools(results []chat.ToolResult) []chat.ToolResult {
+	var out []chat.ToolResult
+	for i, r := range results {
+		if r.Tool != "search.web" {
+			continue
+		}
+		clipped, changed := clipPassages(r.Data["results"])
+		if !changed {
+			continue
+		}
+		if out == nil {
+			out = append([]chat.ToolResult(nil), results...)
+		}
+		data := make(map[string]any, len(r.Data))
+		for k, v := range r.Data {
+			data[k] = v
+		}
+		data["results"] = clipped
+		out[i].Data = data
+	}
+	if out == nil {
+		return results
+	}
+	return out
+}
+
+func clipPassages(list any) (any, bool) {
+	clipOne := func(item map[string]any) (map[string]any, bool) {
+		text, ok := item["passage"].(string)
+		if !ok || utf8.RuneCountInString(text) <= recordPassageRunes {
+			return item, false
+		}
+		cp := make(map[string]any, len(item)+1)
+		for k, v := range item {
+			cp[k] = v
+		}
+		cp["passage"] = clip(text, recordPassageRunes)
+		cp["passage_runes"] = utf8.RuneCountInString(text)
+		return cp, true
+	}
+	switch items := list.(type) {
+	case []any:
+		var out []any
+		for i, it := range items {
+			m, ok := it.(map[string]any)
+			if !ok {
+				continue
+			}
+			if cp, changed := clipOne(m); changed {
+				if out == nil {
+					out = append([]any(nil), items...)
+				}
+				out[i] = cp
+			}
+		}
+		return out, out != nil
+	case []map[string]any:
+		var out []map[string]any
+		for i, m := range items {
+			if cp, changed := clipOne(m); changed {
+				if out == nil {
+					out = append([]map[string]any(nil), items...)
+				}
+				out[i] = cp
+			}
+		}
+		return out, out != nil
+	}
+	return nil, false
 }
 
 func rankingFor(override string, def retrieval.RankingMode) retrieval.RankingMode {

@@ -56,7 +56,9 @@ type Gateway struct {
 	workCtx                    context.Context // replies and commands; cancelled after the shutdown grace
 	cancelWork                 context.CancelFunc
 	stopping                   atomic.Bool
-	more                       moreStore // the rest of trimmed replies (shape.go)
+	more                       moreStore       // the rest of trimmed replies (shape.go)
+	interims                   interimRegistry // the bot's "still looking" lines: never captured, their delete never reconciled (interim.go)
+	interimHook                func(*interim)  // tests: sees each turn's line as it is made
 	botName                    atomic.Pointer[string]
 	mu                         sync.Mutex
 	lastSync                   string
@@ -1322,6 +1324,9 @@ func (g *Gateway) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return // Discord replayed it (RESUME): no second capture, no second reply
 	}
 	if m.Author.Bot {
+		if p := g.botID.Load(); p != nil && *p == m.Author.ID && g.interims.ownCreate(m.ChannelID, m.ID, m.Content) {
+			return // the "still looking" line: not captured, not a sign the channel moved on
+		}
 		if p := g.botID.Load(); p != nil && *p == m.Author.ID && m.GuildID != "" {
 			// the bot's own message: participation counts it as the channel moving on
 			o := application.ObservedMessage{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID, AuthorID: m.Author.ID,
@@ -1729,6 +1734,9 @@ func (g *Gateway) onMessageDelete(s *discordgo.Session, m *discordgo.MessageDele
 	if m.Message == nil || m.ID == "" {
 		return
 	}
+	if g.interims.deleted(m.ID) {
+		return // the bot took its own "still looking" line back: nothing to log, forget or reconcile
+	}
 	_ = g.runReconciliationStep("server log", func() error {
 		d := application.DeletedMessage{ID: m.ID}
 		if b := m.BeforeDelete; b != nil && b.Author != nil {
@@ -1765,6 +1773,14 @@ func (g *Gateway) cancelPictureJobs(channelID string, messageIDs []string) {
 
 func (g *Gateway) onMessageDeleteBulk(s *discordgo.Session, m *discordgo.MessageDeleteBulk) {
 	defer g.recoverReconciliationPanic("bulk delete handler", nil)
+	if kept := g.interims.withoutInterims(m.Messages); len(kept) != len(m.Messages) {
+		if len(kept) == 0 {
+			return
+		}
+		copied := *m
+		copied.Messages = kept
+		m = &copied
+	}
 	_ = g.runReconciliationStep("server log", func() error {
 		msgs := make([]application.DeletedMessage, len(m.Messages))
 		for i, id := range m.Messages {
@@ -1989,6 +2005,10 @@ func (g *Gateway) answer(base context.Context, s *discordgo.Session, m *discordg
 	typing := newTypingKeepalive(s, m.ChannelID, g.log)
 	startTyping := func() { typing.start(ctx) }
 	defer typing.stop()
+	// the "still looking" line of a turn that searches long. Every way out of this function deletes it (on
+	// a context of its own: the turn's is cancelled by the stop word and expires on its timeout).
+	still := g.newInterim(base, s, m)
+	defer still.clear()
 	// a call by name alone types only once the bot knows it was said to it (else it would type, then
 	// stay quiet)
 	if !nameOnly {
@@ -2004,8 +2024,10 @@ func (g *Gateway) answer(base context.Context, s *discordgo.Session, m *discordg
 		Images: call.images, ImageOnly: call.imageOnly, ImageEarlier: call.imageEarlier, ImageTotal: call.imageTotal, ImageSkipped: call.imageSkipped,
 		Fragments: call.fragments, ReadFrom: call.readFrom,
 		OnVisionNotice: func(note string) { visionNotice = note },
+		OnProgress:     still.show,
 		Deliver: func(deliverCtx context.Context, res chat.Result) string {
 			typing.stop()
+			still.clear() // first: the line is gone before any part of the answer is posted
 			if deliverCtx.Err() != nil {
 				g.dropThreadOffer(res.TurnID, "not_sent")
 				unsent = strings.TrimSpace(res.Answer) != ""
@@ -2020,7 +2042,7 @@ func (g *Gateway) answer(base context.Context, s *discordgo.Session, m *discordg
 				return ""
 			}
 			shape := g.svc.ChannelPolicyFor(m.GuildID, m.ChannelID).Conversation.ReplyShape
-			sent, ids, rep := g.sendShaped(deliverCtx, s, m.GuildID, m.ChannelID, m.Reference(), res.Answer, visionNotice, shape)
+			sent, ids, rep := g.sendShapedFor(deliverCtx, s, m.GuildID, m.ChannelID, m.Reference(), res.Answer, visionNotice, shape, deepSearched(res.Tools))
 			g.svc.NoteReplyMessages(res.TurnID, m.GuildID, m.ChannelID, ids)
 			g.svc.NoteDelivery(res.TurnID, m.GuildID, m.ChannelID, rep)
 			delivered = rep.Sent == rep.Parts && rep.Parts > 0
@@ -2035,6 +2057,7 @@ func (g *Gateway) answer(base context.Context, s *discordgo.Session, m *discordg
 			}
 			return sent
 		}})
+	still.clear() // before any notice below: a refusal or a failure line must not stand next to "still looking"
 	if errors.Is(context.Cause(ctx), errTurnStopped) {
 		g.log.Debug("discord: reply stopped by the person") // quiet: no notice, no "restarting"
 		return

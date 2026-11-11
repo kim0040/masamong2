@@ -1,0 +1,99 @@
+package application
+
+import (
+	"strings"
+	"testing"
+
+	"masamong/internal/chat"
+)
+
+func searchResult(status string, ok bool, items ...any) chat.ToolResult {
+	return chat.ToolResult{Tool: "search.web", OK: ok, Status: status, Data: map[string]any{"status": status, "results": items}}
+}
+
+// A turn can search several times at once. A search that failed or came back empty does not keep the reply
+// out of the conversation while another search of the turn succeeded; any other tool's failure still does.
+func TestReplyKeptWhenOneSearchFailedAndAnotherSucceeded(t *testing.T) {
+	good := searchResult("ok", true, map[string]any{"title": "t"})
+	failed := chat.ToolResult{Tool: "search.web", OK: false, Status: "error", Error: "timeout"}
+	empty := searchResult("no_results", true)
+	weatherDown := chat.ToolResult{Tool: "weather.query", OK: true, Status: "unconfigured"}
+	for _, tc := range []struct {
+		name    string
+		results []chat.ToolResult
+		drop    bool
+	}{
+		{"no tools", nil, false},
+		{"one search that worked", []chat.ToolResult{good}, false},
+		{"one search that failed", []chat.ToolResult{failed}, true},
+		{"one search that found nothing", []chat.ToolResult{empty}, true},
+		{"a failed search beside a good one", []chat.ToolResult{failed, good}, false},
+		{"an empty search beside a good one", []chat.ToolResult{good, empty}, false},
+		{"a refused search beside a good one", []chat.ToolResult{{Tool: "search.web", OK: false, Status: "refused"}, good}, false},
+		{"only failed searches", []chat.ToolResult{failed, empty}, true},
+		{"a good search but another tool failed", []chat.ToolResult{good, failed, weatherDown}, true},
+		{"another tool failed alone", []chat.ToolResult{weatherDown}, true},
+	} {
+		if got := toolFailureToReplay(tc.results); got != tc.drop {
+			t.Errorf("%s: toolFailureToReplay = %v, want %v", tc.name, got, tc.drop)
+		}
+	}
+}
+
+// The turn record keeps 200 characters of each page's text and its length, so a deep search does not put
+// ten thousand characters of other people's pages into every record; what the model saw is not touched.
+func TestTurnRecordClipsPassages(t *testing.T) {
+	long := strings.Repeat("가", 900)
+	short := "짧은 문장"
+	asAny := searchResult("ok", true,
+		map[string]any{"title": "a", "url": "https://example.test/a", "snippet": "s", "passage": long, "read": "ok"},
+		map[string]any{"title": "b", "url": "https://example.test/b", "snippet": "s", "passage": short, "read": "ok"},
+		map[string]any{"title": "c", "url": "https://example.test/c", "snippet": "s"},
+	)
+	asMaps := chat.ToolResult{Tool: "search.web", OK: true, Data: map[string]any{"results": []map[string]any{
+		{"title": "a", "passage": long}, {"title": "b"},
+	}}}
+	other := chat.ToolResult{Tool: "weather.query", OK: true, Data: map[string]any{"results": []any{map[string]any{"passage": long}}}}
+	in := []chat.ToolResult{asAny, asMaps, other}
+	out := recordTools(in)
+
+	first := out[0].Data["results"].([]any)[0].(map[string]any)
+	if got := []rune(first["passage"].(string)); len(got) != recordPassageRunes+1 || got[len(got)-1] != '…' || first["passage_runes"] != 900 {
+		t.Fatalf("long passage: %d runes, passage_runes %v", len(got), first["passage_runes"])
+	}
+	if first["title"] != "a" || first["url"] != "https://example.test/a" || first["read"] != "ok" {
+		t.Fatalf("the other fields must stay: %+v", first)
+	}
+	second := out[0].Data["results"].([]any)[1].(map[string]any)
+	if second["passage"] != short || second["passage_runes"] != nil {
+		t.Fatalf("a short passage must stay whole: %+v", second)
+	}
+	if third := out[0].Data["results"].([]any)[2].(map[string]any); third["passage"] != nil || third["passage_runes"] != nil {
+		t.Fatalf("a result without a passage gained one: %+v", third)
+	}
+	typed := out[1].Data["results"].([]map[string]any)[0]
+	if typed["passage_runes"] != 900 {
+		t.Fatalf("typed result list: %+v", typed)
+	}
+	if out[2].Data["results"].([]any)[0].(map[string]any)["passage"] != long {
+		t.Fatal("only search results are clipped")
+	}
+	// the model's copy is untouched
+	if in[0].Data["results"].([]any)[0].(map[string]any)["passage"] != long || in[1].Data["results"].([]map[string]any)[0]["passage"] != long {
+		t.Fatal("recordTools changed the turn's own tool results")
+	}
+}
+
+// A search that read no pages has nothing to clip: the very same slice comes back, so its record is
+// byte-identical to what it was.
+func TestTurnRecordOfPagelessSearchIsUntouched(t *testing.T) {
+	in := []chat.ToolResult{searchResult("ok", true, map[string]any{"title": "a", "snippet": "s", "url": "u", "datetime": "d"}),
+		{Tool: "memory.search", OK: true}}
+	out := recordTools(in)
+	if len(out) != len(in) || &out[0] != &in[0] {
+		t.Fatal("results without passages were copied")
+	}
+	if recordTools(nil) != nil {
+		t.Fatal("nil in, nil out")
+	}
+}

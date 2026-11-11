@@ -138,6 +138,8 @@ var enums = map[string][]string{
 	"chat.tool_model":     ToolModels,
 	"chat.loop_final":     LoopFinals,
 	"chat.vision":         VisionModes,
+	"chat.progress":       ProgressModes,
+	"web_search.fetch":    FetchKinds,
 	"memory.leaf_split":   {"time_gap", "fixed"},
 	"backup.schedule":     BackupSchedules,
 	"participation.mode":  ParticipationModes,
@@ -164,9 +166,12 @@ func implied() map[string]any {
 		"limits.budget_alert_percent": l.AlertPercent(), "limits.max_concurrent_turns": l.ConcurrentTurns(),
 		"memory.backfill_days": int(m.Backfill().Hours() / 24), "memory.backfill_max_messages": m.BackfillMax(), "memory.index_workers": m.Workers(),
 		"memory.leaf_split": "time_gap", "chat.tool_mode": ChatSettings{}.Mode(), "chat.tool_model": ChatSettings{}.LoopRole(),
-		"chat.loop_final":           ChatSettings{}.LoopFinalMode(),
-		"chat.vision":               ChatSettings{}.VisionMode(),
-		"memory.derived_budget_usd": "3.00", "memory.day_boundary": "05:00",
+		"chat.loop_final":       ChatSettings{}.LoopFinalMode(),
+		"chat.vision":           ChatSettings{}.VisionMode(),
+		"chat.progress":         ChatSettings{}.ProgressMode(),
+		"web_search.read_pages": WebSearch{}.Pages(""), "web_search.deep_pages": WebSearch{}.Pages("deep"),
+		"web_search.fetch_daily_limit": WebSearch{}.FetchDailyPages(),
+		"memory.derived_budget_usd":    "3.00", "memory.day_boundary": "05:00",
 		"memory.episodes": "on", "memory.state": "on", "memory.cards": "off", "memory.warm_query": "on", "memory.message_vectors": m.MessageVectorsOn(),
 		"participation.wait_sec": int(p.Wait().Seconds()), "participation.cooldown_sec": int(p.Cooldown().Seconds()),
 		"participation.per_hour": p.Hourly(), "participation.per_day": p.Daily(), "participation.judge_per_hour": p.Judges(),
@@ -201,6 +206,7 @@ var (
 		"memory.backfill_days":         bound(-1, 30), "memory.index_interval_min": bound(1, 1440), "memory.index_workers": bound(1, MaxIndexWorkers),
 		"participation.min_score": bound(0, 1),
 		"dm.per_user_per_day":     bound(-1, 10000), "dm.per_day": bound(-1, 100000),
+		"web_search.read_pages": bound(0, 10), "web_search.deep_pages": bound(0, 10), "web_search.fetch_daily_limit": bound(0, 5000),
 	}
 	// readOnly fields describe the installation; changing them from a form would break it.
 	readOnly = map[string]bool{"instance.data_dir": true, "instance.profile": true, "limits.profile": true}

@@ -27,6 +27,7 @@
   import Progress from '../components/Progress.svelte'
   import LimitDialog from '../components/LimitDialog.svelte'
   import Switch from '../components/Switch.svelte'
+  import Select from '../components/Select.svelte'
   import NoticeOps from '../components/NoticeOps.svelte'
   import FortuneOps from '../components/FortuneOps.svelte'
   import DisasterOps from '../components/DisasterOps.svelte'
@@ -267,6 +268,23 @@
     const r = await patchConfig([{ path: ['web_search', 'order'], op: 'unset' }], { success: t('tool.search_order_saved') })
     if (r.ok) void tools.refresh()
   }
+  // search.web: the pages a chat search reads (web_search.read_pages, deep_pages, fetch, fetch_daily_limit). An empty
+  // field is stored as unset (the built-in default applies); 0 pages is a real choice (snippets only)
+  const PAGES = { read_pages: { min: 0, max: 10 }, deep_pages: { min: 0, max: 10 }, fetch_daily_limit: { min: 1, max: 5000 } } as const
+  async function setPages(k: keyof typeof PAGES, raw: string) {
+    const { min, max } = PAGES[k]
+    const path = ['web_search', k]
+    const n = Math.round(Number(raw))
+    if (!raw.trim() || !Number.isFinite(n)) {
+      if (cfg.doc?.web_search?.[k] == null) return
+      return patchConfig([{ path, op: 'unset' }], { success: t('tool.pages_saved') })
+    }
+    await patchConfig([{ path, value: Math.min(max, Math.max(min, n)) }], { success: t('tool.pages_saved') })
+  }
+  const pageReader = $derived<string>(cfg.doc?.web_search?.fetch || 'auto')
+  async function setPageReader(v: string) {
+    await patchConfig([v === 'auto' ? { path: ['web_search', 'fetch'], op: 'unset' } : { path: ['web_search', 'fetch'], value: v }], { success: t('tool.pages_saved') })
+  }
   const usageSeries = $derived(series.data?.tools?.[id] ?? [])
   const labels = $derived((series.data?.days ?? []).map(shortDate))
   // Deferred catalog entries do not get an operations surface or issue background Actions.
@@ -365,6 +383,24 @@
                 {#if cfg.doc?.web_search?.order?.length}<Button size="sm" variant="ghost" icon={I.RotateCcw} onclick={resetSearchOrder}>{t('tool.search_order_reset')}</Button>{/if}
               </div>
             {/if}
+          </Card>
+          <Card title={t('tool.pages_title')} description={t('tool.pages_desc')}>
+            <div class="stack">
+              <Field id="pg-read" label={t('tool.pages_read')} hint={t('tool.pages_read.hint')}>
+                {#snippet children({ id: fid, describedby })}<Input id={fid} aria-describedby={describedby} type="number" inputmode="numeric" min="0" max="10" placeholder="3" value={cfg.doc?.web_search?.read_pages ?? ''} onchange={(e) => setPages('read_pages', e.currentTarget.value)} />{/snippet}
+              </Field>
+              <Field id="pg-deep" label={t('tool.pages_deep')} hint={t('tool.pages_deep.hint')}>
+                {#snippet children({ id: fid, describedby })}<Input id={fid} aria-describedby={describedby} type="number" inputmode="numeric" min="0" max="10" placeholder="6" value={cfg.doc?.web_search?.deep_pages ?? ''} onchange={(e) => setPages('deep_pages', e.currentTarget.value)} />{/snippet}
+              </Field>
+              <Field id="pg-fetch" label={t('tool.pages_fetch')} hint={t('tool.pages_fetch.hint')}>
+                {#snippet children({ id: fid, describedby })}<Select id={fid} aria-describedby={describedby} value={pageReader} onchange={(e) => setPageReader(e.currentTarget.value)} options={[
+                  { value: 'auto', label: t('tool.pages_fetch.v.auto') }, { value: 'tinyfish', label: t('tool.pages_fetch.v.tinyfish') },
+                  { value: 'jina', label: t('tool.pages_fetch.v.jina') }, { value: 'off', label: t('tool.pages_fetch.v.off') }]} />{/snippet}
+              </Field>
+              <Field id="pg-cap" label={t('tool.pages_cap')} hint={t('tool.pages_cap.hint')}>
+                {#snippet children({ id: fid, describedby })}<Input id={fid} aria-describedby={describedby} type="number" inputmode="numeric" min="1" max="5000" placeholder="800" value={cfg.doc?.web_search?.fetch_daily_limit || ''} onchange={(e) => setPages('fetch_daily_limit', e.currentTarget.value)} />{/snippet}
+              </Field>
+            </div>
           </Card>
         {/if}
       </div>

@@ -79,6 +79,12 @@
   async function setVision(v: boolean) {
     await patchConfig([v ? { path: ['chat', 'vision'], op: 'unset' } : { path: ['chat', 'vision'], value: 'off' }], { success: t('tools.vision.saved') })
   }
+  // the "still looking" line (config chat.progress): "slow" is the default and is stored as unset
+  type Progress = 'slow' | 'deep' | 'off'
+  const progress = $derived<Progress>((cfg.doc?.chat?.progress as Progress) || 'slow')
+  async function setProgress(v: Progress) {
+    await patchConfig([v === 'slow' ? { path: ['chat', 'progress'], op: 'unset' } : { path: ['chat', 'progress'], value: v }], { success: t('tools.progress.saved') })
+  }
 </script>
 
 <PageHeader title={t('tools.title')} description={t('tools.desc')}>
@@ -119,6 +125,14 @@
         <p class="xs muted">{t(`tools.vision.hint.${visionOn ? 'on' : 'off'}`)}</p>
       </div>
       <Switch checked={visionOn} onchange={setVision} label={t('tools.vision.switch')} />
+    </div>
+    <div class="model">
+      <div class="mode-text">
+        <h3 id="tool-progress-title" class="gt">{t('tools.progress.title')}</h3>
+        <p class="xs muted">{t(`tools.progress.hint.${progress}`)}</p>
+      </div>
+      <div class="model-select"><Select aria-labelledby="tool-progress-title" value={progress} onchange={(e) => setProgress(e.currentTarget.value as Progress)} options={[
+        { value: 'slow', label: t('tools.progress.v.slow') }, { value: 'deep', label: t('tools.progress.v.deep') }, { value: 'off', label: t('tools.progress.v.off') }]} /></div>
     </div>
   </section>
 {/if}

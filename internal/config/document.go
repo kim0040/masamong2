@@ -1440,6 +1440,23 @@ func parse(raw []byte, problems *[]Problem) (Document, error) {
 	if d.Chat.Vision != "" && !slices.Contains(VisionModes, d.Chat.Vision) {
 		return Document{}, fmt.Errorf("chat.vision must be one of %v", VisionModes)
 	}
+	if d.Chat.Progress != "" && !slices.Contains(ProgressModes, d.Chat.Progress) {
+		return Document{}, fmt.Errorf("chat.progress must be one of %v", ProgressModes)
+	}
+	// pages a search reads: a request that reads dozens of pages would only slow every search and spend the
+	// daily page quota
+	if n := d.WebSearch.ReadPages; n != nil && (*n < 0 || *n > 10) {
+		return Document{}, fmt.Errorf("web_search.read_pages must be 0–10")
+	}
+	if n := d.WebSearch.DeepPages; n != nil && (*n < 0 || *n > 10) {
+		return Document{}, fmt.Errorf("web_search.deep_pages must be 0–10")
+	}
+	if d.WebSearch.Fetch != "" && !slices.Contains(FetchKinds, d.WebSearch.Fetch) {
+		return Document{}, fmt.Errorf("web_search.fetch must be one of %v", FetchKinds)
+	}
+	if n := d.WebSearch.FetchDailyLimit; n < 0 || n > 5000 {
+		return Document{}, fmt.Errorf("web_search.fetch_daily_limit must be 0–5000 (0 = the default)")
+	}
 	for _, l := range d.Memory.Languages {
 		if _, ok := lang.Get(l); !ok {
 			return Document{}, fmt.Errorf("memory.languages: no language pack %q (have %v)", l, lang.Available())
