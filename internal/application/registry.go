@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -111,6 +112,18 @@ func (r *Registry) reserveN(id string, n int) int { return r.Quota.ReserveN(id, 
 // service (searchDeadline, deep: Linkup's deep search took 41 s), so that limit, not this one, ends a call.
 const searchHTTPTimeout = 50 * time.Second
 
+// followTransport sends through the transport its client has at the moment of each request, so a copy of
+// an http.Client with another timeout still uses the shared connections (and a test's replaced transport).
+type followTransport struct{ from *http.Client }
+
+func (f followTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t := f.from.Transport
+	if t == nil {
+		t = http.DefaultTransport
+	}
+	return t.RoundTrip(req)
+}
+
 // builtinReaderID names the keyless page reader added when config has none.
 const builtinReaderID = "jina"
 
@@ -201,6 +214,7 @@ func buildRegistry(doc config.Document, log *slog.Logger, now func() time.Time) 
 	searchClient := *client
 	searchHTTP := *client.HTTP
 	searchHTTP.Timeout = searchHTTPTimeout
+	searchHTTP.Transport = followTransport{client.HTTP} // whatever the shared client's transport is, now or later
 	searchClient.HTTP = &searchHTTP
 	r := &Registry{Client: client, Quota: providers.NewQuota(limits), fetchHosts: websearch.NewHostCache(), LLM: map[string]*openai.Adapter{}, Search: map[string]websearch.Searcher{}, byID: map[string]ProviderStatus{}}
 	r.Quota.Now = now
