@@ -1,6 +1,12 @@
 package websearch
 
-import "strings"
+import (
+	"errors"
+	"strings"
+
+	"masamong/internal/providers"
+	"masamong/internal/providers/decode"
+)
 
 // Fee is the list price, in US dollars, of one request a search service is sent at a depth: what a
 // turn holds before the search starts and what is recorded as spent when the service reports no cost
@@ -55,4 +61,28 @@ func Requests(kind, depth string, extra int) int {
 func SearchFee(kind, depth string, extra int) float64 {
 	depth = strings.ToLower(strings.TrimSpace(depth))
 	return Fee(kind, depth) * float64(Requests(kind, depth, extra))
+}
+
+// MaybeCharged reports whether a failed search request may still have been charged: it timed out, lost
+// its connection or was cancelled (the turn ended) after it may have been sent, or the service answered with something that could not be
+// read (an answer the service gave, so one it may bill). An HTTP error answer, a request never sent, and
+// anything that is not the service's (a limit of ours) were not.
+func MaybeCharged(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, decode.ErrUnexpected) {
+		return true
+	}
+	var pe *providers.Error
+	if !errors.As(err, &pe) {
+		return false
+	}
+	switch pe.Kind {
+	case "timeout", "connection", "cancelled":
+		return !pe.NotSent
+	case "too_large":
+		return true
+	}
+	return false
 }

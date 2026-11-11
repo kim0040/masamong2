@@ -63,7 +63,8 @@ func fanOut(ctx context.Context, q Query, one searchFn) (Response, error) {
 // reworded query. The answers are merged with the main query's first (MergeResults) and cut to the size
 // asked. A reworded query that fails is dropped. When the main query fails, what the reworded queries found
 // is the answer; the search fails only when they found nothing either (the error still says how many
-// requests were answered, Response.Requests, for the fee). Response.Requests counts every request answered.
+// requests were answered, Response.Requests, for the fee). Response.Requests counts every request answered,
+// Response.Lost every other one that may still have been charged (MaybeCharged).
 func fanOutWith(ctx context.Context, q Query, mainRequests int, main, one searchFn) (Response, error) {
 	extras := q.rewordedFor(mainRequests)
 	if len(extras) == 0 {
@@ -91,10 +92,13 @@ func fanOutWith(ctx context.Context, q Query, mainRequests int, main, one search
 	}
 	res, err := safely(ctx, q, main)
 	wg.Wait()
-	answered := 0
+	answered, lost := 0, 0
 	for _, a := range got {
-		if a.err == nil {
+		switch {
+		case a.err == nil:
 			answered++
+		case MaybeCharged(a.err):
+			lost++
 		}
 	}
 	if err != nil {
@@ -107,13 +111,16 @@ func fanOutWith(ctx context.Context, q Query, mainRequests int, main, one search
 			}
 		}
 		if len(lists) == 0 {
-			return Response{Requests: answered}, err
+			return Response{Requests: answered + res.Requests, Lost: res.Lost + lost}, err
 		}
 		merged := MergeResults(lists...)
 		if n := size(q.Max); len(merged) > n {
 			merged = merged[:n]
 		}
-		return Response{Results: merged, Requests: answered}, nil
+		if MaybeCharged(err) {
+			lost++ // the main query's answer was lost, and the search did not fail with its error
+		}
+		return Response{Results: merged, Requests: answered + res.Requests, Lost: res.Lost + lost}, nil
 	}
 	lists := [][]Result{res.Results}
 	for _, a := range got {
@@ -126,5 +133,6 @@ func fanOutWith(ctx context.Context, q Query, mainRequests int, main, one search
 		res.Results = res.Results[:n]
 	}
 	res.Requests = max(res.Requests, 1) + answered
+	res.Lost += lost
 	return res, nil
 }

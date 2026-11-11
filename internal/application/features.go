@@ -751,8 +751,9 @@ func (s *Service) askService(ctx context.Context, id string, q websearch.Query, 
 
 // paySearch records what a search service charged for the call as spent: the monthly total and the
 // turn's guard (cap and cost), the same for a cost the service reports and for the list price of a
-// service that reports none (Linkup, Tavily, Brave, Serper). A call that failed is charged for the
-// requests the service answered before it did (none for a single request).
+// service that reports none (Linkup, Tavily, Brave, Serper). Requests the service answered are charged,
+// and so are those that failed after they may have been charged (websearch.MaybeCharged: a lost answer,
+// one that could not be read), the failed call's own included.
 func (s *Service) paySearch(ctx context.Context, kind, depth string, t searchTry) {
 	var usd float64
 	if t.err == nil && t.res.CostUSD != nil {
@@ -762,7 +763,8 @@ func (s *Service) paySearch(ctx context.Context, kind, depth string, t searchTry
 		if n == 0 && t.err == nil {
 			n = 1
 		}
-		if t.err != nil && maybeCharged(t.err) {
+		n += t.res.Lost // requests of the search whose answers were lost (websearch.MaybeCharged)
+		if t.err != nil && websearch.MaybeCharged(t.err) {
 			n++ // the request may have reached the service and been charged although its answer was lost
 		}
 		usd = websearch.Fee(kind, depth) * float64(n)
@@ -773,17 +775,6 @@ func (s *Service) paySearch(ctx context.Context, kind, depth string, t searchTry
 	s.recordSpend("search", usd)
 	chat.GuardFrom(ctx).Spend(usd)
 	chat.GuardFrom(ctx).Paid(usd) // the turn's cost counts the fee too (Guard.Paid)
-}
-
-// maybeCharged reports whether a failed search request may still have been charged: it timed out or lost
-// its connection after it may have been sent. An HTTP error answer, a request never sent, and anything
-// that is not the client's error (a limit of ours) were not.
-func maybeCharged(err error) bool {
-	var pe *providers.Error
-	if !errors.As(err, &pe) {
-		return false
-	}
-	return (pe.Kind == "timeout" || pe.Kind == "connection") && !pe.NotSent
 }
 
 // searchRun is what a search has met so far, for the answer when no service had pages.

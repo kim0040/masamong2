@@ -576,7 +576,7 @@ func waitKind(err error) string {
 
 func classify(err error, redacted string, attempt int) *Error {
 	if errors.Is(err, context.Canceled) {
-		return &Error{Kind: "cancelled", URL: redacted, Attempts: attempt, Err: err}
+		return &Error{Kind: "cancelled", URL: redacted, Attempts: attempt, Err: err, NotSent: notSent(err)}
 	}
 	if errors.Is(err, ErrCrossHostRedirect) {
 		msg := err.Error()

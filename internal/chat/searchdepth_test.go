@@ -369,6 +369,10 @@ func TestParallelSearchesKeepTheCallCount(t *testing.T) {
 	if calls, _, _ := g.Totals(); calls != 2 || len(rec.ran) != 2 || results[2].Status != "unavailable" || tr.Steps[2].Reason != "limit" {
 		t.Fatalf("calls %d ran %v results %+v", calls, rec.tools(), results)
 	}
+	// the search held back still says what it asked, so a search for the same words that ran covers it
+	if q, _ := results[2].Data["query"].(string); q != "z" {
+		t.Fatalf("the held-back search lost its query: %+v", results[2])
+	}
 }
 
 // The loop model reads titles, snippets, urls, dates and the read flag of search results, never the text

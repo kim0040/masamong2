@@ -539,7 +539,7 @@ func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message,
 			cancel := func() {
 				lc.run = false
 				lc.step.State, lc.step.Reason = "not_run", "cancelled"
-				lc.result = &ToolResult{Tool: lc.id, Status: "cancelled"}
+				lc.result = &ToolResult{Tool: lc.id, Status: "cancelled", Data: searchQueryData(lc.id, lc.params)}
 			}
 			hold := &paidHold{}
 			steps = append(steps, step{key: stepKey(info, lc.id), reserved: true, cancel: cancel, pays: info.Pays, maxFee: feeBound(info, lc.params), hold: hold, decide: func() bool {
@@ -558,7 +558,7 @@ func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message,
 					// not check, as for a tool that is down
 					lc.run = false
 					lc.step.State, lc.step.Reason = "not_run", "limit"
-					lc.result = &ToolResult{Tool: lc.id, OK: false, Status: "unavailable"}
+					lc.result = &ToolResult{Tool: lc.id, OK: false, Status: "unavailable", Data: searchQueryData(lc.id, lc.params)}
 					return false
 				}
 				l.Guard.Note(0) // what the tool pays for is added by the tool (Guard.Spend)
@@ -1057,4 +1057,18 @@ func (rt *Runtime) startLoop(ctx context.Context, req Request, msg, timeRef stri
 		return lr, others
 	}
 	return lr, Toolset{Known: others.Known}
+}
+
+// searchQueryData is the query of a web search that did not run (refused by the turn's limits, or
+// cancelled), so the result still says what was asked: a later search for the same words that worked
+// then covers it (the replay rule compares searches by query). Other tools get nothing.
+func searchQueryData(id string, params map[string]any) map[string]any {
+	if id != webSearchTool {
+		return nil
+	}
+	q, _ := params["query"].(string)
+	if strings.TrimSpace(q) == "" {
+		return nil
+	}
+	return map[string]any{"query": q}
 }

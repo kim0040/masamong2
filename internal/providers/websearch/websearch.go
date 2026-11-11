@@ -152,6 +152,10 @@ type Response struct {
 	// Requests is how many requests of the search the service answered (what it may have charged for,
 	// empty answers included); 0 is one when the search succeeded.
 	Requests int
+	// Lost is how many further requests of the search failed after they may have been charged
+	// (MaybeCharged): a reworded query whose answer was lost, or the main query's when the reworded ones
+	// answered the search. A failed search's own error is not counted here.
+	Lost int
 }
 
 // Searcher is one configured search service.

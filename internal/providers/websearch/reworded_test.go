@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"masamong/internal/providers"
+	"masamong/internal/providers/decode"
 )
 
 // termServer answers every request of a service kind with results named after the query it was sent
@@ -254,6 +255,68 @@ func TestRewordedQueryFailureAndPanic(t *testing.T) {
 	res, err = fanOut(context.Background(), Query{Text: "main"}, one("", "main"))
 	if err == nil {
 		t.Fatalf("a panic without reworded queries is an error too: %+v", res)
+	}
+}
+
+// A request whose answer was lost (timed out after it was sent) or could not be read may have been
+// charged: the fan-out counts it in Lost; one never sent, an HTTP error and our own limits are not counted.
+func TestRewordedLostAnswersAreCounted(t *testing.T) {
+	lostErr := &providers.Error{Kind: "timeout"}
+	unread := fmt.Errorf("%w: test", decode.ErrUnexpected)
+	notSent := &providers.Error{Kind: "timeout", NotSent: true}
+	status := &providers.Error{Kind: "status", Status: 502}
+	errs := map[string]error{}
+	fn := func(ctx context.Context, q Query) (Response, error) {
+		if err := errs[q.Text]; err != nil {
+			return Response{}, err
+		}
+		return Response{Results: []Result{{URL: "https://" + q.Text + ".example/1"}}}, nil
+	}
+	q := Query{Text: "main", Depth: DepthDeep, Extra: []string{"a", "b"}, Max: 5}
+
+	errs = map[string]error{"a": lostErr, "b": unread}
+	res, err := fanOut(context.Background(), q, fn)
+	if err != nil || res.Requests != 1 || res.Lost != 2 {
+		t.Fatalf("two reworded answers lost: %v %+v", err, res)
+	}
+	errs = map[string]error{"a": notSent, "b": status}
+	res, err = fanOut(context.Background(), q, fn)
+	if err != nil || res.Requests != 1 || res.Lost != 0 {
+		t.Fatalf("never sent and an HTTP error are not charged: %v %+v", err, res)
+	}
+	// the main answer lost while a reworded one answered: the search succeeds and the main request counts
+	errs = map[string]error{"main": lostErr, "b": lostErr}
+	res, err = fanOut(context.Background(), q, fn)
+	if err != nil || res.Requests != 1 || res.Lost != 2 {
+		t.Fatalf("main lost, one reworded answered: %v %+v", err, res)
+	}
+	// everything failed: the main error is the search's (charged by the caller), the reworded ones are Lost
+	errs = map[string]error{"main": lostErr, "a": lostErr, "b": status}
+	res, err = fanOut(context.Background(), q, fn)
+	if err == nil || res.Requests != 0 || res.Lost != 1 {
+		t.Fatalf("all failed: %v %+v", err, res)
+	}
+}
+
+func TestMaybeCharged(t *testing.T) {
+	for _, c := range []struct {
+		err  error
+		want bool
+	}{
+		{nil, false},
+		{fmt.Errorf("a limit of ours"), false},
+		{&providers.Error{Kind: "timeout"}, true},
+		{&providers.Error{Kind: "connection"}, true},
+		{&providers.Error{Kind: "timeout", NotSent: true}, false},
+		{&providers.Error{Kind: "status", Status: 500}, false},
+		{&providers.Error{Kind: "too_large"}, true},
+		{&providers.Error{Kind: "cancelled"}, true},
+		{&providers.Error{Kind: "cancelled", NotSent: true}, false},
+		{fmt.Errorf("%w: linkup results", decode.ErrUnexpected), true},
+	} {
+		if got := MaybeCharged(c.err); got != c.want {
+			t.Errorf("MaybeCharged(%v) = %v, want %v", c.err, got, c.want)
+		}
 	}
 }
 

@@ -455,4 +455,24 @@ func TestSearchRequestIsSentOnceAndALostAnswerIsCharged(t *testing.T) {
 	if hits.Load() != 1 || g.PaidTotal() != 0 {
 		t.Fatalf("a 502 is sent %d times and costs %v; want once and nothing", hits.Load(), g.PaidTotal())
 	}
+
+	// an answer the service gave but that could not be read was still billed
+	odd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"unexpected":true}`))
+	}))
+	defer odd.Close()
+	svc = setupSvc(t)
+	pointAt(t, svc, "linkup", odd.URL, "L_KEY", "k")
+	pointAt(t, svc, "tinyfish", tf.srv.URL, "TF_KEY", "k")
+	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"web_search", "order"}, "value": []any{"linkup", "tinyfish"}}}}); !r.OK {
+		t.Fatalf("order: %+v", r.Error)
+	}
+	g = &chat.Guard{MaxUSD: 1}
+	if res := searchWith(svc, g, map[string]any{"query": "캠핑"}); !res.OK || res.Output["provider"] != "tinyfish" {
+		t.Fatalf("%+v", res.Output)
+	}
+	if !near(g.PaidTotal(), 0.0055) || !near(monthSpend(t, svc), 0.0055) {
+		t.Fatalf("paid %v, month %v: an unreadable answer counts at Linkup's list price", g.PaidTotal(), monthSpend(t, svc))
+	}
 }
