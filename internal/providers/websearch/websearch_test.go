@@ -154,7 +154,7 @@ func TestDepthAndNewsPerService(t *testing.T) {
 			}
 		}},
 		{"linkup", Query{Text: "x", Depth: DepthQuick}, `{"results":[]}`, func(t *testing.T, s seen, _ Response) {
-			if s.body["depth"] != "fast" {
+			if s.body["depth"] != "flash" {
 				t.Errorf("quick: %v", s.body)
 			}
 		}},
@@ -164,12 +164,12 @@ func TestDepthAndNewsPerService(t *testing.T) {
 			}
 		}},
 		{"exa", Query{Text: "x", Depth: DepthDeep, Topic: TopicNews, Fresh: "week"}, `{"results":[]}`, func(t *testing.T, s seen, _ Response) {
-			if s.body["type"] != "deep-lite" || s.body["category"] != "news" || s.body["startPublishedDate"] == nil {
+			if s.body["type"] != "deep" || s.body["category"] != "news" || s.body["startPublishedDate"] == nil {
 				t.Errorf("deep news: %v", s.body)
 			}
 		}},
 		{"exa", Query{Text: "x", Depth: DepthQuick, Fresh: "week"}, `{"results":[]}`, func(t *testing.T, s seen, _ Response) {
-			if s.body["type"] != "fast" || s.body["category"] != nil {
+			if s.body["type"] != "instant" || s.body["category"] != nil {
 				t.Errorf("a recent page is not only news: %v", s.body)
 			}
 		}},

@@ -67,7 +67,9 @@ func (b *brave) Search(ctx context.Context, q Query) (Response, error) {
 		path = "/res/v1/llm/context"
 		v.Set("count", "20") // results considered; the sources kept are maximum_number_of_urls
 		v.Set("maximum_number_of_urls", strconv.Itoa(size(q.Max)))
-		v.Set("maximum_number_of_tokens", "4096")
+		v.Set("maximum_number_of_tokens", "8192")
+		v.Set("maximum_number_of_tokens_per_url", "2048")
+		v.Set("context_threshold_mode", "balanced")
 	default:
 		v.Set("count", strconv.Itoa(size(q.Max)))
 		v.Set("text_decorations", "false")
@@ -109,7 +111,9 @@ func (r braveResult) result(source bool) Result {
 	if when == "" {
 		when = r.Age
 	}
-	return Result{Title: stripMarks(r.Title), URL: r.URL, Snippet: clip(stripMarks(text)), Published: when}
+	// the description and the extra snippets are page text chosen for the query: one paragraph each
+	full := stripMarks(strings.Join(append([]string{r.Description}, r.ExtraSnippets...), "\n\n"))
+	return Result{Title: stripMarks(r.Title), URL: r.URL, Snippet: clip(stripMarks(text)), Published: when, Text: pageText(full)}
 }
 
 // ParseBrave reads {"web":{"results":[{title,url,description,age,page_age,extra_snippets}]}}. A search
@@ -173,7 +177,7 @@ func ParseBraveContext(obj map[string]json.RawMessage) (Response, error) {
 		if r.URL == "" {
 			continue
 		}
-		res := Result{Title: r.Title, URL: r.URL, Snippet: clip(strings.Join(r.Snippets, " … "))}
+		res := Result{Title: r.Title, URL: r.URL, Snippet: clip(strings.Join(r.Snippets, " … ")), Text: pageText(strings.Join(r.Snippets, "\n\n"))}
 		res.Published = braveDate(sources[r.URL].Age)
 		out.Results = append(out.Results, res)
 	}
@@ -214,8 +218,40 @@ func (t *tinyfish) Kind() string     { return "tinyfish" }
 func (t *tinyfish) Configured() bool { return t.cred.Present() }
 
 // Search asks one page (about ten results; the API takes no count) of the web or, for news, of news
-// articles. TinyFish has no depth setting.
+// articles. TinyFish has no depth setting, but a deep search asks pages 0 and 1 at once (twenty
+// candidates, cut to the size asked for) and every search with a purpose passes the member's question,
+// which the service ranks by.
 func (t *tinyfish) Search(ctx context.Context, q Query) (Response, error) {
+	if q.Depth != DepthDeep {
+		return t.page(ctx, q, 0)
+	}
+	type answer struct {
+		res Response
+		err error
+	}
+	second := make(chan answer, 1)
+	go func() {
+		res, err := t.page(ctx, q, 1)
+		second <- answer{res, err}
+	}()
+	first, err := t.page(ctx, q, 0)
+	next := <-second
+	switch {
+	case err != nil:
+		return Response{}, err
+	case next.err != nil:
+		return first, nil // page 0 answers; page 1 was a bonus
+	}
+	merged := first
+	merged.Results = MergeResults(first.Results, next.res.Results)
+	if len(merged.Results) > size(q.Max) {
+		merged.Results = merged.Results[:size(q.Max)]
+	}
+	return merged, nil
+}
+
+// page asks one page of results (0 is the first; the request has no page parameter then).
+func (t *tinyfish) page(ctx context.Context, q Query, page int) (Response, error) {
 	v := url.Values{}
 	v.Set("query", q.Text)
 	if hasHangul(q.Text) {
@@ -227,6 +263,15 @@ func (t *tinyfish) Search(ctx context.Context, q Query) (Response, error) {
 	}
 	if m := tinyfishMinutes[q.Fresh]; m > 0 {
 		v.Set("recency_minutes", strconv.Itoa(m))
+	}
+	if page > 0 {
+		v.Set("page", strconv.Itoa(page))
+	}
+	if purpose := strings.TrimSpace(q.Purpose); purpose != "" {
+		if r := []rune(purpose); len(r) > 2000 {
+			purpose = string(r[:2000])
+		}
+		v.Set("purpose", purpose)
 	}
 	obj, err := get(ctx, t.c, strings.TrimRight(t.base, "/")+"/?"+v.Encode(), map[string]string{"X-API-Key": t.cred.Value()})
 	if err != nil {

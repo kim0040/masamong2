@@ -18,9 +18,9 @@
 // no key here, so their formats are the references' alone):
 //
 //	depth    quick                 standard (default)     deep
-//	tavily   search_depth fast     basic                  advanced (2 credits), 3 chunks, detailed answer
-//	linkup   depth fast            standard               deep (several passes; 7–41 s measured)
-//	exa      type fast             auto                   deep-lite (1.5–2 s, $0.012)
+//	tavily   search_depth fast     basic, 3 chunks        advanced (2 credits), 3 chunks, detailed answer
+//	linkup   depth flash           standard               deep (7–41 s, $0.05; several passes)
+//	exa      type instant          auto                   deep (7–9 s, $0.012) + additionalQueries
 //	serper   one Google page whatever the depth
 //	brave    web search        web + extra_snippets   GET /res/v1/llm/context (text chunks taken from the pages)
 //	tinyfish one page whatever the depth
@@ -45,6 +45,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -86,6 +88,13 @@ type Query struct {
 	Fresh string
 	Depth string
 	Topic string
+	// Full asks a service that can for the page text of each result (Exa contents.text, which costs
+	// nothing more on /search) for the passages a chat search builds. Unset, nothing extra is asked.
+	Full bool
+	// Purpose is the question the member asked, where a service ranks better knowing it (TinyFish).
+	Purpose string
+	// Extra holds up to three reworded queries a deep Exa search runs beside Text (additionalQueries).
+	Extra []string
 }
 
 // Depths and topics search.web accepts.
@@ -96,8 +105,8 @@ const (
 	TopicNews     = "news"
 )
 
-// pick is the service's own word for a depth: quick, standard (anything else) or deep.
-func pick(depth, quick, standard, deep string) string {
+// pick is the service's own word (or number) for a depth: quick, standard (anything else) or deep.
+func pick[T any](depth string, quick, standard, deep T) T {
 	switch depth {
 	case DepthQuick:
 		return quick
@@ -197,6 +206,37 @@ func lead(name, text string) string {
 	return name + " — " + text
 }
 
+// textRunes bounds Result.Text: the page text a service chose for the query, kept past the snippet's
+// length so a search that reads pages can cut passages from it without opening the page.
+const textRunes = 4000
+
+// pageText cleans service text like a snippet (white space collapsed) but keeps the paragraph breaks
+// (blank lines) Passages splits on, and bounds it to textRunes.
+func pageText(s string) string {
+	var paras []string
+	for _, p := range strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n\n") {
+		if p = strings.Join(strings.Fields(p), " "); p != "" {
+			paras = append(paras, p)
+		}
+	}
+	out := strings.Join(paras, "\n\n")
+	if r := []rune(out); len(r) > textRunes {
+		return string(r[:textRunes]) + "…"
+	}
+	return out
+}
+
+// cleanExtra keeps up to three non-empty reworded queries.
+func cleanExtra(in []string) []string {
+	var out []string
+	for _, q := range in {
+		if q = strings.Join(strings.Fields(q), " "); q != "" && len(out) < 3 {
+			out = append(out, q)
+		}
+	}
+	return out
+}
+
 func clip(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	r := []rune(s)
@@ -267,8 +307,11 @@ func (t *tavily) Configured() bool { return t.cred.Present() }
 func (t *tavily) Search(ctx context.Context, q Query) (Response, error) {
 	body := map[string]any{"query": q.Text, "max_results": size(q.Max), "search_depth": pick(q.Depth, "fast", "basic", "advanced"), "include_answer": "basic",
 		"include_published_date": true} // general results carry no date otherwise (news always does)
+	if q.Depth != DepthQuick {
+		body["chunks_per_source"] = 3 // the best three passages of each page, not one
+	}
 	if q.Depth == DepthDeep {
-		body["chunks_per_source"], body["include_answer"] = 3, "advanced"
+		body["include_answer"] = "advanced"
 	}
 	if q.Topic == TopicNews {
 		body["topic"] = "news" // published_date comes with every news result
@@ -299,7 +342,7 @@ func ParseTavily(obj map[string]json.RawMessage) (Response, error) {
 	out := Response{Answer: clip(decode.Str(obj["answer"]))}
 	for _, r := range rows {
 		if r.URL != "" {
-			out.Results = append(out.Results, Result{Title: r.Title, URL: r.URL, Snippet: clip(r.Content), Published: r.Published})
+			out.Results = append(out.Results, Result{Title: r.Title, URL: r.URL, Snippet: clip(r.Content), Published: r.Published, Text: pageText(r.Content)})
 		}
 	}
 	return out, nil
@@ -318,7 +361,7 @@ type linkup struct {
 func (l *linkup) Kind() string     { return "linkup" }
 func (l *linkup) Configured() bool { return l.cred.Present() }
 func (l *linkup) Search(ctx context.Context, q Query) (Response, error) {
-	body := map[string]any{"q": q.Text, "depth": pick(q.Depth, "fast", "standard", "deep"), "outputType": "searchResults", "maxResults": size(q.Max)}
+	body := map[string]any{"q": q.Text, "depth": pick(q.Depth, "flash", "standard", "deep"), "outputType": "searchResults", "maxResults": size(q.Max)}
 	if from := freshFrom(q.Fresh, time.Now()); from != "" {
 		body["fromDate"] = from
 	}
@@ -352,7 +395,7 @@ func ParseLinkup(obj map[string]json.RawMessage) (Response, error) {
 	var out Response
 	for _, r := range rows {
 		if r.URL != "" && (r.Type == "" || r.Type == "text") {
-			out.Results = append(out.Results, Result{Title: r.Name, URL: r.URL, Snippet: clip(r.Content)})
+			out.Results = append(out.Results, Result{Title: r.Name, URL: r.URL, Snippet: clip(r.Content), Text: pageText(r.Content)})
 		}
 	}
 	return out, nil
@@ -371,10 +414,22 @@ type exa struct {
 func (e *exa) Kind() string     { return "exa" }
 func (e *exa) Configured() bool { return e.cred.Present() }
 func (e *exa) Search(ctx context.Context, q Query) (Response, error) {
-	body := map[string]any{"query": q.Text, "type": pick(q.Depth, "fast", "auto", "deep-lite"), "numResults": size(q.Max),
-		"contents": map[string]any{"highlights": map[string]any{"maxCharacters": snippetRunes}}}
+	// the highlights make the snippet as ever; the page text rides along on the same request at no
+	// extra charge (measured 2026-11-11: $0.007 with or without text maxCharacters 3000)
+	contents := map[string]any{"highlights": map[string]any{"maxCharacters": snippetRunes}}
+	if q.Full {
+		contents["text"] = map[string]any{"maxCharacters": pick(q.Depth, 3000, 3000, 4000)}
+	}
+	if q.Fresh == "day" {
+		contents["maxAgeHours"] = 24 // a crawl from today, not the cached copy
+	}
+	body := map[string]any{"query": q.Text, "type": pick(q.Depth, "instant", "auto", "deep"), "numResults": size(q.Max),
+		"contents": contents}
 	if q.Topic == TopicNews {
 		body["category"] = "news"
+	}
+	if extra := cleanExtra(q.Extra); q.Depth == DepthDeep && len(extra) > 0 {
+		body["additionalQueries"] = extra // only the deep types take them
 	}
 	if since, ok := freshSince(q.Fresh, time.Now()); ok {
 		body["startPublishedDate"] = since.Format(time.RFC3339)
@@ -404,10 +459,13 @@ func ParseExa(obj map[string]json.RawMessage) (Response, error) {
 			continue
 		}
 		text := strings.Join(r.Highlights, " … ")
+		full := strings.Join(r.Highlights, "\n\n") // one paragraph per highlight
 		if text == "" {
-			text = r.Text
+			text, full = r.Text, r.Text
+		} else if strings.TrimSpace(r.Text) != "" {
+			full = r.Text // the page text asked for with the highlights; the snippet stays the highlights
 		}
-		out.Results = append(out.Results, Result{Title: r.Title, URL: r.URL, Snippet: clip(text), Published: r.Published})
+		out.Results = append(out.Results, Result{Title: r.Title, URL: r.URL, Snippet: clip(text), Published: r.Published, Text: pageText(full)})
 	}
 	var cost struct {
 		Total *float64 `json:"total"`
@@ -531,7 +589,58 @@ type daum struct{ a *kakao.Adapter }
 func (d *daum) Kind() string     { return "kakao_search" }
 func (d *daum) Configured() bool { return d.a.Configured() }
 func (d *daum) Search(ctx context.Context, q Query) (Response, error) {
+	if q.Depth != DepthDeep {
+		return d.web(ctx, q)
+	}
+	// deep: Daum web and Daum blogs at once (same key); the blog posts are Korean-heavy and readable
+	type answer struct {
+		res Response
+		err error
+	}
+	blog := make(chan answer, 1)
+	go func() {
+		res, err := d.blog(ctx, q)
+		blog <- answer{res, err}
+	}()
+	web, err := d.web(ctx, q)
+	b := <-blog
+	switch {
+	case err != nil && b.err != nil:
+		return Response{}, err
+	case err != nil:
+		return b.res, nil
+	case b.err != nil:
+		return web, nil
+	}
+	web.Results = MergeResults(web.Results, b.res.Results)
+	if len(web.Results) > 10 {
+		web.Results = web.Results[:10]
+	}
+	return web, nil
+}
+
+func (d *daum) web(ctx context.Context, q Query) (Response, error) {
 	res, err := d.a.SearchWeb(ctx, q.Text, size(q.Max))
+	return d.response(res, err)
+}
+
+// blog asks Daum's blog search (/v2/search/blog), whose documents have the shape of the web ones.
+func (d *daum) blog(ctx context.Context, q Query) (Response, error) {
+	if !d.a.Configured() {
+		return Response{}, providers.ErrNoCredential
+	}
+	v := url.Values{}
+	v.Set("query", strings.TrimSpace(q.Text))
+	v.Set("size", strconv.Itoa(size(q.Max)))
+	resp, err := d.a.Client.Get(ctx, d.a.BaseURL+"/v2/search/blog?"+v.Encode(), map[string]string{"Authorization": "KakaoAK " + d.a.Cred.Value()})
+	if err != nil {
+		return d.response(kakao.Result{}, err)
+	}
+	res, err := kakao.Parse(resp.ContentType, resp.Body)
+	return d.response(res, err)
+}
+
+func (d *daum) response(res kakao.Result, err error) (Response, error) {
 	if err != nil {
 		var pe *providers.Error
 		if errors.As(err, &pe) && (pe.Status == 401 || pe.Status == 403) {

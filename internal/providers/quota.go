@@ -81,6 +81,29 @@ func (q *Quota) Reserve(provider string) (used, limit int, ok bool) {
 	return q.counts[provider], limit, true
 }
 
+// ReserveN consumes up to n units for provider on the current day and returns how many it granted (n,
+// or what is left of the limit; 0 when it is used up). A search that reads several pages counts each
+// page, not the one call.
+func (q *Quota) ReserveN(provider string, n int) (granted int) {
+	if n <= 0 {
+		return 0
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.roll(q.today())
+	granted = n
+	if limit := q.limits[provider]; limit > 0 {
+		granted = max(0, min(n, limit-q.counts[provider]))
+	}
+	q.counts[provider] += granted
+	if q.Store != nil {
+		for range granted {
+			q.fail(q.Store.Bump(q.day, provider))
+		}
+	}
+	return granted
+}
+
 // Snapshot returns today's counts.
 func (q *Quota) Snapshot() map[string]int {
 	q.mu.Lock()

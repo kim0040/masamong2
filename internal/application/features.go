@@ -618,7 +618,7 @@ func (s *Service) quoteBySearch(ctx context.Context, req action.Request, symbol,
 	if strings.HasPrefix(strings.ToLower(req.Locale), "ko") || strings.HasPrefix(strings.ToLower(s.Doc().I18n.DefaultLocale), "ko") || name != symbol {
 		query = name + " 주가"
 	}
-	raw, _ := json.Marshal(map[string]any{"query": query, "size": 5, "fresh": "day"})
+	raw, _ := json.Marshal(map[string]any{"query": query, "size": 5, "fresh": "day", "pages": 0}) // a price line needs no page text
 	res := s.Execute(ctx, action.Request{Action: "search.web", Input: raw, Locale: req.Locale, RequestID: req.RequestID, Invoker: req.Invoker})
 	if !res.OK {
 		return action.Result{}, false
@@ -638,18 +638,17 @@ func (s *Service) quoteBySearch(ctx context.Context, req action.Request, symbol,
 //	quick/standard   Exa 0.4–1.8 s, Linkup fast and standard 0.7–1.6 s, Kakao under 0.12 s, TinyFish
 //	                 0.2–2.5 s without a date filter (once 4.5 s, cold), but 6.5–8.2 s in 9 of 11 calls
 //	                 with one (recency_minutes or after_date)
-//	deep             Exa deep-lite 1.5–1.9 s; Linkup deep 6.9, 9.0, 9.3, 25.8 and 41.3 s (and a tool loop
-//	                 that took 66 s)
+//	deep             Exa deep 7.4–9.3 s; Linkup deep 6.9–9.3, 25.8 and 41.3 s (and a tool loop that took 66 s)
 //
-// Before this limit a service that was slow held the turn: the 15 s HTTP limit (registry.go) cut each
-// attempt and the client retried it twice, so one hung service cost 3 × 15 s plus the waits (46 s in the
-// test of this file). quick and standard sit above the slowest date-filtered TinyFish search (8.2 s)
-// with a little room, so a service that is merely slow still answers; deep is the HTTP limit itself, so
-// a deep search that has not answered by then is handed on rather than waited for.
+// Before this limit a service that was slow held the turn: the 15 s HTTP limit cut each attempt and the
+// client retried it twice, so one hung service cost 3 × 15 s plus the waits (46 s in the test of this
+// file). quick and standard sit above the slowest date-filtered TinyFish search (8.2 s) with a little
+// room, so a service that is merely slow still answers; deep sits above the slowest Linkup deep search
+// seen (41.3 s), and the search services' HTTP limit (searchHTTPTimeout, registry.go) above that.
 var searchDeadline = map[string]time.Duration{
 	websearch.DepthQuick:    8 * time.Second,
 	websearch.DepthStandard: 10 * time.Second,
-	websearch.DepthDeep:     15 * time.Second,
+	websearch.DepthDeep:     45 * time.Second,
 }
 
 // searchTimeout is searchDeadline for a depth ("" is standard).
@@ -660,11 +659,253 @@ func searchTimeout(depth string) time.Duration {
 	return searchDeadline[websearch.DepthStandard]
 }
 
+// Timings of the page reading of a search. Variables so tests can shorten them.
+var (
+	// fetchSoftAfter: once two pages are in, the pages still missing get this long.
+	fetchSoftAfter = 2500 * time.Millisecond
+	// fetchHardDeadline is the longest the page reading of one search takes, by depth ("" is standard).
+	fetchHardDeadline = map[string]time.Duration{websearch.DepthStandard: 5 * time.Second, websearch.DepthDeep: 8 * time.Second}
+)
+
+const (
+	// passageMinText is how much service text a result needs to be cut into a passage without opening
+	// the page.
+	passageMinText = 300
+	// passageRunes is the passage's budget per page, standard and deep.
+	passageRunes     = 1500
+	passageRunesDeep = 2000
+	// fetchPageRunes is how much of a page is read before the passage is cut from it.
+	fetchPageRunes = 30000
+)
+
+// searchTry is one service's answer to a search.
+type searchTry struct {
+	id       string
+	sr       websearch.Searcher
+	res      websearch.Response
+	err      error
+	quota    bool // our daily limit for the service stopped the call
+	ours     bool // our time limit for the call ran out, or the turn ended: not the service's error
+	timedOut bool // the service's own limit, not the turn's
+}
+
+// askService asks one service: it takes the quota unit, bounds the call by limit, notes the service's
+// health (only what the service itself answered) and counts the fee a service reports.
+func (s *Service) askService(ctx context.Context, id string, q websearch.Query, limit time.Duration) searchTry {
+	t := searchTry{id: id}
+	if err := s.Registry().reserve(id); err != nil {
+		t.err, t.quota = err, true
+		return t
+	}
+	t.sr = s.Registry().Search[id]
+	callCtx, cancel := context.WithTimeout(ctx, limit)
+	t.res, t.err = t.sr.Search(callCtx, q)
+	t.ours = callCtx.Err() != nil
+	t.timedOut = t.ours && ctx.Err() == nil
+	cancel()
+	if t.err == nil || !t.ours {
+		s.noteProvider(id, t.err)
+	}
+	if t.err == nil && t.res.CostUSD != nil {
+		s.recordSpend("search", *t.res.CostUSD)
+		chat.GuardFrom(ctx).Spend(*t.res.CostUSD)
+		chat.GuardFrom(ctx).Paid(*t.res.CostUSD) // the turn's cost counts the fee too (Guard.Paid)
+	}
+	return t
+}
+
+// searchRun is what a search has met so far, for the answer when no service had pages.
+type searchRun struct {
+	tried           []any
+	lastID          string
+	lastErr         error
+	lastIsProviders bool // lastErr is the service's own answer (not a limit of ours or the end of the turn)
+}
+
+// absorb takes a service's answer. It reports true when the answer is the search's: pages, or an
+// empty answer from the last service there is (more: others are still to be heard).
+func (r *searchRun) absorb(t searchTry, more bool) bool {
+	switch {
+	case t.quota:
+		r.tried = append(r.tried, map[string]any{"provider": t.id, "reason": "daily_limit"})
+		r.lastID, r.lastErr = t.id, t.err
+	case t.err != nil:
+		reason := "error"
+		if t.timedOut {
+			reason = "timeout"
+		}
+		r.tried = append(r.tried, map[string]any{"provider": t.id, "reason": reason, "detail": clip(t.err.Error(), 200)})
+		r.lastID, r.lastErr, r.lastIsProviders = t.id, t.err, !t.ours
+	case len(t.res.Results) == 0 && more:
+		r.tried = append(r.tried, map[string]any{"provider": t.id, "reason": "empty"})
+	default:
+		return true
+	}
+	return false
+}
+
+// searchSequential asks the services in order, each in its own mode for the depth: the first one that
+// answers with pages is the answer; one that fails or finds nothing hands over to the next. Services
+// are alternatives, never mixed.
+func (s *Service) searchSequential(ctx context.Context, order []string, q websearch.Query, depth string, run *searchRun) (searchTry, bool) {
+	for i, id := range order {
+		if err := ctx.Err(); err != nil {
+			// the turn has ended: the services left are not asked, and none of them is to blame
+			run.lastID, run.lastErr, run.lastIsProviders = id, err, false
+			return searchTry{}, false
+		}
+		t := s.askService(ctx, id, q, searchTimeout(depth))
+		if run.absorb(t, i+1 < len(order)) {
+			return t, true
+		}
+	}
+	return searchTry{}, false
+}
+
+// searchPages is how many result pages this search reads for passages. An explicit `pages` input wins
+// (a planner may ask for them); without one only a chat turn reads pages, as many as the depth's
+// setting says — /search, replies, scheduled tasks and the price fallback stay snippets only. It is
+// clamped to the deep setting (at most 10), and a quick search reads none.
+func (s *Service) searchPages(in map[string]any, req action.Request, depth string) int {
+	if depth == websearch.DepthQuick {
+		return 0
+	}
+	ws := s.Doc().WebSearch
+	n := 0
+	if _, set := in["pages"]; set {
+		n = intVal(in, "pages", 0)
+	} else if req.Invoker != nil && req.Invoker.Via == "chat" {
+		n = ws.Pages(depth)
+	}
+	return max(0, min(n, max(ws.Pages(websearch.DepthDeep), ws.Pages(depth))))
+}
+
+// readsOwnPages reports whether the pages behind a search service's results are opened: TinyFish pages go through TinyFish Fetch (the same key), and Serper's and Kakao's,
+// which have no reader, borrow the configured one. Exa, Linkup, Tavily and Brave return the page text
+// with the results, so a result of theirs without text is not opened (there is no better reader to
+// ask than the service that has just looked at the page).
+func readsOwnPages(kind string) bool {
+	switch kind {
+	case "tinyfish", "serper", "kakao_search":
+		return true
+	}
+	return false
+}
+
+// pageRead is what one result got from page reading.
+type pageRead struct {
+	passage string
+	// read: ok (the page was read), service (the passage is cut from the search service's own text, no
+	// page was opened), timeout, blocked, skipped (not asked: not public, a login-walled host, over the
+	// daily allowance, no reader), error.
+	read string
+}
+
+// readPages gives the first n results a passage: cut from the text the search service returned when
+// it returned enough, else (when mayFetch) from the page, which is read through the page fetcher for all
+// such results at once (soft deadline once two pages are in, hard deadline by depth). A page that cannot be read
+// costs the search nothing but its passage.
+func (s *Service) readPages(ctx context.Context, query, depth string, results []websearch.Result, pages int, mayFetch bool) []pageRead {
+	n := min(pages, len(results))
+	reads := make([]pageRead, n)
+	budget := passageRunes
+	if depth == websearch.DepthDeep {
+		budget = passageRunesDeep
+	}
+	reg := s.Registry()
+	var fetcher websearch.Fetcher
+	if mayFetch {
+		fetcher = reg.pageFetcher(s.Doc().WebSearch)
+	}
+	var need []int
+	var urls []string
+	have := 0
+	for i := range n {
+		r := results[i]
+		if len([]rune(r.Text)) >= passageMinText {
+			if p := websearch.Passages(query, r.Text, budget); p != "" {
+				reads[i] = pageRead{p, "service"}
+				have++
+				continue
+			}
+		}
+		reads[i].read = "skipped"
+		if fetcher == nil {
+			continue
+		}
+		target, ok := websearch.FetchTarget(r.URL)
+		if !ok {
+			continue
+		}
+		if why, hit := reg.fetchHosts.Skip(target); hit {
+			reads[i].read = why
+			continue
+		}
+		need, urls = append(need, i), append(urls, target)
+	}
+	if len(need) > 0 {
+		granted := reg.reserveN(fetchQuotaKey, len(need)) // a unit a page
+		need, urls = need[:granted], urls[:granted]
+	}
+	if len(need) == 0 {
+		return reads
+	}
+	hard := fetchHardDeadline[depth]
+	if hard == 0 {
+		hard = fetchHardDeadline[websearch.DepthStandard]
+	}
+	fctx, cancel := context.WithTimeout(ctx, hard)
+	defer cancel()
+	fctx = websearch.WithSoftDeadline(fctx, 2-have, fetchSoftAfter)
+	got, err := fetcher.Fetch(fctx, urls, fetchPageRunes)
+	if err != nil {
+		s.noteProvider(fetchQuotaKey, err) // the service's own failure; a page's never reaches here
+	}
+	anyRead := false
+	for k, i := range need {
+		f := websearch.Fetched{Err: "error"}
+		if k < len(got) {
+			f = got[k]
+		}
+		switch f.Err {
+		case "":
+			anyRead = true
+			if p := websearch.Passages(query, f.Content, budget); p != "" {
+				reads[i] = pageRead{p, "ok"}
+			} else {
+				reads[i].read = "error"
+			}
+		case "timeout":
+			reads[i].read = "timeout"
+			reg.fetchHosts.Note(urls[k], f.Err)
+		case "blocked", "login":
+			reads[i].read = "blocked"
+			reg.fetchHosts.Note(urls[k], f.Err)
+		case "not_public":
+			reads[i].read = "skipped"
+		case "service":
+			reads[i].read = "service"
+		default:
+			reads[i].read = "error"
+		}
+	}
+	if err == nil && anyRead {
+		s.noteProvider(fetchQuotaKey, nil)
+	}
+	return reads
+}
+
 // search asks the search services in order; one that fails or finds nothing hands over to the next.
 // The answer says which service found the pages (source/provider) and which were passed over.
 // Input: query, size (1–10), fresh (day|week|month), depth (quick|standard|deep: speed against
 // coverage, each service in its own words), topic (news: news articles where the service has a news
-// search), provider (only that one).
+// search), provider (only that one), purpose (the member's question, for a service that ranks by it),
+// queries (up to three reworded queries for a deep search), pages (how many result pages to read for
+// passages; see searchPages).
+//
+// With pages read, the first `pages` results also carry `passage` (the part of the page that answers
+// the query) and `read` (how it went), and the answer carries `pages_read`. Without, the answer is
+// what it always was.
 func (s *Service) search(ctx context.Context, req action.Request) action.Result {
 	in := inputMap(req)
 	query := strings.TrimSpace(strVal(in, "query", ""))
@@ -701,7 +942,9 @@ func (s *Service) search(ctx context.Context, req action.Request) action.Result 
 	default:
 		fresh = "" // a word the schema does not offer and that names no span of days
 	}
-	q := websearch.Query{Text: query, Max: intVal(in, "size", size), Fresh: fresh, Depth: depth, Topic: topic}
+	pages := s.searchPages(in, req, depth)
+	q := websearch.Query{Text: query, Max: intVal(in, "size", size), Fresh: fresh, Depth: depth, Topic: topic, Full: pages > 0,
+		Purpose: strVal(in, "purpose", ""), Extra: strSlice(in, "queries")}
 	if topic == websearch.TopicNews && len(order) > 1 {
 		// news: the services with a news search of their own first (dated articles), the rest after
 		reg := s.Registry()
@@ -713,78 +956,57 @@ func (s *Service) search(ctx context.Context, req action.Request) action.Result 
 		}
 		slices.SortStableFunc(order, func(a, b string) int { return later(a) - later(b) })
 	}
-	var tried []any
-	var lastID string
-	var lastErr error
-	lastIsProviders := true // lastErr is the service's own answer (not a limit of ours or the end of the turn)
-	for _, id := range order {
-		if err := ctx.Err(); err != nil {
-			// the turn has ended: the services left are not asked, and none of them is to blame
-			lastID, lastErr, lastIsProviders = id, err, false
-			break
+	run := &searchRun{lastIsProviders: true}
+	win, found := s.searchSequential(ctx, order, q, depth, run)
+	if !found {
+		if !run.lastIsProviders {
+			return s.providerResult(req, run.lastID, run.lastErr)
 		}
-		if err := s.Registry().reserve(id); err != nil {
-			tried = append(tried, map[string]any{"provider": id, "reason": "daily_limit"})
-			lastID, lastErr = id, err
-			continue
-		}
-		sr := s.Registry().Search[id]
-		callCtx, cancel := context.WithTimeout(ctx, searchTimeout(depth))
-		res, err := sr.Search(callCtx, q)
-		ours := callCtx.Err() != nil         // our limit for the depth ran out or the turn ended: not the service's error
-		timedOut := ours && ctx.Err() == nil // this service's limit, not the turn's
-		cancel()
-		if err == nil || !ours {
-			s.noteProvider(id, err) // only what the service itself answered goes into its health
-		}
-		if err != nil {
-			reason := "error"
-			if timedOut {
-				reason = "timeout"
+		return s.providerFail(req, run.lastID, run.lastErr)
+	}
+	results := win.res.Results
+	var reads []pageRead
+	if pages > 0 && len(results) > 0 {
+		reads = s.readPages(ctx, query, depth, results, pages, readsOwnPages(win.sr.Kind()))
+	}
+	items := make([]any, 0, len(results))
+	pagesRead := 0
+	for i, r := range results {
+		item := map[string]any{"title": r.Title, "snippet": r.Snippet, "url": r.URL, "datetime": r.Published}
+		if i < len(reads) {
+			if reads[i].passage != "" {
+				item["passage"] = reads[i].passage
+				pagesRead++
 			}
-			tried = append(tried, map[string]any{"provider": id, "reason": reason, "detail": clip(err.Error(), 200)})
-			lastID, lastErr, lastIsProviders = id, err, !ours
-			continue
+			item["read"] = reads[i].read
 		}
-		if res.CostUSD != nil {
-			s.recordSpend("search", *res.CostUSD)
-			chat.GuardFrom(ctx).Spend(*res.CostUSD)
-			chat.GuardFrom(ctx).Paid(*res.CostUSD) // the turn's cost counts the fee too (Guard.Paid)
-		}
-		if len(res.Results) == 0 && len(tried)+1 < len(order) {
-			tried = append(tried, map[string]any{"provider": id, "reason": "empty"})
-			continue
-		}
-		items := make([]any, 0, len(res.Results))
-		for _, r := range res.Results {
-			items = append(items, map[string]any{"title": r.Title, "snippet": r.Snippet, "url": r.URL, "datetime": r.Published})
-		}
-		out := map[string]any{"status": "ok", "live": true, "source": sr.Kind(), "provider": id, "query": query, "results": items, "paid_provider_call": true}
-		if depth != "" {
-			out["depth"] = depth
-		}
-		if topic != "" {
-			out["topic"] = topic
-		}
-		if len(items) == 0 {
-			out["status"] = "empty"
-		}
-		if res.Answer != "" {
-			out["answer"] = res.Answer
-		}
-		if len(tried) > 0 {
-			out["passed_over"] = tried
-		}
-		return action.OK(req, out)
+		items = append(items, item)
 	}
-	if !lastIsProviders {
-		return s.providerResult(req, lastID, lastErr)
+	out := map[string]any{"status": "ok", "live": true, "source": win.sr.Kind(), "provider": win.id, "query": query, "results": items, "paid_provider_call": true}
+	if depth != "" {
+		out["depth"] = depth
 	}
-	return s.providerFail(req, lastID, lastErr)
+	if topic != "" {
+		out["topic"] = topic
+	}
+	if len(items) == 0 {
+		out["status"] = "empty"
+	}
+	if win.res.Answer != "" {
+		out["answer"] = win.res.Answer
+	}
+	if len(run.tried) > 0 {
+		out["passed_over"] = run.tried
+	}
+	if pages > 0 {
+		out["pages_read"] = pagesRead
+	}
+	return action.OK(req, out)
 }
 
-// webRead reads one public web page as text (Jina Reader). Input: url, max_chars (500–20000; the
-// default fits the answer prompt's tool block, internal/chat BuildAnswerMessages).
+// webRead reads one public web page as text: through the page fetcher when that is TinyFish Fetch
+// (a real browser), else, or when that fails, through Jina Reader. Input: url, max_chars (500–20000;
+// the default fits the answer prompt's tool block, internal/chat BuildAnswerMessages).
 func (s *Service) webRead(ctx context.Context, req action.Request) action.Result {
 	in := inputMap(req)
 	target, err := websearch.PublicURL(strVal(in, "url", ""))
@@ -792,19 +1014,47 @@ func (s *Service) webRead(ctx context.Context, req action.Request) action.Result
 		return action.Fail(req, errcode.InvalidInput, "generic.error", "url: a public http(s) web address is required", nil)
 	}
 	reg := s.Registry()
+	maxChars := min(max(intVal(in, "max_chars", 2800), 500), 20000)
+	if f := reg.pageFetcher(s.Doc().WebSearch); f != nil && f.Kind() == "tinyfish_fetch" {
+		if res, ok := s.readThrough(ctx, req, f, target, maxChars); ok {
+			return res
+		}
+	}
 	if reg.Reader == nil {
 		return action.OK(req, map[string]any{"status": "unconfigured", "live": false, "url": target, "message": s.msg(req, "provider.unconfigured", "provider", "jina")})
 	}
 	if err := reg.reserve(reg.readerID); err != nil {
 		return s.providerFail(req, reg.readerID, err)
 	}
-	page, err := reg.Reader.Read(ctx, target, min(max(intVal(in, "max_chars", 2800), 500), 20000))
+	page, err := reg.Reader.Read(ctx, target, maxChars)
 	if err != nil {
 		return s.providerFail(req, reg.readerID, err)
 	}
 	s.noteProvider(reg.readerID, nil)
 	return action.OK(req, map[string]any{"status": "ok", "live": true, "source": "jina_reader", "provider": reg.readerID, "url": page.URL,
 		"title": page.Title, "content": page.Content, "truncated": page.Truncated})
+}
+
+// readThrough reads one page through the page fetcher for web.read; false when it could not (over the
+// daily allowance, the service failed, the page could not be read), so the caller falls back.
+func (s *Service) readThrough(ctx context.Context, req action.Request, f websearch.Fetcher, target string, maxChars int) (action.Result, bool) {
+	addr, ok := websearch.FetchTarget(target)
+	if !ok || s.Registry().reserveN(fetchQuotaKey, 1) == 0 {
+		return action.Result{}, false
+	}
+	fctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+	got, err := f.Fetch(fctx, []string{addr}, maxChars)
+	if err != nil {
+		s.noteProvider(fetchQuotaKey, err)
+		return action.Result{}, false
+	}
+	if len(got) != 1 || got[0].Err != "" {
+		return action.Result{}, false
+	}
+	s.noteProvider(fetchQuotaKey, nil)
+	return action.OK(req, map[string]any{"status": "ok", "live": true, "source": f.Kind(), "provider": s.Registry().tinyfishID, "url": got[0].URL,
+		"title": got[0].Title, "content": got[0].Content, "truncated": got[0].Truncated}), true
 }
 
 // ---------------------------------------------------------------------------

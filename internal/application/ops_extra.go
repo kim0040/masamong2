@@ -82,6 +82,12 @@ func (s *Service) providerHealth() map[string]ProviderHealth {
 		}
 		out[id] = h
 	}
+	if s.Store != nil { // the page reader's own health, once it has been used
+		var h ProviderHealth
+		if ok, _ := s.kvGet("provider:"+fetchQuotaKey, &h); ok {
+			out[fetchQuotaKey] = h
+		}
+	}
 	return out
 }
 

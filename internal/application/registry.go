@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"masamong/internal/config"
@@ -50,11 +51,65 @@ type Registry struct {
 	Reader                 *websearch.Reader
 	byID                   map[string]ProviderStatus
 	kmaID, fxID, finnhubID string
+	// fetchHosts remembers the hosts whose pages could not be read (search.web, page passages).
+	fetchHosts *websearch.HostCache
+	// the TinyFish provider whose key reads pages (TinyFish Fetch takes the search key); "" = none
+	tinyfishID     string
+	tinyfishClient *providers.Client
+	tinyfishCred   providers.Credential
+	fetchMu        sync.Mutex
+	fetchers       map[string]websearch.Fetcher
 	// Places is the Kakao Map place search of the first Kakao provider (places.search)
 	Places                *kakao.Adapter
 	placesID              string
 	openMeteoID, readerID string
 }
+
+// fetchQuotaKey is the daily counter of pages read (one unit a page, not a call) and the health key of
+// the page reader; it is not a provider of config.
+const fetchQuotaKey = "fetch"
+
+// tinyfishFetchBase is TinyFish Fetch's address (a test points it at a server).
+var tinyfishFetchBase = websearch.FetchBaseURL
+
+// pageFetcher is the service that reads the pages behind search results, as web_search.fetch says:
+// TinyFish Fetch when it is chosen (or automatic) and a TinyFish key exists, else Jina Reader; nil for
+// "off" or when neither is there. Built on first use, so the built-in reader is in by then.
+func (r *Registry) pageFetcher(ws config.WebSearch) websearch.Fetcher {
+	kind := ws.FetchKind(r.tinyfishID != "")
+	if kind == "off" {
+		return nil
+	}
+	r.fetchMu.Lock()
+	defer r.fetchMu.Unlock()
+	if r.fetchers == nil {
+		r.fetchers = map[string]websearch.Fetcher{}
+	}
+	if kind == "tinyfish" && r.tinyfishID != "" {
+		if f := r.fetchers["tinyfish"]; f != nil {
+			return f
+		}
+		f := websearch.NewTinyFishFetcher(r.tinyfishClient, tinyfishFetchBase, r.tinyfishCred)
+		r.fetchers["tinyfish"] = f
+		return f
+	}
+	if r.Reader == nil {
+		return nil
+	}
+	if f := r.fetchers["jina"]; f != nil {
+		return f
+	}
+	f := websearch.NewJinaFetcher(r.Reader)
+	r.fetchers["jina"] = f
+	return f
+}
+
+// reserveN consumes up to n quota units of id and returns how many it got.
+func (r *Registry) reserveN(id string, n int) int { return r.Quota.ReserveN(id, n) }
+
+// searchHTTPTimeout is the HTTP limit of the search services' requests: above the longest wait for one
+// service (searchDeadline, deep: Linkup's deep search took 41 s), so that limit, not this one, ends a call.
+const searchHTTPTimeout = 50 * time.Second
 
 // builtinReaderID names the keyless page reader added when config has none.
 const builtinReaderID = "jina"
@@ -140,7 +195,14 @@ func buildRegistry(doc config.Document, log *slog.Logger, now func() time.Time) 
 			limits[id] = p.DailyLimit
 		}
 	}
-	r := &Registry{Client: client, Quota: providers.NewQuota(limits), LLM: map[string]*openai.Adapter{}, Search: map[string]websearch.Searcher{}, byID: map[string]ProviderStatus{}}
+	limits[fetchQuotaKey] = doc.WebSearch.FetchDailyPages()
+	// the search services get their own copy of the client with the longer limit (it shares the
+	// connections); everything else keeps the 15 s one
+	searchClient := *client
+	searchHTTP := *client.HTTP
+	searchHTTP.Timeout = searchHTTPTimeout
+	searchClient.HTTP = &searchHTTP
+	r := &Registry{Client: client, Quota: providers.NewQuota(limits), fetchHosts: websearch.NewHostCache(), LLM: map[string]*openai.Adapter{}, Search: map[string]websearch.Searcher{}, byID: map[string]ProviderStatus{}}
 	r.Quota.Now = now
 	for id, p := range doc.Providers {
 		st := ProviderStatus{ID: id, Kind: p.Kind, CredentialRef: p.CredentialRef, DailyLimit: p.DailyLimit}
@@ -179,8 +241,11 @@ func buildRegistry(doc config.Document, log *slog.Logger, now func() time.Time) 
 		case config.KindFinnhub:
 			r.Finnhub, r.finnhubID = finnhub.New(gated, p.BaseURL, cred), id
 		case config.KindKakaoSearch, config.KindTavily, config.KindLinkup, config.KindExa, config.KindSerper, config.KindBrave, config.KindTinyFish:
-			if sr, err := websearch.New(p.Kind, gated, p.BaseURL, cred); err == nil {
+			if sr, err := websearch.New(p.Kind, gatedProvider(&searchClient, p, cred), p.BaseURL, cred); err == nil {
 				r.Search[id] = sr
+			}
+			if p.Kind == config.KindTinyFish && cred.Present() && (r.tinyfishID == "" || id < r.tinyfishID) {
+				r.tinyfishID, r.tinyfishClient, r.tinyfishCred = id, client, cred
 			}
 			// the same Kakao REST key also searches Kakao Map (places.search)
 			if p.Kind == config.KindKakaoSearch && (r.Places == nil || !r.Places.Configured()) {
