@@ -1021,6 +1021,9 @@ type ChatInput struct {
 	// first line of the delivered reply (never in a model prompt). It is called once, from the turn's final
 	// outcome, and only when some pictures were read and some were not.
 	OnVisionNotice func(string)
+	// OnProgress hears how far the turn's web search has got (chat.Request.OnProgress); the connector may
+	// post a short "still looking" line and delete it before the answer. It must not block. nil = none.
+	OnProgress func(chat.Progress)
 	// ImageOnly marks a message that said nothing but the call: the pictures are the request. When no
 	// model can look at them, the member gets a short honest line instead of an answer.
 	ImageOnly bool

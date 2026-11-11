@@ -61,6 +61,12 @@ type ToolInfo struct {
 	// Pays: the tool spends money of its own (a model call, a picture, a paid search), so under a money
 	// cap the turn's later steps wait for it to be decided (runSteps).
 	Pays bool `json:"-"`
+	// Parallel: calls of this tool in one round may run at once (read-only and idempotent: a search, a
+	// page read, a forecast). Other tools keep the model's order (runSteps).
+	Parallel bool `json:"-"`
+	// MaxFeeUSD is the most one call can pay a service (0 = unknown). Under a money cap a paying step with
+	// a known bound holds that much instead of making the next steps wait for it (Guard holds).
+	MaxFeeUSD float64 `json:"-"`
 }
 
 // Toolset is what the planner may use in this turn. Enabled is offered in order; Known lists every

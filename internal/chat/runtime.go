@@ -97,6 +97,10 @@ type Request struct {
 	// TurnStart is when the turn began (the application's ChatTurn), the zero point of Result.Spans; the
 	// zero time counts from the start of Answer.
 	TurnStart time.Time
+	// OnProgress hears how far the turn's web search has got (progress.go), so the connector can say a
+	// long turn is still looking. It is called from the loop's or the planner path's goroutine, at most
+	// once per stage, never in shadow mode, and must not block. nil = nobody listens.
+	OnProgress func(Progress)
 }
 
 // Result is the answer plus a body-free trace for logs/diagnostics.

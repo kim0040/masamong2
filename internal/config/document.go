@@ -135,6 +135,55 @@ type WebSearch struct {
 	// Order names search providers (config providers of a search kind) first to last; empty means
 	// every one with a key, in the built-in order: Tavily, Linkup, Exa, Serper, Kakao.
 	Order []string `yaml:"order,omitempty" json:"order,omitempty"`
+	// ReadPages is how many result pages a chat search reads for passages (standard depth; unset = 3,
+	// 0 = snippets only). DeepPages is the same for a deep search (unset = 6). Quick reads none.
+	ReadPages *int `yaml:"read_pages,omitempty" json:"read_pages,omitempty"`
+	DeepPages *int `yaml:"deep_pages,omitempty" json:"deep_pages,omitempty"`
+	// Fetch is the service that reads those pages: "tinyfish", "jina" or "off" (unset = tinyfish when a
+	// TinyFish key is configured, else jina).
+	Fetch string `yaml:"fetch,omitempty" json:"fetch,omitempty"`
+	// FetchDailyLimit caps the pages read a day (unset or 0 = 800; TinyFish Fetch is free to 1,000 a day).
+	FetchDailyLimit int `yaml:"fetch_daily_limit,omitempty" json:"fetch_daily_limit,omitempty"`
+}
+
+// FetchKinds are the values web_search.fetch accepts besides empty (auto).
+var FetchKinds = []string{"tinyfish", "jina", "off"}
+
+// Pages is how many result pages a chat search of this depth reads ("" is standard).
+func (w WebSearch) Pages(depth string) int {
+	switch depth {
+	case "quick":
+		return 0
+	case "deep":
+		if w.DeepPages != nil {
+			return max(0, min(*w.DeepPages, 10))
+		}
+		return 6
+	}
+	if w.ReadPages != nil {
+		return max(0, min(*w.ReadPages, 10))
+	}
+	return 3
+}
+
+// FetchKind is the effective page reader: tinyfish, jina or off.
+func (w WebSearch) FetchKind(hasTinyFish bool) string {
+	switch w.Fetch {
+	case "tinyfish", "jina", "off":
+		return w.Fetch
+	}
+	if hasTinyFish {
+		return "tinyfish"
+	}
+	return "jina"
+}
+
+// FetchDailyPages is the effective daily cap of pages read.
+func (w WebSearch) FetchDailyPages() int {
+	if w.FetchDailyLimit > 0 {
+		return w.FetchDailyLimit
+	}
+	return 800
 }
 
 // Updates controls the daily release check. It only reports a newer version; it installs nothing.
@@ -1046,6 +1095,22 @@ type ChatSettings struct {
 	// or "off". Only pictures attached to the message that calls the bot (or the one it replies to)
 	// are read; nothing looks at a room's pictures in the background.
 	Vision string `yaml:"vision,omitempty" json:"vision,omitempty"`
+	// Progress is when the bot posts a short "still looking" line during a turn that searches the web,
+	// deleted before the answer: "slow" (the default: at once for a deep search or a second round of
+	// searches, else when a search turn is still unanswered after a few seconds), "deep" (only those two)
+	// or "off".
+	Progress string `yaml:"progress,omitempty" json:"progress,omitempty"`
+}
+
+// ProgressModes are the values chat.progress accepts besides empty (slow).
+var ProgressModes = []string{"slow", "deep", "off"}
+
+// ProgressMode is the effective chat.progress.
+func (c ChatSettings) ProgressMode() string {
+	if c.Progress == "" {
+		return "slow"
+	}
+	return c.Progress
 }
 
 // VisionModes are the values chat.vision accepts besides empty (auto).

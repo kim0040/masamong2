@@ -122,6 +122,9 @@ type Result struct {
 	URL       string `json:"url"`
 	Snippet   string `json:"snippet"`
 	Published string `json:"published,omitempty"`
+	// Text is the page text a service chose for the query (Exa highlights, Tavily content, Linkup
+	// content, Brave context), not cut to the snippet's length; "" when the service gives none.
+	Text string `json:"text,omitempty"`
 }
 
 // Response is what a service returned: pages, and an answer when the service writes one.
