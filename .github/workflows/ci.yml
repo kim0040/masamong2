@@ -76,16 +76,17 @@ jobs:
 
   windows:
     runs-on: windows-latest
-    timeout-minutes: 90
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - run: go vet ./...
-      # the application package alone runs past go test's default 10 minutes on the Windows runner
-      # (23 min on 2026-10-12, over 30 on a slow runner the same day; 34 to 39 min at v1.1.1, and one run passed 45)
-      - run: go test ./... -count=1 -timeout 70m
+      # the application package runs in the windows-app shards
+      - name: go test (all but the application package)
+        shell: bash
+        run: go test $(go list ./... | grep -v '^masamong/internal/application$') -count=1 -timeout 30m
       - name: noweb build
         run: |
           go vet -tags noweb ./cmd/... ./internal/transport/web/...
@@ -124,6 +125,26 @@ jobs:
           python -m unittest discover -s tools/evaluation/rag_upgrade
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+  # The application package alone ran 34 to 45 minutes on the Windows runner at v1.1.1 (and past 40 under the race
+  # detector on Linux at v1.2.0), one test after another. It runs here in four shards by the first letter of the
+  # test name, balanced by time (A-C, D-L, M-R, the rest); the last shard takes everything the others do not,
+  # so a new test always runs somewhere.
+  windows-app:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ['^Test[A-C]', '^Test[D-L]', '^Test[M-R]', '^(Test([^A-R]|$)|Example|Fuzz)']
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: go test (application shard)
+        shell: bash
+        run: go test ./internal/application -run '${{ matrix.shard }}' -count=1 -timeout 30m
+
   # the macOS keychain, the Unix file modes and the launcher are only built and run here
   macos:
     runs-on: macos-latest
@@ -140,16 +161,23 @@ jobs:
     needs: changes
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 80
+    timeout-minutes: 50
+    strategy:
+      fail-fast: false
+      matrix:
+        # "rest" is every package but the application one; the others are its shards (see windows-app)
+        shard: ['rest', '^Test[A-C]', '^Test[D-L]', '^Test[M-R]', '^(Test([^A-R]|$)|Example|Fuzz)']
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      # under the race detector the application package runs past go test's default 10 minutes (it timed
-      # out there on 2026-10-05 and 10-12 without any race reported); it took 37 min at v1.1.1 and passed
-      # 40 at v1.2.0 (2026-11-11, still running tests, no race reported)
-      - run: go test -race ./... -count=1 -timeout 65m
+      # under the race detector the application package took 37 min at v1.1.1 and passed 40 at v1.2.0
+      # (2026-11-11, no race reported), so it runs in shards
+      - if: matrix.shard == 'rest'
+        run: go test -race $(go list ./... | grep -v '^masamong/internal/application$') -count=1 -timeout 40m
+      - if: matrix.shard != 'rest'
+        run: go test -race ./internal/application -run '${{ matrix.shard }}' -count=1 -timeout 40m
 
   load:
     # 45 s of mixed traffic against the real service (fake model): fails on leaked goroutines or
