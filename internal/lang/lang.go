@@ -257,13 +257,17 @@ type Chat struct {
 	// ToolConclusion is added when a web search tool answered (search.*, web.*, places.*): the conclusion goes in the reply's first line, sources are not listed one by
 	// one. Optional: a pack without it adds nothing. It lives in the tool block, not in answer_template
 	// or memory_rules, which stay byte-identical to the sandbox.
-	ToolConclusion string            `json:"tool_conclusion,omitempty"`
-	MemoryRules    string            `json:"memory_rules"`
-	SecurityRules  string            `json:"security_rules"`
-	RagNotes       map[string]string `json:"rag_notes"`
-	EvidenceLine   string            `json:"evidence_line"`   // {i} {date} {speakers}
-	CorrectionLine string            `json:"correction_line"` // {note}: an operator's correction of a memory
-	SummaryLine    string            `json:"summary_line"`    // {i} {summary}
+	ToolConclusion string `json:"tool_conclusion,omitempty"`
+	// ToolConclusionDeep takes ToolConclusion's place after a deep web search (depth deep): the conclusion
+	// first, then a well-organized synthesis of the aspects asked, sources compared where they differ and
+	// named in passing, and what is uncertain or dated said so. Optional like ToolConclusion.
+	ToolConclusionDeep string            `json:"tool_conclusion_deep,omitempty"`
+	MemoryRules        string            `json:"memory_rules"`
+	SecurityRules      string            `json:"security_rules"`
+	RagNotes           map[string]string `json:"rag_notes"`
+	EvidenceLine       string            `json:"evidence_line"`   // {i} {date} {speakers}
+	CorrectionLine     string            `json:"correction_line"` // {note}: an operator's correction of a memory
+	SummaryLine        string            `json:"summary_line"`    // {i} {summary}
 	// MemoryTail follows the memory snippets when there are some: combine them into the bot's own words
 	// rather than relaying them line by line. Optional; "" adds nothing.
 	MemoryTail     string `json:"memory_tail,omitempty"`
