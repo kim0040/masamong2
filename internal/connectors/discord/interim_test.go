@@ -30,6 +30,8 @@ type restEvent struct {
 	Reply        string // the message a post replies to
 	Parse        []string
 	parseSet     bool
+	Nonce        string
+	Enforce      bool
 }
 
 // restLog is a fake Discord that numbers the messages posted and keeps every call in order. gate, when set,
@@ -39,6 +41,7 @@ type restLog struct {
 	events      []restEvent
 	posts       int
 	failPost    map[int]bool
+	statusPost  map[int]int  // the post is refused with this HTTP status (a body that is not a Discord error)
 	losePost    map[int]bool // the post was accepted but the REST answer never came back
 	failDelete  int          // the first N deletes fail
 	deletes     int
@@ -63,12 +66,14 @@ func (r *restLog) RoundTrip(req *http.Request) (*http.Response, error) {
 			Mentions *struct {
 				Parse []string `json:"parse"`
 			} `json:"allowed_mentions"`
+			Nonce   string `json:"nonce"`
+			Enforce bool   `json:"enforce_nonce"`
 		}
 		_ = json.Unmarshal(raw, &sent)
 		r.mu.Lock()
 		r.posts++
 		n := r.posts
-		ev := restEvent{Method: req.Method, Path: req.URL.Path, Content: sent.Content, Flags: sent.Flags}
+		ev := restEvent{Method: req.Method, Path: req.URL.Path, Content: sent.Content, Flags: sent.Flags, Nonce: sent.Nonce, Enforce: sent.Enforce}
 		if sent.Ref != nil {
 			ev.Reply = sent.Ref.MessageID
 		}
@@ -77,6 +82,7 @@ func (r *restLog) RoundTrip(req *http.Request) (*http.Response, error) {
 		}
 		fail := r.failPost[n]
 		lose := r.losePost[n]
+		status := r.statusPost[n]
 		gate, entered := r.gate, r.entered
 		if n == 1 {
 			r.gate, r.entered = nil, nil
@@ -95,6 +101,9 @@ func (r *restLog) RoundTrip(req *http.Request) (*http.Response, error) {
 		r.mu.Unlock()
 		if fail {
 			return reply(http.StatusForbidden, `{"code":50013,"message":"Missing Permissions"}`), nil
+		}
+		if status != 0 {
+			return reply(status, `{"message":"status"}`), nil
 		}
 		if lose {
 			return nil, context.DeadlineExceeded
@@ -481,7 +490,7 @@ func TestInterimEventsAreNeitherCapturedNorReconciled(t *testing.T) {
 	ip.show(chat.Progress{Stage: chat.ProgressDeep})
 	ip.posts.Wait()
 	text := log.list()[0].Content
-	if ours, drop := g.interims.ownCreate("c", "i1", text); !ours || drop {
+	if ours, drop := g.interims.ownCreate("c", m.ID, "i1", text); !ours || drop {
 		t.Fatal("the line's own create event is not recognised")
 	}
 	create := &discordgo.MessageCreate{Message: &discordgo.Message{ID: "i1", ChannelID: "c", GuildID: "g", Content: text, Author: &discordgo.User{ID: bot, Bot: true}}}
@@ -511,12 +520,12 @@ func TestInterimEventsAreNeitherCapturedNorReconciled(t *testing.T) {
 func TestInterimRegistry(t *testing.T) {
 	t.Run("event first", func(t *testing.T) {
 		var r interimRegistry
-		r.expect("c", "text")
-		if ours, _ := r.ownCreate("c", "id", "text"); !ours {
+		r.expect("c", "r", "text")
+		if ours, _ := r.ownCreate("c", "r", "id", "text"); !ours {
 			t.Fatal("pending text not recognised")
 		}
-		r.bind("c", "text", "id") // the REST answer comes second
-		if ours, _ := r.ownCreate("c", "other", "text"); ours {
+		r.bind("c", "r", "text", "id") // the REST answer comes second
+		if ours, _ := r.ownCreate("c", "r", "other", "text"); ours {
 			t.Fatal("one expectation matched two messages")
 		}
 		if !r.deleted("id") || !r.deleted("id") {
@@ -525,55 +534,69 @@ func TestInterimRegistry(t *testing.T) {
 	})
 	t.Run("answer first", func(t *testing.T) {
 		var r interimRegistry
-		r.expect("c", "text")
-		r.bind("c", "text", "id")
-		if ours, _ := r.ownCreate("c", "id", "text"); !ours {
+		r.expect("c", "r", "text")
+		r.bind("c", "r", "text", "id")
+		if ours, _ := r.ownCreate("c", "r", "id", "text"); !ours {
 			t.Fatal("bound ID not recognised")
 		}
-		if ours, _ := r.ownCreate("c", "other", "text"); ours {
+		if ours, _ := r.ownCreate("c", "r", "other", "text"); ours {
 			t.Fatal("a bound line left its expectation behind")
 		}
 	})
-	t.Run("same text twice, another channel, another text", func(t *testing.T) {
+	t.Run("same text twice, another channel, another text, another reply", func(t *testing.T) {
 		var r interimRegistry
-		r.expect("c", "text")
-		r.expect("c", "text")
-		if ours, _ := r.ownCreate("d", "x", "text"); ours {
+		r.expect("c", "r1", "text")
+		r.expect("c", "r2", "text")
+		if ours, _ := r.ownCreate("d", "r1", "x", "text"); ours {
 			t.Fatal("matched the wrong channel")
 		}
-		if ours, _ := r.ownCreate("c", "x", "other"); ours {
+		if ours, _ := r.ownCreate("c", "r1", "x", "other"); ours {
 			t.Fatal("matched the wrong text")
 		}
-		if ours, _ := r.ownCreate("c", "a", "text"); !ours {
-			t.Fatal("the first of two lines with one text")
+		if ours, _ := r.ownCreate("c", "r3", "x", "text"); ours {
+			t.Fatal("matched a line that replies to another message")
 		}
-		if ours, _ := r.ownCreate("c", "b", "text"); !ours {
-			t.Fatal("the second of two lines with one text")
+		if ours, _ := r.ownCreate("c", "", "x", "text"); ours {
+			t.Fatal("matched a message that replies to nothing")
 		}
-		if ours, _ := r.ownCreate("c", "c", "text"); ours {
-			t.Fatal("two lines with one text matched a third")
+		if ours, _ := r.ownCreate("c", "r2", "b", "text"); !ours {
+			t.Fatal("the second turn's line (events in the other order)")
+		}
+		if ours, _ := r.ownCreate("c", "r1", "a", "text"); !ours {
+			t.Fatal("the first turn's line")
+		}
+		if ours, _ := r.ownCreate("c", "r1", "c", "text"); ours {
+			t.Fatal("two lines matched a third")
+		}
+	})
+	t.Run("two slots for one reply and text match none", func(t *testing.T) {
+		var r interimRegistry
+		r.expect("c", "r", "text")
+		r.expect("c", "r", "text")
+		if ours, drop := r.ownCreate("c", "r", "x", "text"); ours || drop {
+			t.Fatal("a create that two slots match was taken")
 		}
 	})
 	t.Run("old entries are forgotten", func(t *testing.T) {
 		var r interimRegistry
-		r.expect("c", "text")
-		r.bind("c", "other", "id")
+		r.expect("c", "r", "text")
+		r.bind("c", "r", "other", "id")
 		r.mu.Lock()
-		r.pending[interimKey("c", "text")] = []interimSlot{{token: 1, at: time.Now().Add(-2 * interimIDTTL)}}
+		r.pending[interimKey("c", "r", "text")] = []interimSlot{{token: 1, at: time.Now().Add(-2 * interimIDTTL)}}
 		r.ids["id"] = time.Now().Add(-2 * interimIDTTL)
 		r.mu.Unlock()
-		if ours, _ := r.ownCreate("c", "id", "text"); ours {
+		if ours, _ := r.ownCreate("c", "r", "id", "text"); ours {
 			t.Fatal("an expired entry still matched")
 		}
 	})
 	t.Run("delete before create, and a duplicate delete", func(t *testing.T) {
 		var r interimRegistry
-		r.expect("c", "text")
-		r.bind("c", "text", "id")
+		r.expect("c", "r", "text")
+		r.bind("c", "r", "text", "id")
 		if !r.deleted("id") {
 			t.Fatal("the line's delete was not recognised")
 		}
-		if ours, drop := r.ownCreate("c", "id", "text"); !ours || drop {
+		if ours, drop := r.ownCreate("c", "r", "id", "text"); !ours || drop {
 			t.Fatal("a create of a deleted line must be ours and not deleted again")
 		}
 		if !r.deleted("id") {
@@ -582,12 +605,12 @@ func TestInterimRegistry(t *testing.T) {
 	})
 	t.Run("bulk delete before create", func(t *testing.T) {
 		var r interimRegistry
-		r.expect("c", "text")
-		r.bind("c", "text", "id")
+		r.expect("c", "r", "text")
+		r.bind("c", "r", "text", "id")
 		if kept := r.withoutInterims([]string{"id", "x"}); len(kept) != 1 || kept[0] != "x" {
 			t.Fatalf("bulk delete kept %v", kept)
 		}
-		if ours, drop := r.ownCreate("c", "id", "text"); !ours || drop {
+		if ours, drop := r.ownCreate("c", "r", "id", "text"); !ours || drop {
 			t.Fatal("a create after the bulk delete must still be ours")
 		}
 		// the tombstone also swallows a later bulk delete
@@ -600,7 +623,7 @@ func TestInterimRegistry(t *testing.T) {
 		r.mu.Lock()
 		r.tombstones = map[string]time.Time{"id": time.Now().Add(-2 * interimTombstoneTTL)}
 		r.mu.Unlock()
-		if ours, _ := r.ownCreate("c", "id", "text"); ours || r.deleted("id") {
+		if ours, _ := r.ownCreate("c", "r", "id", "text"); ours || r.deleted("id") {
 			t.Fatal("an expired tombstone matched")
 		}
 		if kept := r.withoutInterims([]string{"id"}); len(kept) != 1 || kept[0] != "id" {
@@ -609,19 +632,19 @@ func TestInterimRegistry(t *testing.T) {
 	})
 	t.Run("an ambiguous expectation expires", func(t *testing.T) {
 		var r interimRegistry
-		token := r.expect("c", "text")
+		token := r.expect("c", "r", "text")
 		if id := r.lose(token); id != "" {
 			t.Fatal("nothing was created yet")
 		}
 		r.mu.Lock()
-		slots := r.pending[interimKey("c", "text")]
+		slots := r.pending[interimKey("c", "r", "text")]
 		if len(slots) != 1 || !slots[0].ambiguous {
 			t.Fatalf("the lost send did not stay registered: %+v", slots)
 		}
 		slots[0].at = time.Now().Add(-2 * interimAmbiguousTTL)
-		r.pending[interimKey("c", "text")] = slots
+		r.pending[interimKey("c", "r", "text")] = slots
 		r.mu.Unlock()
-		if ours, _ := r.ownCreate("c", "late", "text"); ours {
+		if ours, _ := r.ownCreate("c", "r", "late", "text"); ours {
 			t.Fatal("an expired lost send still matched")
 		}
 	})
@@ -681,6 +704,13 @@ func botCreate(channelID, id, text string) *discordgo.MessageCreate {
 		Author: &discordgo.User{ID: "bot-id", Username: "masamong", Bot: true}}}
 }
 
+// botReplyTo is a bot message that replies to the message ref.
+func botReplyTo(channelID, ref, id, text string) *discordgo.MessageCreate {
+	m := botCreate(channelID, id, text)
+	m.MessageReference = &discordgo.MessageReference{MessageID: ref, ChannelID: channelID}
+	return m
+}
+
 func armInterimBot(g *Gateway) {
 	bot := "bot-id"
 	g.botID.Store(&bot)
@@ -703,7 +733,7 @@ func TestInterimAmbiguousSendIsDeletedWhenTheCreateArrives(t *testing.T) {
 		ip := makeInterim(g, clock, context.Background(), m)
 		ip.show(chat.Progress{Stage: chat.ProgressDeep})
 		<-entered
-		g.onMessage(g.sess, botCreate(m.ChannelID, "made", line(g, m)))
+		g.onMessage(g.sess, botReplyTo(m.ChannelID, m.ID, "made", line(g, m)))
 		close(gate)
 		ip.posts.Wait()
 		if got := log.shape(interimTexts(g, m)); !slices.Equal(got, []string{"POST interim", "DELETE made"}) {
@@ -727,7 +757,7 @@ func TestInterimAmbiguousSendIsDeletedWhenTheCreateArrives(t *testing.T) {
 		if len(log.list()) != 1 {
 			t.Fatalf("the lost send deleted early: %+v", log.list())
 		}
-		g.onMessage(g.sess, botCreate(m.ChannelID, "late", line(g, m)))
+		g.onMessage(g.sess, botReplyTo(m.ChannelID, m.ID, "late", line(g, m)))
 		deadline := time.Now().Add(3 * time.Second)
 		for time.Now().Before(deadline) && !slices.Equal(log.shape(interimTexts(g, m)), []string{"POST interim", "DELETE late"}) {
 			time.Sleep(10 * time.Millisecond)
@@ -830,5 +860,193 @@ func TestBackfillDoesNotCaptureAnInterimLine(t *testing.T) {
 	}
 	if !slices.Equal(texts, []string{"먼저", "이어서", line}) {
 		t.Fatalf("room holds %q", texts)
+	}
+}
+
+// settleDeletes waits until the fake Discord has seen want deletes (deleteInterimLine runs on a goroutine).
+func waitForShape(t *testing.T, g *Gateway, log *restLog, m *discordgo.MessageCreate, want []string) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && !slices.Equal(log.shape(interimTexts(g, m)), want) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := log.shape(interimTexts(g, m)); !slices.Equal(got, want) {
+		t.Fatalf("calls %q, want %q", got, want)
+	}
+}
+
+// The post goes through the nonce path: a resend of it is answered with the first message. It stays a
+// silent reply to the turn's message.
+func TestInterimPostCarriesANonce(t *testing.T) {
+	g, log, clock := interimFixture(t, "deep")
+	m := answerMessage("질문")
+	ip := makeInterim(g, clock, context.Background(), m)
+	ip.show(chat.Progress{Stage: chat.ProgressDeep})
+	ip.posts.Wait()
+	ev := log.list()[0]
+	if ev.Nonce == "" || len(ev.Nonce) > 25 || !ev.Enforce {
+		t.Fatalf("the post carries nonce %q enforce %v", ev.Nonce, ev.Enforce)
+	}
+	if ev.Reply != m.ID || ev.Flags&int(discordgo.MessageFlagsSuppressNotifications) == 0 {
+		t.Fatalf("the post is not a silent reply to the turn's message: %+v", ev)
+	}
+}
+
+// A bot message with the same text that replies to another message, or to nothing, is an ordinary
+// message: after an ambiguous send it is neither deleted nor taken for the line, and the line's real
+// create is still recognised afterwards.
+func TestInterimOrdinaryBotReplyWithTheSameTextIsLeftAlone(t *testing.T) {
+	g, log, clock := interimFixture(t, "deep")
+	armInterimBot(g)
+	m := answerMessage("질문")
+	log.losePost = map[int]bool{1: true}
+	ip := makeInterim(g, clock, context.Background(), m)
+	ip.show(chat.Progress{Stage: chat.ProgressDeep})
+	ip.posts.Wait()
+	line := messages.T(g.noticeLocale(m), "discord.chat.interim.1")
+	g.onMessage(g.sess, botReplyTo(m.ChannelID, "another-message", "other", line))
+	g.onMessage(g.sess, botCreate(m.ChannelID, "no-reply", line))
+	time.Sleep(50 * time.Millisecond)
+	if got := log.shape(interimTexts(g, m)); !slices.Equal(got, []string{"POST interim"}) {
+		t.Fatalf("an ordinary bot message was deleted: %q", got)
+	}
+	for _, id := range []string{"other", "no-reply"} {
+		if g.interims.deleted(id) {
+			t.Fatalf("%s was registered as a line", id)
+		}
+	}
+	g.onMessage(g.sess, botReplyTo(m.ChannelID, m.ID, "line", line)) // the real one
+	waitForShape(t, g, log, m, []string{"POST interim", "DELETE line"})
+}
+
+// A normal reply with the line's text, created while the line's send is in flight, is not the line: the
+// settle that follows binds the REST answer and nothing else is deleted.
+func TestInterimOwnCreateOfAnotherReplyDoesNotDeleteIt(t *testing.T) {
+	var r interimRegistry
+	token := r.expect("c", "turn", "text")
+	if ours, drop := r.ownCreate("c", "other-turn", "normal", "text"); ours || drop {
+		t.Fatal("a reply to another message was taken for the line")
+	}
+	if extra := r.settle(token, "line"); extra != "" {
+		t.Fatalf("settle returned %q for deletion", extra)
+	}
+	if r.deleted("normal") || !r.deleted("line") {
+		t.Fatal("the registry holds the wrong message")
+	}
+}
+
+// A 5xx may have committed the write: the expectation stays, and the create that comes later is deleted.
+func TestInterimServerErrorIsAmbiguous(t *testing.T) {
+	for _, status := range []int{http.StatusInternalServerError, http.StatusServiceUnavailable} {
+		t.Run(strconv.Itoa(status), func(t *testing.T) {
+			g, log, clock := interimFixture(t, "deep")
+			armInterimBot(g)
+			m := answerMessage("질문")
+			log.statusPost = map[int]int{1: status}
+			ip := makeInterim(g, clock, context.Background(), m)
+			ip.show(chat.Progress{Stage: chat.ProgressDeep})
+			ip.posts.Wait()
+			g.onMessage(g.sess, botReplyTo(m.ChannelID, m.ID, "made", messages.T(g.noticeLocale(m), "discord.chat.interim.1")))
+			waitForShape(t, g, log, m, []string{"POST interim", "DELETE made"})
+		})
+	}
+}
+
+// A 4xx is a refusal, but a create that already arrived did create a message: it is deleted anyway.
+func TestInterimRefusedSendStillDeletesAnEarlyCreate(t *testing.T) {
+	g, log, clock := interimFixture(t, "deep")
+	armInterimBot(g)
+	m := answerMessage("질문")
+	gate, entered := make(chan struct{}), make(chan struct{})
+	log.gate, log.entered = gate, entered
+	log.failPost = map[int]bool{1: true}
+	ip := makeInterim(g, clock, context.Background(), m)
+	ip.show(chat.Progress{Stage: chat.ProgressDeep})
+	<-entered
+	g.onMessage(g.sess, botReplyTo(m.ChannelID, m.ID, "early", messages.T(g.noticeLocale(m), "discord.chat.interim.1")))
+	close(gate)
+	ip.posts.Wait()
+	if got := log.shape(interimTexts(g, m)); !slices.Equal(got, []string{"POST interim", "DELETE early"}) {
+		t.Fatalf("calls %q", got)
+	}
+}
+
+// Two turns in one channel with the same line text each delete only their own line, whatever the order of
+// the events.
+func TestInterimSameTextTurnsDeleteTheirOwnLines(t *testing.T) {
+	g, log, clock := interimFixture(t, "deep")
+	armInterimBot(g)
+	m1, m2 := answerMessage("질문"), answerMessage("질문")
+	m2.ID = m1.ID + "-second"
+	m2.ChannelID = m1.ChannelID
+	log.losePost = map[int]bool{1: true, 2: true} // neither answer comes back; the creates arrive in reverse order
+	ip1, ip2 := makeInterim(g, clock, context.Background(), m1), makeInterim(g, clock, context.Background(), m2)
+	ip1.show(chat.Progress{Stage: chat.ProgressDeep})
+	ip1.posts.Wait()
+	ip2.show(chat.Progress{Stage: chat.ProgressDeep})
+	ip2.posts.Wait()
+	line := messages.T(g.noticeLocale(m1), "discord.chat.interim.1")
+	g.onMessage(g.sess, botReplyTo(m1.ChannelID, m2.ID, "second", line))
+	g.onMessage(g.sess, botReplyTo(m1.ChannelID, m1.ID, "first", line))
+	deadline := time.Now().Add(3 * time.Second)
+	deletes := func() []string {
+		var out []string
+		for _, e := range log.list() {
+			if e.Method == http.MethodDelete {
+				out = append(out, e.Path[strings.LastIndex(e.Path, "/")+1:])
+			}
+		}
+		slices.Sort(out)
+		return out
+	}
+	for time.Now().Before(deadline) && len(deletes()) < 2 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := deletes(); !slices.Equal(got, []string{"first", "second"}) {
+		t.Fatalf("deleted %q", got)
+	}
+}
+
+// discordgo resends a post that got a 502 (up to its retry limit) and then returns a plain error: every
+// resend carries the one nonce, and the outcome stays ambiguous, so the create that came is deleted.
+func TestInterimBadGatewayRetriesShareOneNonce(t *testing.T) {
+	g, log, clock := interimFixture(t, "deep")
+	armInterimBot(g)
+	m := answerMessage("질문")
+	log.statusPost = map[int]int{1: 502, 2: 502, 3: 502, 4: 502}
+	ip := makeInterim(g, clock, context.Background(), m)
+	ip.show(chat.Progress{Stage: chat.ProgressDeep})
+	ip.posts.Wait()
+	posts := log.list()
+	if len(posts) < 2 {
+		t.Fatalf("discordgo did not resend the post: %+v", posts)
+	}
+	for _, e := range posts {
+		if e.Nonce == "" || e.Nonce != posts[0].Nonce || !e.Enforce {
+			t.Fatalf("a resend lost the nonce: %+v", posts)
+		}
+	}
+	g.onMessage(g.sess, botReplyTo(m.ChannelID, m.ID, "made", messages.T(g.noticeLocale(m), "discord.chat.interim.1")))
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && log.list()[len(log.list())-1].Method != http.MethodDelete {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if last := log.list()[len(log.list())-1]; last.Method != http.MethodDelete || !strings.HasSuffix(last.Path, "/made") {
+		t.Fatalf("the created line was not deleted: %+v", log.list())
+	}
+}
+
+// Only a 4xx other than 429 says the line was not created.
+func TestInterimSendAmbiguousClassification(t *testing.T) {
+	rest := func(code int) error {
+		return &discordgo.RESTError{Response: &http.Response{StatusCode: code}}
+	}
+	for code, want := range map[int]bool{400: false, 403: false, 404: false, 429: true, 500: true, 502: true, 503: true} {
+		if got := interimSendAmbiguous(rest(code)); got != want {
+			t.Errorf("status %d: ambiguous %v, want %v", code, got, want)
+		}
+	}
+	if !interimSendAmbiguous(context.DeadlineExceeded) || interimSendAmbiguous(nil) {
+		t.Error("a timeout is ambiguous and no error is not")
 	}
 }

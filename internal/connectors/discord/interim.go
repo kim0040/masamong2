@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"net/http"
 	"sync"
 	"time"
 
@@ -20,12 +21,15 @@ import (
 // messages are captured, so an edited line would leave "still looking" in the stored conversation.
 //
 // For the same reason the line must never reach memory or the delete reconciliation. Its create event is
-// recognised by (channel, exact text) registered before the send, and its delete event by its message ID
-// (interimRegistry), so neither is captured, logged or queued, and a captured-then-deleted line cannot make
-// the next turn wait on a pending source change. A deleted ID stays a tombstone for a short while, because
-// the create or a second delete can arrive after the first delete. A send that returns no answer from
-// Discord may still have been created: that expectation stays until a matching create arrives or it expires,
-// and the create is deleted at once instead of being observed.
+// recognised by (channel, the message it replies to, exact text) registered before the send, and its delete
+// event by its message ID (interimRegistry), so neither is captured, logged or queued, and a
+// captured-then-deleted line cannot make the next turn wait on a pending source change. Text alone never
+// makes a message ours: a bot message that replies to something else, or to nothing, is an ordinary one.
+// A deleted ID stays a tombstone for a short while, because the create or a second delete can arrive after
+// the first delete. A send that returns no answer from Discord (a transport error, an HTTP 5xx, a 429 that
+// outlasted the retries) may still have been created: that expectation stays until a matching create
+// arrives or it expires, and the create is deleted at once instead of being observed. The post carries a
+// nonce (postReply), so a resend of it never creates a second line.
 const (
 	// interimSlowDelay is how long an ordinary search turn runs before the line is posted (mode "slow").
 	interimSlowDelay = 12 * time.Second
@@ -165,16 +169,21 @@ func (i *interim) post(variants int, key string) {
 
 	text := messages.T(i.locale, fmt.Sprintf("%s.%d", key, 1+i.pick(variants)))
 	reg := &i.g.interims
-	token := reg.expect(i.channelID, text) // before the send: the create event can arrive before the REST call returns
+	token := reg.expect(i.channelID, i.refID(), text) // before the send: the create event can arrive before the REST call returns
 	ctx, cancel := context.WithTimeout(i.base, interimPostTimeout)
-	sent, err := i.s.ChannelMessageSendComplex(i.channelID, &discordgo.MessageSend{Content: text, Reference: i.ref,
-		AllowedMentions: noMentions, Flags: discordgo.MessageFlagsSuppressNotifications}, discordgo.WithContext(ctx))
+	// the same nonce path as the answer parts: a resend of this post (discordgo's own retry of a 502, or
+	// ours) is answered with the first message, never a second line
+	sent, err := postReply(ctx, i.s, i.channelID, &discordgo.MessageSend{Content: text, Reference: i.ref,
+		AllowedMentions: noMentions, Flags: discordgo.MessageFlagsSuppressNotifications}, newNonce())
 	cancel()
 
-	// Discord answered with an error, or nothing came back with an ID: the line was not created.
-	// A timeout or a dropped connection is not that. The message may exist, so the expectation stays.
+	// Discord answered with a 4xx, or nothing came back with an ID: the line was not created.
+	// A timeout, a dropped connection, a 5xx or a 429 is not that. The message may exist, so the
+	// expectation stays.
 	if err != nil && !interimSendAmbiguous(err) || err == nil && (sent == nil || sent.ID == "") {
-		reg.cancel(token)
+		if early := reg.cancel(token); early != "" {
+			i.remove(early) // its create arrived before the refusal, so it exists
+		}
 		i.mu.Lock()
 		i.state = interimCleared // a line that did not go out is not tried again; the answer is unaffected
 		close(landed)
@@ -210,15 +219,26 @@ func (i *interim) post(variants int, key string) {
 	close(landed)
 }
 
-// interimSendAmbiguous reports whether a failed post may still have created the message. Discord
-// answering with an HTTP error means it did not; a timeout or a transport error leaves it unknown.
+// refID is the message the line replies to: the turn's triggering message, which is what tells the line
+// apart from the bot's other messages in the channel.
+func (i *interim) refID() string {
+	if i.ref == nil {
+		return ""
+	}
+	return i.ref.MessageID
+}
+
+// interimSendAmbiguous reports whether a failed post may still have created the message. Only a 4xx
+// answer (other than 429) means it did not; a timeout, a transport error, a 5xx and a 429 that outlasted
+// the retries leave it unknown.
 func interimSendAmbiguous(err error) bool {
 	if err == nil {
 		return false
 	}
 	var rest *discordgo.RESTError
 	if errors.As(err, &rest) && rest.Response != nil {
-		return false
+		code := rest.Response.StatusCode
+		return !(code >= 400 && code < 500 && code != http.StatusTooManyRequests)
 	}
 	return true
 }
@@ -300,7 +320,7 @@ func deleteInterimMessage(g *Gateway, base context.Context, s *discordgo.Session
 type interimRegistry struct {
 	mu         sync.Mutex
 	next       uint64
-	pending    map[string][]interimSlot // channel + text → sends not yet finished
+	pending    map[string][]interimSlot // channel + replied-to message + text → sends not yet finished
 	ids        map[string]time.Time     // live message ID → when it was bound
 	tombstones map[string]time.Time     // deleted message ID → when it was deleted
 }
@@ -314,7 +334,9 @@ type interimSlot struct {
 	restDone  bool
 }
 
-func interimKey(channelID, text string) string { return channelID + "\x00" + text }
+func interimKey(channelID, refID, text string) string {
+	return channelID + "\x00" + refID + "\x00" + text
+}
 
 func (r *interimRegistry) sweepLocked(now time.Time) {
 	for k, slots := range r.pending {
@@ -346,8 +368,8 @@ func (r *interimRegistry) sweepLocked(now time.Time) {
 	}
 }
 
-// expect registers a line about to be sent and returns the token that settles it.
-func (r *interimRegistry) expect(channelID, text string) uint64 {
+// expect registers a line about to be sent as a reply to refID and returns the token that settles it.
+func (r *interimRegistry) expect(channelID, refID, text string) uint64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := time.Now()
@@ -356,20 +378,24 @@ func (r *interimRegistry) expect(channelID, text string) uint64 {
 		r.pending = map[string][]interimSlot{}
 	}
 	r.next++
-	k := interimKey(channelID, text)
+	k := interimKey(channelID, refID, text)
 	r.pending[k] = append(r.pending[k], interimSlot{token: r.next, at: now})
 	return r.next
 }
 
-// cancel drops an expectation whose send Discord refused: the line was not created.
-func (r *interimRegistry) cancel(token uint64) {
+// cancel drops an expectation whose send Discord refused: the line was not created. A create that
+// arrived before the refusal is the exception, since that message exists: its ID is returned so the
+// caller can delete it (it stays registered as ours).
+func (r *interimRegistry) cancel(token uint64) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	k, idx, ok := r.slotLocked(token)
 	if !ok {
-		return
+		return ""
 	}
+	id := r.pending[k][idx].id
 	r.removeSlotLocked(k, idx)
+	return id
 }
 
 // lose records a send that returned no answer. If the create already arrived, its ID is returned so
@@ -416,10 +442,10 @@ func (r *interimRegistry) settle(token uint64, id string) string {
 
 // bind records the message ID the send returned. If the create event came first it already took the
 // expectation and the ID is known. Tests and a caller without the expect token use it; post uses settle.
-func (r *interimRegistry) bind(channelID, text, id string) {
+func (r *interimRegistry) bind(channelID, refID, text, id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	k := interimKey(channelID, text)
+	k := interimKey(channelID, refID, text)
 	if _, known := r.ids[id]; known {
 		r.removeSlotIDLocked(k, id)
 		return
@@ -501,9 +527,13 @@ func (r *interimRegistry) removeSlotIDLocked(k, id string) {
 }
 
 // ownCreate reports whether a bot message just created is a "still looking" line, and whether it
-// should be deleted now. drop is set when the send already failed without an answer, or would be,
-// so the line must not stay in the channel and must not be observed.
-func (r *interimRegistry) ownCreate(channelID, id, text string) (ours, drop bool) {
+// should be deleted now. refID is the message it replies to ("" for none). The line is recognised by
+// channel, replied-to message and exact text together; the text alone never makes a message ours, and a
+// message that replies to another message (or to nothing) never matches a slot. If two slots match the
+// same create (one turn's message and text twice, which should not happen) none is taken rather than
+// guessing. drop is set when the send already failed without an answer, so the line must not stay in the
+// channel and must not be observed.
+func (r *interimRegistry) ownCreate(channelID, refID, id, text string) (ours, drop bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.sweepLocked(time.Now())
@@ -513,25 +543,34 @@ func (r *interimRegistry) ownCreate(channelID, id, text string) (ours, drop bool
 	if _, ok := r.ids[id]; ok {
 		return true, false
 	}
-	k := interimKey(channelID, text)
+	if refID == "" {
+		return false, false
+	}
+	k := interimKey(channelID, refID, text)
+	match := -1
 	for i := range r.pending[k] {
 		slot := r.pending[k][i]
-		if slot.id != "" {
+		if slot.id != "" || slot.restDone && !slot.ambiguous {
 			continue
 		}
-		if !slot.restDone {
-			slot.id = id
-			r.pending[k][i] = slot
-			r.addIDLocked(id)
-			return true, false
+		if match >= 0 {
+			return false, false // ambiguous: do not guess
 		}
-		if slot.ambiguous {
-			r.removeSlotLocked(k, i)
-			r.addIDLocked(id)
-			return true, true
-		}
+		match = i
 	}
-	return false, false
+	if match < 0 {
+		return false, false
+	}
+	slot := r.pending[k][match]
+	if !slot.restDone {
+		slot.id = id
+		r.pending[k][match] = slot
+		r.addIDLocked(id)
+		return true, false
+	}
+	r.removeSlotLocked(k, match)
+	r.addIDLocked(id)
+	return true, true
 }
 
 // deleted reports whether a deleted message was a "still looking" line: such a delete is neither
