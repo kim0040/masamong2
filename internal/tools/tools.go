@@ -69,7 +69,7 @@ type Settings struct {
 // form from these, so a tool's inputs are described once, here, next to the Action that reads them.
 type Input struct {
 	Name     string   `json:"name"`
-	Type     string   `json:"type"` // text | number | select | bool | url | provider (a configured provider of the tool)
+	Type     string   `json:"type"` // text | number | select | bool | url | provider (a configured provider of the tool) | list (up to Max texts)
 	Required bool     `json:"required,omitempty"`
 	Options  []string `json:"options,omitempty"` // select values; labels are the console's toolp.<name>.<value>
 	Min      int      `json:"min,omitempty"`
@@ -96,9 +96,18 @@ type Builtin struct {
 	Once bool
 	// Final: in a chat turn, a tool whose one result is the answer. A loop round whose calls are all of
 	// such tools and all found what they looked for ends the loop without asking the model again.
-	Final  bool
-	Sample map[string]any
-	Inputs []Input
+	Final bool
+	// Parallel: in a chat turn, calls of this tool in one round run at once instead of one after another.
+	// Only read-only lookups that may run twice side by side (a search, a forecast, a quote); never a tool
+	// that writes or is Once.
+	Parallel bool
+	// MaxFeeUSD is the most one call pays a service of its own (0 = nothing or not known). Under a money cap
+	// a call holds it instead of making the turn's next steps wait for its fee (chat Guard holds). A web
+	// search's is its deep search's; a chat turn holds the bound of the call's depth (application
+	// searchFeeBounds).
+	MaxFeeUSD float64
+	Sample    map[string]any
+	Inputs    []Input
 	// Providers are the provider kinds the tool calls; any one of them with a key is enough (weather:
 	// keyless Open-Meteo or KMA; search: whichever search services have keys). Empty: no provider.
 	Providers []string
@@ -128,26 +137,30 @@ var (
 func Builtins() []Builtin {
 	return []Builtin{
 		{ID: "memory.search", Chat: true, Implemented: true, Role: "embed", Inputs: []Input{{Name: "query", Type: "text", Required: true}}},
-		{ID: "weather.query", Feature: "weather", Chat: true, Command: true, Implemented: true, Sample: map[string]any{}, Providers: []string{"open_meteo", "kma"},
+		{ID: "weather.query", Feature: "weather", Chat: true, Command: true, Implemented: true, Parallel: true, Sample: map[string]any{}, Providers: []string{"open_meteo", "kma"},
 			Inputs: []Input{{Name: "region", Type: "text", Example: "Seoul · Tokyo · Paris"}, {Name: "day_offset", Type: "select", Options: days14}}},
-		{ID: "disasters.query", Feature: "disasters", Chat: true, Command: true, Implemented: true, Sample: map[string]any{}, Providers: []string{"kma"},
+		{ID: "disasters.query", Feature: "disasters", Chat: true, Command: true, Implemented: true, Parallel: true, Sample: map[string]any{}, Providers: []string{"kma"},
 			Inputs: []Input{{Name: "days", Type: "number", Min: 1, Max: 7, Example: "3"}}},
-		{ID: "finance.quote", Feature: "finance", Chat: true, Command: true, Implemented: true, Required: []string{"symbol"}, Sample: map[string]any{"symbol": "AAPL"}, Providers: []string{"finnhub"},
+		{ID: "finance.quote", Feature: "finance", Chat: true, Command: true, Implemented: true, Parallel: true,
+			// a quote the service cannot give is looked up with one standard web search
+			MaxFeeUSD: 0.01, Required: []string{"symbol"}, Sample: map[string]any{"symbol": "AAPL"}, Providers: []string{"finnhub"},
 			Inputs: []Input{{Name: "symbol", Type: "text", Required: true, Example: "AAPL · 005930.KS"}, {Name: "krw", Type: "bool"}}},
-		{ID: "finance.fx", Feature: "finance", Chat: true, Command: true, Implemented: true, Required: []string{"base"}, Sample: map[string]any{"base": "USD"}, Providers: []string{"exchangerate"},
+		{ID: "finance.fx", Feature: "finance", Chat: true, Command: true, Implemented: true, Parallel: true, Required: []string{"base"}, Sample: map[string]any{"base": "USD"}, Providers: []string{"exchangerate"},
 			Inputs: []Input{{Name: "base", Type: "text", Required: true, Example: "USD"}, {Name: "symbols", Type: "text", Example: "KRW, JPY, EUR"}}},
-		{ID: "search.web", Feature: "search", Chat: true, Command: true, Implemented: true, WebContent: true, Required: []string{"query"}, Sample: map[string]any{"query": "masamong", "size": 1},
+		{ID: "search.web", Feature: "search", Chat: true, Command: true, Implemented: true, WebContent: true, Parallel: true, MaxFeeUSD: 0.06, Required: []string{"query"}, Sample: map[string]any{"query": "masamong", "size": 1},
 			Providers: websearch.Kinds,
 			Inputs: []Input{{Name: "query", Type: "text", Required: true}, {Name: "size", Type: "number", Min: 1, Max: 10, Example: "5"},
 				{Name: "fresh", Type: "select", Options: fresh},
 				// quick: one fact; deep: a wider, slower look (a digest, a comparison); news: news articles
 				{Name: "depth", Type: "select", Options: []string{"quick", "standard", "deep"}},
 				{Name: "topic", Type: "select", Options: []string{"general", "news"}},
+				// with depth deep: the same question asked from other angles, searched in the same call
+				{Name: "queries", Type: "list", Max: 3},
 				{Name: "provider", Type: "provider"}}},
-		{ID: "places.search", Feature: "search", Chat: true, Command: true, Implemented: true, Final: true, Required: []string{"query"}, Sample: map[string]any{"query": "강남역 맛집", "size": 3},
+		{ID: "places.search", Feature: "search", Chat: true, Command: true, Implemented: true, Final: true, Parallel: true, Required: []string{"query"}, Sample: map[string]any{"query": "강남역 맛집", "size": 3},
 			Providers: []string{"kakao_search"},
 			Inputs:    []Input{{Name: "query", Type: "text", Required: true, Example: "강남역 맛집 · Hongdae cafe"}, {Name: "size", Type: "number", Min: 1, Max: 15, Example: "5"}}},
-		{ID: "web.read", Feature: "search", Chat: true, Implemented: true, OptIn: true, WebContent: true, Required: []string{"url"}, Sample: map[string]any{"url": "https://example.com", "max_chars": 600},
+		{ID: "web.read", Feature: "search", Chat: true, Implemented: true, OptIn: true, WebContent: true, Parallel: true, Required: []string{"url"}, Sample: map[string]any{"url": "https://example.com", "max_chars": 600},
 			Providers: []string{"jina_reader"},
 			Inputs:    []Input{{Name: "url", Type: "url", Required: true, Example: "https://…"}, {Name: "max_chars", Type: "number", Min: 500, Max: 20000, Example: "2800"}}},
 		{ID: "images.generate", Feature: "images", Chat: true, Command: true, Uses: "model", Role: "image", Implemented: true, Required: []string{"prompt"}, Writes: true, Once: true,
@@ -409,6 +422,8 @@ type Resolved struct {
 	Writes      bool           `json:"writes,omitempty"`
 	Once        bool           `json:"-"` // Builtin.Once
 	Final       bool           `json:"-"` // Builtin.Final
+	Parallel    bool           `json:"-"` // Builtin.Parallel
+	MaxFeeUSD   float64        `json:"-"` // Builtin.MaxFeeUSD
 	Inputs      []Input        `json:"inputs,omitempty"`
 	Providers   []string       `json:"providers,omitempty"` // provider kinds, any one with a key is enough
 	Uses        string         `json:"uses,omitempty"`
@@ -433,7 +448,7 @@ func Resolve(cfg map[string]Settings, features map[string]bool) []Resolved {
 	for _, b := range Builtins() {
 		s := cfg[b.ID]
 		r := Resolved{ID: b.ID, Kind: "builtin", Implemented: b.Implemented, Required: b.Required, Scoped: b.Scoped, Writes: b.Writes, Once: b.Once, Final: b.Final,
-			Description: s.Description, Route: s.Route, Defaults: s.Defaults, Limits: s.Limits, Inputs: b.Inputs, Providers: b.Providers, Uses: b.Uses, Role: b.Role, OptIn: b.OptIn, Sample: b.Sample,
+			Parallel: b.Parallel, MaxFeeUSD: b.MaxFeeUSD, Description: s.Description, Route: s.Route, Defaults: s.Defaults, Limits: s.Limits, Inputs: b.Inputs, Providers: b.Providers, Uses: b.Uses, Role: b.Role, OptIn: b.OptIn, Sample: b.Sample,
 			WebContent: b.WebContent}
 		r.Enabled = boolOr(s.Enabled, !b.OptIn)
 		if !r.Enabled && s.Enabled == nil {

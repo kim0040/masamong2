@@ -26,6 +26,7 @@ import (
 	"masamong/internal/errcode"
 	"masamong/internal/lang"
 	"masamong/internal/providers"
+	"masamong/internal/providers/websearch"
 	"masamong/internal/tools"
 )
 
@@ -475,15 +476,38 @@ func (s *Service) memoryUsable(inv *action.Invoker) bool {
 
 // toolPays marks the tools that spend money of their own in a chat turn (Guard.Spend): a model call
 // (Uses "model": a picture, a summary, a fortune), a paid web search, and a quote that falls back to
-// one. Under a money cap the turn's later steps wait for them (chat runSteps).
+// one. Under a money cap the turn's later steps wait for them (chat runSteps), unless the tool's fee has a
+// bound (tools.Builtin.MaxFeeUSD), which the call holds instead.
 func toolPays(r tools.Resolved) bool {
 	return r.Uses == "model" || r.ID == "search.web" || r.ID == "finance.quote"
+}
+
+// searchFeeBounds is the most one web search pays at each depth: the dearest of the services' own prices
+// for that depth, with some room (2026-11: Exa instant 0.004, auto 0.007, deep 0.012; Tavily advanced about
+// 0.016; Linkup deep 0.05–0.055). A chat turn's call holds it while it runs (chat Guard holds); the highest is
+// tools.Builtin.MaxFeeUSD of search.web.
+var searchFeeBounds = map[string]float64{websearch.DepthQuick: 0.005, websearch.DepthStandard: 0.01, websearch.DepthDeep: 0.06}
+
+// searchFeeBound is searchFeeBounds for a call's depth; a depth the search does not take is the standard
+// search, as search.web reads it.
+func searchFeeBound(params map[string]any) float64 {
+	depth, _ := params["depth"].(string)
+	if fee, ok := searchFeeBounds[strings.ToLower(strings.TrimSpace(depth))]; ok {
+		return fee
+	}
+	return searchFeeBounds[websearch.DepthStandard]
 }
 
 // toolInfo renders one tool for the planner in the voice's language.
 func toolInfo(r tools.Resolved, p *lang.Pack, params []tools.Param) chat.ToolInfo {
 	info := chat.ToolInfo{ID: r.ID, Description: r.Description, Route: r.Route, Required: r.Required, Writes: r.Writes, Once: r.Once, Final: r.Final, Web: r.WebContent,
-		Pays: toolPays(r)}
+		Pays: toolPays(r), Parallel: r.Parallel}
+	if info.Pays {
+		info.MaxFeeUSD = r.MaxFeeUSD // a bound on a tool that pays nothing would only hold money for nothing
+		if r.ID == "search.web" {
+			info.FeeBound = searchFeeBound
+		}
+	}
 	t := p.Tools[r.ID]
 	if info.Description == "" {
 		info.Description = t.Description
@@ -538,6 +562,12 @@ func loopParams(inputs []tools.Input, hints map[string]string, operator []tools.
 			}
 		case "bool":
 			cp.Type = "boolean"
+		case "list":
+			cp.Type = "array"
+			if in.Max > 0 {
+				hi := in.Max
+				cp.Max = &hi
+			}
 		case "select":
 			if lo, hi, ok := intRange(in.Options); ok {
 				cp.Type, cp.Min, cp.Max = "integer", &lo, &hi
