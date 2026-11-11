@@ -2,11 +2,11 @@
   "note": "Translation record checked by tools/doccheck. When a file of a group changes, bring the other languages along, then run: go run ./tools/doccheck -write",
   "groups": {
     "README": {
-      "README.es.md": "d73d76b870d7bfc0",
-      "README.ja.md": "5ac1b94188cb3534",
-      "README.ko.md": "a93e96ab79b54e5f",
-      "README.md": "3037d5db3197149a",
-      "README.zh-Hans.md": "22bc915db9fac904"
+      "README.es.md": "95d2e51db2eec932",
+      "README.ja.md": "611b4076a18b6012",
+      "README.ko.md": "f2c31fd9d4aa6aac",
+      "README.md": "f34551d35b85b8aa",
+      "README.zh-Hans.md": "7d9b67718f5a5d60"
     },
     "wiki/CLI-명령어": {
       "docs/wiki/CLI-Commands.md": "cb6e440750dc6a01",
@@ -25,28 +25,28 @@
       "docs/wiki/개발-가이드.md": "b7c6fc72aac08908"
     },
     "wiki/관리-콘솔": {
-      "docs/wiki/Admin-Console.md": "7b874bd85a445a67",
-      "docs/wiki/관리-콘솔.md": "c3b670431da41478"
+      "docs/wiki/Admin-Console.md": "dc4dc9001f989493",
+      "docs/wiki/관리-콘솔.md": "ad0549d52ffc84d0"
     },
     "wiki/기억-블록": {
       "docs/wiki/Memory-Blocks.md": "9e53c1c0ac67387b",
       "docs/wiki/기억-블록.md": "e95fa65c1945bf2c"
     },
     "wiki/도구와-한도": {
-      "docs/wiki/Tools-and-Limits.md": "8a8647d1ed61517a",
-      "docs/wiki/도구와-한도.md": "06ffab6f1f192fc3"
+      "docs/wiki/Tools-and-Limits.md": "2f104e0f734772a3",
+      "docs/wiki/도구와-한도.md": "c516436e85e6bdde"
     },
     "wiki/동시-처리와-성능": {
-      "docs/wiki/Concurrency-and-Performance.md": "7d3c351690360305",
-      "docs/wiki/동시-처리와-성능.md": "9dd6966ac0e9ea52"
+      "docs/wiki/Concurrency-and-Performance.md": "fe42487fb484f48c",
+      "docs/wiki/동시-처리와-성능.md": "afdae2b9943667b7"
     },
     "wiki/릴리스-체크리스트": {
       "docs/wiki/Release-Checklist.md": "b2a04be652d11818",
       "docs/wiki/릴리스-체크리스트.md": "153ba0cb63005dfd"
     },
     "wiki/문제-해결": {
-      "docs/wiki/Troubleshooting.md": "1a329e83c538dcdf",
-      "docs/wiki/문제-해결.md": "9a6b553e10d170c6"
+      "docs/wiki/Troubleshooting.md": "69e5fbf7044d9af7",
+      "docs/wiki/문제-해결.md": "5e6f542777d3b5f8"
     },
     "wiki/보류-중인-결정": {
       "docs/wiki/Pending-Decisions.md": "d4fcd126d8b2ba63",
@@ -65,8 +65,8 @@
       "docs/wiki/빠른-시작.md": "8f97bbe7ac9959e6"
     },
     "wiki/설정-레퍼런스": {
-      "docs/wiki/Configuration-Reference.md": "4d55ad70458c4818",
-      "docs/wiki/설정-레퍼런스.md": "2b8c93e429781d29"
+      "docs/wiki/Configuration-Reference.md": "f0a97044541bb598",
+      "docs/wiki/설정-레퍼런스.md": "88346c77462b7382"
     },
     "wiki/설치": {
       "docs/wiki/Installation.md": "0fadd96bae14101a",
