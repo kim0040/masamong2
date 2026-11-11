@@ -97,9 +97,35 @@ func MergeResults(lists ...[]Result) []Result {
 			out = append(out, r)
 		}
 		if !more {
-			return out
+			return dropLateCopies(out)
 		}
 	}
+}
+
+// dropLateCopies drops a page that became a copy of an earlier one only once a later result filled in its
+// title or snippet (a page met empty first, its copy under another address in between): the earlier page
+// is kept, with what it lacks taken from the copy.
+func dropLateCopies(out []Result) []Result {
+	first := map[string]int{}
+	kept := out[:0]
+	for _, r := range out {
+		alias := sameText(CanonicalURL(r.URL), r)
+		if j, ok := first[alias]; ok && alias != "" {
+			k := &kept[j]
+			if k.Text == "" {
+				k.Text = r.Text
+			}
+			if k.Published == "" {
+				k.Published = r.Published
+			}
+			continue
+		}
+		if alias != "" {
+			first[alias] = len(kept)
+		}
+		kept = append(kept, r)
+	}
+	return kept
 }
 
 // sameText is the key a page is a copy of another under: its site, title and the start of its snippet,

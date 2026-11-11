@@ -152,8 +152,10 @@ func TestSearchLeavesOutTheBotsName(t *testing.T) {
 		{"masamongish SpaceX", "masamongish SpaceX"},
 		{"Masamong Bot SpaceX stock", "SpaceX stock"},
 		{"Bot SpaceX stock", "Bot SpaceX stock"},
+		{"O'Reilly SpaceX stock", "SpaceX stock"},
+		{"O’Reilly SpaceX stock", "SpaceX stock"},
 	} {
-		if got := withoutBotNames(c.in, append(names, "Masamong Bot")); got != c.want {
+		if got := withoutBotNames(c.in, append(names, "Masamong Bot", "O'Reilly", `"`)); got != c.want {
 			t.Errorf("%q: got %q, want %q", c.in, got, c.want)
 		}
 	}

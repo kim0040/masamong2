@@ -1470,7 +1470,11 @@ func withoutBotNames(query string, names []string) string {
 	nameAt := func(i int) int {
 		longest := 0
 		for _, n := range names {
-			parts := strings.Fields(strings.ToLower(n))
+			parts := strings.Fields(n)
+			for k := range parts {
+				parts[k] = fold(parts[k]) // spelled as a query word is: "O'Reilly" is oreilly in both
+			}
+			parts = slices.DeleteFunc(parts, func(p string) bool { return p == "" })
 			if len(parts) == 0 || i+len(parts) > len(words) {
 				continue
 			}

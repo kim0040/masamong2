@@ -385,6 +385,15 @@ func TestMergeRemembersCopiesAndRootQueries(t *testing.T) {
 	if want := []string{"https://s.example/a", "https://w.example/?p=1"}; !slices.Equal(urls, want) {
 		t.Fatalf("got %v, want %v", urls, want)
 	}
+	// a page met empty, its copy under another address, then the page again with its title and snippet:
+	// one page, and the slot is left for another page
+	got = MergeResults(
+		[]Result{{URL: "https://s.example/a"}, {Title: "충북대학교 편입학 모집요강", URL: "https://s.example/a", Snippet: long, Published: "2026-11-01"}},
+		[]Result{{Title: "충북대학교 편입학 모집요강", URL: "https://s.example/b", Snippet: long, Text: "본문"}, {Title: "다른 쪽 제목입니다만", URL: "https://s.example/c", Snippet: long}},
+	)
+	if len(got) != 2 || got[0].URL != "https://s.example/a" || got[0].Text != "본문" || got[0].Published != "2026-11-01" || got[1].URL != "https://s.example/c" {
+		t.Fatalf("late copy: %+v", got)
+	}
 }
 
 // The word for papers is added unless the query already asks for them as a whole word: "paperclip",
