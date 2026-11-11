@@ -55,8 +55,8 @@ func (j *jinaFetch) one(ctx context.Context, raw string, maxChars int) (Fetched,
 		f.Err = "error" // this page's answer was too big: the page's failure, not the Reader's
 	case errors.As(err, &pe) && pe.Kind == "timeout":
 		f.Err = "timeout"
-	case errors.As(err, &pe) && pe.Status == 0:
-		f.Err = "service" // no connection to the Reader
+	case errors.As(err, &pe) && (pe.Status == 0 || pe.Kind == "connection"):
+		f.Err = "service" // no connection to the Reader, or it was lost mid-answer
 		return f, err
 	default:
 		f.Err = "error"

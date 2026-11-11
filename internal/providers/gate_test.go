@@ -185,3 +185,33 @@ func TestSharedGateCapacityChangeKeepsOldRequests(t *testing.T) {
 	}
 	current.leave()
 }
+
+// An answer whose body could not be read keeps the status it came with, so an HTTP error answer is not
+// taken for a lost success (a search is not charged for it); a body past the cap keeps its status too.
+func TestCutOffAnswerKeepsItsStatus(t *testing.T) {
+	for _, status := range []int{200, 502} {
+		c := NewClient(time.Second, nil)
+		c.InProcess, c.MaxRetries = true, 0
+		c.HTTP.Transport = gateTransport(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(io.MultiReader(strings.NewReader("{"), errReader{}))}, nil
+		})
+		_, err := c.Get(context.Background(), "http://127.0.0.1:1/x", nil)
+		e, ok := err.(*Error)
+		if !ok || e.Status != status || e.NotSent {
+			t.Fatalf("status %d: %#v", status, err)
+		}
+		big := NewClient(time.Second, nil)
+		big.InProcess, big.MaxRetries, big.MaxBody = true, 0, 4
+		big.HTTP.Transport = gateTransport(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("0123456789"))}, nil
+		})
+		_, err = big.Get(context.Background(), "http://127.0.0.1:1/x", nil)
+		if e, ok := err.(*Error); !ok || e.Kind != "too_large" || e.Status != status {
+			t.Fatalf("too large %d: %#v", status, err)
+		}
+	}
+}
+
+type errReader struct{}
+
+func (errReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }

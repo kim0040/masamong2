@@ -417,6 +417,9 @@ func (c *Client) do(ctx context.Context, method, rawURL string, headers map[stri
 		if readErr != nil {
 			last = classify(readErr, redacted, attempt)
 			last.NotSent, sent = false, true // the server answered
+			if resp != nil {
+				last.Status = resp.StatusCode // what it answered, though its body was cut off
+			}
 			if last.Kind == "cancelled" || attempt == attempts {
 				return nil, last
 			}
