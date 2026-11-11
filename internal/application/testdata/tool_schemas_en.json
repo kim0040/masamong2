@@ -82,7 +82,7 @@
    "properties": {
     "depth": {
      "type": "string",
-     "description": "How hard to search. Usually leave out (standard: also reads the main pages), also for a light one-thing question like 'why did it go up?' or 'what is that?'. quick: one fact checked fast (a date, a price, who, a score). deep: summaries and comparisons, 'why' or 'how did it happen' questions with several sides, research-like questions, requests such as 'in detail', 'look further' or 'dig deeper', and a follow-up saying the last answer was thin.",
+     "description": "How hard to search. Usually leave out (standard: also reads the main pages), also for a light one-thing question like 'why did it go up?' or 'what is that?'. quick: only when one current value (a price, the weather, a score, a date) is all that is needed and nothing has to be explained. When unsure, leave it out. deep: summaries and comparisons, 'why' or 'how did it happen' questions with several sides, research-like questions, requests such as 'in detail', 'look further' or 'dig deeper', and a follow-up saying the last answer was thin.",
      "enum": [
       "quick",
       "standard",
