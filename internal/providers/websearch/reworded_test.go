@@ -325,6 +325,14 @@ func TestMaybeCharged(t *testing.T) {
 }
 
 // A request that panicked may have been sent and answered before it did: it counts as maybe charged.
+func TestKakaoBlogPanicIsAnError(t *testing.T) {
+	d := &daum{}
+	res, err := d.deepMain(context.Background(), Query{Text: "x", Depth: DepthDeep}, true) // no adapter: both requests fail
+	if err == nil {
+		t.Fatalf("expected an error, got %+v", res)
+	}
+}
+
 func TestMaybeChargedErrPanic(t *testing.T) {
 	if !MaybeCharged(errPanic) {
 		t.Fatal("a request that panicked may still have been charged")
