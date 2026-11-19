@@ -166,7 +166,7 @@ func Commands() []Command {
 		},
 		{
 			Name: "fx", Desc: "Exchange rates", Action: "finance.fx",
-			Options: []*discordgo.ApplicationCommandOption{option(str, "base", "Base currency (default USD)", false)},
+			Options: []*discordgo.ApplicationCommandOption{option(str, "base", "Currency to show values in, e.g. USD or JPY (default USD)", false)},
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
 				fallback := "USD"
 				if i18n.Normalize(c.Locale) == "ko" {

@@ -2,6 +2,7 @@ package discord
 
 import (
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -10,6 +11,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/bwmarrin/discordgo"
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
+	"golang.org/x/text/number"
 
 	"masamong/internal/action"
 )
@@ -199,7 +203,8 @@ func Render(res action.Result, cmd Command, locale string) Rendered {
 			e.Footer = &discordgo.MessageEmbedFooter{Text: "Finnhub"}
 		}
 	case "finance.fx":
-		e.Title = t("fx.title", "base", fmt.Sprint(out["base"]))
+		base, _ := out["base"].(string)
+		e.Title = t("fx.title", "base", base)
 		if status == "unconfigured" {
 			e.Color, e.Description = colorWarn, t("fx.unconfigured")
 			break
@@ -210,11 +215,20 @@ func Render(res action.Result, cmd Command, locale string) Rendered {
 				keys = append(keys, k)
 			}
 			sort.Strings(keys)
+			printer := message.NewPrinter(language.Make(locale))
 			var lines []string
 			for _, k := range keys {
-				lines = append(lines, fmt.Sprintf("%s %.4g", k, toF(rates[k])))
+				perUnit := 1 / toF(rates[k])
+				if k == base || perUnit <= 0 || math.IsNaN(perUnit) || math.IsInf(perUnit, 0) {
+					continue
+				}
+				value := printer.Sprint(number.Decimal(perUnit, number.Precision(5), number.MaxFractionDigits(-1)))
+				lines = append(lines, fmt.Sprintf("1 %s ≈ %s %s", k, value, base))
 			}
 			e.Description = strings.Join(lines, "\n")
+		}
+		if e.Description == "" {
+			e.Description = t("fx.no_rates")
 		}
 		if at, _ := out["updated_at"].(string); at != "" {
 			e.Fields = []*discordgo.MessageEmbedField{{Name: t("fx.updated"), Value: discordTime(at), Inline: true}}
