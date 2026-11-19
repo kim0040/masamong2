@@ -218,7 +218,8 @@ var ownTokens = [][2]string{{"req1", "OWNREQ"}, {"ans1", "OWNANS1"}, {"req2", "O
 //
 // Before the fix the exchange was lost whenever the bot's answer line was in neither the live window (in
 // memory, empty after a restart) nor the last 24 chat_turns rows channelLines read, because a stored room
-// message (memory_observations) carries no mark that it was said to the bot.
+// message (memory_observations) carries no mark that it was said to the bot. A turn now reads every kept row,
+// and the stored request marks its line as said to the bot (Line.ToBot).
 func TestOwnEarlierExchangeReachesTheNextCall(t *testing.T) {
 	const all = "req1 ans1 req2 ans2"
 	for _, c := range []struct {
@@ -239,12 +240,13 @@ func TestOwnEarlierExchangeReachesTheNextCall(t *testing.T) {
 		// chat_turns: 2 rows for each exchange; the table keeps 40
 		{name: "name call, live window, 12 other exchanges", others: 6, otherCalls: 12, want: all},
 		{name: "name call, live window, 20 other exchanges (past the 40-row cap)", others: 6, otherCalls: 20, want: all},
-		{name: "name call, restart, 11 other exchanges", restart: true, others: 6, otherCalls: 11, want: "req2 ans2"},
-		{name: "name call, restart, 12 other exchanges", restart: true, others: 6, otherCalls: 12, want: ""},
-		{name: "mention, restart, 12 other exchanges", mention: true, restart: true, others: 6, otherCalls: 12, want: ""},
+		{name: "name call, restart, 11 other exchanges", restart: true, others: 6, otherCalls: 11, want: all},
+		{name: "name call, restart, 12 other exchanges", restart: true, others: 6, otherCalls: 12, want: all},
+		{name: "mention, restart, 12 other exchanges", mention: true, restart: true, others: 6, otherCalls: 12, want: all},
+		// the rows are gone: chat_turns keeps 40 rows of a channel, whatever their age
 		{name: "name call, restart, 20 other exchanges (past the 40-row cap)", restart: true, others: 6, otherCalls: 20, want: ""},
-		{name: "name call, bot posts not in live window, 12 other exchanges", noBotPosts: true, others: 6, otherCalls: 12, want: ""},
-		{name: "mention, bot posts not in live window, 12 other exchanges", mention: true, noBotPosts: true, others: 6, otherCalls: 12, want: "req1 req2"},
+		{name: "name call, bot posts not in live window, 12 other exchanges", noBotPosts: true, others: 6, otherCalls: 12, want: all},
+		{name: "mention, bot posts not in live window, 12 other exchanges", mention: true, noBotPosts: true, others: 6, otherCalls: 12, want: all},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			r := newOwnAnswerRoom(t)
@@ -387,6 +389,43 @@ func TestNameCalledRequestStaysToTheBot(t *testing.T) {
 				answeredAt: r.at(7*time.Minute + 20*time.Second), how: "name", answer: "응"})
 			if got := r.shown([][2]string{{"req1", "OWNREQ"}}); got != "req1" {
 				t.Fatalf("the earlier request is missing (attribution %v)", att)
+			}
+		})
+	}
+}
+
+// The caller's own last exchanges with the bot come in even when the room moved on past the 30-minute window:
+// the newest three within six hours, the bot's older answers clipped. An older one, another person's exchange
+// and the room's talk stay out.
+func TestOwnExchangesReachPastTheWindow(t *testing.T) {
+	for _, restart := range []bool{false, true} {
+		t.Run(fmt.Sprintf("restart %v", restart), func(t *testing.T) {
+			r := newOwnAnswerRoom(t)
+			r.t0 = time.Now().Add(-8 * time.Hour)
+			ask := func(id, token string, at time.Duration, answer string) {
+				r.call(ownCall{id: id, author: "u1", name: "Caller", text: "마사몽 " + token + " 알려줘", at: r.at(at), answeredAt: r.at(at + 20*time.Second),
+					how: "name", answer: answer})
+			}
+			ask("old", "REQOLD", 0, "ANSOLD 이거야")
+			ask("a", "REQA", 5*time.Hour, "ANSA 이거야")
+			ask("b", "REQB", 5*time.Hour+10*time.Minute, "ANSB 이거야")
+			ask("c", "REQC", 5*time.Hour+20*time.Minute, "ANSC 이거야")
+			ask("d", "REQD", 5*time.Hour+30*time.Minute, "ANSD "+strings.Repeat("가", 600)+" ANSDEND")
+			r.call(ownCall{id: "o1", author: "u2", name: "Other", text: "@마사몽 OTHERREQ 알려줘", at: r.at(5*time.Hour + 40*time.Minute),
+				answeredAt: r.at(5*time.Hour + 41*time.Minute), how: "mention", answer: "OTHERANS 이거야"})
+			if restart {
+				r.svc = restartServiceForTest(t, r.svc)
+			}
+			r.talk(6*time.Hour, 50*time.Minute, 6, 0)
+			att, _ := r.call(ownCall{id: "now", author: "u1", name: "Caller", text: "마사몽 아까 그거 다시", at: r.at(7 * time.Hour),
+				answeredAt: r.at(7*time.Hour + 20*time.Second), how: "name", answer: "응"})
+			got := r.shown([][2]string{{"old", "REQOLD"}, {"a", "REQA"}, {"b", "REQB"}, {"b'", "ANSB"}, {"c", "REQC"}, {"c'", "ANSC"},
+				{"d", "REQD"}, {"d'", "ANSD"}, {"d-end", "ANSDEND"}, {"other", "OTHER"}, {"room", "ROOMLINE"}})
+			if got != "b b' c c' d d'" {
+				t.Fatalf("in prompt %q, want the last three exchanges, the long answer clipped (attribution %v)", got, att)
+			}
+			if reasons, _ := att["reasons"].(map[string]any); reasons["own"] != float64(6) {
+				t.Fatalf("reasons %v", att["reasons"])
 			}
 		})
 	}

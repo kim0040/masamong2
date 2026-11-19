@@ -1061,7 +1061,7 @@ func (s *Service) seedThread(guildID, parentID, threadID, callerID string) []sto
 		mine = mine[len(mine)-threadSeedTurns:]
 	}
 	if len(mine) > 0 {
-		_ = eng.Store.AppendChatTurns(blocks.ChannelKey(guildID, threadID), mine, 40)
+		_ = eng.Store.AppendChatTurns(blocks.ChannelKey(guildID, threadID), mine, chatTurnsKept)
 	}
 	return mine
 }
