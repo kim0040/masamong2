@@ -19,7 +19,7 @@
 | LOWSPEC-DECISIONS | 동작 결정이 필요한 저사양 잔여 | 동의를 철회하면 기존 스레드 참여자 기록은 메모리와 DB에서 지워집니다(`TestThreadParticipantWriteCannotFollowWithdrawal`). 다만 철회한 회원이 그 뒤 봇 스레드에서 다시 말하면 저장되지 않는 메모리 전용 참여자로 다시 들어갑니다(`TestThreadParticipantAfterWithdrawalStaysInMemoryOnly`). 이를 막으면 "철회한 사람은 스레드에서도 멘션해야 봇이 답한다"로 동작이 바뀌므로 결정이 필요합니다. `channels.attachments.add/remove`로 저장한 채널 참조 파일은 답변 경로에서 읽지 않는 휴면 기능입니다. 참여 상태는 현재 512 상한을 넘을 수 있습니다. |
 | PARITY | 검색 parity의 검출 범위 | 점수는 달라도 순서가 같은 변화는 parity 비교에서 잡히지 않습니다(leaf/golden 테스트가 점수 차이를 다룹니다). |
 | LIVE-14 | 한도 거절 안내 시점 | 월 예산·사용자 일일 한도에도 다시 시도 시점을 구체적으로 알려 주지 않습니다. `locales/*.json`의 `discord.chat.budget`·`discord.chat.limited`를 고칩니다. |
-| LIVE-19 | Discord 도움말 길이 | `/help`·`!도움말`은 활성 슬래시 명령과 접두 명령·별칭을 나열합니다. 명령별 한 줄, 대표 별칭, 상세 도움말로 줄일지 결정하고 실제 길이를 다시 잽니다. |
+| LIVE-19 | Discord 도움말 길이 | `/도움말`·`!도움말`은 활성 슬래시 명령과 접두 명령·별칭을 나열합니다. 명령별 한 줄, 대표 별칭, 상세 도움말로 줄일지 결정하고 실제 길이를 다시 잽니다. |
 | U1000 | 미사용 함수 경고 | 이전 staticcheck 기록에는 함수 이름이 없었습니다. 현재 `jobs_persist.go`의 일부 함수는 호출되지만, 이번에는 staticcheck를 실행하지 않아 원래 경고가 해결됐는지 확인 필요로 둡니다. |
 
 ## 1. 운영·검증·릴리스
