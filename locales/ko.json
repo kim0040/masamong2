@@ -196,7 +196,7 @@
   "discord.command.quote.option.symbol.name": "종목",
   "discord.command.quote.option.symbol.description": "종목 코드 (예: AAPL)",
   "discord.command.fx.option.base.name": "기준통화",
-  "discord.command.fx.option.base.description": "기준 통화 (기본 USD)",
+  "discord.command.fx.option.base.description": "기준 통화 (기본 KRW)",
   "discord.command.search.option.query.name": "검색어",
   "discord.command.search.option.query.description": "검색할 내용",
   "discord.command.poll.option.question.name": "질문",

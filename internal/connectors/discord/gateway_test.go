@@ -199,7 +199,7 @@ func TestCommandNamesAreDiscordSafe(t *testing.T) {
 			}
 		}
 	}
-	if got := CommandsHash(); got != "d182a633d45b0da0" {
+	if got := CommandsHash(); got != "178864bbe2fcb996" {
 		t.Fatalf("command registration hash = %q", got)
 	}
 }
