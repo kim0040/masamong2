@@ -67,7 +67,7 @@ func fxText(in map[string]any, key string) (string, bool) {
 // the same as the prefix command's words.
 func fxAmount(locale string, in map[string]any) (float64, bool) {
 	v, given := in["amount"]
-	if !given {
+	if !given || v == nil {
 		return 0, true
 	}
 	var f float64
@@ -163,18 +163,23 @@ func (s *Service) financeFX(ctx context.Context, req action.Request, in map[stri
 }
 
 // fxRawPlan is a request by base and symbols (chat, tasks, the console, the CLI): what 1 of the base is
-// in each symbol, quoted in the unit that reads naturally.
+// in each symbol, quoted in the unit that reads naturally. Direct callers keep what they always had: a
+// missing, blank or null base is USD, blank entries of symbols are skipped, and a list of nothing but
+// blanks selects no rate (an empty list or none at all selects the default five). A name that is not a
+// currency is an error. (Only a command's own option is invalid when blank: fxHomePlan.)
 func (s *Service) fxRawPlan(lex *currency.Lexicon, in map[string]any, amount float64) (fxPlan, bool) {
 	plan := fxPlan{base: "USD"}
-	if text, given := fxText(in, "base"); given {
+	if text, _ := fxText(in, "base"); strings.TrimSpace(text) != "" {
 		code, ok := lex.Resolve(text)
 		if !ok {
 			return plan, false
 		}
 		plan.base = code
 	}
+	onlyBlanks := false
 	if _, given := in["symbols"]; given {
-		for _, name := range strSlice(in, "symbols") {
+		listed := strSlice(in, "symbols")
+		for _, name := range listed {
 			if strings.TrimSpace(name) == "" {
 				continue
 			}
@@ -184,8 +189,9 @@ func (s *Service) fxRawPlan(lex *currency.Lexicon, in map[string]any, amount flo
 			}
 			plan.symbols = append(plan.symbols, code)
 		}
+		onlyBlanks = len(listed) > 0 && len(plan.symbols) == 0
 	}
-	if len(plan.symbols) == 0 {
+	if len(plan.symbols) == 0 && !onlyBlanks {
 		plan.symbols = defaultFXSymbols
 	}
 	for _, c := range plan.symbols {

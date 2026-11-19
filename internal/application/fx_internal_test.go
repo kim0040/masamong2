@@ -61,7 +61,8 @@ func fxRun(t *testing.T, s *Service, via string, input map[string]any) chat.Tool
 var fxOrigins = []string{viaChat, viaTask, "cli", "web"}
 
 // A bad currency is an input error on every origin, found before the quota or the provider is touched;
-// a code the service lacks is the only late one; the raw rates keep their shape.
+// a code the service lacks is the only late one; the raw rates keep their shape. (A blank base is USD for
+// direct callers: TestFXRawInputKeepsItsOldMeaning.)
 func TestFXActionSurfaces(t *testing.T) {
 	s := fixg1Svc(t, []string{"serper"}, nil, nil)
 	calls := fxRates(t, s)
@@ -75,7 +76,7 @@ func TestFXActionSurfaces(t *testing.T) {
 			if rates["USD"] != nil || rates["JPY"] != 150.0/1400.0 {
 				t.Fatalf("raw default rates changed: %v", rates)
 			}
-			for _, bad := range []map[string]any{{"base": "U$D"}, {"base": "ZZZ"}, {"base": "   "}, {"base": ""}, {"base": "달라"}, {"base": "USD", "symbols": []string{"U$D"}}} {
+			for _, bad := range []map[string]any{{"base": "U$D"}, {"base": "ZZZ"}, {"base": "달라"}, {"base": "USD", "symbols": []string{"U$D"}}} {
 				before := calls.Load()
 				r = fxRun(t, s, via, bad)
 				if r.Status != errcode.InvalidInput || calls.Load() != before {
@@ -241,5 +242,55 @@ func TestFXResultCarriesTheAnswerHint(t *testing.T) {
 				t.Errorf("the answer prompt lacks the hint %q", hint)
 			}
 		})
+	}
+}
+
+// Direct callers (CLI, console, chat, tasks) keep what the action always did with their input: a missing,
+// blank or null base is USD, blank symbols are skipped, a list of only blanks selects nothing. A name that
+// is no currency is an error on every surface; a blank option is invalid only on a command's own request.
+func TestFXRawInputKeepsItsOldMeaning(t *testing.T) {
+	s := fixg1Svc(t, []string{"serper"}, nil, nil)
+	calls := fxRates(t, s)
+	for _, via := range fxOrigins {
+		t.Run(via, func(t *testing.T) {
+			for _, base := range []any{nil, "", "   ", "\t"} {
+				r := fxRun(t, s, via, map[string]any{"base": base, "symbols": []string{"KRW"}})
+				if !r.OK || r.Data["base"] != "USD" || r.Data["rates"].(map[string]any)["KRW"] != 1400.0 {
+					t.Errorf("base %#v: %+v", base, r)
+				}
+			}
+			r := fxRun(t, s, via, map[string]any{"base": "KRW", "symbols": []string{"USD", ""}})
+			if rates, _ := r.Data["rates"].(map[string]any); !r.OK || len(rates) != 1 || rates["USD"] != 1.0/1400.0 {
+				t.Errorf("a blank symbol is ignored: %+v", r)
+			}
+			r = fxRun(t, s, via, map[string]any{"base": "KRW", "symbols": []string{""}})
+			if rates, _ := r.Data["rates"].(map[string]any); !r.OK || len(rates) != 0 || len(quotesOf(t, r.Data)) != 0 {
+				t.Errorf("only blank symbols select nothing: %+v", r)
+			}
+			if _, has := r.Data["answer_hint"]; has {
+				t.Errorf("a hint without quotes: %v", r.Data)
+			}
+			for _, empty := range []any{nil, []string{}, ""} {
+				r = fxRun(t, s, via, map[string]any{"base": "KRW", "symbols": empty})
+				if rates, _ := r.Data["rates"].(map[string]any); !r.OK || len(rates) != 5 { // the default five (the base itself is one of them)
+					t.Errorf("no symbols means the defaults (%#v): %+v", empty, r)
+				}
+			}
+			before := calls.Load()
+			for _, bad := range []map[string]any{{"base": "KRW", "symbols": []string{"USD", "ZZZ"}}, {"base": "ZZZ"}, {"base": "U$D"}} {
+				if r := fxRun(t, s, via, bad); r.OK || r.Status != errcode.InvalidInput {
+					t.Errorf("%v: %+v, want invalid input", bad, r)
+				}
+			}
+			if calls.Load() != before {
+				t.Error("a refused name cost a provider call")
+			}
+		})
+	}
+	// a command's own blank option is not the default
+	before := calls.Load()
+	res := s.Execute(context.Background(), action.Request{Action: "finance.fx", Locale: "ko", Input: []byte(`{"home":"","currency":"  "}`)})
+	if !IsFXInputError(res) || calls.Load() != before {
+		t.Errorf("blank command option: %+v", res)
 	}
 }
