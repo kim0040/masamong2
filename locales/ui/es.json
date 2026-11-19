@@ -3121,6 +3121,7 @@
   "toolp.summary": "Resumen",
   "toolp.symbol": "Símbolo",
   "toolp.symbols": "Monedas (separadas por comas)",
+  "toolp.amount": "Importe",
   "toolp.time": "Hora",
   "toolp.universities": "Universidades (separadas por comas, vacío para todas)",
   "toolp.url": "Enlace",

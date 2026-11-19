@@ -3121,6 +3121,7 @@
   "toolp.summary": "要約",
   "toolp.symbol": "銘柄コード",
   "toolp.symbols": "通貨（カンマ区切り）",
+  "toolp.amount": "金額",
   "toolp.time": "時刻",
   "toolp.universities": "大学（カンマ区切り、空欄ですべて）",
   "toolp.url": "リンク",

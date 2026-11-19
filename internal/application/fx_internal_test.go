@@ -127,3 +127,91 @@ func TestFXInputErrorIsNotUnanswered(t *testing.T) {
 		t.Error("an unrelated failure must still carry on")
 	}
 }
+
+func quotesOf(t *testing.T, data map[string]any) []map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(data["quotes"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("quotes %s: %v", raw, err)
+	}
+	return out
+}
+
+// Chat, tasks, the CLI and the console get the raw rates as before, plus quotes in the unit people use,
+// in the language of the request (chat: the answer language).
+func TestFXQuotesNextToRawRates(t *testing.T) {
+	s := fixg1Svc(t, []string{"serper"}, nil, nil)
+	fxRates(t, s)
+	for _, via := range fxOrigins {
+		t.Run(via, func(t *testing.T) {
+			r := fxRun(t, s, via, map[string]any{"base": "JPY", "symbols": []string{"KRW", "USD"}})
+			if !r.OK || r.Data["base"] != "JPY" || r.Data["source"] == nil || r.Data["updated_at"] == nil {
+				t.Fatalf("raw fields changed: %+v", r)
+			}
+			rates := r.Data["rates"].(map[string]any)
+			if len(rates) != 2 || rates["KRW"] != 1400.0/150.0 {
+				t.Fatalf("raw rates changed: %v", rates)
+			}
+			q := quotesOf(t, r.Data)
+			if len(q) != 2 {
+				t.Fatalf("quotes = %v", q)
+			}
+			if q[0]["from"] != "JPY" || q[0]["to"] != "KRW" || q[0]["unit"] != 100.0 || q[0]["value"] != 933.3 || q[0]["text"] != "100엔 ≈ 933.3원" {
+				t.Errorf("first quote = %v", q[0])
+			}
+			if q[1]["to"] != "USD" || q[1]["text"] != "1,000엔 ≈ 6.667달러" {
+				t.Errorf("second quote = %v", q[1])
+			}
+		})
+	}
+}
+
+// With an amount the quote is that amount; a name works for the base and the symbols.
+func TestFXAmountAndNames(t *testing.T) {
+	s := fixg1Svc(t, []string{"serper"}, nil, nil)
+	calls := fxRates(t, s)
+	for _, amount := range []any{"50,000", "50000", 50000, 50000.0, json.Number("50000")} {
+		r := fxRun(t, s, "cli", map[string]any{"base": "엔화", "symbols": "원", "amount": amount})
+		if !r.OK {
+			t.Fatalf("%v: %+v", amount, r)
+		}
+		if q := quotesOf(t, r.Data); len(q) != 1 || q[0]["text"] != "50,000엔 ≈ 466,700원" || q[0]["unit"] != 50000.0 {
+			t.Fatalf("%v: quotes %v", amount, q)
+		}
+	}
+	for _, bad := range []any{"abc", "-5", "0", 0, -1, "1e3", "", "5만", true, "1000000000000000000"} {
+		before := calls.Load()
+		r := fxRun(t, s, "cli", map[string]any{"base": "USD", "amount": bad})
+		if r.Status != errcode.InvalidInput || calls.Load() != before {
+			t.Errorf("amount %v: %+v, provider calls %d", bad, r, calls.Load()-before)
+		}
+	}
+}
+
+// The command's request (home currency, what was typed): both directions, one provider call.
+func TestFXHomeRequest(t *testing.T) {
+	s := fixg1Svc(t, []string{"serper"}, nil, nil)
+	calls := fxRates(t, s)
+	res := s.Execute(context.Background(), action.Request{Action: "finance.fx", Locale: "ko", Input: []byte(`{"home":"KRW","currency":"엔화"}`)})
+	if !res.OK || res.Output["base"] != "KRW" || calls.Load() != 1 {
+		t.Fatalf("%+v calls=%d", res, calls.Load())
+	}
+	q := quotesOf(t, res.Output)
+	if len(q) != 2 || q[0]["text"] != "100엔 ≈ 933.3원" || q[1]["text"] != "1,000원 ≈ 107.1엔" {
+		t.Fatalf("quotes %v", q)
+	}
+	if rates := res.Output["rates"].(map[string]any); len(rates) != 1 || rates["JPY"] == nil {
+		t.Errorf("rates = %v", rates)
+	}
+	for _, bad := range []string{`{"home":"KRW","currency":""}`, `{"home":"KRW","currency":"   "}`, `{"home":"KRW","currency":"U$D"}`, `{"home":"KRW","amount":"x"}`} {
+		before := calls.Load()
+		res = s.Execute(context.Background(), action.Request{Action: "finance.fx", Locale: "ko", Input: []byte(bad)})
+		if !IsFXInputError(res) || calls.Load() != before {
+			t.Errorf("%s: %+v calls %d", bad, res, calls.Load()-before)
+		}
+	}
+}

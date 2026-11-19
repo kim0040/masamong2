@@ -233,12 +233,13 @@
     "finance.fx": {
       "description": "Exchange rates. parameters.base",
       "route": "exchange rates: finance.fx",
-      "purpose": "Exchange rates.",
+      "purpose": "Exchange rates. The result's quotes are ready-made lines such as \"100 JPY ≈ 930.2 KRW\" (in the unit people use): answer with their text as it is; do not recompute from rates.",
       "when": "Use when asked for the rate between currencies.",
       "skip": "Not for stock prices (use finance.quote) or product prices. When asked why it moved, call search.web too.",
       "params": {
-        "base": "Code of the currency asked about (USD, JPY, EUR…). \"Euro rate\" means EUR. Do not put the local currency as the base.",
-        "symbols": "Target currency codes, comma-separated (e.g. KRW). Leave out when not said."
+        "base": "The currency asked about, as a code (USD, JPY, EUR…) or a name (yen, dollar). \"Euro rate\" means EUR. Do not put the local currency as the base.",
+        "symbols": "Target currencies, comma-separated codes or names (e.g. KRW). Leave out when not said.",
+        "amount": "How much of the base, when a sum is asked (50000 yen → 50000). Leave out when not said: the unit is chosen for you."
       }
     },
     "activity.ranking": {

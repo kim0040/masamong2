@@ -85,7 +85,7 @@ masamong channels configure --guild_id 123456789 --id 987654321 --respond mentio
 | `/places` | Restaurants, cafes, shops (Kakao Map; needs a Kakao REST key) |
 | `/ranking` | Top talkers in this room: today, this week, this month, all time |
 | `/quote` | Stock quotes (needs a Finnhub key) |
-| `/fx` | Exchange rates |
+| `/fx` | Exchange rates. No option: the main currencies in your home currency (won for Korean, dollars otherwise). `currency` (a code like `USD` or a name like `yen`): both directions. `amount`: convert that sum. Values use the unit people say ("100 yen ≈ 930 won", "10,000 KRW ≈ 7.2 USD") |
 | `/search` | Web search (needs a key for Tavily, Linkup, Exa, Serper, Brave, TinyFish or Kakao) |
 | `/poll` | A Discord poll in this room |
 | `/summary` | Three-line summary and decisions of the recent conversation (rooms that collect conversation) |
@@ -103,7 +103,7 @@ Turning a tool off removes its slash command from Discord's menu at once.
 
 ### Prefix commands (`!`, need Message Content Intent)
 
-The prefix words follow the bot's language. In Korean: `!날씨 서울`, `!특보`, `!시세 AAPL`, `!환율 USD`, `!검색 마사몽`, `!투표 lunch | gimbap, ramen`, `!요약`, `!알림 tomorrow 3pm meeting`, `!알림목록`, `!운세`, `!운세등록 1995-05-15 14:30 남 서울`, `!이번달운세`, `!올해운세`, `!구독 08:00`, `!공지`, `!편입`, `!개인정보`, `!내설정`, `!관리`, `!도움말`. The words live in the `locales/` language files, not in code, and can be renamed per tool (`tools.<id>.aliases`).
+The prefix words follow the bot's language. In Korean: `!날씨 서울`, `!특보`, `!시세 AAPL`, `!환율 엔화 50000`, `!검색 마사몽`, `!투표 lunch | gimbap, ramen`, `!요약`, `!알림 tomorrow 3pm meeting`, `!알림목록`, `!운세`, `!운세등록 1995-05-15 14:30 남 서울`, `!이번달운세`, `!올해운세`, `!구독 08:00`, `!공지`, `!편입`, `!개인정보`, `!내설정`, `!관리`, `!도움말`. The words live in the `locales/` language files, not in code, and can be renamed per tool (`tools.<id>.aliases`).
 
 The bot sends a refusal notice only when the person addressed it (by mention, reply or bot name). Notices use neutral wording and do not reveal budget details; at most one is sent per channel per minute, and at most one to the same person in that channel every five minutes. If a prefix or slash command times out, its final localized error card is still sent when the Discord connection is available.
 

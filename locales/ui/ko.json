@@ -3427,6 +3427,7 @@
   "toolnew.title": "새 도구 만들기",
   "toolnew.url_hint": "https 주소만 허용됩니다. {name}에는 파라미터가, {credential}에는 인증 키가 대입됩니다. 호스트 주소에는 {}를 사용할 수 없습니다.",
   "toolp.allow_multiselect": "여러 개 선택 허용",
+  "toolp.amount": "금액",
   "toolp.aspect_ratio": "비율",
   "toolp.base": "기준 통화",
   "toolp.day_offset": "날짜 기준",

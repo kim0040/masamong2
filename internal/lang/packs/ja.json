@@ -217,7 +217,7 @@
       "route": "株価: finance.quote"
     },
     "finance.fx": {
-      "description": "為替レート。parameters.base",
+      "description": "為替レート。parameters.base。結果の quotes に読みやすい文が入っているので、そのまま答える。",
       "route": "為替レート: finance.fx"
     },
     "activity.ranking": {

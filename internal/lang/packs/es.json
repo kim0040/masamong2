@@ -212,7 +212,7 @@
       "route": "precios de acciones: finance.quote"
     },
     "finance.fx": {
-      "description": "Tipos de cambio. parameters.base",
+      "description": "Tipos de cambio. parameters.base. El resultado trae frases hechas en quotes: responde con ellas.",
       "route": "tipos de cambio: finance.fx"
     },
     "activity.ranking": {

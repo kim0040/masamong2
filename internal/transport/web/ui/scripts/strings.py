@@ -1722,7 +1722,7 @@ add("toolp", {
     "day_offset.5": ("5일 뒤", "In 5 days"), "day_offset.6": ("6일 뒤", "In 6 days"),
     "size": ("결과 수", "Results"), "fresh": ("기간", "Recent only"), "fresh.day": ("최근 하루", "Past day"), "fresh.week": ("최근 일주일", "Past week"), "fresh.month": ("최근 한 달", "Past month"),
     "provider": ("검색 서비스", "Search service"), "provider_auto": ("자동 (순서대로)", "Automatic (in order)"),
-    "url": ("링크 주소", "Link"), "max_chars": ("가져올 최대 글자 수", "Max characters"), "krw": ("원화 환산", "Convert to KRW"), "symbols": ("표시할 통화 (쉼표 구분)", "Currencies (comma-separated)"),
+    "url": ("링크 주소", "Link"), "max_chars": ("가져올 최대 글자 수", "Max characters"), "krw": ("원화 환산", "Convert to KRW"), "symbols": ("표시할 통화 (쉼표 구분)", "Currencies (comma-separated)"), "amount": ("금액", "Amount"),
     "images.generate.async": ("대화에서는 백그라운드로 그리기", "Draw in the background when asked in chat"),
     "hint.images.generate.async": ("켜면(기본) 대화에서 그림을 부탁받았을 때 바로 \"그리는 중\"이라고 답하고, 다 그리면 부탁한 메시지에 답글로 올립니다. 끄면 그림이 나올 때까지 답을 기다립니다. /이미지 명령은 항상 기다립니다.",
      "On (the default): when someone asks for a picture in chat, the bot answers at once that it is drawing and posts the picture as a reply to the request when it is done. Off: the answer waits for the picture. The /image command always waits."),

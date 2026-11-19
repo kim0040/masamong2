@@ -199,11 +199,14 @@ func ParseAmount(text string) (float64, bool) {
 		}
 	}
 	n, err := strconv.ParseFloat(strings.ReplaceAll(t, ",", ""), 64)
-	if err != nil || !(n > 0) || n > MaxAmount {
+	if err != nil || !ValidAmount(n) {
 		return 0, false
 	}
 	return n, true
 }
+
+// ValidAmount reports whether n is an amount a person may ask about: above zero and not beyond MaxAmount.
+func ValidAmount(n float64) bool { return n > 0 && n <= MaxAmount }
 
 // IsNumber reports whether text is written as a number (the prefix command's amount token).
 func IsNumber(text string) bool {

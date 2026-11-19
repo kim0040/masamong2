@@ -3121,6 +3121,7 @@
   "toolp.summary": "摘要",
   "toolp.symbol": "代码",
   "toolp.symbols": "货币（用逗号分隔）",
+  "toolp.amount": "金额",
   "toolp.time": "时间",
   "toolp.universities": "大学（用逗号分隔，留空表示全部）",
   "toolp.url": "链接",

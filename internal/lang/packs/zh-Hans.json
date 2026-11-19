@@ -207,7 +207,7 @@
       "route": "股价：finance.quote"
     },
     "finance.fx": {
-      "description": "汇率。parameters.base",
+      "description": "汇率。parameters.base。结果的 quotes 里有现成的句子，直接照着回答。",
       "route": "汇率：finance.fx"
     },
     "activity.ranking": {

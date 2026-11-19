@@ -3427,6 +3427,7 @@
   "toolnew.title": "New tool",
   "toolnew.url_hint": "https only. {name} becomes a parameter, {credential} the key. The host cannot contain {}.",
   "toolp.allow_multiselect": "Allow several choices",
+  "toolp.amount": "Amount",
   "toolp.aspect_ratio": "Aspect ratio",
   "toolp.base": "Base currency",
   "toolp.day_offset": "Day",

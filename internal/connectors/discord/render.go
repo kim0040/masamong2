@@ -2,7 +2,6 @@ package discord
 
 import (
 	"fmt"
-	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -11,9 +10,6 @@ import (
 	"unicode/utf8"
 
 	"github.com/bwmarrin/discordgo"
-	"golang.org/x/text/language"
-	"golang.org/x/text/message"
-	"golang.org/x/text/number"
 
 	"masamong/internal/action"
 )
@@ -209,24 +205,21 @@ func Render(res action.Result, cmd Command, locale string) Rendered {
 			e.Color, e.Description = colorWarn, t("fx.unconfigured")
 			break
 		}
-		if rates, ok := out["rates"].(map[string]any); ok {
-			keys := make([]string, 0, len(rates))
-			for k := range rates {
-				keys = append(keys, k)
+		// the action states each rate in words ("100엔 ≈ 930.2원"); the card only lists them
+		var lines []string
+		switch quotes := out["quotes"].(type) {
+		case []map[string]any:
+			for _, q := range quotes {
+				lines = append(lines, fmt.Sprint(q["text"]))
 			}
-			sort.Strings(keys)
-			printer := message.NewPrinter(language.Make(locale))
-			var lines []string
-			for _, k := range keys {
-				perUnit := 1 / toF(rates[k])
-				if k == base || perUnit <= 0 || math.IsNaN(perUnit) || math.IsInf(perUnit, 0) {
-					continue
+		case []any:
+			for _, q := range quotes {
+				if m, ok := q.(map[string]any); ok {
+					lines = append(lines, fmt.Sprint(m["text"]))
 				}
-				value := printer.Sprint(number.Decimal(perUnit, number.Precision(5), number.MaxFractionDigits(-1)))
-				lines = append(lines, fmt.Sprintf("1 %s ≈ %s %s", k, value, base))
 			}
-			e.Description = strings.Join(lines, "\n")
 		}
+		e.Description = strings.Join(lines, "\n")
 		if e.Description == "" {
 			e.Description = t("fx.no_rates")
 		}

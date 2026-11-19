@@ -146,7 +146,9 @@ func Builtins() []Builtin {
 			MaxFeeUSD: 0.01, Required: []string{"symbol"}, Sample: map[string]any{"symbol": "AAPL"}, Providers: []string{"finnhub"},
 			Inputs: []Input{{Name: "symbol", Type: "text", Required: true, Example: "AAPL · 005930.KS"}, {Name: "krw", Type: "bool"}}},
 		{ID: "finance.fx", Feature: "finance", Chat: true, Command: true, Implemented: true, Parallel: true, Required: []string{"base"}, Sample: map[string]any{"base": "USD"}, Providers: []string{"exchangerate"},
-			Inputs: []Input{{Name: "base", Type: "text", Required: true, Example: "USD"}, {Name: "symbols", Type: "text", Example: "KRW, JPY, EUR"}}},
+			Inputs: []Input{{Name: "base", Type: "text", Required: true, Example: "USD"}, {Name: "symbols", Type: "text", Example: "KRW, JPY, EUR"},
+				// an amount of the base to state in each symbol ("50,000"); text, so a decimal or a thousands comma reads
+				{Name: "amount", Type: "text", Example: "50000"}}},
 		{ID: "search.web", Feature: "search", Chat: true, Command: true, Implemented: true, WebContent: true, Parallel: true, MaxFeeUSD: 0.06, Required: []string{"query"}, Sample: map[string]any{"query": "masamong", "size": 1},
 			Providers: websearch.Kinds,
 			Inputs: []Input{{Name: "query", Type: "text", Required: true}, {Name: "size", Type: "number", Min: 1, Max: 10, Example: "5"},

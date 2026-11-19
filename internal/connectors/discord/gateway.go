@@ -853,6 +853,8 @@ func (g *Gateway) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 		switch o.Type {
 		case discordgo.ApplicationCommandOptionInteger:
 			opts[o.Name] = fmt.Sprint(o.IntValue())
+		case discordgo.ApplicationCommandOptionNumber:
+			opts[o.Name] = strconv.FormatFloat(o.FloatValue(), 'f', -1, 64)
 		case discordgo.ApplicationCommandOptionBoolean:
 			opts[o.Name] = fmt.Sprint(o.BoolValue())
 		default:

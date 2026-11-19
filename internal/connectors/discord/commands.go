@@ -166,14 +166,19 @@ func Commands() []Command {
 		},
 		{
 			Name: "fx", Desc: "Exchange rates", Action: "finance.fx",
-			Options: []*discordgo.ApplicationCommandOption{option(str, "currency", "Currency code or name, e.g. USD or dollar", false)},
+			Options: []*discordgo.ApplicationCommandOption{
+				option(str, "currency", "Currency code or name, e.g. USD or dollar", false),
+				option(discordgo.ApplicationCommandOptionNumber, "amount", "Amount to convert", false),
+			},
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				// absent: the member's home currency. Given, even blank: the action checks what was typed.
-				cur := currency.New(messages).Home(c.Locale)
-				if v, given := o["currency"]; given {
-					cur = v
+				// what was typed goes to the action as it is: a given option, even a blank one, is checked there
+				in := map[string]any{"home": currency.New(messages).Home(c.Locale)}
+				for _, k := range []string{"currency", "amount"} {
+					if v, given := o[k]; given {
+						in[k] = v
+					}
 				}
-				return "finance.fx", map[string]any{"base": cur}
+				return "finance.fx", in
 			},
 		},
 		{
@@ -843,7 +848,9 @@ func (t PrefixTable) Parse(prefix, content string) (Command, map[string]string, 
 	opts := map[string]string{}
 	tail = strings.TrimSpace(tail)
 	if len(cmd.Options) > 0 && tail != "" {
-		if cmd.Name == "poll" {
+		if cmd.Name == "fx" {
+			fxPrefixOptions(tail, opts)
+		} else if cmd.Name == "poll" {
 			q, o, cut := strings.Cut(tail, "|")
 			opts["question"] = strings.TrimSpace(q)
 			if cut {
@@ -854,6 +861,22 @@ func (t PrefixTable) Parse(prefix, content string) (Command, map[string]string, 
 		}
 	}
 	return cmd, opts, true
+}
+
+// fxPrefixOptions reads "!환율 50000 엔화" and "!환율 엔화 50000": the number is the amount, the rest the
+// currency (a code or a name that may hold spaces).
+func fxPrefixOptions(tail string, opts map[string]string) {
+	var words []string
+	for _, w := range strings.Fields(tail) {
+		if _, taken := opts["amount"]; !taken && currency.IsNumber(w) {
+			opts["amount"] = w
+			continue
+		}
+		words = append(words, w)
+	}
+	if len(words) > 0 {
+		opts["currency"] = strings.Join(words, " ")
+	}
 }
 
 // requestFor builds the Action request for a command invocation. The invoker lets the tool layer

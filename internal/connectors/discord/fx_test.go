@@ -8,33 +8,71 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"masamong/internal/application"
 )
 
-func TestFXDefaultCurrency(t *testing.T) {
+// The command always stays finance.fx and hands the action what was typed, with the home currency of
+// the member's language (KRW for Korean, USD otherwise). Nothing is checked or rewritten here.
+func TestFXBuildHandsOverWhatWasTyped(t *testing.T) {
 	cmd, _ := ByName("fx")
-	for _, tc := range []struct{ locale, base, want string }{
-		{"ko", "", "KRW"},
-		{"ko-KR", "", "KRW"},
-		{"en-US", "", "USD"},
-		{"ja", "", "USD"},
-		{"ko", "USD", "USD"},
-		{"en", "JPY", "JPY"},
+	for _, tc := range []struct {
+		locale string
+		opts   map[string]string
+		want   map[string]any
+	}{
+		{"ko", nil, map[string]any{"home": "KRW"}},
+		{"ko-KR", nil, map[string]any{"home": "KRW"}},
+		{"en-US", nil, map[string]any{"home": "USD"}},
+		{"ja", nil, map[string]any{"home": "USD"}},
+		{"ko", map[string]string{"currency": "엔화", "amount": "50000"}, map[string]any{"home": "KRW", "currency": "엔화", "amount": "50000"}},
+		{"en", map[string]string{"currency": "U$D"}, map[string]any{"home": "USD", "currency": "U$D"}},
+		{"ko", map[string]string{"currency": "   "}, map[string]any{"home": "KRW", "currency": "   "}}, // given but blank: not the default
 	} {
-		opts := map[string]string{}
-		if tc.base != "" {
-			opts["currency"] = tc.base
+		act, input := cmd.Build(tc.opts, InvokeContext{Locale: tc.locale})
+		if act != "finance.fx" || len(input) != len(tc.want) {
+			t.Errorf("%s %v: got %s %v, want finance.fx %v", tc.locale, tc.opts, act, input, tc.want)
+			continue
 		}
-		act, input := cmd.Build(opts, InvokeContext{Locale: tc.locale})
-		if act != "finance.fx" || input["base"] != tc.want {
-			t.Errorf("locale %q, base %q: got %s %v, want finance.fx %s", tc.locale, tc.base, act, input, tc.want)
+		for k, v := range tc.want {
+			if input[k] != v {
+				t.Errorf("%s %v: %s = %v, want %v", tc.locale, tc.opts, k, input[k], v)
+			}
 		}
 	}
 }
 
-func TestFXCardShowsOneForeignUnitInSelectedCurrency(t *testing.T) {
+func TestFXPrefixParsing(t *testing.T) {
+	for _, tc := range []struct{ text, currency, amount string }{
+		{"!환율", "", ""},
+		{"!환율 엔화", "엔화", ""},
+		{"!환율 USD", "USD", ""},
+		{"!환율 50000 엔화", "엔화", "50000"},
+		{"!환율 엔화 50000", "엔화", "50000"},
+		{"!환율 50,000 엔화", "엔화", "50,000"},
+		{"!환율 미국 달러 100", "미국 달러", "100"},
+		{"!환율 100 미국 달러", "미국 달러", "100"},
+		{"!환율 50000", "", "50000"},
+		{"!환율 2 3 엔", "3 엔", "2"}, // one amount: what is left is read as the currency, and fails there
+		{"!fx yen 10", "yen", "10"},
+	} {
+		cmd, opts, ok := ParsePrefix("!", tc.text)
+		if !ok || cmd.Name != "fx" {
+			t.Errorf("%q: not parsed as fx (%v)", tc.text, ok)
+			continue
+		}
+		if opts["currency"] != tc.currency || opts["amount"] != tc.amount {
+			t.Errorf("%q: currency %q amount %q, want %q %q", tc.text, opts["currency"], opts["amount"], tc.currency, tc.amount)
+		}
+	}
+}
+
+// fxCard runs /환율 against a local rate service whose dollar prices are fixed.
+func fxCard(t *testing.T, locale string, opts map[string]string) []string {
+	t.Helper()
 	svc := svcForTest(t)
 	g := &Gateway{svc: svc}
-	unitsPerDollar := map[string]float64{"USD": 1, "KRW": 1350, "JPY": 160, "CNY": 6.75, "EUR": 0.9, "GBP": 0.75, "CHF": 0.8}
+	unitsPerDollar := map[string]float64{"USD": 1, "KRW": 1350, "JPY": 148, "CNY": 6.75, "EUR": 0.9, "GBP": 0.75, "CHF": 0.8}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		base := strings.TrimPrefix(r.URL.Path, "/latest/")
 		rates := make(map[string]float64)
@@ -50,39 +88,76 @@ func TestFXCardShowsOneForeignUnitInSelectedCurrency(t *testing.T) {
 	adapter.OpenBase, adapter.KeyedBase = server.URL, server.URL
 
 	cmd, _ := ByName("fx")
+	ictx := InvokeContext{Locale: locale, UserID: "tester"}
+	res := g.svc.Execute(context.Background(), requestFor(cmd, opts, ictx, ""))
+	if !res.OK {
+		t.Fatalf("%s %v: %+v", locale, opts, res.Error)
+	}
+	embed := g.renderInvoked(res, cmd, ictx).Embed
+	if len(embed.Fields) != 1 || embed.Footer == nil {
+		t.Error("missing update time or source")
+	}
+	return strings.Split(embed.Description, "\n")
+}
+
+func TestFXCardsStateRatesInReadableUnits(t *testing.T) {
 	for _, tc := range []struct {
-		locale, option, base string
-		rows                 int
-		want                 []string
+		name, locale string
+		opts         map[string]string
+		want         []string
 	}{
-		{"ko", "", "KRW", 5, []string{"1 USD ≈ 1,350 KRW", "1 JPY ≈ 8.4375 KRW", "1 CNY ≈ 200 KRW"}},
-		{"ko", "jpy", "JPY", 5, []string{"1 USD ≈ 160 JPY"}},
-		{"en", "", "USD", 5, []string{"1 JPY ≈ 0.00625 USD"}},
-		{"en", "CHF", "CHF", 6, []string{"1 USD ≈ 0.8 CHF"}},
+		{"ko board in won", "ko", nil, []string{"1달러 ≈ 1,350원", "100엔 ≈ 912.2원", "1유로 ≈ 1,500원", "1위안 ≈ 200원", "1파운드 ≈ 1,800원"}},
+		{"ko the home currency is the board", "ko", map[string]string{"currency": "원"}, []string{"1달러 ≈ 1,350원", "100엔 ≈ 912.2원", "1유로 ≈ 1,500원", "1위안 ≈ 200원", "1파운드 ≈ 1,800원"}},
+		{"ko one currency, both directions", "ko", map[string]string{"currency": "엔화"}, []string{"100엔 ≈ 912.2원", "1,000원 ≈ 109.6엔"}},
+		{"ko by code", "ko", map[string]string{"currency": "jpy"}, []string{"100엔 ≈ 912.2원", "1,000원 ≈ 109.6엔"}},
+		{"ko dollar", "ko", map[string]string{"currency": "달러"}, []string{"1달러 ≈ 1,350원", "10,000원 ≈ 7.407달러"}},
+		{"ko an amount of a currency in won", "ko", map[string]string{"currency": "엔", "amount": "50000"}, []string{"50,000엔 ≈ 456,100원"}},
+		{"ko an amount of won in every board currency", "ko", map[string]string{"amount": "10000"}, []string{"10,000원 ≈ 7.407달러", "10,000원 ≈ 1,096엔", "10,000원 ≈ 6.667유로", "10,000원 ≈ 50위안", "10,000원 ≈ 5.556파운드"}},
+		{"ko the home currency with an amount", "ko", map[string]string{"currency": "원", "amount": "10000"}, []string{"10,000원 ≈ 7.407달러", "10,000원 ≈ 1,096엔", "10,000원 ≈ 6.667유로", "10,000원 ≈ 50위안", "10,000원 ≈ 5.556파운드"}},
+		{"en board in dollars, krw included", "en", nil, []string{"1,000 JPY ≈ 6.757 USD", "1 EUR ≈ 1.111 USD", "10 CNY ≈ 1.481 USD", "1 GBP ≈ 1.333 USD", "10,000 KRW ≈ 7.407 USD"}},
+		{"en by name", "en", map[string]string{"currency": "Japanese Yen"}, []string{"1,000 JPY ≈ 6.757 USD", "1 USD ≈ 148 JPY"}},
+		{"ja reads names in other languages", "ja", map[string]string{"currency": "엔화", "amount": "100"}, []string{"100円 ≈ 0.6757ドル"}},
 	} {
-		t.Run(tc.locale+"_"+tc.base, func(t *testing.T) {
-			ictx := InvokeContext{Locale: tc.locale, UserID: "tester"}
-			opts := map[string]string{}
-			if tc.option != "" {
-				opts["currency"] = tc.option
-			}
-			res := g.svc.Execute(context.Background(), requestFor(cmd, opts, ictx, ""))
-			if !res.OK || res.Output["base"] != tc.base {
-				t.Fatalf("unexpected action result: %+v", res)
-			}
-			embed := g.renderInvoked(res, cmd, ictx).Embed
-			lines := strings.Split(embed.Description, "\n")
-			if len(lines) != tc.rows || strings.Contains(embed.Description, "1 "+tc.base+" ≈") {
-				t.Fatalf("unexpected comparison currencies: %v", lines)
-			}
-			for _, want := range tc.want {
-				if !slices.Contains(lines, want) {
-					t.Errorf("missing %q in %v", want, lines)
-				}
-			}
-			if len(embed.Fields) != 1 || embed.Footer == nil {
-				t.Error("missing update time or source")
+		t.Run(tc.name, func(t *testing.T) {
+			got := fxCard(t, tc.locale, tc.opts)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("got  %q\nwant %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// The raw rates keep their shape next to the quotes.
+func TestFXRawRatesStayInTheResult(t *testing.T) {
+	svc := svcForTest(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"result":"success","base_code":"KRW","rates":{"USD":0.00074,"JPY":0.1096,"EUR":0.00067,"CNY":0.0049,"GBP":0.00056},"time_last_update_unix":1757894401}`))
+	}))
+	defer server.Close()
+	adapter := svc.Registry().FX
+	adapter.OpenBase, adapter.KeyedBase = server.URL, server.URL
+	cmd, _ := ByName("fx")
+	res := svc.Execute(context.Background(), requestFor(cmd, nil, InvokeContext{Locale: "ko", UserID: "tester"}, ""))
+	if !res.OK || res.Output["base"] != "KRW" || res.Output["source"] == nil || res.Output["updated_at"] == nil {
+		t.Fatalf("raw fields changed: %+v", res.Output)
+	}
+	if rates, _ := res.Output["rates"].(map[string]any); rates["JPY"] != 0.1096 || len(rates) != 5 {
+		t.Errorf("rates = %v", res.Output["rates"])
+	}
+}
+
+// A real code the service has no rate for fails as input, like a typo.
+func TestFXMissingRateIsAnInputError(t *testing.T) {
+	svc := svcForTest(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"result":"success","base_code":"KRW","rates":{"USD":0.00074}}`))
+	}))
+	defer server.Close()
+	adapter := svc.Registry().FX
+	adapter.OpenBase, adapter.KeyedBase = server.URL, server.URL
+	cmd, _ := ByName("fx")
+	res := svc.Execute(context.Background(), requestFor(cmd, map[string]string{"currency": "BTN"}, InvokeContext{Locale: "ko", UserID: "tester"}, ""))
+	if !application.IsFXInputError(res) || res.Error.MessageKey != "fx.unsupported_currency" {
+		t.Fatalf("got %+v", res)
 	}
 }

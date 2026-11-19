@@ -214,7 +214,7 @@ Los comandos también funcionan. Los comandos con prefijo necesitan el Message C
 | `!clima Barcelona` | `/clima` | Tiempo actual y previsión de hasta 14 días (aproximada más allá de una semana) |
 | `!alertas` | `/alertas` | Avisos meteorológicos, terremotos |
 | `!cotizacion AAPL` | `/cotización` | Cotización de acciones |
-| `!cambio USD` | `/cambio` | Tipos de cambio |
+| `!cambio yen 50000` | `/cambio` | Tipos de cambio: sin opciones, las monedas principales en tu moneda de referencia; con una moneda (código o nombre), en los dos sentidos; con un importe, lo convierte |
 | `!buscar …` | `/búsqueda` | Búsqueda web |
 | `!lugares Seongsu cafe` | `/lugares` | Encontrar lugares en Corea (Kakao Map) |
 | `!imagen …` | `/imagen` | Dibujar una imagen |
