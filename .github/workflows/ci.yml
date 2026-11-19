@@ -7,7 +7,7 @@
 # The release workflow calls this (full) before it builds archives.
 name: ci
 on:
-  # docs-only changes skip the gate: docs/wiki is checked by the wiki workflow, the rest is prose
+  # docs-only changes skip the gate: the wiki workflow runs doccheck on docs/** and the READMEs
   push:
     paths-ignore: ["docs/**", "**.md"]
   pull_request:
