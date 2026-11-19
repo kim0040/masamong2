@@ -262,3 +262,41 @@ func TestFXSlashInputErrorStaysPrivateWhenTheDeleteFails(t *testing.T) {
 		})
 	}
 }
+
+// A typo is refused before the per-user allowance is counted: the next valid request still has it.
+func TestFXInvalidInputDoesNotUseTheToolAllowance(t *testing.T) {
+	d := newFXDelivery(t, func(g *Gateway) { // before the rate service is wired: configuring rebuilds the providers
+		if res := g.svc.Execute(context.Background(), action.Request{Action: "tools.configure", Input: mustJSON(map[string]any{"id": "finance.fx", "per_user_per_day": 1})}); !res.OK {
+			t.Fatalf("configure: %v", res.Error)
+		}
+	})
+	req := func(in map[string]any) action.Request {
+		in["home"] = "KRW"
+		return action.Request{Action: "finance.fx", Locale: "ko", Input: mustJSON(in),
+			Invoker: &action.Invoker{Via: "command", GuildID: "g", ChannelID: "c", UserID: "u"}}
+	}
+	for _, bad := range []map[string]any{{"currency": "U$D"}, {"currency": "   "}, {"amount": "-3"}} {
+		if res := d.g.svc.Execute(context.Background(), req(bad)); res.OK || res.Error.MessageKey == "" || res.Error.Code == "TOOL_LIMITED" || d.calls.Load() != 0 {
+			t.Fatalf("%v: %+v provider=%d", bad, res.Error, d.calls.Load())
+		}
+	}
+	if res := d.g.svc.Execute(context.Background(), req(map[string]any{"currency": "JPY"})); !res.OK || d.calls.Load() != 1 {
+		t.Fatalf("valid after typos: %+v provider=%d", res.Error, d.calls.Load())
+	}
+	if res := d.g.svc.Execute(context.Background(), req(map[string]any{"currency": "EUR"})); res.OK || res.Error.Code != "TOOL_LIMITED" {
+		t.Fatalf("the one allowed call was not counted: %+v", res)
+	}
+}
+
+// The caller's access is answered first, whatever was typed.
+func TestFXBlockedUserIsRefusedBeforeInputIsRead(t *testing.T) {
+	d := newFXDelivery(t, nil)
+	if res := d.g.svc.Execute(context.Background(), action.Request{Action: "access.policy", Input: mustJSON(map[string]any{"guild_id": "223456789012345678", "block": "123456789012345678"})}); !res.OK {
+		t.Fatalf("block: %v", res.Error)
+	}
+	res := d.g.svc.Execute(context.Background(), action.Request{Action: "finance.fx", Locale: "ko", Input: mustJSON(map[string]any{"home": "KRW", "currency": "U$D"}),
+		Invoker: &action.Invoker{Via: "command", GuildID: "223456789012345678", ChannelID: "c", UserID: "123456789012345678"}})
+	if res.OK || res.Error.MessageKey != "access.blocked" {
+		t.Fatalf("a blocked member was told about their typo: %+v", res.Error)
+	}
+}

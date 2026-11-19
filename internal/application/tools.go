@@ -196,10 +196,26 @@ func (s *Service) gateTool(req action.Request) (action.Request, *action.Result) 
 	if r.ID == "images.generate" && s.imageQueueRefuses(req) {
 		return req, nil // the queue answers a repeat or a full line without drawing: not a use of the tool
 	}
+	if check := toolInputChecks[r.ID]; check != nil {
+		// the switches above and the caller's access come first, then the input: a request the tool would
+		// refuse as malformed uses none of the caller's allowance
+		if refused := s.gateDiscord(req); refused != nil {
+			return req, refused
+		}
+		if refused := check(s, req); refused != nil {
+			return req, refused
+		}
+	}
 	if refused := s.reserveTool(req, r); refused != nil {
 		return req, refused
 	}
 	return req, nil
+}
+
+// toolInputChecks are the tools that check what they were asked before their limits are counted (gateTool).
+// A check returns the failure to give, or nil.
+var toolInputChecks = map[string]func(*Service, action.Request) *action.Result{
+	"finance.fx": (*Service).checkFXInput,
 }
 
 // ---------------------------------------------------------------------------

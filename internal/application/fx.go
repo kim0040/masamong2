@@ -85,12 +85,13 @@ func fxAmount(in map[string]any) (float64, bool) {
 	return f, currency.ValidAmount(f)
 }
 
-func (s *Service) financeFX(ctx context.Context, req action.Request, in map[string]any) action.Result {
-	lex := currency.New(s.I18n)
-	// what the person typed is checked before anything else: no provider call, no quota
+// fxPlanFor reads and checks what the person typed. A refusal comes back as the result to give; nothing
+// has been fetched or counted by then.
+func (s *Service) fxPlanFor(lex *currency.Lexicon, req action.Request, in map[string]any) (fxPlan, *action.Result) {
 	amount, ok := fxAmount(in)
 	if !ok {
-		return s.fxInvalid(req, "fx.invalid_amount")
+		res := s.fxInvalid(req, "fx.invalid_amount")
+		return fxPlan{}, &res
 	}
 	var plan fxPlan
 	if _, home := in["home"]; home {
@@ -99,7 +100,24 @@ func (s *Service) financeFX(ctx context.Context, req action.Request, in map[stri
 		plan, ok = s.fxRawPlan(lex, in, amount)
 	}
 	if !ok {
-		return s.fxInvalid(req, "fx.invalid_currency")
+		res := s.fxInvalid(req, "fx.invalid_currency")
+		return fxPlan{}, &res
+	}
+	return plan, nil
+}
+
+// checkFXInput is the tool's input check (toolInputChecks): it runs before the per-user limits and the
+// provider quota are counted, so a typo uses neither.
+func (s *Service) checkFXInput(req action.Request) *action.Result {
+	_, refused := s.fxPlanFor(currency.New(s.I18n), req, inputMap(req))
+	return refused
+}
+
+func (s *Service) financeFX(ctx context.Context, req action.Request, in map[string]any) action.Result {
+	lex := currency.New(s.I18n)
+	plan, refused := s.fxPlanFor(lex, req, in)
+	if refused != nil {
+		return *refused
 	}
 	if s.Registry().FX == nil {
 		return action.OK(req, map[string]any{"status": "unconfigured", "live": false, "message": s.msg(req, "provider.unconfigured", "provider", "exchangerate")})
