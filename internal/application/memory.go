@@ -1729,7 +1729,7 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		if !toolFailureToReplay(res.Tools) {
 			turns = append(turns, store.ChatTurn{Role: "assistant", Content: said, NativeID: in.MessageID, SpeakerID: in.SpeakerID, SourceIDs: sources, Merged: in.Fragments, ReadAsOf: in.readAsOf})
 		}
-		_ = eng.Store.AppendDecidedChatTurns(key, func() []store.ChatTurn { return s.flights.toKeep(in.flight, turns) }, 40)
+		_ = eng.Store.AppendDecidedChatTurns(key, func() []store.ChatTurn { return s.flights.toKeep(in.flight, turns) }, chatTurnsKept)
 	}
 	s.logTurn(in, res)
 	if !deliverEnd.IsZero() {

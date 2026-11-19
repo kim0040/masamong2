@@ -23,6 +23,11 @@ type Options struct {
 	// may point at (default 3 min); LeadInMax caps them (default 8).
 	LeadIn    time.Duration
 	LeadInMax int
+	// OwnWindow and OwnExchanges reach past Window for the caller's own last exchanges with the bot (a request
+	// of theirs and the bot's answer to it): the newest OwnExchanges of them within OwnWindow, the ones inside
+	// Window counted. They come in as "own". Zero (the default) leaves them out.
+	OwnWindow    time.Duration
+	OwnExchanges int
 }
 
 func (o Options) withDefaults() Options {
@@ -50,7 +55,7 @@ type Attribution struct {
 	// itself included).
 	Included []string
 	// Reasons says why each included line is in (call, reply, replied_to, bot_reply, to_bot, follow,
-	// burst, to_caller) — recorded in the turn ledger so a wrong answer can be traced.
+	// burst, to_caller, own) — recorded in the turn ledger so a wrong answer can be traced.
 	Reasons map[string]string
 	// Candidates are recent lines from other conversations the call might still point at ("what about
 	// that one?"). They stay out of the prompt unless a classifier picks them (fail-closed).
@@ -197,15 +202,47 @@ func Attribute(lines []Line, callIDs []string, callerID string, opt Options) Att
 			}
 		}
 	}
+	// the caller's own earlier exchanges with the bot, also from before the window: newest first, those the
+	// window already holds counted
+	ownFrom := from
+	ownLines := map[string]bool{}
+	if opt.OwnWindow > 0 && opt.OwnExchanges > 0 {
+		own := 0
+		for i := last - 1; i >= 0 && own < opt.OwnExchanges; i-- {
+			l := sorted[i]
+			if lastAt.Sub(l.At) > opt.OwnWindow {
+				break
+			}
+			if !l.Bot || l.ID == "" || l.ReplyTo == "" {
+				continue
+			}
+			j, ok := byID[l.ReplyTo]
+			if !ok || j > i || sorted[j].Bot || sorted[j].AuthorID != callerID || callerID == "" {
+				continue
+			}
+			own++
+			add(l.ID, "own")
+			ownLines[l.ID] = true
+			if lastAt.Sub(sorted[j].At) <= opt.OwnWindow {
+				add(l.ReplyTo, "own")
+				ownLines[l.ReplyTo] = true
+				ownFrom = min(ownFrom, j)
+			}
+			ownFrom = min(ownFrom, i)
+		}
+	}
 	start := lastAt
 	for _, l := range window {
-		if in[l.ID] {
-			if l.At.Before(start) {
-				start = l.At
-			}
-			out.Included = append(out.Included, l.ID)
-		} else {
+		if in[l.ID] && l.At.Before(start) {
+			start = l.At
+		}
+		if !in[l.ID] {
 			out.Excluded++
+		}
+	}
+	for i := ownFrom; i <= last; i++ {
+		if l := sorted[i]; in[l.ID] && (i >= from || ownLines[l.ID]) {
+			out.Included = append(out.Included, l.ID)
 		}
 	}
 	// candidates: other people's recent lines from the lead-in before the conversation started up to the

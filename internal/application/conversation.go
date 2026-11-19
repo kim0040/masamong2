@@ -32,6 +32,18 @@ const (
 	referTimeout       = 8 * time.Second
 )
 
+// The caller's own earlier exchanges with the bot reach further back than the room's talk around them: the last
+// ownExchanges of them within ownWindow come in even when the room has moved on (conversation.Options), read from
+// the stored conversation like every other line. An older answer of the bot is clipped to ownClipRunes and counts
+// in the transcript budget like any line, so it is the first to go when the conversation is long.
+const (
+	ownWindow    = 6 * time.Hour
+	ownExchanges = 3
+	ownClipRunes = 400
+	// chatTurnsKept is how many rows of a channel's stored conversation are kept (chat_turns); a turn reads them all
+	chatTurnsKept = 40
+)
+
 // convContext is what the turn reads instead of the plain history and recent room lines.
 type convContext struct {
 	history []chat.Turn
@@ -81,7 +93,7 @@ func (s *Service) callerConversation(ctx context.Context, in ChatInput, eng *eng
 			Text: in.Message, Mentions: []string{botID}})
 	}
 	att := conversation.Attribute(lines, []string{in.MessageID}, in.SpeakerID,
-		conversation.Options{BotID: botID, Names: conversation.NamesFrom(lines)})
+		conversation.Options{BotID: botID, Names: conversation.NamesFrom(lines), OwnWindow: ownWindow, OwnExchanges: ownExchanges})
 	out := convContext{ledger: map[string]any{"mode": mode, "included": len(att.Included), "excluded": att.Excluded,
 		"candidates": len(att.Candidates)}}
 	stats.note(out.ledger, att)
@@ -110,6 +122,9 @@ func (s *Service) callerConversation(ctx context.Context, in ChatInput, eng *eng
 	var context []conversation.Line
 	for _, l := range picked {
 		if l.ID != in.MessageID && strings.TrimSpace(l.Text) != "" {
+			if l.Bot && att.Reasons[l.ID] == "own" {
+				l.Text = clip(l.Text, ownClipRunes)
+			}
 			context = append(context, l)
 		}
 	}
@@ -207,7 +222,7 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 		}
 	}
 	answered := map[string]string{} // user messages the stored conversation has the bot's answer to: its line
-	if turns, err := eng.Store.RecentChatTurns(blocks.ChannelKey(in.GuildID, in.ChannelID), 24); err == nil {
+	if turns, err := eng.Store.RecentChatTurns(blocks.ChannelKey(in.GuildID, in.ChannelID), chatTurnsKept); err == nil {
 		st.turnsRead = len(turns)
 		st.turnsGated = len(turns) == 0 && eng.Store.DB.HasPendingEvents("source-change")
 		for _, t := range turns {
