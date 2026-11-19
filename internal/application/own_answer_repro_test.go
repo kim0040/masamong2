@@ -316,3 +316,38 @@ func TestReplyToTheBotKeepsTheCallersExchange(t *testing.T) {
 		})
 	}
 }
+
+// A reply to any message the bot's answer was posted as (its first bubble, a later one) is a reply to that
+// answer: another person who replies to it gets the answer and the request it answered, also after a restart
+// (the posted messages are tied to their turn in reply_messages).
+func TestReplyToAPostedPartBringsItsAnswer(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		part    int
+		restart bool
+	}{
+		{name: "first bubble", part: 0},
+		{name: "later bubble", part: 2},
+		{name: "first bubble, restart", part: 0, restart: true},
+		{name: "later bubble, restart", part: 2, restart: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := newOwnAnswerRoom(t)
+			_, parts := r.call(ownCall{id: "req1", author: "u1", name: "Asker", text: "@마사몽 OWNREQ 논문 찾아줘", at: r.at(0),
+				answeredAt: r.at(20 * time.Second), how: "mention", answer: "OWNANS1-A 찾은 / OWNANS1-B 논문은 / OWNANS1-C 이거야"})
+			if c.restart {
+				r.svc = restartServiceForTest(t, r.svc)
+			}
+			r.talk(time.Minute, 5*time.Minute, 4, 0)
+			att, _ := r.call(ownCall{id: "req2", author: "u2", name: "Replier", text: "그게 무슨 뜻이야", at: r.at(7 * time.Minute),
+				answeredAt: r.at(7*time.Minute + 20*time.Second), how: "reply", replyTo: parts[c.part], answer: "설명"})
+			got := r.shown([][2]string{{"req1", "OWNREQ"}, {"ans1-a", "OWNANS1-A"}, {"ans1-c", "OWNANS1-C"}})
+			if got != "req1 ans1-a ans1-c" {
+				t.Fatalf("in prompt %q (attribution %v)", got, att)
+			}
+			if strings.Count(r.lastPrompt(), "OWNANS1-C") != 1 {
+				t.Fatalf("the answer is shown more than once:\n%s", r.lastPrompt())
+			}
+		})
+	}
+}
