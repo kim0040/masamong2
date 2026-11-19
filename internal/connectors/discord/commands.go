@@ -12,6 +12,7 @@ import (
 	"masamong/internal/action"
 	"masamong/internal/application"
 	"masamong/internal/i18n"
+	"masamong/internal/providers/fx"
 )
 
 // Command binds one Discord surface (slash command or legacy prefix alias) to an Application Action.
@@ -171,7 +172,11 @@ func Commands() []Command {
 				if i18n.Normalize(c.Locale) == "ko" {
 					fallback = "KRW"
 				}
-				return "finance.fx", map[string]any{"base": orDefault(o["base"], fallback)}
+				base := orDefault(o["base"], fallback)
+				if !fx.ValidCode(base) {
+					return "help.version", nil
+				}
+				return "finance.fx", map[string]any{"base": strings.ToUpper(strings.TrimSpace(base))}
 			},
 		},
 		{

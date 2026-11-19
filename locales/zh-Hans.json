@@ -239,6 +239,7 @@
   "discord.render.quote.unconfigured": "此机器人尚未配置行情功能。",
   "discord.render.quote.fx_missing": "汇率不可用；仅显示美元。",
   "discord.render.quote.as_of": "截至",
+  "fx.unsupported_currency": "不支持此货币。请输入 USD 等三位字母货币代码。",
   "discord.render.fx.title": "汇率 · {base}",
   "discord.render.fx.unconfigured": "尚未配置汇率。",
   "discord.render.fx.updated": "更新时间",
