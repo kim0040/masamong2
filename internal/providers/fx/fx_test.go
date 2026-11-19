@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"masamong/internal/providers"
+	"masamong/internal/providers/decode"
 )
 
 const keyed = `{"result":"success","documentation":"x","base_code":"USD","conversion_rates":{"KRW":1387.12,"JPY":"147.3","EUR":0.92,"BAD":"n/a","ZERO":0},"time_last_update_unix":1757894401,"time_next_update_unix":1757980801}`
@@ -80,5 +81,17 @@ func TestLatestSurfacesProviderErrorOn4xx(t *testing.T) {
 	a.OpenBase = srv.URL
 	if _, err := a.Latest(context.Background(), "USD"); !errors.Is(err, ErrProvider) {
 		t.Fatalf("want provider error-type, got %v", err)
+	}
+}
+
+func TestLatestRejectsWrongBase(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(open)) // USD rates in response to a KRW request
+	}))
+	defer server.Close()
+	a := New(providers.NewClient(time.Second, nil), providers.Credential{})
+	a.OpenBase = server.URL
+	if _, err := a.Latest(context.Background(), "KRW"); !errors.Is(err, decode.ErrUnexpected) {
+		t.Fatalf("got %v for a mismatched base", err)
 	}
 }

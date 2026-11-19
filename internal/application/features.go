@@ -380,6 +380,9 @@ func (s *Service) finance(ctx context.Context, req action.Request) action.Result
 		want := strSlice(in, "symbols")
 		if len(want) == 0 {
 			want = []string{"KRW", "JPY", "EUR", "CNY", "GBP"}
+			if req.Invoker != nil && req.Invoker.Via == "command" && rates.Base != "USD" {
+				want = append(want, "USD")
+			}
 		}
 		sel := map[string]any{}
 		for _, c := range want {

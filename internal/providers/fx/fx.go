@@ -87,6 +87,9 @@ func (a *Adapter) Latest(ctx context.Context, base string) (Rates, error) {
 		return Rates{}, err
 	}
 	r, err := Parse(resp.ContentType, resp.Body)
+	if err == nil && r.Base != base {
+		return Rates{}, fmt.Errorf("%w: requested base %s, received %q", decode.ErrUnexpected, base, r.Base)
+	}
 	r.Source = source
 	return r, err
 }
