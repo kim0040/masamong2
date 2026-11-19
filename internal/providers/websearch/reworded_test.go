@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -323,11 +324,46 @@ func TestMaybeCharged(t *testing.T) {
 	}
 }
 
-// Kakao's blog search runs in a goroutine of its own: a panic there is that request's error.
-func TestKakaoBlogPanicIsAnError(t *testing.T) {
-	d := &daum{}
-	res, err := d.deepMain(context.Background(), Query{Text: "x", Depth: DepthDeep}, true) // no adapter: both requests fail
-	if err == nil {
-		t.Fatalf("expected an error, got %+v", res)
+// A request that panicked may have been sent and answered before it did: it counts as maybe charged.
+func TestMaybeChargedErrPanic(t *testing.T) {
+	if !MaybeCharged(errPanic) {
+		t.Fatal("a request that panicked may still have been charged")
+	}
+}
+
+// Daum's deep search asks the web and the blogs at once for the main query: a half that fails after
+// it may have been charged is counted lost, an HTTP error answer is not.
+func TestDaumDeepCountsALostHalf(t *testing.T) {
+	var badBlog, badWeb atomic.Int32 // a half's status: 0 a good answer, -1 an unreadable one
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bad := &badWeb
+		if strings.HasSuffix(r.URL.Path, "/blog") {
+			bad = &badBlog
+		}
+		switch bad.Load() {
+		case -1:
+			fmt.Fprint(w, "not json")
+		case 500:
+			w.WriteHeader(500)
+		default:
+			fmt.Fprint(w, `{"documents":[{"title":"t","contents":"c","url":"https://w.example/1","datetime":""}],"meta":{}}`)
+		}
+	}))
+	defer srv.Close()
+	s := newSearcher(t, "kakao_search", srv.URL)
+	q := Query{Text: "x", Depth: DepthDeep}
+
+	for _, half := range []*atomic.Int32{&badBlog, &badWeb} {
+		half.Store(-1) // answered with something unreadable: maybe charged, so lost
+		res, err := s.Search(context.Background(), q)
+		if err != nil || res.Requests != 1 || res.Lost != 1 || len(res.Results) != 1 {
+			t.Fatalf("half lost: %v %+v", err, res)
+		}
+		half.Store(0)
+	}
+	badBlog.Store(500) // an HTTP error answer was not charged: nothing is lost
+	res, err := s.Search(context.Background(), q)
+	if err != nil || res.Requests != 1 || res.Lost != 0 || len(res.Results) != 1 {
+		t.Fatalf("blog answer an HTTP error: %v %+v", err, res)
 	}
 }
