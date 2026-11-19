@@ -122,6 +122,20 @@ func (c *Catalog) Lookup(locale, key string) (string, bool) {
 	return v, ok && v != ""
 }
 
+// Prefixed returns locale's keys that start with prefix, with the prefix removed (no fallback): data
+// kept as one entry per item, such as the currency names.
+func (c *Catalog) Prefixed(locale, prefix string) map[string]string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	out := map[string]string{}
+	for k, v := range c.msgs[Normalize(locale)] {
+		if rest, ok := strings.CutPrefix(k, prefix); ok && rest != "" && v != "" {
+			out[rest] = v
+		}
+	}
+	return out
+}
+
 // Has reports whether key exists in the English base catalog.
 func (c *Catalog) Has(key string) bool {
 	c.mu.RLock()

@@ -16,8 +16,11 @@ import (
 var unansweredStatuses = map[string]bool{"unconfigured": true, "no_results": true, "no_area": true, "unavailable": true, "not_found": true, "error": true}
 
 // Unanswered reports whether a result gave the person nothing: it failed, or its status says so. A
-// refusal (no permission) is an answer: the person is told and nothing else is tried.
+// refusal (no permission) and a currency the person typed wrongly are answers: the person is told and nothing else is tried.
 func Unanswered(res action.Result) bool {
+	if IsFXInputError(res) {
+		return false // the person is told how to write it; no other tool or model is asked
+	}
 	if !res.OK {
 		return res.Error == nil || (res.Error.Code != errcode.PermissionDenied && res.Error.Code != errcode.Unauthorized)
 	}

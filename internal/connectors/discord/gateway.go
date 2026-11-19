@@ -889,12 +889,9 @@ func (g *Gateway) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 		}
 		return
 	}
-	req := requestFor(cmd, opts, ictx, "dc:"+i.ID)
 	flags := discordgo.MessageFlags(0)
-	if cmd.Ephemeral || req.Action == "help.version" {
+	if cmd.Ephemeral {
 		flags = discordgo.MessageFlagsEphemeral
-		ictx.Private = true
-		req.Invoker.Private = true
 	}
 	ackCtx, cancelAck := g.ackContext()
 	defer cancelAck()
@@ -905,8 +902,12 @@ func (g *Gateway) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 	g.work(func(base context.Context) {
 		ctx, cancel := context.WithTimeout(base, g.ActionTimeout)
 		defer cancel()
+		req := requestFor(cmd, opts, ictx, "dc:"+i.ID)
 		mark := g.svc.SettledMark() // before the command reads anything: its result may go on into a chat turn
-		res := g.executeCommand(ctx, req)
+		res := g.svc.Execute(ctx, req)
+		if application.IsFXInputError(res) && !ictx.Private && g.answerPrivately(base, s, i, res, cmd, ictx) {
+			return
+		}
 		if application.Unanswered(res) && !ictx.Private {
 			// the reply is posted inside the turn: the conversation keeps only what reached Discord
 			deliver := func(deliverCtx context.Context, out chat.Result) string {
@@ -956,6 +957,25 @@ func (g *Gateway) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 			g.log.Warn("discord: response edit failed", "cmd", cmd.Name, "err", err)
 		}
 	})
+}
+
+// answerPrivately replaces a public deferred response with a private message. Discord keeps the
+// visibility the first response was given, so an edit cannot make it private: the response is deleted
+// and the answer is sent as an ephemeral follow-up. false means the deferred response is still there
+// (it could not be deleted) and the caller edits it as usual.
+func (g *Gateway) answerPrivately(base context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, res action.Result, cmd Command, ictx InvokeContext) bool {
+	final, cancel := g.finalContext(base)
+	defer cancel()
+	if err := s.InteractionResponseDelete(i.Interaction, discordgo.WithContext(final)); err != nil {
+		g.log.Warn("discord: deferred response delete failed", "cmd", cmd.Name, "err", err)
+		return false
+	}
+	ictx.Private = true
+	r := g.renderInvoked(res, cmd, ictx)
+	if _, err := s.FollowupMessageCreate(i.Interaction, false, &discordgo.WebhookParams{Embeds: r.Embeds(), Flags: discordgo.MessageFlagsEphemeral, AllowedMentions: noMentions}, discordgo.WithContext(final)); err != nil {
+		g.log.Warn("discord: private follow-up failed", "cmd", cmd.Name, "err", err)
+	}
+	return true
 }
 
 // responseEdit is the slash command's final response: its card (with the generated picture attached), or,
@@ -1928,22 +1948,13 @@ func (g *Gateway) shouldAnswer(m *discordgo.MessageCreate, pol config.ChannelPol
 	return false
 }
 
-func (g *Gateway) executeCommand(ctx context.Context, req action.Request) action.Result {
-	res := g.svc.Execute(ctx, req)
-	if req.Action == "finance.fx" && res.Error != nil && res.Error.MessageKey == "fx.unsupported_currency" {
-		req.Action, req.Input = "help.version", nil
-		return g.svc.Execute(ctx, req)
-	}
-	return res
-}
-
 func (g *Gateway) runCommand(s *discordgo.Session, m *discordgo.MessageCreate, cmd Command, opts map[string]string) {
 	ictx := InvokeContext{ChannelID: m.ChannelID, GuildID: m.GuildID, UserID: m.Author.ID, Locale: g.locale(m.GuildID), Manager: g.messageManager(s, m),
 		Private: m.GuildID == "", UserName: displayName(m)}
 	ctx, cancel := context.WithTimeout(g.runCtx(), g.ActionTimeout)
 	defer cancel()
 	mark := g.svc.SettledMark() // before the command reads anything: its result may go on into a chat turn
-	res := g.executeCommand(ctx, requestFor(cmd, opts, ictx, "dc:"+m.ID))
+	res := g.svc.Execute(ctx, requestFor(cmd, opts, ictx, "dc:"+m.ID))
 	if application.Unanswered(res) && (!ictx.Private || m.GuildID == "") { // a DM: CommandToChat checks DM chat is open
 		// no answer from the tool: carry on as a conversation, off the event loop
 		g.work(func(base context.Context) {

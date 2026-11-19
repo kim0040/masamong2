@@ -363,41 +363,7 @@ func (s *Service) disasters(ctx context.Context, req action.Request) action.Resu
 func (s *Service) finance(ctx context.Context, req action.Request) action.Result {
 	in := inputMap(req)
 	if req.Action == "finance.fx" {
-		if s.Registry().FX == nil {
-			return action.OK(req, map[string]any{"status": "unconfigured", "live": false, "message": s.msg(req, "provider.unconfigured", "provider", "exchangerate")})
-		}
-		if err := s.Registry().reserve(s.Registry().fxID); err != nil {
-			return s.providerFail(req, s.Registry().fxID, err)
-		}
-		base := strVal(in, "base", "USD")
-		rates, err := s.Registry().FX.Latest(ctx, base)
-		if errors.Is(err, fx.ErrUnsupportedCurrency) {
-			return action.Fail(req, errcode.InvalidInput, "fx.unsupported_currency", s.msg(req, "fx.unsupported_currency"), nil)
-		}
-		if err != nil {
-			return s.providerFail(req, s.Registry().fxID, err)
-		}
-		want := strSlice(in, "symbols")
-		if len(want) == 0 {
-			want = []string{"KRW", "JPY", "EUR", "CNY", "GBP"}
-			if req.Invoker != nil && req.Invoker.Via == "command" && rates.Base != "USD" {
-				want = append(want, "USD")
-			}
-		}
-		sel := map[string]any{}
-		for _, c := range want {
-			if v, ok := rates.Rates[strings.ToUpper(c)]; ok {
-				sel[strings.ToUpper(c)] = v
-			}
-		}
-		out := map[string]any{"status": "ok", "live": true, "source": "exchangerate-api/" + rates.Source, "base": rates.Base, "rates": sel, "rate_count": len(rates.Rates)}
-		if !rates.Updated.IsZero() {
-			out["updated_at"] = rates.Updated.Format(time.RFC3339)
-		}
-		if !rates.NextUpdate.IsZero() {
-			out["next_update_at"] = rates.NextUpdate.Format(time.RFC3339)
-		}
-		return action.OK(req, out)
+		return s.financeFX(ctx, req, in)
 	}
 	symbol := strings.ToUpper(strVal(in, "symbol", ""))
 	if symbol == "" {

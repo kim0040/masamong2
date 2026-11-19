@@ -11,8 +11,8 @@ import (
 
 	"masamong/internal/action"
 	"masamong/internal/application"
+	"masamong/internal/currency"
 	"masamong/internal/i18n"
-	"masamong/internal/providers/fx"
 )
 
 // Command binds one Discord surface (slash command or legacy prefix alias) to an Application Action.
@@ -166,17 +166,14 @@ func Commands() []Command {
 		},
 		{
 			Name: "fx", Desc: "Exchange rates", Action: "finance.fx",
-			Options: []*discordgo.ApplicationCommandOption{option(str, "base", "Currency to show values in, e.g. USD or JPY (default USD)", false)},
+			Options: []*discordgo.ApplicationCommandOption{option(str, "currency", "Currency code or name, e.g. USD or dollar", false)},
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				fallback := "USD"
-				if i18n.Normalize(c.Locale) == "ko" {
-					fallback = "KRW"
+				// absent: the member's home currency. Given, even blank: the action checks what was typed.
+				cur := currency.New(messages).Home(c.Locale)
+				if v, given := o["currency"]; given {
+					cur = v
 				}
-				base := orDefault(o["base"], fallback)
-				if !fx.ValidCode(base) {
-					return "help.version", nil
-				}
-				return "finance.fx", map[string]any{"base": strings.ToUpper(strings.TrimSpace(base))}
+				return "finance.fx", map[string]any{"base": cur}
 			},
 		},
 		{
