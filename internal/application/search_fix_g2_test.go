@@ -255,8 +255,10 @@ func TestSearchHasOneTotalTimeLimit(t *testing.T) {
 
 // With no time left for the next service, an empty answer of the last one asked is the search's answer.
 func TestSearchTimeLimitKeepsAnEmptyAnswer(t *testing.T) {
-	defer application.SetSearchLimitsForTest("standard", 400*time.Millisecond, 500*time.Millisecond, 300*time.Millisecond)()
-	first := hungService(t, 350*time.Millisecond, `{"organic":[]}`)
+	// the first service answers (empty) after 400 ms, well inside its 1.5 s limit; the search has 1 s in
+	// all, so at most 600 ms is left, under the 700 ms the next one needs, however slow the answer was
+	defer application.SetSearchLimitsForTest("standard", 1500*time.Millisecond, time.Second, 700*time.Millisecond)()
+	first := hungService(t, 400*time.Millisecond, `{"organic":[]}`)
 	second := hungService(t, 0, `{"organic":[{"title":"B","link":"https://b.example/1","snippet":"s"}]}`)
 	svc := setupSvc(t)
 	pointAt(t, svc, "serper", first.srv.URL, "S_KEY", "k")
@@ -507,5 +509,35 @@ func TestSearchAsksWithoutTheBotsNameAndForPapers(t *testing.T) {
 	v, _ := url.ParseQuery(qs[0])
 	if v.Get("query") != "시간이 3차원이라는 논문" || v.Get("domain_type") != "research_paper" {
 		t.Fatalf("asked %v", v)
+	}
+}
+
+// A research search asks the services with a search of papers of their own first (TinyFish, Serper, Exa),
+// the others after them; a search without a topic keeps the configured order.
+func TestResearchSearchAsksTheServicesWithPapersFirst(t *testing.T) {
+	var tavilyHits, tinyfishHits atomic.Int32
+	tavily := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tavilyHits.Add(1)
+		_, _ = w.Write([]byte(`{"results":[{"title":"T","url":"https://t.example/1","content":"c"}]}`))
+	}))
+	defer tavily.Close()
+	tinyfish := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tinyfishHits.Add(1)
+		_, _ = w.Write([]byte(`{"results":[{"title":"Three-dimensional time","url":"https://w.example/doi/1","snippet":"This paper introduces"}]}`))
+	}))
+	defer tinyfish.Close()
+	svc := setupSvc(t)
+	pointAt(t, svc, "tavily", tavily.URL, "T_KEY", "k")
+	pointAt(t, svc, "tinyfish", tinyfish.URL, "TF_KEY", "k")
+	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"web_search", "order"}, "value": []any{"tavily", "tinyfish"}}}}); !r.OK {
+		t.Fatalf("order: %+v", r.Error)
+	}
+	res := searchWith(svc, &chat.Guard{MaxUSD: 1}, map[string]any{"query": "time dimensions paper", "topic": "research"})
+	if !res.OK || res.Output["provider"] != "tinyfish" || tavilyHits.Load() != 0 {
+		t.Fatalf("a research search must start with TinyFish: %+v (tavily asked %d times)", res.Output, tavilyHits.Load())
+	}
+	res = searchWith(svc, &chat.Guard{MaxUSD: 1}, map[string]any{"query": "time dimensions"})
+	if !res.OK || res.Output["provider"] != "tavily" {
+		t.Fatalf("a search without a topic keeps the configured order: %+v", res.Output)
 	}
 }

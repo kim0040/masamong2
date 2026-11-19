@@ -1055,6 +1055,17 @@ func (s *Service) search(ctx context.Context, req action.Request) action.Result 
 		}
 		slices.SortStableFunc(order, func(a, b string) int { return later(a) - later(b) })
 	}
+	if topic == websearch.TopicResearch && len(order) > 1 {
+		// research: the services with a search of papers of their own first, the rest after
+		reg := s.Registry()
+		later := func(id string) int {
+			if websearch.ResearchSearch(reg.Search[id].Kind()) {
+				return 0
+			}
+			return 1
+		}
+		slices.SortStableFunc(order, func(a, b string) int { return later(a) - later(b) })
+	}
 	run := &searchRun{lastIsProviders: true}
 	win, found := s.searchSequential(ctx, order, q, depth, run)
 	if !found {
@@ -1433,21 +1444,29 @@ func tallyOut(r poll.Result) []any {
 
 // withoutBotNames takes the names people call the bot by out of a search query: "마사몽 젠슨 황 근황" is a
 // question to the bot about Jensen Huang, and the web knows nothing of the bot's name. A word is the name
-// with or without quotes, a call ending (마사몽아, 마사몽이) or a trailing comma. A query that is only the
-// name, or whose name is part of a longer word, is kept as it is.
+// with or without quotes or brackets, a call or subject ending (마사몽아, 마사몽님이) or a trailing comma. It is
+// taken out where it is a call: at the start or the end of the query, quoted or bracketed, with an ending,
+// or followed by a comma. A plain name in the middle ("Amazon Echo price") is part of the query. A quote or
+// bracket the name opened is not left open: `"마사몽 젠슨 황"` gives 젠슨 황, without the orphan closing quote.
+// A query that is only the name, or whose name is part of a longer word, is kept as it is.
 func withoutBotNames(query string, names []string) string {
 	if len(names) == 0 {
 		return query
 	}
-	// a word compared: lower case, without quotes anywhere ("“마사몽”아" is 마사몽아) or punctuation at its edges
+	const quotes = "\"'“”‘’「」『』"
+	const brackets = "()[]【】"
+	// the quote or bracket that closes each one that opens
+	closers := map[rune]rune{'"': '"', '\'': '\'', '“': '”', '‘': '’', '「': '」', '『': '』', '(': ')', '[': ']', '【': '】'}
+	// a word compared: lower case, without quotes anywhere ("“마사몽”아" is 마사몽아) or punctuation and
+	// brackets at its edges
 	fold := func(word string) string {
 		word = strings.Map(func(r rune) rune {
-			if strings.ContainsRune("\"'“”‘’「」『』", r) {
+			if strings.ContainsRune(quotes, r) {
 				return -1
 			}
 			return r
 		}, word)
-		return strings.ToLower(strings.Trim(word, ",.!?:;~"))
+		return strings.ToLower(strings.Trim(word, ",.!?:;~"+brackets))
 	}
 	last := func(w, n string) bool { // the name's last word, alone or with a call or subject ending
 		if w == n {
@@ -1455,20 +1474,26 @@ func withoutBotNames(query string, names []string) string {
 		}
 		if rest, ok := strings.CutPrefix(w, n); ok {
 			switch rest {
-			case "아", "야", "이", "가", "은", "는", "님", "이가", "한테", "에게":
+			case "아", "야", "이", "가", "은", "는", "님", "이가", "한테", "에게", "님이", "님은", "님아", "님께":
 				return true
 			}
 		}
 		return false
+	}
+	// a word with a quote or bracket at either edge ("마사몽", (마사몽), 마사몽")
+	edged := func(w string) bool {
+		r := []rune(strings.TrimRight(w, ",.!?:;~"))
+		return len(r) > 0 && (strings.ContainsRune(quotes+brackets, r[0]) || strings.ContainsRune(quotes+brackets, r[len(r)-1]))
 	}
 	words := strings.Fields(query)
 	folded := make([]string, len(words))
 	for i, w := range words {
 		folded[i] = fold(w)
 	}
-	// the length in words of a name starting at word i (a name of several words, "Masamong Bot", too)
-	nameAt := func(i int) int {
-		longest := 0
+	// the length in words of a name starting at word i (a name of several words, "Masamong Bot", too), and
+	// whether it stands plain: no quote, bracket, ending or comma
+	nameAt := func(i int) (int, bool) {
+		longest, plain := 0, false
 		for _, n := range names {
 			parts := strings.Fields(n)
 			for k := range parts {
@@ -1478,28 +1503,65 @@ func withoutBotNames(query string, names []string) string {
 			if len(parts) == 0 || i+len(parts) > len(words) {
 				continue
 			}
-			ok := true
+			ok, bare := true, true
 			for k, part := range parts {
 				if k == len(parts)-1 {
 					ok = ok && last(folded[i+k], part)
+					bare = bare && folded[i+k] == part && !strings.HasSuffix(words[i+k], ",")
 				} else {
 					ok = ok && folded[i+k] == part
 				}
+				bare = bare && !edged(words[i+k])
 			}
-			if ok && len(parts) > longest {
-				longest = len(parts) // the longest name there: "Masamong Bot" over "Masamong"
+			if !ok {
+				continue
+			}
+			switch {
+			case len(parts) > longest:
+				longest, plain = len(parts), bare // the longest name there: "Masamong Bot" over "Masamong"
+			case len(parts) == longest:
+				plain = plain && bare
 			}
 		}
-		return longest
+		return longest, plain
 	}
 	kept := words[:0:0]
+	var open []rune // closers of the quotes and brackets a removed name opened and nothing has closed yet
 	for i := 0; i < len(words); {
-		if n := nameAt(i); n > 0 {
+		if n, plain := nameAt(i); n > 0 && (!plain || len(kept) == 0 || i+n == len(words)) {
+			for _, w := range words[i : i+n] {
+				r := []rune(w)
+				if c := closers[r[0]]; c != 0 && !strings.ContainsRune(string(r[1:]), c) {
+					open = append(open, c)
+				}
+			}
 			i += n
 			continue
 		}
-		kept = append(kept, words[i])
+		w := words[i]
 		i++
+		for k, c := range open {
+			// a closer a removed name left behind: dropped with its opener, if the word has no opener of its own
+			trimmed := strings.TrimRight(w, ",.!?:;~")
+			if !strings.HasSuffix(trimmed, string(c)) {
+				continue
+			}
+			opener := c
+			for o, cl := range closers {
+				if cl == c {
+					opener = o
+				}
+			}
+			cnt := strings.Count(w, string(c))
+			if (opener == c && cnt%2 == 1) || (opener != c && cnt > strings.Count(w, string(opener))) {
+				w = strings.TrimSuffix(trimmed, string(c)) + w[len(trimmed):]
+				open = slices.Delete(open, k, k+1)
+				break
+			}
+		}
+		if w != "" {
+			kept = append(kept, w)
+		}
 	}
 	if len(kept) == 0 || len(kept) == len(words) {
 		return query

@@ -281,9 +281,10 @@ func queuedTurn(t *testing.T, delay time.Duration, behind application.ChatInput)
 // another one still gets its whole share (it used to be spent in the queue, and the model call that
 // followed failed at once).
 func TestTurnTimeoutStartsAfterTheWait(t *testing.T) {
-	// a turn takes two model calls (about 600 ms); the second waits about as long as the first runs,
-	// so waiting and running together overrun 1 s but running alone does not, with room for a slow machine
-	second, first := queuedTurn(t, 300*time.Millisecond, application.ChatInput{TurnTimeout: time.Second})
+	// a turn takes two model calls (about 1.2 s); the second waits about as long as the first runs, so
+	// waiting and running together (about 2.4 s) overrun 2.1 s, but running alone has 0.9 s to spare for a
+	// slow machine, and a limit started before the wait would still be missed by about 0.3 s
+	second, first := queuedTurn(t, 600*time.Millisecond, application.ChatInput{TurnTimeout: 2100 * time.Millisecond})
 	if first != nil || second != nil {
 		t.Fatalf("first: %v, second: %v", first, second)
 	}
