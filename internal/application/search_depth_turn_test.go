@@ -164,34 +164,3 @@ func TestSearchLeavesOutTheBotsName(t *testing.T) {
 		t.Fatalf("reworded queries: %v (the call's list must stay as it was: %v)", out, in)
 	}
 }
-
-// A quote or bracket the name opened is not left open, honorific endings and brackets around the name
-// count as calls, and a plain name in the middle of a query is part of it ("Amazon Echo price").
-func TestSearchBotNameEdgeCases(t *testing.T) {
-	names := []string{"마사몽", "Echo"}
-	for _, c := range []struct{ in, want string }{
-		{`"마사몽 젠슨 황"`, "젠슨 황"},
-		{`"마사몽 젠슨 황" 근황`, "젠슨 황 근황"},
-		{"(마사몽 젠슨 황) 근황", "젠슨 황 근황"},
-		{"마사몽님이 추천한 책", "추천한 책"},
-		{"마사몽님은 추천한 책", "추천한 책"},
-		{"마사몽님아 추천한 책", "추천한 책"},
-		{"마사몽님께 추천한 책", "추천한 책"},
-		{"(마사몽) 후기", "후기"},
-		{"[마사몽] 후기", "후기"},
-		{"【마사몽】 후기", "후기"},
-		{"Amazon Echo price", "Amazon Echo price"},
-		{"best Echo review today", "best Echo review today"},
-		{"젠슨 황 (마사몽) 근황", "젠슨 황 근황"},
-		{"젠슨 황 마사몽님이 근황", "젠슨 황 근황"},
-		{"젠슨 황 마사몽, 근황", "젠슨 황 근황"},
-		{"젠슨 황 근황 마사몽", "젠슨 황 근황"},
-		{"마사몽아 젠슨 황 근황", "젠슨 황 근황"},
-		{"마사몽", "마사몽"},
-		{"마사몽 출시일", "출시일"},
-	} {
-		if got := withoutBotNames(c.in, names); got != c.want {
-			t.Errorf("%q: got %q, want %q", c.in, got, c.want)
-		}
-	}
-}

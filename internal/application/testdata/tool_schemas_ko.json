@@ -108,7 +108,7 @@
     },
     "query": {
      "type": "string",
-     "description": "검색어. 핵심어만, 메시지의 언어로."
+     "description": "검색어. 핵심어만, 메시지의 언어로. 봇 이름·부르는 말·인사는 넣지 않는다."
     },
     "size": {
      "type": "integer",
