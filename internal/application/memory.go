@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -1532,11 +1533,6 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	if err := s.chatGate(in); err != nil {
 		return chat.Result{}, err
 	}
-	if !in.DryRun && !in.Proactive && !in.banter && in.MessageID != "" {
-		// the turn takes the message as said to the bot (its name alone included): the person's next call
-		// finds it as part of their conversation with the bot
-		s.liveToBot(in.GuildID, in.ChannelID, append([]string{in.MessageID}, in.Fragments...))
-	}
 	doc := s.Doc()
 	eng, err := s.MemoryEngine()
 	if err != nil {
@@ -1561,10 +1557,10 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	// the last chat.HistoryShown, whichever rows are empty or long: every prompt built from this history keeps to them,
 	// and a caller's conversation records each line it shows (conv.sources).
 	var windowAll, windowShown, windowLinks []string
-	if turns, err := eng.Store.RecentChatTurns(key, 16); err == nil {
+	cutoff := s.callCutoff(in)
+	turns, readErr := eng.Store.RecentChatTurns(key, 16)
+	if readErr == nil {
 		for i, t := range turns {
-			at, _ := time.Parse(time.RFC3339, t.CreatedAt) // the store writes RFC3339; a bad value shows no age
-			history = append(history, chat.Turn{Role: t.Role, Speaker: t.Speaker, Content: t.Content, At: at})
 			read := t.SourceIDs
 			if t.Role == "user" && t.NativeID != "" {
 				read = append(slices.Clone(read), corpus.DiscordLiveObservationID(room, t.NativeID))
@@ -1612,11 +1608,29 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 				in.context[k] = v
 			}
 		}
-	} else if in.sourceRefs != nil {
+	} else {
+		// Only plain history needs these timestamps; attribution resolves its own larger window.
+		if readErr == nil {
+			_ = s.timeChatTurns(in, turns)
+			for _, t := range turns {
+				stamp := t.SpokenAt
+				if stamp == "" {
+					stamp = t.CreatedAt
+				}
+				at, _ := time.Parse(time.RFC3339Nano, stamp)
+				content := visibleDelivery(t.Content, t.DeliverySpans, cutoff)
+				if t.Role == "assistant" && in.MessageID != "" && !cutoff.IsZero() && at.After(cutoff) {
+					content = "" // plain history also cannot see a delivery not yet started
+				}
+				history = append(history, chat.Turn{Role: t.Role, Speaker: t.Speaker, Content: content, At: at})
+			}
+		}
 		// the recent lines reach the reply only here (RecentRoom below), so only here is it built on them. With the
 		// caller's conversation in their place it is built on the lines that conversation picked (conv.sources). A
 		// line offered to the reference classifier and not picked leaves nothing: it answers with labels only.
-		*in.sourceRefs = append(append(append(*in.sourceRefs, windowLinks...), windowShown...), ambient...)
+		if in.sourceRefs != nil {
+			*in.sourceRefs = append(append(append(*in.sourceRefs, windowLinks...), windowShown...), ambient...)
+		}
 	}
 	toolset := s.chatToolset(voice, in.GuildID, in.ChannelID)
 	_, memTool := toolsetHas(toolset, "memory.search")
@@ -1699,11 +1713,15 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		s.notePartialVision(&in, in.vision)
 	}
 	s.decideThreadOffer(in, pol, res, in.context)
-	var firstSendMS int
-	var deliverEnd time.Time
+	var firstSend, deliverEnd time.Time
+	var rejected atomic.Bool
 	if in.Deliver != nil {
-		said, firstSendMS, deliverEnd = deliverTimed(ctx, in, res)
-		noteTurnTiming(&res, "first_send", firstSendMS)
+		s.delivering.Store(in.turnID, &rejected)
+		defer s.delivering.Delete(in.turnID)
+		said, firstSend, deliverEnd = deliverTimed(ctx, in, res)
+		if !firstSend.IsZero() && !in.started.IsZero() {
+			noteTurnTiming(&res, "first_send", max(int(firstSend.Sub(in.started).Milliseconds()), 0))
+		}
 	}
 	if strings.TrimSpace(said) != "" && !in.Proactive && !in.banter {
 		s.openFollowWindow(in, said, pol, in.FollowUp)
@@ -1714,22 +1732,46 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	}
 	// a reply with no text (a picture the tools posted) keeps the request in the conversation as before
 	kept := in.Deliver == nil || strings.TrimSpace(said) != "" || strings.TrimSpace(res.Answer) == ""
+	callAddress := store.CallAccepted
+	if kept && !in.DryRun && !in.Proactive && !in.banter && in.MessageID != "" {
+		if s.liveToBot(in) {
+			callAddress = store.CallReply
+		}
+	}
 	// a person who withdrew consent to being remembered is not kept in the chat context either
 	if !in.DryRun && s.MemoryAllowed(in.SpeakerID) && kept {
+		requestAt, answerAt, spans := s.spokenTimes(in, firstSend, deliverEnd, said)
+		if rejected.Load() {
+			// The text was delivered, but the registration transaction lost its
+			// boundaries. Do not offer any of it before delivery completed.
+			answerAt, spans = deliverEnd, ""
+		}
+		answerAt = afterRequest(answerAt, requestAt)
 		var sources []string
 		if in.sourceRefs != nil {
 			sources = *in.sourceRefs
 		}
 		sources = uniqueStrings(append(append(append([]string{}, sources...), lookedUp(res)...), in.MessageID, personRef(in.SpeakerID)))
-		turns := []store.ChatTurn{{Role: "user", Speaker: in.Speaker, Content: in.Message, NativeID: in.MessageID, SpeakerID: in.SpeakerID, Merged: in.Fragments, ReadAsOf: in.readAsOf}}
+		turns := []store.ChatTurn{{Role: "user", Speaker: in.Speaker, Content: in.Message, NativeID: in.MessageID, SpeakerID: in.SpeakerID, Merged: in.Fragments, ReadAsOf: in.readAsOf, SpokenAt: requestAt.UTC().Format(time.RFC3339Nano), CallAddress: callAddress}}
 		if in.vision != nil && in.vision.Mode == "described" {
 			// the description came from other messages too: deleting one of them removes this turn
 			turns[0].DerivedFrom = in.vision.Sources
 		}
 		if !toolFailureToReplay(res.Tools) {
-			turns = append(turns, store.ChatTurn{Role: "assistant", Content: said, NativeID: in.MessageID, SpeakerID: in.SpeakerID, SourceIDs: sources, Merged: in.Fragments, ReadAsOf: in.readAsOf})
+			turns = append(turns, store.ChatTurn{Role: "assistant", Content: said, NativeID: in.MessageID, SpeakerID: in.SpeakerID,
+				SourceIDs: sources, Merged: in.Fragments, ReadAsOf: in.readAsOf, SpokenAt: answerAt.UTC().Format(time.RFC3339Nano), DeliveryTurn: in.turnID, DeliverySpans: spans})
 		}
-		_ = eng.Store.AppendDecidedChatTurns(key, func() []store.ChatTurn { return s.flights.toKeep(in.flight, turns) }, chatTurnsKept)
+		committed, err := eng.Store.AppendDecidedChatTurns(key, func() []store.ChatTurn { return s.flights.toKeep(in.flight, turns) }, chatTurnsKept)
+		if err != nil {
+			msg := "could not keep delivered conversation"
+			if committed {
+				msg = "kept delivered conversation but could not prune older turns"
+			}
+			s.Log.WarnContext(ctx, msg, "turn", in.turnID, "err", err)
+		}
+		if committed && len(turns) == 2 && in.Deliver != nil && !rejected.Load() && in.MessageID != "" {
+			s.linkPostedReply(in.turnID, in.MessageID, key)
+		}
 	}
 	s.logTurn(in, res)
 	if !deliverEnd.IsZero() {

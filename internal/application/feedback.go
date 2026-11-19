@@ -1,11 +1,16 @@
 package application
 
 import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
 	"masamong/internal/action"
 	"masamong/internal/errcode"
+	"masamong/internal/memory/blocks"
 	"masamong/internal/memory/store"
 )
 
@@ -90,21 +95,202 @@ func feedbackUser(userID string) string { return personRef(userID) }
 func personRef(userID string) string { return store.PersonRef(userID) }
 
 // NoteReplyMessages remembers which turn the bot's reply messages came from.
-func (s *Service) NoteReplyMessages(turnID, guildID, channelID string, messageIDs []string) {
-	db, err := s.adminDB()
-	if err != nil || turnID == "" {
+func (s *Service) NoteReplyMessages(turnID, guildID, channelID string, messageIDs []string, ends ...int) {
+	if turnID == "" || len(messageIDs) == 0 {
 		return
 	}
-	now := s.Clock.Now().UTC().Format(time.RFC3339)
-	for _, id := range messageIDs {
-		if id == "" {
-			continue
+	db, err := s.adminDB()
+	now := s.Clock.Now().UTC().Format(time.RFC3339Nano)
+	if err == nil {
+		err = db.WithWriter(func(tx *sql.Tx) error {
+			for i, id := range messageIDs {
+				if id == "" {
+					return errors.New("reply registration: missing message ID")
+				}
+				end := 0
+				if i < len(ends) {
+					end = ends[i]
+				}
+				if _, err := tx.Exec(insertReplyMessage(db.IsSQLite()), id, turnID, guildID, channelID, now, "", end); err != nil {
+					return err
+				}
+				var owner string
+				if err := tx.QueryRow(`SELECT turn_id FROM reply_messages WHERE message_id=?`, id).Scan(&owner); err != nil {
+					return err
+				}
+				if owner != turnID {
+					return errors.New("reply registration: message already belongs to another turn")
+				}
+			}
+			return nil
+		})
+	}
+	if err != nil {
+		s.rejectDelivery(guildID, channelID, turnID, messageIDs)
+		s.Log.Warn("could not register delivered reply; not replayable", "turn", turnID, "parts", len(messageIDs), "err", err)
+	}
+}
+
+func insertReplyMessage(sqlite bool) string {
+	insert := "INSERT IGNORE"
+	if sqlite {
+		insert = "INSERT OR IGNORE"
+	}
+	return insert + ` INTO reply_messages(message_id,turn_id,guild_id,channel_id,at,request_id,part_end) VALUES(?,?,?,?,?,?,?)`
+}
+
+// DeliverReplyContinuation keeps a reply to a newly posted part behind its
+// registration, even when the gateway event arrives before the REST acknowledgement.
+func (s *Service) DeliverReplyContinuation(ctx context.Context, guildID, channelID, headID string, send func() (string, []string, []int)) error {
+	release, err := s.turns.enter(ctx, blocks.ChannelKey(guildID, channelID), 0)
+	if err != nil {
+		return err
+	}
+	defer release()
+	said, ids, ends := send()
+	return s.NoteReplyContinuation(guildID, channelID, headID, said, ids, ends...)
+}
+
+// NoteReplyContinuation attaches only the parts a later "more" press actually posted.
+// The original row owns their provenance: never insert a new answer if it was removed.
+func (s *Service) NoteReplyContinuation(guildID, channelID, headID, said string, ids []string, ends ...int) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	db, err := s.adminDB()
+	if err != nil {
+		s.rejectDelivery(guildID, channelID, "", ids)
+		return err
+	}
+	now := s.Clock.Now().UTC()
+	observed := map[string]time.Time{}
+	for _, l := range s.liveLines(guildID, channelID) {
+		if l.Bot {
+			observed[l.ID] = l.At
 		}
-		q := `INSERT OR IGNORE INTO reply_messages(message_id, turn_id, guild_id, channel_id, at) VALUES(?,?,?,?,?)`
-		if !db.IsSQLite() {
-			q = `INSERT IGNORE INTO reply_messages(message_id, turn_id, guild_id, channel_id, at) VALUES(?,?,?,?,?)`
+	}
+	key := blocks.ChannelKey(guildID, channelID)
+	byteLen, appendText := "LENGTH(content)", "CONCAT(content,?)"
+	if db.IsSQLite() {
+		byteLen, appendText = "LENGTH(CAST(content AS BLOB))", "content || ?"
+	}
+	err = db.WithWriter(func(tx *sql.Tx) error {
+		var turn, request string
+		err := tx.QueryRow(`SELECT turn_id,COALESCE(request_id,'') FROM reply_messages WHERE message_id=? AND guild_id=? AND channel_id=?`,
+			headID, guildID, channelID).Scan(&turn, &request)
+		if errors.Is(err, sql.ErrNoRows) {
+			return errors.New("continued reply: no registered head")
 		}
-		_, _ = db.DB.Exec(q, id, turnID, guildID, channelID, now)
+		if err != nil {
+			return err
+		}
+		var base int
+		var spoken, encoded string
+		err = tx.QueryRow(`SELECT `+byteLen+`,spoken_at,COALESCE(delivery_spans,'') FROM chat_turns
+			WHERE channel_key=? AND delivery_turn=? AND native_id=? AND role='assistant'`, key, turn, request).Scan(&base, &spoken, &encoded)
+		if errors.Is(err, sql.ErrNoRows) {
+			request = "" // registration for feedback only; never re-create a removed answer
+		} else if err != nil {
+			return err
+		}
+		var spans []deliverySpan
+		if encoded != "" {
+			if err := json.Unmarshal([]byte(encoded), &spans); err != nil {
+				return err
+			}
+		} else if base != 0 {
+			at, _ := time.Parse(time.RFC3339Nano, spoken)
+			spans = append(spans, deliverySpan{End: base, At: at})
+		}
+		var addition strings.Builder
+		grouped := len(ends) == 0 // older connectors supplied a single text for the group
+		if !grouped && (len(ids) != len(ends) || ends[len(ends)-1] != len(said)) {
+			return errors.New("continued reply: invalid part boundaries")
+		}
+		from, fresh := 0, 0
+		var last time.Time
+		for i, id := range ids {
+			if id == "" {
+				return errors.New("continued reply: missing post ID")
+			}
+			to := len(said)
+			if !grouped {
+				to = ends[i]
+			}
+			if to < from || to > len(said) {
+				return errors.New("continued reply: invalid part boundary")
+			}
+			part := said[from:to]
+			if !grouped {
+				from = to
+			}
+			res, err := tx.Exec(insertReplyMessage(db.IsSQLite()), id, turn, guildID, channelID, now.Format(time.RFC3339Nano), request, 0)
+			if err != nil {
+				return err
+			}
+			n, err := res.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if n == 0 || request == "" || said == "" {
+				continue
+			}
+			fresh++
+			at := snowflakeTime(id)
+			if at.IsZero() {
+				at = observed[id]
+			}
+			if at.IsZero() {
+				at = now
+			}
+			start := base + 2
+			if fresh == 1 {
+				addition.WriteString("\n\n")
+			}
+			if !grouped || fresh == 1 {
+				start = base + addition.Len()
+				addition.WriteString(part)
+			}
+			end := base + addition.Len()
+			if _, err := tx.Exec(`UPDATE reply_messages SET rest_start=?,part_end=? WHERE message_id=?`, start, end, id); err != nil {
+				return err
+			}
+			if !grouped {
+				spans = append(spans, deliverySpan{End: end, At: at})
+			}
+			if at.After(last) {
+				last = at
+			}
+		}
+		if fresh == 0 {
+			return nil
+		}
+		if grouped {
+			if fresh != len(ids) {
+				return errors.New("continued reply: partially overlapping group without boundaries")
+			}
+			spans = append(spans, deliverySpan{End: base + addition.Len(), At: last})
+		}
+		_, err = tx.Exec(`UPDATE chat_turns SET content=`+appendText+`,delivery_spans=? WHERE channel_key=? AND delivery_turn=? AND native_id=? AND role='assistant'`,
+			addition.String(), encodeSpans(spans), key, turn, request)
+		return err
+	})
+	if err != nil {
+		s.rejectDelivery(guildID, channelID, "", ids)
+	}
+	return err
+}
+
+// linkPostedReply publishes the request for all parts together, before the channel gate opens.
+// A post not cleared for replay stays available for feedback, but not conversation history.
+func (s *Service) linkPostedReply(turnID, requestID, channelKey string) {
+	if db, err := s.adminDB(); err == nil {
+		if _, err := db.DB.Exec(`UPDATE reply_messages SET request_id=? WHERE turn_id=? AND EXISTS
+			(SELECT 1 FROM chat_turns WHERE channel_key=? AND delivery_turn=? AND native_id=? AND role='assistant')`, requestID, turnID, channelKey, turnID, requestID); err != nil {
+			s.Log.Warn("could not link posted reply", "err", err)
+		}
+	} else {
+		s.Log.Warn("could not open posted reply registry", "err", err)
 	}
 }
 

@@ -19,11 +19,13 @@ import (
 
 // Line is one message of a channel, as the live window or the store knows it.
 type Line struct {
-	ID       string // the platform message ID (Discord snowflake)
-	AuthorID string // the account; "" when the platform has none (Kakao imports)
-	Author   string // the name people see
-	Bot      bool   // the bot itself
-	ReplyTo  string // the message this one replies to ("" for none)
+	ID          string // the platform message ID (Discord snowflake)
+	AuthorID    string // the account; "" when the platform has none (Kakao imports)
+	Author      string // the name people see
+	Bot         bool   // the bot itself
+	Withdrawn   bool   // its answer is unavailable, not merely a post delivered without text
+	RegistryGap bool   // raw post is ineligible unless its delivery can be verified
+	ReplyTo     string // the message this one replies to ("" for none)
 	// Mentions are the accounts the message mentions (people and the bot). MentionsOthers marks a role or
 	// @everyone mention, which is directed at people in general.
 	Mentions       []string
@@ -31,9 +33,13 @@ type Line struct {
 	// ToBot marks a message said to the bot however it called it: a mention, a reply to one of its messages,
 	// or its name in a call it took (the name-call check said so, or it answered the message). Mentions and
 	// ReplyTo show the first two only when the source keeps them; a stored message keeps neither.
-	ToBot bool
-	At    time.Time
-	Text  string
+	ToBot      bool
+	ReplyToBot bool // the immutable reply target was the bot, even if no longer in the window
+	// RevisedAt is when the live window received an edit. An older running turn
+	// must not mark that revision as the call it answered.
+	RevisedAt time.Time
+	At        time.Time
+	Text      string
 }
 
 func (l Line) mentions(id string) bool {

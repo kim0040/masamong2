@@ -11,6 +11,7 @@ import (
 	"masamong/internal/application"
 	"masamong/internal/chat"
 	"masamong/internal/config"
+	"masamong/internal/memory/blocks"
 	"masamong/internal/memory/engine"
 )
 
@@ -66,6 +67,477 @@ func newOwnAnswerRoom(t *testing.T) *ownAnswerRoom {
 }
 
 func (r *ownAnswerRoom) at(d time.Duration) time.Time { return r.t0.Add(d) }
+
+func TestDeferredReplyPublishesAtItsEdit(t *testing.T) {
+	for _, multi := range []bool{false, true} {
+		t.Run(fmt.Sprintf("multipart=%t", multi), func(t *testing.T) {
+			r := newOwnAnswerRoom(t)
+			r.answer = "FIRSTDELIVERY"
+			if multi {
+				r.answer += " SECONDDELIVERY"
+			}
+			var queued string
+			_, err := r.svc.ChatTurn(t.Context(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "dc:slash",
+				SpeakerID: "a", Speaker: "Asker", Message: "SLASH", Deliver: func(ctx context.Context, res chat.Result) string {
+					now := time.Now()
+					queued = snowflake(now)
+					ids, ends := []string{snowflake(now.Add(-time.Minute))}, []int{len("FIRSTDELIVERY")}
+					if multi {
+						// The single-part case has only the queued call's ID, no live observation.
+						r.human(queued, "a", "Asker", "FOLLOW", now, true)
+						ids = append(ids, snowflake(now.Add(time.Second)))
+						ends = append(ends, len(res.Answer))
+					}
+					application.NoteFirstSend(ctx)
+					r.svc.NoteReplyMessages(res.TurnID, "g", "c", ids, ends...)
+					return res.Answer
+				}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := r.svc.ChatTurn(t.Context(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: queued, SpeakerID: "a", Speaker: "Asker", Message: "FOLLOW"}); err != nil {
+				t.Fatal(err)
+			}
+			if got := r.shown([][2]string{{"first", "FIRSTDELIVERY"}, {"second", "SECONDDELIVERY"}}); got != "" {
+				t.Fatalf("placeholder exposed text before its edit: %s", got)
+			}
+		})
+	}
+}
+
+func TestInFlightEditAddressAfterRestart(t *testing.T) {
+	for _, reply := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reply=%t", reply), func(t *testing.T) {
+			r := newOwnAnswerRoom(t)
+			m := application.ObservedMessage{MessageID: "asked", AuthorID: "a", AuthorName: "Asker", Content: "original", At: r.at(0)}
+			if reply {
+				m.ReplyTo, m.ReplyAuthorID = "prior-post", "bot"
+			}
+			r.post(m, true)
+			r.human("separator", "b", "Other", "separate topic", r.at(time.Minute), false)
+			r.answer = "initial answer"
+			_, err := r.svc.ChatTurn(t.Context(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "asked",
+				Message: "original", Speaker: "Asker", SpeakerID: "a", Deliver: func(ctx context.Context, res chat.Result) string {
+					if err := r.svc.MessageEdited("g", "c", "asked", "REVISIONTOKEN", r.at(2*time.Minute)); err != nil {
+						t.Fatal(err)
+					}
+					if err := r.svc.DrainRedactions(ctx); err != nil {
+						t.Fatal(err)
+					}
+					return res.Answer
+				}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			r.svc = restartServiceForTest(t, r.svc)
+			r.call(ownCall{id: "fresh", author: "a", name: "Asker", text: "fresh", how: "mention", at: r.at(5 * time.Minute), answeredAt: r.at(6 * time.Minute), answer: "next"})
+			if got := strings.Contains(r.lastPrompt(), "REVISIONTOKEN"); got != reply {
+				t.Fatalf("edited words in cold prompt: %t, want %t", got, reply)
+			}
+		})
+	}
+}
+
+func TestLegacyAliasReplaysBeforeCommit(t *testing.T) {
+	r := newOwnAnswerRoom(t)
+	r.human("request", "a", "Asker", "LEGACYREQ", r.at(0), true)
+	db := r.svc.Store.DB
+	post := snowflake(r.at(time.Second))
+	stamp := r.at(4 * time.Second).UTC().Format(time.RFC3339Nano)
+	for role, text := range map[string]string{"user": "LEGACYREQ", "assistant": "LEGACYANS"} {
+		if _, err := db.Exec(`INSERT INTO chat_turns(channel_key,role,speaker,content,created_at,native_id,speaker_id,evidence_state)
+			VALUES(?,?,'Asker',?,?,'request','a',1)`, blocks.ChannelKey("g", "c"), role, text, stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`INSERT INTO reply_messages(message_id,turn_id,guild_id,channel_id,at) VALUES(?,'legacy-turn','g','c',?)`, post, stamp); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO turn_log(id,at,day,hour,guild_id,channel_id,outcome,tools,hits,cost_usd,latency_ms,lab,body,speaker_ref,evidence_state)
+		VALUES('legacy-turn',?,'',0,'g','c','answered','',0,0,0,0,'{"message_id":"request"}','',1)`, stamp); err != nil {
+		t.Fatal(err)
+	}
+	r.call(ownCall{id: "queued", author: "b", name: "Replier", text: "follow up", at: r.at(2 * time.Second),
+		answeredAt: r.at(5 * time.Second), how: "reply", replyTo: post, answer: "next"})
+	if !strings.Contains(r.lastPrompt(), "LEGACYANS") {
+		t.Fatal("reply cannot see the delivered legacy answer")
+	}
+}
+
+func TestOlderAnswerThroughPartAliasIsClipped(t *testing.T) {
+	r := newOwnAnswerRoom(t)
+	_, parts := r.call(ownCall{id: "request", author: "a", name: "Asker", text: "request",
+		at: r.at(0), answeredAt: r.at(time.Second), how: "mention",
+		answer: "FIRSTPART / " + strings.Repeat("x", 450) + " ENDMARK"})
+	r.call(ownCall{id: "reply", author: "b", name: "Replier", text: "follow up",
+		at: r.at(time.Minute), answeredAt: r.at(2 * time.Minute), how: "reply", replyTo: parts[1], answer: "next"})
+	if got := r.shown([][2]string{{"start", "FIRSTPART"}, {"tail", "ENDMARK"}}); got != "start tail" {
+		t.Fatalf("reply to the current exchange shows %q, want the full answer", got)
+	}
+	r.call(ownCall{id: "later", author: "b", name: "Replier", text: "another follow up",
+		at: r.at(3 * time.Minute), answeredAt: r.at(4 * time.Minute), how: "mention", answer: "final"})
+	if got := r.shown([][2]string{{"start", "FIRSTPART"}, {"tail", "ENDMARK"}}); got != "start" {
+		t.Fatalf("reply alias shows %q, want only the clipped answer", got)
+	}
+}
+
+func TestReplyToOlderExchangePreservesNewerTail(t *testing.T) {
+	r := newOwnAnswerRoom(t)
+	long := strings.Repeat("x", 450)
+	var target string
+	for i, tail := range []string{"OLDESTEND", "TARGETEND", "NEWESTEND"} {
+		id := fmt.Sprintf("request%d", i)
+		_, parts := r.call(ownCall{id: id, author: "a", name: "Asker", how: "mention", text: id,
+			at: r.at(time.Duration(i) * time.Minute), answeredAt: r.at(time.Duration(i)*time.Minute + time.Second), answer: long + tail})
+		if i == 1 {
+			target = parts[0]
+		}
+	}
+	r.call(ownCall{id: "reply", author: "a", name: "Asker", how: "reply", replyTo: target, text: "follow",
+		at: r.at(3 * time.Minute), answeredAt: r.at(4 * time.Minute), answer: "final"})
+	if got := r.shown([][2]string{{"oldest", "OLDESTEND"}, {"target", "TARGETEND"}, {"newest", "NEWESTEND"}}); got != "target newest" {
+		t.Fatalf("visible tails: %q", got)
+	}
+}
+
+func TestMorePartsJoinOnlyTheirSurvivingAnswer(t *testing.T) {
+	for _, deleted := range []bool{false, true} {
+		t.Run(fmt.Sprintf("deleted=%t", deleted), func(t *testing.T) {
+			r := newOwnAnswerRoom(t)
+			_, head := r.call(ownCall{id: "request", author: "a", name: "Asker", text: "MOREQUESTION", at: r.at(0),
+				answeredAt: r.at(time.Second), how: "mention", answer: "HEADTOKEN"})
+			if deleted {
+				changeSource(t, r.svc, "delete", "request", "a")
+			}
+			for i := 0; i < 2; i++ { // duplicate notification must not double the delivered text
+				if err := r.svc.NoteReplyContinuation("g", "c", head[0], "RESTTOKEN", []string{"more-a", "more-b"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if deleted && r.callerAnswersStored("a") != 0 {
+				t.Fatal("more recreated the removed answer")
+			}
+			r.svc = restartServiceForTest(t, r.svc)
+			r.call(ownCall{id: "reply", author: "b", name: "Replier", text: "follow up", at: r.at(time.Minute),
+				answeredAt: r.at(time.Minute + time.Second), how: "reply", replyTo: "more-b", answer: "next"})
+			want := 1
+			if deleted {
+				want = 0
+			}
+			for _, token := range []string{"MOREQUESTION", "HEADTOKEN", "RESTTOKEN"} {
+				if n := strings.Count(r.lastPrompt(), token); n != want {
+					t.Fatalf("reply through a continuation after restart: %s count %d, want %d", token, n, want)
+				}
+			}
+		})
+	}
+}
+
+func TestReplyToUnthreadedPostKeepsItsTail(t *testing.T) {
+	r := newOwnAnswerRoom(t)
+	r.svc.Observe(application.ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: "unthreaded",
+		AuthorID: "bot", FromBot: true, At: r.at(0), Content: strings.Repeat("h", 500) + "CURRENTTAIL"})
+	r.call(ownCall{id: "reply", author: "b", name: "Replier", text: "follow up", at: r.at(time.Second),
+		answeredAt: r.at(2 * time.Second), how: "reply", replyTo: "unthreaded", answer: "next"})
+	if !strings.Contains(r.lastPrompt(), "CURRENTTAIL") {
+		t.Fatal("direct reply to a post without a request lost its tail")
+	}
+}
+
+func TestReplyDuringContinuationSend(t *testing.T) {
+	r := newOwnAnswerRoom(t)
+	_, head := r.call(ownCall{id: "request", author: "a", name: "Asker", text: "ORIGIN",
+		at: r.at(0), answeredAt: r.at(time.Second), how: "mention", answer: strings.Repeat("h", 650)})
+	first := snowflake(r.at(2 * time.Second))
+	last := snowflake(r.at(4 * time.Second))
+	done := make(chan error, 1)
+	err := r.svc.DeliverReplyContinuation(t.Context(), "g", "c", head[0], func() (string, []string, []int) {
+		// Discord has displayed first, but its REST send has not returned an ID
+		// and no gateway observation of the continuation is available.
+		r.post(application.ObservedMessage{MessageID: "queued", AuthorID: "b", AuthorName: "Replier",
+			Content: "follow up", ReplyTo: first, At: r.at(3 * time.Second)}, false)
+		go func() {
+			_, err := r.svc.ChatTurn(t.Context(), application.ChatInput{GuildID: "g", ChannelID: "c",
+				MessageID: "queued", SpeakerID: "b", Speaker: "Replier", Message: "follow up"})
+			done <- err
+		}()
+		for deadline := time.Now().Add(5 * time.Second); r.svc.TurnsInFlightForTest() == 0; {
+			if time.Now().After(deadline) {
+				t.Fatal("replier did not queue during send")
+			}
+			time.Sleep(time.Millisecond)
+		}
+		return "RESTFIRSTRESTLAST", []string{first, last}, []int{len("RESTFIRST"), len("RESTFIRSTRESTLAST")}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := r.shown([][2]string{{"request", "ORIGIN"}, {"first", "RESTFIRST"}, {"later", "RESTLAST"}}); got != "request first" {
+		t.Fatalf("reply during continuation send saw %q", got)
+	}
+	r.svc = restartServiceForTest(t, r.svc)
+	r.call(ownCall{id: "later", author: "c", name: "Other", text: "follow up", at: r.at(time.Minute),
+		answeredAt: r.at(2 * time.Minute), how: "reply", replyTo: last, answer: "next"})
+	if got := r.shown([][2]string{{"request", "ORIGIN"}, {"last", "RESTLAST"}}); got != "request last" {
+		t.Fatalf("continuation alias after restart saw %q", got)
+	}
+}
+
+func TestFailedWritesNeverClearDeliveredPosts(t *testing.T) {
+	for _, tc := range []struct {
+		name, trigger string
+	}{
+		{"registration", `BEFORE INSERT ON reply_messages WHEN NEW.message_id='botmsg2' BEGIN SELECT RAISE(FAIL,'synthetic failure'); END`},
+		{"assistant write", `BEFORE INSERT ON chat_turns WHEN NEW.role='assistant' BEGIN SELECT RAISE(FAIL,'synthetic failure'); END`},
+		{"assistant declined", `BEFORE INSERT ON chat_turns WHEN NEW.role='assistant' BEGIN SELECT RAISE(IGNORE); END`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newOwnAnswerRoom(t)
+			if _, err := r.svc.Store.DB.Exec(`CREATE TRIGGER refuse_write ` + tc.trigger); err != nil {
+				t.Fatal(err)
+			}
+			_, parts := r.call(ownCall{id: "request", author: "a", name: "Asker", text: "request", at: r.at(0),
+				answeredAt: r.at(time.Second), how: "mention", answer: "FAILEDHEAD / FAILEDPART"})
+			var published int
+			if tc.name == "registration" && r.callerAnswersStored("a") != 1 {
+				t.Fatal("a failed alias write discarded a successfully delivered answer")
+			}
+			if err := r.svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM reply_messages WHERE request_id='request'`).Scan(&published); err != nil || published != 0 {
+				t.Fatalf("%d posts published without a kept answer: %v", published, err)
+			}
+			r.call(ownCall{id: "reply", author: "b", name: "Replier", text: "follow up", at: r.at(time.Minute),
+				answeredAt: r.at(2 * time.Minute), how: "reply", replyTo: parts[1], answer: "next"})
+			if strings.Contains(r.lastPrompt(), "FAILEDPART") {
+				t.Fatal("unverified post entered the replier's context")
+			}
+		})
+	}
+}
+
+func TestPruneFailureStillLinksCommittedReply(t *testing.T) {
+	r := newOwnAnswerRoom(t)
+	db := r.svc.Store.DB
+	if _, err := db.Exec(`WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<40)
+		INSERT INTO chat_turns(channel_key,role,content,created_at) SELECT ?,'user','seed',? FROM n`,
+		blocks.ChannelKey("g", "c"), r.at(-time.Hour).Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TRIGGER fail_prune BEFORE DELETE ON chat_turns BEGIN SELECT RAISE(FAIL,'synthetic prune failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	_, parts := r.call(ownCall{id: "request", author: "a", name: "Asker", text: "question", at: r.at(0),
+		answeredAt: r.at(time.Second), how: "mention", answer: "head / tail"})
+	for _, id := range parts {
+		var request string
+		if err := db.QueryRow(`SELECT request_id FROM reply_messages WHERE message_id=?`, id).Scan(&request); err != nil || request != "request" {
+			t.Fatalf("part %s not linked to committed answer: %q (%v)", id, request, err)
+		}
+	}
+}
+
+func TestContinuationStaysWithItsExactDelivery(t *testing.T) {
+	r := newOwnAnswerRoom(t)
+	c := ownCall{id: "request", author: "a", name: "Asker", text: "ORIGIN",
+		at: r.at(0), answeredAt: r.at(time.Second), how: "mention", answer: strings.Repeat("h", 650)}
+	_, head := r.call(c)
+	rest := snowflake(r.at(2 * time.Second))
+	if err := r.svc.NoteReplyContinuation("g", "c", head[0], "ORIGINALREST", []string{rest}); err != nil {
+		t.Fatal(err)
+	}
+	c.answer, c.answeredAt = strings.Repeat("x", 700), r.at(3*time.Second)
+	r.call(c)
+	r.svc = restartServiceForTest(t, r.svc)
+	r.call(ownCall{id: "reply", author: "b", name: "Replier", text: "follow up", at: r.at(time.Minute),
+		answeredAt: r.at(2 * time.Minute), how: "reply", replyTo: rest, answer: "next"})
+	if !strings.Contains(r.lastPrompt(), "ORIGINALREST") {
+		t.Fatal("a later delivery for the same request displaced the continuation")
+	}
+}
+
+func TestHistoryCutoffBeforeContinuation(t *testing.T) {
+	for _, mode := range []string{"on", "off"} {
+		t.Run(mode, func(t *testing.T) {
+			r := newOwnAnswerRoom(t)
+			applyDoc(t, r.svc, func(d *config.Document) {
+				policy := d.Guilds["g"].Channels["c"]
+				policy.Attribution = mode
+				d.Guilds["g"].Channels["c"] = policy
+			})
+			_, head := r.call(ownCall{id: "request", author: "a", name: "Asker", text: "start",
+				at: r.at(0), answeredAt: r.at(time.Second), how: "mention", answer: "VISIBLEHEAD"})
+			if err := r.svc.NoteReplyContinuation("g", "c", head[0], "UNPOSTEDREST", []string{snowflake(r.at(4 * time.Second))}); err != nil {
+				t.Fatal(err)
+			}
+			r.call(ownCall{id: "future", author: "a", name: "Asker", text: "another question",
+				at: r.at(5 * time.Second), answeredAt: r.at(6 * time.Second), how: "mention", answer: "FUTUREANSWER"})
+			r.call(ownCall{id: "queued", author: "a", name: "Asker", text: "follow up",
+				at: r.at(2 * time.Second), answeredAt: r.at(7 * time.Second), how: "mention", answer: "next"})
+			if got := r.shown([][2]string{{"head", "VISIBLEHEAD"}, {"rest", "UNPOSTEDREST"}, {"future", "FUTUREANSWER"}}); got != "head" {
+				t.Fatalf("earlier call saw %q", got)
+			}
+		})
+	}
+}
+
+func TestReviewOwnBurstKeepsFullRequest(t *testing.T) {
+	for _, restart := range []bool{false, true} {
+		t.Run(fmt.Sprintf("restart=%t", restart), func(t *testing.T) {
+			r := newOwnAnswerRoom(t)
+			r.human("first", "a", "Asker", "BURSTFIRST", r.at(0), false)
+			r.human("last", "a", "Asker", "BURSTLAST", r.at(time.Second), false)
+			r.answer = "BURSTANSWER"
+			res, err := r.svc.ChatTurn(t.Context(), application.ChatInput{GuildID: "g", ChannelID: "c",
+				MessageID: "last", Message: "BURSTFIRST\nBURSTLAST", Speaker: "Asker", SpeakerID: "a", Fragments: []string{"first"}})
+			if err != nil || res.Answer == "" {
+				t.Fatalf("burst turn: %v", err)
+			}
+			answered := r.at(20 * time.Second)
+			if restart {
+				answered = r.at(40 * time.Minute) // only the answer is inside the later call's room window
+			}
+			if _, err := r.svc.Store.DB.Exec(`UPDATE chat_turns SET spoken_at=? WHERE role='assistant'`, answered.UTC().Format(time.RFC3339Nano)); err != nil {
+				t.Fatal(err)
+			}
+			if restart {
+				r.svc = restartServiceForTest(t, r.svc)
+			}
+			r.call(ownCall{id: "next", author: "a", name: "Asker", text: "follow up", at: r.at(time.Hour),
+				answeredAt: r.at(time.Hour + time.Second), how: "mention", answer: "next answer"})
+			if got := r.shown([][2]string{{"first", "BURSTFIRST"}, {"last", "BURSTLAST"}, {"answer", "BURSTANSWER"}}); got != "first last answer" {
+				t.Fatalf("included %s", got)
+			}
+			changeSource(t, r.svc, "delete", "first", "a")
+			if n := chainCount(t, r.svc, `SELECT COUNT(*) FROM chat_turns WHERE native_id='next' AND role='assistant'`); n != 0 {
+				t.Fatal("answer that read the first fragment survived its deletion")
+			}
+		})
+	}
+}
+
+func TestReviewOwnCountsExchangesNotBubbles(t *testing.T) {
+	r := newOwnAnswerRoom(t)
+	r.call(ownCall{id: "good", author: "a", name: "Asker", text: "GOODREQ", at: r.at(0),
+		answeredAt: r.at(time.Second), how: "mention", answer: "GOODANS"})
+	r.call(ownCall{id: "failed", author: "a", name: "Asker", text: "FAILREQ", at: r.at(10 * time.Minute),
+		answeredAt: r.at(11 * time.Minute), how: "mention", answer: "FAILANS-A / FAILANS-B / FAILANS-C",
+		plan: `{"memory_requirement":"none","tool_plan":[{"tool_name":"weather","parameters":{"region":"Atlantis","source":"global"}}]}`})
+	if n := r.callerAnswersStored("a"); n != 1 {
+		t.Fatalf("expected only the successful assistant row, got %d", n)
+	}
+	r.call(ownCall{id: "now", author: "a", name: "Asker", text: "follow up", at: r.at(time.Hour),
+		answeredAt: r.at(time.Hour + time.Second), how: "mention", answer: "next"})
+	if got := r.shown([][2]string{{"good", "GOODANS"}, {"failed", "FAILANS"}, {"failed request", "FAILREQ"}}); got != "good" {
+		t.Fatalf("prior exchanges: %s", got)
+	}
+}
+
+func TestFailedToolPostIsNotAReplyAlias(t *testing.T) {
+	r := newOwnAnswerRoom(t)
+	_, parts := r.call(ownCall{id: "failed", author: "a", name: "Asker", text: "FAILREQ", at: r.at(0),
+		answeredAt: r.at(time.Second), how: "mention", answer: "FAILANS-A / FAILANS-B",
+		plan: `{"memory_requirement":"none","tool_plan":[{"tool_name":"weather","parameters":{"region":"Atlantis","source":"global"}}]}`})
+	r.call(ownCall{id: "other", author: "b", name: "Replier", text: "follow up", at: r.at(time.Minute),
+		answeredAt: r.at(2 * time.Minute), how: "reply", replyTo: parts[1], answer: "next"})
+	if got := r.shown([][2]string{{"answer", "FAILANS"}, {"request", "FAILREQ"}}); got != "" {
+		t.Fatalf("reply through a failed turn included %s", got)
+	}
+}
+
+func TestReviewPostedAliasBeforeTurnLogCommit(t *testing.T) {
+	r := newOwnAnswerRoom(t)
+	r.t0 = time.Now()
+	// Leave the first turn in exactly the state visible after gate release but before
+	// its diagnostic insert. No hook or goroutine needs to race the log writer.
+	if _, err := r.svc.Store.DB.Exec(`CREATE TRIGGER hold_record BEFORE INSERT ON turn_log
+		WHEN json_extract(NEW.body,'$.message_id')='request' BEGIN SELECT RAISE(IGNORE); END`); err != nil {
+		t.Fatal(err)
+	}
+	r.human("request", "a", "Asker", "GAPREQUEST", r.at(0), true)
+	r.answer = "GAPFIRST / GAPLATER"
+	_, err := r.svc.ChatTurn(t.Context(), application.ChatInput{GuildID: "g", ChannelID: "c",
+		MessageID: "request", Message: "GAPREQUEST", Speaker: "Asker", SpeakerID: "a",
+		Deliver: func(_ context.Context, res chat.Result) string {
+			r.svc.NoteReplyMessages(res.TurnID, "g", "c", []string{"first", "later"})
+			return res.Answer
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := chainCount(t, r.svc, `SELECT COUNT(*) FROM turn_log`); n != 0 {
+		t.Fatal("first turn already logged")
+	}
+	r.call(ownCall{id: "reply", author: "b", name: "Replier", text: "follow up", at: r.at(time.Minute),
+		answeredAt: r.at(2 * time.Minute), how: "reply", replyTo: "later", answer: "next"})
+	if got := r.shown([][2]string{{"request", "GAPREQUEST"}, {"first", "GAPFIRST"}, {"later", "GAPLATER"}}); got != "request first later" {
+		t.Fatalf("reply before log insert included %s", got)
+	}
+}
+
+func TestReviewRealQueuedFollowupBeforeCommit(t *testing.T) {
+	for _, observed := range []bool{true, false} {
+		t.Run(fmt.Sprintf("observed=%t", observed), func(t *testing.T) {
+			r := newOwnAnswerRoom(t)
+			r.answer = "DELIVEREDANSWER\nLATERBUBBLE"
+			r.human("initial", "a", "Asker", "FIRSTREQUEST", r.at(0), true)
+			done := make(chan error, 1)
+			_, err := r.svc.ChatTurn(t.Context(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "initial",
+				Message: "FIRSTREQUEST", Speaker: "Asker", SpeakerID: "a", Deliver: func(_ context.Context, res chat.Result) string {
+					sent := r.at(time.Second)
+					id := snowflake(sent)
+					r.svc.Observe(application.ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: "tool-post", ReplyTo: "initial",
+						FromBot: true, AuthorID: "bot", Content: "attachment", At: r.at(500 * time.Millisecond)})
+					if observed {
+						id = "observed-answer" // exercise the live timestamp without a snowflake
+						r.svc.Observe(application.ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: id, ReplyTo: "initial",
+							FromBot: true, AuthorID: "bot", Content: "DELIVEREDANSWER", At: sent})
+					}
+					r.human("queued", "a", "Asker", "NEXTREQUEST", r.at(2*time.Second), true)
+					r.mu.Lock()
+					r.answer = "NEXTANSWER"
+					r.mu.Unlock()
+					go func() {
+						_, err := r.svc.ChatTurn(t.Context(), application.ChatInput{GuildID: "g", ChannelID: "c",
+							MessageID: "queued", Message: "NEXTREQUEST", Speaker: "Asker", SpeakerID: "a"})
+						done <- err
+					}()
+					for deadline := time.Now().Add(5 * time.Second); r.svc.TurnsInFlightForTest() < 2; {
+						if time.Now().After(deadline) {
+							t.Error("follow-up did not queue before first commit")
+							break
+						}
+						time.Sleep(time.Millisecond)
+					}
+					last := snowflake(r.at(3 * time.Second))
+					r.svc.NoteReplyMessages(res.TurnID, "g", "c", []string{id, last}, len("DELIVEREDANSWER"), len(res.Answer))
+					return res.Answer
+				}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("queued turn did not finish")
+			}
+			if got := r.shown([][2]string{{"request", "FIRSTREQUEST"}, {"answer", "DELIVEREDANSWER"}, {"late", "LATERBUBBLE"}}); got != "request answer" {
+				t.Fatalf("queued call saw %s", got)
+			}
+			var stamp string
+			if err := r.svc.Store.DB.QueryRow(`SELECT spoken_at FROM chat_turns WHERE native_id='initial' AND role='assistant'`).Scan(&stamp); err != nil {
+				t.Fatal(err)
+			}
+			if sent, err := time.Parse(time.RFC3339Nano, stamp); err != nil || sent.UnixMilli() != r.at(time.Second).UnixMilli() {
+				t.Fatalf("stored delivery time %q, want %v", stamp, r.at(time.Second))
+			}
+		})
+	}
+}
 
 // human posts a person's message: the gateway captures it (memory_observations) and observes it (live window).
 func (r *ownAnswerRoom) human(id, author, name, text string, at time.Time, mentionBot bool) {
@@ -144,7 +616,10 @@ func (r *ownAnswerRoom) call(c ownCall) (map[string]any, []string) {
 	if err != nil || res.Answer == "" {
 		r.t.Fatalf("turn %s: %+v %v", c.id, res, err)
 	}
-	if _, err := eng.Store.DB.DB.Exec(`UPDATE chat_turns SET created_at=? WHERE id>?`, c.answeredAt.UTC().Format(time.RFC3339), before); err != nil {
+	// Without a gateway observation or a Discord snowflake this fixture's synthetic
+	// connector cannot convey its simulated delivery time.
+	if _, err := eng.Store.DB.DB.Exec(`UPDATE chat_turns SET created_at=?, spoken_at=CASE WHEN role='assistant' AND ? THEN ? ELSE spoken_at END WHERE id>?`,
+		c.answeredAt.UTC().Format(time.RFC3339), r.noBotPosts, c.answeredAt.UTC().Format(time.RFC3339Nano), before); err != nil {
 		r.t.Fatal(err)
 	}
 	return r.attribution(res.TurnID), ids

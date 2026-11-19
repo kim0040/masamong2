@@ -28,6 +28,46 @@ func mention(ids ...string) func(*Line) {
 
 func ids(a Attribution) string { return strings.Join(a.Included, ",") }
 
+func TestOwnCountsDistinctRequests(t *testing.T) {
+	lines := []Line{
+		ln("q0", "A", 0, "zero"), ln("a0", bot, 1, "zero", reply("q0")),
+		ln("q1", "A", 10, "one"), ln("a1", bot, 11, "one", reply("q1")),
+		ln("q2", "A", 20, "two"), ln("a2", bot, 21, "part", reply("q2")),
+		ln("b2", bot, 22, "rest", reply("q2")), ln("q3", "A", 3600, "next"),
+	}
+	a := Attribute(lines, []string{"q3"}, "A", Options{OwnWindow: time.Hour, OwnExchanges: 2})
+	if got := ids(a); got != "q1,a1,q2,a2,b2,q3" {
+		t.Fatalf("included %s", got)
+	}
+}
+
+func TestBlankBotLineDoesNotBringItsRequest(t *testing.T) {
+	for _, age := range []int{300, 3600} {
+		lines := []Line{
+			ln("good", "A", 0, "one"), ln("answer", bot, 1, "answer", reply("good")),
+			ln("unrelated", "A", 60, "two"), ln("withdrawn", bot, 61, "", reply("unrelated")),
+			ln("next", "A", age, "next", reply("withdrawn")),
+		}
+		lines[3].Withdrawn = true
+		a := Attribute(lines, []string{"next"}, "A", Options{OwnWindow: time.Hour, OwnExchanges: 1, FollowGap: time.Second})
+		if got := ids(a); got != "good,answer,next" {
+			t.Fatalf("age %d: included %s", age, got)
+		}
+	}
+}
+
+func TestPictureOnlyAnswerBringsItsRequest(t *testing.T) {
+	lines := []Line{ln("q", "A", 0, "PICTUREREQUEST"), ln("pic", bot, 10, "", reply("q")),
+		ln("now", "B", 60, "RECOLOR", reply("pic"))}
+	if got := ids(Attribute(lines, []string{"now"}, "B", Options{})); got != "q,pic,now" {
+		t.Fatalf("picture reply includes %q", got)
+	}
+	lines[1].Withdrawn = true
+	if got := ids(Attribute(lines, []string{"now"}, "B", Options{})); got != "now" {
+		t.Fatalf("withdrawn picture still links its request: %q", got)
+	}
+}
+
 // The case the user named: one friend talks to the bot while two others decide which game to play. The
 // game lines carry no link to the bot conversation and must stay out, in Korean and in English alike
 // (attribution never reads the words).

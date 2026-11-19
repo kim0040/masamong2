@@ -138,6 +138,7 @@ type Service struct {
 	// indexQueueMu orders reads and writes of the recorded index queue (indexQueueKey)
 	indexQueueMu sync.Mutex
 	turns        turnGate     // chat turn concurrency (turns.go)
+	delivering   sync.Map     // active turn ID -> *atomic.Bool: a post registration failed
 	imgq         imageQueue   // pictures asked for in chat, drawn in the background (imagequeue.go)
 	imgDrops     atomic.Int64 // jobs of imgq dropped for policy, deletion or shutdown (tests wait on it)
 	// jobCtx bounds background jobs to the daemon run (ResumeJobs sets it); nil = context.Background.

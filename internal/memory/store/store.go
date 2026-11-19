@@ -224,6 +224,10 @@ func Open(db *storage.Store) (*Store, error) {
 		{"memory_observations", "edited_at", `TEXT NOT NULL DEFAULT ''`, `VARCHAR(64) NOT NULL DEFAULT ''`},
 		{"memory_observations", "deleted_at", `TEXT NOT NULL DEFAULT ''`, `VARCHAR(64) NOT NULL DEFAULT ''`},
 		{"chat_turns", "native_id", `TEXT NOT NULL DEFAULT ''`, `VARCHAR(80) NOT NULL DEFAULT ''`},
+		{"chat_turns", "spoken_at", `TEXT NOT NULL DEFAULT ''`, `VARCHAR(64) NOT NULL DEFAULT ''`},
+		{"chat_turns", "delivery_turn", `TEXT NOT NULL DEFAULT ''`, `VARCHAR(64) NOT NULL DEFAULT ''`},
+		{"chat_turns", "delivery_spans", `TEXT`, `TEXT`},
+		{"chat_turns", "call_address", `INTEGER`, `TINYINT`},
 		{"chat_turns", "speaker_id", `TEXT NOT NULL DEFAULT ''`, `VARCHAR(80) NOT NULL DEFAULT ''`},
 		{"chat_turns", "evidence_state", `INTEGER NOT NULL DEFAULT 0`, `TINYINT NOT NULL DEFAULT 0`},
 	} {
@@ -525,7 +529,8 @@ func (s *Store) EditMessageContext(ctx context.Context, platform, nativeID, cont
 		}
 		// the chat turn follows the edit whether or not the channel stores its messages (a channel the
 		// bot answers in without capture still keeps the message as conversation context)
-		if _, err := tx.Exec(`UPDATE chat_turns SET content=? WHERE native_id=? AND role='user'`, content, nativeID); err != nil {
+		if _, err := tx.Exec(`UPDATE chat_turns SET content=?,call_address=CASE WHEN call_address=? THEN call_address ELSE ? END
+			WHERE native_id=? AND role='user'`, content, CallReply, CallEdited, nativeID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(`DELETE FROM chat_turns WHERE native_id=? AND role<>'user'`, nativeID); err != nil {
@@ -2089,10 +2094,26 @@ func (s *Store) SpendSince(day string) (map[string]float64, float64, error) {
 	return out, total, rows.Err()
 }
 
+// A reply's addressee survives edits. For other edited requests, only the new
+// words (not the previous revision's acceptance) can address the bot.
+const (
+	CallAccepted = iota
+	CallReply
+	CallEdited
+)
+
 // ChatTurn is one message of the bot's conversation in a channel (the bot's own replies are not
 // memory observations; they are kept here only as conversation context).
 type ChatTurn struct {
 	Role, Speaker, Content, CreatedAt string
+	CallAddress                       int
+	// SpokenAt orders the conversation by delivery; CreatedAt remains the retention clock.
+	SpokenAt string
+	// DeliveryTurn identifies the original assistant row for later delivered parts.
+	// A thread's copy is not the delivery being extended.
+	DeliveryTurn string
+	// DeliverySpans records byte boundaries and delivery times, never a second copy of the words.
+	DeliverySpans string
 	// NativeID is the Discord request a user or assistant turn came from (empty for lab turns).
 	// An edit or deletion of that message changes or removes the turn (EditMessage).
 	NativeID string
@@ -2131,16 +2152,20 @@ func (s *Store) AppendChatTurns(channelKey string, turns []ChatTurn, keep int) e
 	if len(turns) > 0 {
 		decide = func() []ChatTurn { return turns }
 	}
-	return s.AppendDecidedChatTurns(channelKey, decide, keep)
+	_, err := s.AppendDecidedChatTurns(channelKey, decide, keep)
+	return err
 }
 
 // AppendDecidedChatTurns is AppendChatTurns for turns that depend on what happens up to the commit: decide is called
 // inside the write transaction, when no change of the store can come between it and the rows. It may take a short lock
-// of its own, and must not call the store.
-func (s *Store) AppendDecidedChatTurns(channelKey string, decide func() []ChatTurn, keep int) error {
+// of its own, and must not call the store. committed distinguishes a later prune failure from a failed write.
+func (s *Store) AppendDecidedChatTurns(channelKey string, decide func() []ChatTurn, keep int) (committed bool, err error) {
 	if decide != nil {
 		err := s.DB.WithWriter(func(tx *sql.Tx) error {
 			for _, t := range decide() {
+				if t.Copied {
+					t.DeliveryTurn = ""
+				}
 				if !s.tidb() {
 					native, read := t.NativeID, uniqueSources(t.SourceIDs, t.DerivedFrom)
 					if t.Copied {
@@ -2170,7 +2195,7 @@ func (s *Store) AppendDecidedChatTurns(channelKey string, decide func() []ChatTu
 						continue
 					}
 				}
-				result, err := tx.Exec(`INSERT INTO chat_turns(channel_key,role,speaker,content,created_at,native_id,speaker_id,evidence_state) VALUES(?,?,?,?,?,?,?,1)`, channelKey, t.Role, t.Speaker, t.Content, now(), t.NativeID, t.SpeakerID)
+				result, err := tx.Exec(`INSERT INTO chat_turns(channel_key,role,speaker,content,created_at,spoken_at,native_id,speaker_id,delivery_turn,delivery_spans,call_address,evidence_state) VALUES(?,?,?,?,?,?,?,?,?,?,?,1)`, channelKey, t.Role, t.Speaker, t.Content, now(), t.SpokenAt, t.NativeID, t.SpeakerID, t.DeliveryTurn, t.DeliverySpans, t.CallAddress)
 				if err != nil {
 					return err
 				}
@@ -2196,17 +2221,18 @@ func (s *Store) AppendDecidedChatTurns(channelKey string, decide func() []ChatTu
 			return nil
 		})
 		if err != nil {
-			return err
+			return false, err
 		}
+		committed = true
 	}
 	if keep > 0 {
 		// the derived table lets MySQL/TiDB read the table it deletes from
 		if _, err := s.DB.DB.Exec(`DELETE FROM chat_turns WHERE channel_key=? AND id <= (SELECT id FROM (SELECT id FROM chat_turns
 			WHERE channel_key=? ORDER BY id DESC LIMIT 1 OFFSET ?) AS cutoff)`, channelKey, channelKey, keep); err != nil {
-			return err
+			return committed, err
 		}
 	}
-	return nil
+	return committed, nil
 }
 
 // RecentChatTurns returns the last n turns of a channel in order. SourceIDs is what reading the turn
@@ -2221,11 +2247,13 @@ func (s *Store) RecentChatTurns(channelKey string, n int) ([]ChatTurn, error) {
 	// failed after its walk, and waits for its retry): it is not read. A user turn whose edit has settled holds the
 	// new words and is read again.
 	notGoing := ""
+	legacyAddress := "0"
 	if !s.tidb() {
+		legacyAddress = `CASE WHEN role='user' AND EXISTS (SELECT 1 FROM privacy_tombstones t WHERE t.kind='message' AND t.source_id=chat_turns.native_id) THEN 2 ELSE 0 END`
 		notGoing = ` AND NOT EXISTS (SELECT 1 FROM privacy_tombstones t WHERE t.kind IN ('source','going') AND t.source_id='chat:'||chat_turns.id
 			AND NOT EXISTS (SELECT 1 FROM privacy_settled d WHERE d.source_id=t.source_id))`
 	}
-	rows, err := s.DB.DB.Query(`SELECT id,role,speaker,content,created_at,native_id,speaker_id FROM chat_turns WHERE channel_key=?`+notGoing+` ORDER BY id DESC LIMIT ?`, channelKey, n)
+	rows, err := s.DB.DB.Query(`SELECT id,role,speaker,content,created_at,spoken_at,native_id,speaker_id,delivery_turn,COALESCE(delivery_spans,''),COALESCE(call_address,`+legacyAddress+`) FROM chat_turns WHERE channel_key=?`+notGoing+` ORDER BY id DESC LIMIT ?`, channelKey, n)
 	if err != nil {
 		return nil, err
 	}
@@ -2234,7 +2262,7 @@ func (s *Store) RecentChatTurns(channelKey string, n int) ([]ChatTurn, error) {
 	for rows.Next() {
 		var t ChatTurn
 		var id int64
-		if err := rows.Scan(&id, &t.Role, &t.Speaker, &t.Content, &t.CreatedAt, &t.NativeID, &t.SpeakerID); err != nil {
+		if err := rows.Scan(&id, &t.Role, &t.Speaker, &t.Content, &t.CreatedAt, &t.SpokenAt, &t.NativeID, &t.SpeakerID, &t.DeliveryTurn, &t.DeliverySpans, &t.CallAddress); err != nil {
 			return nil, err
 		}
 		t.SourceIDs = []string{ChatLink(id)}

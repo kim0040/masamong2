@@ -1,9 +1,71 @@
 package discord
 
 import (
+	"net/http"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/bwmarrin/discordgo"
 )
+
+func TestMoreLaneTimeoutKeepsButtonForRetry(t *testing.T) {
+	g, fake := gatewayWithFakeDiscord(t)
+	g.ActionTimeout = 40 * time.Millisecond
+	fake.setResponse("/messages", http.StatusOK, `{"id":"rest"}`)
+	g.svc.NoteReplyMessages("original", "g1", "c1", []string{"head"})
+	g.more.put("head", "c1", "continuation", nil)
+	press := &discordgo.InteractionCreate{Interaction: &discordgo.Interaction{ID: "press", Token: "fixture", GuildID: "g1", ChannelID: "c1"}}
+
+	// Hold the lane until the press has exhausted its admission budget.
+	err := g.svc.DeliverReplyContinuation(t.Context(), "g1", "c1", "head", func() (string, []string, []int) {
+		g.handleMore(g.sess, press, "head")
+		g.inflight.Wait()
+		return "", nil, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if call, ok := fake.find(http.MethodPost, "/callback"); !ok || !strings.Contains(call.body, `"type":6`) {
+		t.Fatalf("press did not acknowledge without modifying the button: %+v", call)
+	}
+	if _, ok := fake.find(http.MethodPatch, "/head"); ok {
+		t.Fatal("button removed before admission")
+	}
+	if e, ok := g.more.peek("head"); !ok || e.reserved {
+		t.Fatal("continuation not available for retry")
+	}
+	g.handleMore(g.sess, press, "head")
+	if !g.Wait(3 * time.Second) {
+		t.Fatal("retry did not finish")
+	}
+	if turn, ok := g.svc.ReplyTurn("rest"); !ok || turn != "original" {
+		t.Fatal("retry did not deliver and register the continuation")
+	}
+	if _, ok := g.more.peek("head"); ok {
+		t.Fatal("a successful retry did not consume the continuation")
+	}
+}
+
+func TestMorePressRegistersItsDeliveredPost(t *testing.T) {
+	g, fake := gatewayWithFakeDiscord(t)
+	g.ActionTimeout = 5 * time.Second
+	fake.setResponse("/messages", http.StatusOK, `{"id":"rest"}`)
+	done := make(chan struct{})
+	g.more.put("head", "c1", "delivered rest", done)
+	i := &discordgo.InteractionCreate{Interaction: &discordgo.Interaction{ID: "press", Token: "fixture",
+		GuildID: "g1", ChannelID: "c1", Message: &discordgo.Message{ID: "head", Content: "first part"}}}
+	g.handleMore(g.sess, i, "head")
+	// Pressed before the turn returned from Deliver and registered its head.
+	g.svc.NoteReplyMessages("original", "g1", "c1", []string{"head"})
+	close(done)
+	if !g.Wait(5 * time.Second) {
+		t.Fatal("continuation did not finish")
+	}
+	if turn, ok := g.svc.ReplyTurn("rest"); !ok || turn != "original" {
+		t.Fatalf("posted continuation belongs to %q, want original", turn)
+	}
+}
 
 func TestBubbles(t *testing.T) {
 	parts, ok := bubbles("ㅋㅋㅋ 그거 나도 봤어\n내일 같이 갈래?")

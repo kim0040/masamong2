@@ -105,6 +105,7 @@ type ObservedMessage struct {
 	// ReplyTo is the message this one replies to; Mentions the accounts it mentions (the bot included);
 	// MentionsOthers a role or @everyone mention. Attribution reads them (live.go).
 	ReplyTo        string
+	ReplyAuthorID  string
 	Mentions       []string
 	MentionsOthers bool
 	// BotCall is how the message calls the bot: "mention" (a mention of it or a reply to it), "name" (only

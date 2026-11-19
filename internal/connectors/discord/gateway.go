@@ -921,7 +921,9 @@ func (g *Gateway) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 					g.log.Warn("discord: response edit failed", "cmd", cmd.Name, "err", err)
 					return ""
 				}
+				application.NoteFirstSend(deliverCtx) // the deferred response now contains the answer
 				said, ids := first, []string{edited.ID}
+				ends := []int{len(first)}
 				for _, p := range parts[1:] {
 					if deliverCtx.Err() != nil {
 						break
@@ -932,9 +934,10 @@ func (g *Gateway) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 						break
 					}
 					said += p
+					ends = append(ends, len(said))
 					ids = append(ids, sent.ID)
 				}
-				g.svc.NoteReplyMessages(out.TurnID, i.GuildID, i.ChannelID, ids)
+				g.svc.NoteReplyMessages(out.TurnID, i.GuildID, i.ChannelID, ids, ends...)
 				g.postToolArtifacts(deliverCtx, s, i.GuildID, i.ChannelID, nil, out.Tools)
 				return said
 			}
@@ -1443,6 +1446,9 @@ func linksOf(m *discordgo.MessageCreate, o *application.ObservedMessage) {
 	case m.ReferencedMessage != nil:
 		o.ReplyTo = m.ReferencedMessage.ID
 	}
+	if o.ReplyTo != "" && m.ReferencedMessage != nil && m.ReferencedMessage.Author != nil {
+		o.ReplyAuthorID = m.ReferencedMessage.Author.ID
+	}
 	for _, u := range m.Mentions {
 		if u != nil {
 			o.Mentions = append(o.Mentions, u.ID)
@@ -1940,7 +1946,7 @@ func (g *Gateway) runCommand(s *discordgo.Session, m *discordgo.MessageCreate, c
 				}
 				g.postToolArtifacts(deliverCtx, s, m.GuildID, m.ChannelID, m.Reference(), out.Tools)
 				said, ids, rep := g.sendReply(deliverCtx, s, m.GuildID, m.ChannelID, m.Reference(), out.Answer)
-				g.svc.NoteReplyMessages(out.TurnID, m.GuildID, m.ChannelID, ids)
+				g.svc.NoteReplyMessages(out.TurnID, m.GuildID, m.ChannelID, ids, rep.PartEnds...)
 				g.svc.NoteDelivery(out.TurnID, m.GuildID, m.ChannelID, rep)
 				return said
 			}
@@ -2028,6 +2034,8 @@ func (g *Gateway) answer(base context.Context, s *discordgo.Session, m *discordg
 	// replied: something of the answer reached the channel (a part of the text or a post of a tool).
 	// unsent: there was an answer to post and none of it did.
 	delivered, replied, unsent := false, false, false
+	turnDone := make(chan struct{})
+	defer close(turnDone)
 	// the reply is posted inside the turn, so the channel's next turn starts after it and the
 	// conversation keeps only what reached Discord
 	_, err := g.svc.ChatTurn(ctx, application.ChatInput{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID, Message: text,
@@ -2053,8 +2061,8 @@ func (g *Gateway) answer(base context.Context, s *discordgo.Session, m *discordg
 				return ""
 			}
 			shape := g.svc.ChannelPolicyFor(m.GuildID, m.ChannelID).Conversation.ReplyShape
-			sent, ids, rep := g.sendShapedFor(deliverCtx, s, m.GuildID, m.ChannelID, m.Reference(), res.Answer, visionNotice, shape, deepSearched(res.Tools))
-			g.svc.NoteReplyMessages(res.TurnID, m.GuildID, m.ChannelID, ids)
+			sent, ids, rep := g.sendShapedFor(deliverCtx, s, m.GuildID, m.ChannelID, m.Reference(), res.Answer, visionNotice, shape, deepSearched(res.Tools), turnDone)
+			g.svc.NoteReplyMessages(res.TurnID, m.GuildID, m.ChannelID, ids, rep.PartEnds...)
 			g.svc.NoteDelivery(res.TurnID, m.GuildID, m.ChannelID, rep)
 			delivered = rep.Sent == rep.Parts && rep.Parts > 0
 			if sent != "" || rep.Sent > 0 {
@@ -2356,6 +2364,7 @@ func (g *Gateway) sendReplyParts(ctx context.Context, parts []string, ref *disco
 			break
 		}
 		said.WriteString(part)
+		rep.PartEnds = append(rep.PartEnds, said.Len())
 		ids = append(ids, sent.ID)
 		rep.Sent++
 		application.NoteFirstSend(ctx) // the turn's first_send timing: a no-op unless ctx is a chat reply's

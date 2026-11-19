@@ -1,10 +1,12 @@
 package application
 
 import (
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"masamong/internal/conversation"
@@ -31,6 +33,42 @@ const (
 type liveWindow struct {
 	mu    sync.Mutex
 	chans map[string][]conversation.Line
+	// Registration may fail before the gateway observes a post. Once observed,
+	// the gap travels with the line, including in snapshots and through eviction.
+	registryGaps map[string]map[string]time.Time
+}
+
+func (s *Service) rejectDelivery(guild, channel, turn string, ids []string) {
+	if len(ids) == 0 {
+		return
+	}
+	if f, ok := s.delivering.Load(turn); ok {
+		f.(*atomic.Bool).Store(true)
+	}
+	s.live.mu.Lock()
+	defer s.live.mu.Unlock()
+	if s.live.registryGaps == nil {
+		s.live.registryGaps = map[string]map[string]time.Time{}
+	}
+	key := liveKey(guild, channel)
+	gaps := s.live.registryGaps[key]
+	if gaps == nil {
+		gaps = map[string]time.Time{}
+		s.live.registryGaps[key] = gaps
+	}
+	now := s.Clock.Now()
+	for _, id := range ids {
+		gaps[id] = now
+	}
+	for i, l := range s.live.chans[key] {
+		if _, failed := gaps[l.ID]; l.Bot && failed {
+			s.live.chans[key][i].RegistryGap = true
+			delete(gaps, l.ID)
+		}
+	}
+	if len(gaps) == 0 {
+		delete(s.live.registryGaps, key)
+	}
 }
 
 func liveKey(guildID, channelID string) string { return guildID + ":" + channelID }
@@ -46,6 +84,7 @@ func (s *Service) noteLive(m ObservedMessage) {
 		text = ""
 	}
 	// a mention of the bot or a reply to it is said to it; a call by its name only once the turn takes it (liveToBot)
+	bot := s.botAccount(nil)
 	l := conversation.Line{ID: m.MessageID, AuthorID: m.AuthorID, Author: m.AuthorName, Bot: m.FromBot, ReplyTo: m.ReplyTo,
 		Mentions: append([]string(nil), m.Mentions...), MentionsOthers: m.MentionsOthers, ToBot: !m.FromBot && m.BotCall == "mention",
 		At: m.At, Text: clip(text, liveTextRunes)}
@@ -57,9 +96,34 @@ func (s *Service) noteLive(m ObservedMessage) {
 		w.chans = map[string][]conversation.Line{}
 	}
 	lines := w.chans[key]
+	if gaps := w.registryGaps[key]; l.Bot && gaps != nil {
+		_, l.RegistryGap = gaps[l.ID]
+		delete(gaps, l.ID)
+		if len(gaps) == 0 {
+			delete(w.registryGaps, key)
+		}
+	}
+	l.ReplyToBot = l.ReplyTo != "" && (m.ReplyAuthorID == bot || authorOfLine(lines, l.ReplyTo) == bot)
+	l.ToBot = !l.Bot && (l.ToBot || l.ReplyToBot || slices.Contains(l.Mentions, bot))
 	for i := range lines {
-		if lines[i].ID == l.ID {
-			l.ToBot = l.ToBot || lines[i].ToBot
+		if old := lines[i]; old.ID == l.ID {
+			l.RegistryGap = l.RegistryGap || old.RegistryGap
+			if old.Withdrawn {
+				l.Text, l.Withdrawn = "", true
+			}
+			if old.ReplyTo != "" {
+				l.ReplyTo = old.ReplyTo
+				l.ReplyToBot = l.ReplyToBot || old.ReplyToBot
+				l.ToBot = l.ToBot || (!l.Bot && l.ReplyToBot)
+			}
+			changed := old.Text != l.Text || old.ReplyTo != l.ReplyTo || old.MentionsOthers != l.MentionsOthers || !slices.Equal(old.Mentions, l.Mentions)
+			l.RevisedAt = old.RevisedAt
+			if changed {
+				l.RevisedAt = time.Now()
+			}
+			if !changed {
+				l.ToBot = l.ToBot || old.ToBot
+			}
 			lines[i] = l
 			return
 		}
@@ -74,16 +138,20 @@ func (s *Service) noteLive(m ObservedMessage) {
 
 // liveToBot marks messages of the window as said to the bot: the turn took them as a call (a call by name the
 // name-call check heard as one, a follow-up the window chose, the rest of a burst).
-func (s *Service) liveToBot(guildID, channelID string, messageIDs []string) {
+func (s *Service) liveToBot(in ChatInput) (replyToBot bool) {
 	w := &s.live
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	lines := w.chans[liveKey(guildID, channelID)]
+	lines := w.chans[liveKey(in.GuildID, in.ChannelID)]
 	for i := range lines {
-		if !lines[i].Bot && slices.Contains(messageIDs, lines[i].ID) {
+		if lines[i].ID == in.MessageID {
+			replyToBot = lines[i].ReplyToBot
+		}
+		if !lines[i].Bot && !lines[i].RevisedAt.After(in.started) && (lines[i].ID == in.MessageID || slices.Contains(in.Fragments, lines[i].ID)) {
 			lines[i].ToBot = true
 		}
 	}
+	return replyToBot
 }
 
 // liveLines is a copy of a channel's live window, oldest first.
@@ -94,17 +162,34 @@ func (s *Service) liveLines(guildID, channelID string) []conversation.Line {
 	return append([]conversation.Line(nil), w.chans[liveKey(guildID, channelID)]...)
 }
 
+var groupMention = regexp.MustCompile(`<@&[0-9]+>|@(?:everyone|here)\b`)
+
+func editedAddress(l *conversation.Line, content, bot string) {
+	l.Mentions = nil
+	for _, m := range mentionPattern.FindAllStringSubmatch(content, -1) {
+		l.Mentions = append(l.Mentions, m[1])
+	}
+	l.MentionsOthers = groupMention.MatchString(content)
+	l.ToBot = !l.Bot && (l.ReplyToBot || slices.Contains(l.Mentions, bot))
+}
+
 // liveEdit and liveDelete apply an author's edit or deletion, so a removed message never reaches a reply.
 func (s *Service) liveEdit(guildID, channelID, messageID, content string) {
 	unreached := s.liveUnreached(guildID, channelID)
+	bot := s.botAccount(nil)
 	w := &s.live
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	s.liveBlankReplies(guildID, channelID, []string{messageID}, unreached)
 	for _, key := range s.liveKeys(guildID, channelID) {
 		for i, l := range w.chans[key] {
-			if l.ID == messageID && l.Text != "" {
-				w.chans[key][i].Text = clip(content, liveTextRunes)
+			if l.ID == messageID {
+				l.RevisedAt = time.Now()
+				editedAddress(&l, content, bot)
+				if l.Text != "" {
+					l.Text = clip(content, liveTextRunes)
+				}
+				w.chans[key][i] = l
 			}
 		}
 	}
@@ -218,7 +303,7 @@ func (s *Service) liveBlankReplies(guildID, channelID string, messageIDs []strin
 		}
 		for i := range lines {
 			if lines[i].Bot && !wanted[lines[i].ID] && !lines[i].At.Before(since) {
-				lines[i].Text = ""
+				lines[i].Text, lines[i].Withdrawn = "", true
 			}
 		}
 	}
@@ -237,6 +322,7 @@ func (s *Service) liveForget(accountID string) {
 		for i := range lines {
 			if lines[i].AuthorID == accountID || lines[i].Bot {
 				w.chans[key][i].Text = ""
+				w.chans[key][i].Withdrawn = lines[i].Bot
 			}
 		}
 	}
@@ -263,6 +349,16 @@ func (s *Service) sweepLive(now time.Time) {
 	w := &s.live
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	for key, gaps := range w.registryGaps {
+		for id, at := range gaps {
+			if now.Sub(at) > liveMaxAge {
+				delete(gaps, id)
+			}
+		}
+		if len(gaps) == 0 {
+			delete(w.registryGaps, key)
+		}
+	}
 	type quiet struct {
 		key string
 		at  time.Time
