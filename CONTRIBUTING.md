@@ -66,7 +66,7 @@ go test ./... -count=1
 go test -race ./... -count=1
 go vet ./...
 python3 scripts/license_audit.py        # Windows에서는 python scripts\license_audit.py
-go run ./tools/doccheck                 # 링크와 번역 상태
+go run ./tools/doccheck                 # 링크, 번역 상태, 명령 이름
 
 cd internal/transport/web/ui
 npm ci
