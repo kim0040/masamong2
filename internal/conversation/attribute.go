@@ -57,6 +57,10 @@ type Attribution struct {
 	Candidates []string
 	// Excluded counts the lines inside the window that were left out.
 	Excluded int
+	// Before counts the lines older than the window, After the lines after the last call message (both
+	// ignored), and CallerEarlier the caller's own lines in the window other than the call: body-free
+	// counts for the turn ledger, so a conversation that came out short can be traced.
+	Before, After, CallerEarlier int
 }
 
 // Attribute finds the conversation that the call (one message, or several the merger joined) belongs to.
@@ -96,6 +100,12 @@ func Attribute(lines []Line, callIDs []string, callerID string, opt Options) Att
 		from++
 	}
 	window := sorted[from : last+1]
+	out.Before, out.After = from, len(sorted)-last-1
+	for _, l := range window {
+		if !l.Bot && l.AuthorID == callerID && l.AuthorID != "" && out.Reasons[l.ID] != "call" {
+			out.CallerEarlier++
+		}
+	}
 	authorOf := func(id string) (string, bool, bool) {
 		if i, ok := byID[id]; ok {
 			return sorted[i].AuthorID, sorted[i].Bot, true

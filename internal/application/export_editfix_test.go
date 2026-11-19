@@ -83,7 +83,7 @@ func (s *Service) ChannelLineIDsForTest(guildID, channelID, messageID string) []
 	if err != nil {
 		return nil
 	}
-	lines, _ := s.channelLines(ChatInput{GuildID: guildID, ChannelID: channelID, MessageID: messageID}, eng)
+	lines, _, _ := s.channelLines(ChatInput{GuildID: guildID, ChannelID: channelID, MessageID: messageID}, eng)
 	out := make([]string, len(lines))
 	for i, l := range lines {
 		out[i] = l.ID
