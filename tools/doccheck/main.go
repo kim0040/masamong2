@@ -1,4 +1,4 @@
-// doccheck keeps the documentation honest, in two ways:
+// doccheck keeps the documentation honest, in three ways:
 //
 //   - links: every relative link, and every link to this repository's files or wiki pages, points at a
 //     file that exists (wiki links had broken before; nothing caught them);
@@ -8,6 +8,9 @@
 //     page). When one file changes and the record no longer matches, the check fails until the other
 //     languages are brought along and the record is written again. The idea comes from DeepSeek
 //     Harness's translation-pairing gate.
+//
+//   - commands: a slash-command name written for another language (a Korean page that says /weather
+//     when Discord shows /날씨).
 //
 //     go run ./tools/doccheck          check (go test ./tools/doccheck runs the same)
 //     go run ./tools/doccheck -write   after updating every language of a changed page, record them
@@ -29,6 +32,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -67,6 +72,7 @@ func main() {
 		fmt.Printf("recorded %d translation groups in %s\n", len(groups), lockFile)
 	}
 	problems := append(checkLinks(root), checkTranslations(root)...)
+	problems = append(problems, checkCommands(root)...)
 	for _, p := range problems {
 		fmt.Println(p)
 	}
@@ -74,7 +80,7 @@ func main() {
 		fmt.Printf("\n%d problem(s)\n", len(problems))
 		os.Exit(1)
 	}
-	fmt.Println("doccheck: links and translations ok")
+	fmt.Println("doccheck: links, translations and command names ok")
 }
 
 func repoRoot() (string, error) {
@@ -411,4 +417,269 @@ func checkTranslations(root string) []string {
 		problems = append(problems, msg+", then go run ./tools/doccheck -write")
 	}
 	return problems
+}
+
+// checkCommands reports slash-command names written for another language. A command registers
+// under its canonical English name (internal/connectors/discord/commands.go) and Discord shows each
+// member the localized name from locales/<lang>.json (discord.command.<name>.name), so a Korean page
+// must say /날씨, not /weather. A page may still name another language's form in parentheses right
+// after its own, as `/날씨`(`/weather`). "!" prefix words are not checked: their aliases merge every
+// locale. Historical records (docs/postmortems, docs/adr, docs/archive, docs/plan-*.md) keep the
+// names of their time.
+func checkCommands(root string) []string {
+	canon, err := commandNames(root)
+	if err != nil {
+		return []string{"commands: " + err.Error()}
+	}
+	local, err := commandLocalNames(root, canon)
+	if err != nil {
+		return []string{"commands: " + err.Error()}
+	}
+	// every spelling a command goes by in some language, longest first for prefix matching
+	seen := map[string]bool{}
+	var known []string
+	valid := map[string]map[string]bool{"en": {}}
+	for _, c := range canon {
+		valid["en"][c] = true
+		if !seen[c] {
+			seen[c] = true
+			known = append(known, c)
+		}
+	}
+	for loc, names := range local {
+		valid[loc] = map[string]bool{}
+		for _, c := range canon {
+			n := names[c]
+			if n == "" {
+				n = c // a locale without the key falls back to the canonical name
+			}
+			local[loc][c] = n
+			valid[loc][n] = true
+			if !seen[n] {
+				seen[n] = true
+				known = append(known, n)
+			}
+		}
+	}
+	sort.Slice(known, func(i, j int) bool { return len(known[i]) > len(known[j]) })
+
+	files, err := markdownFiles(root)
+	if err != nil {
+		return []string{"commands: " + err.Error()}
+	}
+	var problems []string
+	for _, f := range files {
+		if !commandDoc(f) {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(f)))
+		if err != nil {
+			problems = append(problems, f+": "+err.Error())
+			continue
+		}
+		lang := pageLanguage(root, f, string(raw))
+		if _, ok := valid[lang]; !ok {
+			lang = "en"
+		}
+		text := string(raw)
+		for _, c := range canon {
+			// `/own`(`/other`) names another language's form without teaching it as the command
+			own := local[lang][c]
+			if own == "" {
+				own = c
+			}
+			for other := range namesOf(local, c) {
+				if other == own {
+					continue
+				}
+				text = annotationForm(own, other).ReplaceAllString(text, "")
+			}
+		}
+		for _, m := range slashToken.FindAllStringSubmatchIndex(text, -1) {
+			word := text[m[2]:m[3]]
+			name := ""
+			for _, k := range known {
+				if !strings.HasPrefix(word, k) {
+					continue
+				}
+				// a CJK name may run into a particle (날씨를, お知らせを); an ASCII name only when the
+				// rest is another script (/weather를), never more ASCII (/admins, /images)
+				rest := word[len(k):]
+				if r, _ := utf8.DecodeRuneInString(rest); rest == "" || nonASCII(k) || r > unicode.MaxASCII && unicode.IsLetter(r) {
+					name = k
+					break
+				}
+			}
+			if name == "" || valid[lang][name] {
+				continue
+			}
+			line := 1 + strings.Count(text[:m[0]], "\n")
+			problems = append(problems, fmt.Sprintf("%s:%d: /%s is a %s command name; this page is %s, which shows /%s", f, line, word, nameLanguage(canon, local, name), lang, wantName(canon, local, lang, name)))
+		}
+	}
+	return problems
+}
+
+var (
+	commandNameField = regexp.MustCompile(`Name:\s*"([a-z][a-z0-9-]*)"`)
+	commandNameKey   = regexp.MustCompile(`^discord\.command\.([a-z][a-z0-9-]*)\.name$`)
+	readmeLanguage   = regexp.MustCompile(`^README\.([A-Za-z-]+)\.md$`)
+	// a "/word" not continuing a path, URL or closing tag (no letter, digit, slash or angle bracket before it)
+	slashToken = regexp.MustCompile(`(?:^|[^\p{L}\p{N}_/<>])/(\p{L}[\p{L}\p{N}_-]*)`)
+	hangul     = regexp.MustCompile(`\p{Hangul}`)
+	latin      = regexp.MustCompile(`\p{Latin}`)
+)
+
+// commandNames is the canonical registry: the Command literals of internal/connectors/discord.
+func commandNames(root string) ([]string, error) {
+	raw, err := os.ReadFile(filepath.Join(root, "internal/connectors/discord/commands.go"))
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, m := range commandNameField.FindAllStringSubmatch(string(raw), -1) {
+		if !seen[m[1]] {
+			seen[m[1]] = true
+			out = append(out, m[1])
+		}
+	}
+	if len(out) == 0 {
+		return nil, errors.New("no command names found in internal/connectors/discord/commands.go")
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// commandLocalNames is locale -> command -> its name in locales/<lang>.json.
+func commandLocalNames(root string, canon []string) (map[string]map[string]string, error) {
+	want := map[string]bool{}
+	for _, c := range canon {
+		want[c] = true
+	}
+	out := map[string]map[string]string{}
+	entries, err := os.ReadDir(filepath.Join(root, "locales"))
+	if err != nil {
+		return nil, err
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		loc := strings.TrimSuffix(e.Name(), ".json")
+		var msgs map[string]string
+		raw, err := os.ReadFile(filepath.Join(root, "locales", e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(raw, &msgs); err != nil {
+			return nil, fmt.Errorf("locales/%s: %w", e.Name(), err)
+		}
+		names := map[string]string{}
+		for k, v := range msgs {
+			if m := commandNameKey.FindStringSubmatch(k); m != nil && want[m[1]] && v != "" {
+				names[m[1]] = v
+			}
+		}
+		out[loc] = names
+	}
+	return out, nil
+}
+
+// commandDoc reports whether a maintained page is checked for command names: the documentation and
+// the READMEs, except records kept as written (postmortems, ADRs, the archive, plans).
+func commandDoc(f string) bool {
+	if !(strings.HasPrefix(f, "docs/") || f == "README.md" || readmeLanguage.MatchString(f)) {
+		return false
+	}
+	if strings.HasPrefix(f, "docs/postmortems/") || strings.HasPrefix(f, "docs/adr/") {
+		return false
+	}
+	return !strings.HasPrefix(path.Base(f), "plan-")
+}
+
+// pageLanguage is the language a page is written for: the README suffix, the wiki language switch
+// that pairs a page with its translation, or (for an unpaired page) the script most of it is in.
+func pageLanguage(root, f, text string) string {
+	if m := readmeLanguage.FindStringSubmatch(f); m != nil {
+		return m[1]
+	}
+	if strings.HasPrefix(f, wikiDir+"/") {
+		sw := languageSwitch(filepath.Join(root, filepath.FromSlash(f)))
+		if wikiEnglish.MatchString(sw) {
+			return "ko"
+		}
+		if wikiKorean.MatchString(sw) {
+			return "en"
+		}
+	}
+	if len(hangul.FindAllString(text, -1)) > len(latin.FindAllString(text, -1)) {
+		return "ko"
+	}
+	return "en"
+}
+
+// namesOf is every spelling command c has across the catalogs plus its canonical name.
+func namesOf(local map[string]map[string]string, c string) map[string]bool {
+	out := map[string]bool{c: true}
+	for _, names := range local {
+		if n := names[c]; n != "" {
+			out[n] = true
+		}
+	}
+	return out
+}
+
+// annotationForm matches `/own`(`/other`) and the plainer /own (/other): the page's own name first,
+// another language's name only as a parenthesized aside.
+func annotationForm(own, other string) *regexp.Regexp {
+	return regexp.MustCompile("`?" + regexp.QuoteMeta("/"+own) + "`?" + ` *\(` + "`?" + regexp.QuoteMeta("/"+other) + "`?" + `\)`)
+}
+
+// nameLanguage is the catalog a spelling belongs to, for the report.
+func nameLanguage(canon []string, local map[string]map[string]string, name string) string {
+	for _, c := range canon {
+		if c == name {
+			return "en"
+		}
+	}
+	for loc, names := range local {
+		for _, n := range names {
+			if n == name {
+				return loc
+			}
+		}
+	}
+	return "another"
+}
+
+// wantName is the name command name's command has in locale, for the report.
+func wantName(canon []string, local map[string]map[string]string, lang, name string) string {
+	for _, c := range canon {
+		if c == name {
+			return orEmpty(local[lang][c], c)
+		}
+		for loc, n := range local {
+			if loc != lang && n[c] == name {
+				return orEmpty(local[lang][c], c)
+			}
+		}
+	}
+	return name
+}
+
+func orEmpty(v, d string) string {
+	if v == "" {
+		return d
+	}
+	return v
+}
+
+func nonASCII(s string) bool {
+	for _, r := range s {
+		if r > unicode.MaxASCII {
+			return true
+		}
+	}
+	return false
 }

@@ -14,7 +14,7 @@ func TestRepositoryDocs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range append(checkLinks(root), checkTranslations(root)...) {
+	for _, p := range append(append(checkLinks(root), checkTranslations(root)...), checkCommands(root)...) {
 		t.Error(p)
 	}
 }
