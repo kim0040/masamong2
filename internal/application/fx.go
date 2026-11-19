@@ -153,7 +153,12 @@ func (s *Service) financeFX(ctx context.Context, req action.Request, in map[stri
 	if !rates.NextUpdate.IsZero() {
 		out["next_update_at"] = rates.NextUpdate.Format(time.RFC3339)
 	}
-	out["quotes"] = fxQuotes(lex, req.Locale, rates, plan.pairs)
+	quotes := fxQuotes(lex, req.Locale, rates, plan.pairs)
+	out["quotes"] = quotes
+	if len(quotes) > 0 {
+		// the model that words the answer sees this result, not the tool's description
+		out["answer_hint"] = s.msg(req, "fx.answer_hint")
+	}
 	return action.OK(req, out)
 }
 

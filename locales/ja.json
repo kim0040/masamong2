@@ -244,6 +244,7 @@
   "fx.unsupported_currency": "為替レートのサービスにこの通貨のレートがありません。",
   "fx.invalid_currency": "どの通貨か分かりませんでした。USD のようなコードか「ドル」のような名前で入力してください。",
   "fx.invalid_amount": "金額は 0 より大きく {max} 以下の数字で、{example} のように入力してください。",
+  "fx.answer_hint": "為替レートは quotes[].text の表記のまま答え、rates から計算し直さないでください。",
   "fx.home": "USD",
   "fx.amount.named": "{value}{name}",
   "fx.amount.coded": "{value} {code}",

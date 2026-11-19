@@ -244,6 +244,7 @@
   "fx.unsupported_currency": "汇率服务没有这种货币的汇率。",
   "fx.invalid_currency": "无法识别该货币。请输入 USD 之类的代码，或“美元”之类的名称。",
   "fx.invalid_amount": "金额必须是大于 0 且不超过 {max} 的数字，写法如 {example}。",
+  "fx.answer_hint": "汇率请按 quotes[].text 中的写法回答，不要根据 rates 重新计算。",
   "fx.home": "USD",
   "fx.amount.named": "{value}{name}",
   "fx.amount.coded": "{value} {code}",

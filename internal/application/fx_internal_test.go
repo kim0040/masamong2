@@ -215,3 +215,31 @@ func TestFXHomeRequest(t *testing.T) {
 		}
 	}
 }
+
+// The model that words the answer is told, in the result itself and in its own language, to quote the
+// quotes: the tool's description is only seen where the tool is chosen.
+func TestFXResultCarriesTheAnswerHint(t *testing.T) {
+	s := fixg1Svc(t, []string{"serper"}, nil, nil)
+	fxRates(t, s)
+	for _, tag := range []string{"en", "ko", "ja", "es", "zh-Hans"} {
+		t.Run(tag, func(t *testing.T) {
+			p, _ := lang.Get(tag)
+			voice := chat.Voice{Pack: p}
+			result := s.turnTool(ChatInput{GuildID: "g", ChannelID: "c", SpeakerID: "u"}, voice, viaChat)(context.Background(), "finance.fx", map[string]any{"base": "JPY", "symbols": "KRW"})
+			if !result.OK {
+				t.Fatalf("tool error: %v", result)
+			}
+			hint, _ := result.Data["answer_hint"].(string)
+			if hint == "" || !strings.Contains(hint, "quotes[].text") || hint == s.msg(action.Request{Locale: "en"}, "fx.answer_hint") && tag != "en" {
+				t.Fatalf("answer_hint = %q", hint)
+			}
+			var all []string
+			for _, m := range chat.BuildAnswerMessages(voice, chat.AnswerInput{System: chat.ComposeSystem(voice, "", "", ""), Message: "FX rate", Tools: []chat.ToolResult{result}}) {
+				all = append(all, m.Content)
+			}
+			if !strings.Contains(strings.Join(all, "\n"), hint) {
+				t.Errorf("the answer prompt lacks the hint %q", hint)
+			}
+		})
+	}
+}

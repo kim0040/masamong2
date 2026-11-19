@@ -244,6 +244,7 @@
   "fx.unsupported_currency": "The exchange rate service has no rate for that currency.",
   "fx.invalid_currency": "I couldn't tell which currency that is. Write a code such as USD or a name such as dollar.",
   "fx.invalid_amount": "The amount must be a number greater than zero and at most {max}, written like {example}.",
+  "fx.answer_hint": "Quote the rates as written in quotes[].text; do not recompute them from rates.",
   "fx.home": "USD",
   "fx.amount.named": "{value} {name}",
   "fx.amount.coded": "{value} {code}",
