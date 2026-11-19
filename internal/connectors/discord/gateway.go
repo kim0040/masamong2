@@ -907,7 +907,8 @@ func (g *Gateway) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 		req := requestFor(cmd, opts, ictx, "dc:"+i.ID)
 		mark := g.svc.SettledMark() // before the command reads anything: its result may go on into a chat turn
 		res := g.svc.Execute(ctx, req)
-		if application.IsFXInputError(res) && !ictx.Private && g.answerPrivately(base, s, i, res, cmd, ictx) {
+		if application.IsFXInputError(res) && !ictx.Private {
+			g.answerPrivately(base, s, i, res, cmd, ictx)
 			return
 		}
 		if application.Unanswered(res) && !ictx.Private {
@@ -961,23 +962,22 @@ func (g *Gateway) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 	})
 }
 
-// answerPrivately replaces a public deferred response with a private message. Discord keeps the
-// visibility the first response was given, so an edit cannot make it private: the response is deleted
-// and the answer is sent as an ephemeral follow-up. false means the deferred response is still there
-// (it could not be deleted) and the caller edits it as usual.
-func (g *Gateway) answerPrivately(base context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, res action.Result, cmd Command, ictx InvokeContext) bool {
+// answerPrivately sends the answer to a slash command's input error to the invoker alone. Discord keeps
+// the visibility the first response was given, so a public deferred response cannot be edited into a
+// private message: it is deleted and the answer goes out as an ephemeral follow-up. If the delete fails the
+// deferred response is left as it is (never patched: the error must not become public) and the follow-up is
+// still sent. The caller has nothing more to do either way.
+func (g *Gateway) answerPrivately(base context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, res action.Result, cmd Command, ictx InvokeContext) {
 	final, cancel := g.finalContext(base)
 	defer cancel()
 	if err := s.InteractionResponseDelete(i.Interaction, discordgo.WithContext(final)); err != nil {
-		g.log.Warn("discord: deferred response delete failed", "cmd", cmd.Name, "err", err)
-		return false
+		g.log.Warn("discord: deferred response delete failed; the input error is sent privately and the public response is left unedited", "cmd", cmd.Name, "err", err)
 	}
 	ictx.Private = true
 	r := g.renderInvoked(res, cmd, ictx)
 	if _, err := s.FollowupMessageCreate(i.Interaction, false, &discordgo.WebhookParams{Embeds: r.Embeds(), Flags: discordgo.MessageFlagsEphemeral, AllowedMentions: noMentions}, discordgo.WithContext(final)); err != nil {
 		g.log.Warn("discord: private follow-up failed", "cmd", cmd.Name, "err", err)
 	}
-	return true
 }
 
 // responseEdit is the slash command's final response: its card (with the generated picture attached), or,

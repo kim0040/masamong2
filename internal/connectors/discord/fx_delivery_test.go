@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -217,6 +218,46 @@ func TestFXPrefixInputErrorIsTerminal(t *testing.T) {
 			}
 			if d.calls.Load() != 0 {
 				t.Error("a provider was called")
+			}
+		})
+	}
+}
+
+// refuseDelete answers the deletion of the original response with Discord's 403 and passes the rest on.
+type refuseDelete struct{ fake *fakeDiscord }
+
+func (r refuseDelete) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method == http.MethodDelete && strings.HasSuffix(req.URL.Path, "/messages/@original") {
+		_, _ = r.fake.RoundTrip(req) // recorded
+		return &http.Response{StatusCode: http.StatusForbidden, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"code":50013,"message":"denied"}`)), Request: req}, nil
+	}
+	return r.fake.RoundTrip(req)
+}
+
+// When Discord refuses to delete the public deferred response, the input error still goes out privately
+// and is never patched into the public message.
+func TestFXSlashInputErrorStaysPrivateWhenTheDeleteFails(t *testing.T) {
+	for _, input := range []string{"U$D", "   ", "ZZZ", "BTN"} {
+		t.Run(input, func(t *testing.T) {
+			d := newFXDelivery(t, nil)
+			d.g.sess.Client.Transport = refuseDelete{d.fake}
+			d.slash(t, strOption("currency", input))
+			if _, ok := d.fake.find(http.MethodDelete, "/messages/@original"); !ok {
+				t.Fatal("no deletion attempted")
+			}
+			if edit, ok := d.fake.find(http.MethodPatch, "/messages/@original"); ok {
+				t.Fatalf("the error was patched into the public response: %s", edit.body)
+			}
+			follow, ok := d.fake.find(http.MethodPost, "/webhooks/app/tok")
+			if !ok {
+				t.Fatalf("no private follow-up: %+v", d.fake.calls)
+			}
+			var body struct {
+				Flags  int
+				Embeds []struct{ Description string }
+			}
+			if err := json.Unmarshal([]byte(follow.body), &body); err != nil || body.Flags != ephemeral || len(body.Embeds) != 1 {
+				t.Fatalf("follow-up %s: %v", follow.body, err)
 			}
 		})
 	}
