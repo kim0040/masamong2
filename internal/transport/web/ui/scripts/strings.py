@@ -1724,7 +1724,7 @@ add("toolp", {
     "provider": ("검색 서비스", "Search service"), "provider_auto": ("자동 (순서대로)", "Automatic (in order)"),
     "url": ("링크 주소", "Link"), "max_chars": ("가져올 최대 글자 수", "Max characters"), "krw": ("원화 환산", "Convert to KRW"), "symbols": ("표시할 통화 (쉼표 구분)", "Currencies (comma-separated)"),
     "images.generate.async": ("대화에서는 백그라운드로 그리기", "Draw in the background when asked in chat"),
-    "hint.images.generate.async": ("켜면(기본) 대화에서 그림을 부탁받았을 때 바로 \"그리는 중\"이라고 답하고, 다 그리면 부탁한 메시지에 답글로 올립니다. 끄면 그림이 나올 때까지 답을 기다립니다. /image 명령은 항상 기다립니다.",
+    "hint.images.generate.async": ("켜면(기본) 대화에서 그림을 부탁받았을 때 바로 \"그리는 중\"이라고 답하고, 다 그리면 부탁한 메시지에 답글로 올립니다. 끄면 그림이 나올 때까지 답을 기다립니다. /이미지 명령은 항상 기다립니다.",
      "On (the default): when someone asks for a picture in chat, the bot answers at once that it is drawing and posts the picture as a reply to the request when it is done. Off: the answer waits for the picture. The /image command always waits."),
     "fortune.query.hour_correction_minutes": ("시주 태양시 보정(분)", "Hour pillar: solar time correction (minutes)"),
     "hint.fortune.query.hour_correction_minutes": ("태어난 시각으로 시주를 정할 때 표준시에서 빼는 분입니다. 비워 두면 서울·평양 시간대에서는 30분(서울의 태양시가 표준시보다 약 30분 늦은 것을 반영한 국내 만세력 관례로, 자시가 23:30~01:30)이고 그 밖의 시간대에서는 0입니다. 값을 직접 입력하면 모든 시간대에 그대로 적용됩니다. 서머타임은 항상 빼고 계산합니다. 연주·월주는 바뀌지 않으며, 일주는 태양시 기준 날짜가 달라지는 출생(서머타임 시계로 자정 직후 등)에서만 그 날짜에 맞춰집니다. 매일 운세 브리핑도 같은 값을 씁니다.",

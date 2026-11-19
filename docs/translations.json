@@ -2,11 +2,11 @@
   "note": "Translation record checked by tools/doccheck. When a file of a group changes, bring the other languages along, then run: go run ./tools/doccheck -write",
   "groups": {
     "README": {
-      "README.es.md": "95d2e51db2eec932",
-      "README.ja.md": "611b4076a18b6012",
-      "README.ko.md": "f2c31fd9d4aa6aac",
+      "README.es.md": "2422a547a28d2a61",
+      "README.ja.md": "fc9d044917dc4a45",
+      "README.ko.md": "3957bec57dff1bc3",
       "README.md": "f34551d35b85b8aa",
-      "README.zh-Hans.md": "7d9b67718f5a5d60"
+      "README.zh-Hans.md": "9db11240d99f8435"
     },
     "wiki/CLI-명령어": {
       "docs/wiki/CLI-Commands.md": "cb6e440750dc6a01",
@@ -14,7 +14,7 @@
     },
     "wiki/Discord-연결": {
       "docs/wiki/Connecting-Discord.md": "c50b3b8bb17626a5",
-      "docs/wiki/Discord-연결.md": "72a0ea70b5dced9e"
+      "docs/wiki/Discord-연결.md": "33c776e25501ee1d"
     },
     "wiki/Home": {
       "docs/wiki/English.md": "357a9307b7f1f507",
@@ -34,7 +34,7 @@
     },
     "wiki/도구와-한도": {
       "docs/wiki/Tools-and-Limits.md": "94ca84d18909fdb5",
-      "docs/wiki/도구와-한도.md": "495ab10abbc513da"
+      "docs/wiki/도구와-한도.md": "af5bc25a2a97b077"
     },
     "wiki/동시-처리와-성능": {
       "docs/wiki/Concurrency-and-Performance.md": "fe42487fb484f48c",
@@ -46,7 +46,7 @@
     },
     "wiki/문제-해결": {
       "docs/wiki/Troubleshooting.md": "69e5fbf7044d9af7",
-      "docs/wiki/문제-해결.md": "5e6f542777d3b5f8"
+      "docs/wiki/문제-해결.md": "f98b169d4ded60f3"
     },
     "wiki/보류-중인-결정": {
       "docs/wiki/Pending-Decisions.md": "d4fcd126d8b2ba63",
@@ -54,7 +54,7 @@
     },
     "wiki/보안과-개인정보": {
       "docs/wiki/Security-and-Privacy.md": "db9c9e66e6bd0ea5",
-      "docs/wiki/보안과-개인정보.md": "5e8ec3afa3c140a5"
+      "docs/wiki/보안과-개인정보.md": "019d3ab4e562b73d"
     },
     "wiki/부하-테스트와-장기-운영": {
       "docs/wiki/Load-Testing-and-Long-Running.md": "5c947bb91af06284",
@@ -66,7 +66,7 @@
     },
     "wiki/설정-레퍼런스": {
       "docs/wiki/Configuration-Reference.md": "f0a97044541bb598",
-      "docs/wiki/설정-레퍼런스.md": "88346c77462b7382"
+      "docs/wiki/설정-레퍼런스.md": "c1c9376e90114727"
     },
     "wiki/설치": {
       "docs/wiki/Installation.md": "0fadd96bae14101a",
@@ -74,7 +74,7 @@
     },
     "wiki/언어-설정": {
       "docs/wiki/Languages.md": "05ffe57f5f9c7602",
-      "docs/wiki/언어-설정.md": "0564f0fbccda8a30"
+      "docs/wiki/언어-설정.md": "a3c9ff0790320b61"
     },
     "wiki/저장소와-백업": {
       "docs/wiki/Storage-and-Backup.md": "b7f1a01b16cab443",
