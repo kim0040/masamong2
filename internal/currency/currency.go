@@ -186,38 +186,106 @@ func roundSignificant(v float64) float64 {
 	return r
 }
 
-// ParseAmount reads the number a person typed ("50000", "50,000", "0.5"). ok is false for anything
-// else, a zero or negative number and one beyond MaxAmount.
-func ParseAmount(text string) (float64, bool) {
-	t := strings.TrimSpace(text)
-	if t == "" {
-		return 0, false
+// separators are the group and decimal separators of locale as x/text writes them (en "," and ".",
+// es "." and ","): read off a number that has both.
+func separators(locale string) (group, decimal string) {
+	text := message.NewPrinter(language.Make(locale)).Sprint(number.Decimal(1234567.5, number.MaxFractionDigits(1)))
+	var runs []string // the non-digit runs: group, group, decimal
+	cur := ""
+	for _, r := range text {
+		if r >= '0' && r <= '9' {
+			if cur != "" {
+				runs = append(runs, cur)
+				cur = ""
+			}
+			continue
+		}
+		cur += string(r)
 	}
-	for _, r := range t {
-		if !(r >= '0' && r <= '9' || r == '.' || r == ',') {
+	if len(runs) < 2 {
+		return ",", "."
+	}
+	return runs[0], runs[len(runs)-1]
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// ParseAmount reads the number a person typed, in the syntax of locale: digits, optional thousands groups
+// of exactly three digits joined by the locale's group separator, then optionally the locale's decimal
+// separator and digits ("1,234.5" in English, "1.234,5" in Spanish). Anything else (".5", "1,5" where the
+// comma is a group, "5,00,0", a sign, an exponent) is not an amount, and neither is a zero or negative
+// number or one beyond MaxAmount.
+func ParseAmount(locale, text string) (float64, bool) {
+	t := strings.TrimSpace(text)
+	group, decimal := separators(locale)
+	whole, fraction := t, ""
+	if i := strings.Index(t, decimal); i >= 0 {
+		whole, fraction = t[:i], t[i+len(decimal):]
+		if !isDigits(fraction) {
 			return 0, false
 		}
 	}
-	n, err := strconv.ParseFloat(strings.ReplaceAll(t, ",", ""), 64)
+	digits := whole
+	if strings.Contains(whole, group) {
+		parts := strings.Split(whole, group)
+		for i, part := range parts {
+			if i == 0 && (len(part) < 1 || len(part) > 3) || i > 0 && len(part) != 3 || !isDigits(part) {
+				return 0, false
+			}
+		}
+		digits = strings.Join(parts, "")
+	}
+	if !isDigits(digits) {
+		return 0, false
+	}
+	if fraction != "" {
+		digits += "." + fraction
+	}
+	n, err := strconv.ParseFloat(digits, 64)
 	if err != nil || !ValidAmount(n) {
 		return 0, false
 	}
 	return n, true
 }
 
+// MaxAmountText is MaxAmount written for locale; AmountExample shows how a locale writes an amount.
+func MaxAmountText(locale string) string {
+	return message.NewPrinter(language.Make(locale)).Sprint(number.Decimal(MaxAmount))
+}
+
+// AmountExample is a sample amount in locale's syntax ("1,234.5"), for the message that refuses one.
+func AmountExample(locale string) string {
+	return message.NewPrinter(language.Make(locale)).Sprint(number.Decimal(1234.5, number.MaxFractionDigits(1)))
+}
+
 // ValidAmount reports whether n is an amount a person may ask about: above zero and not beyond MaxAmount.
 func ValidAmount(n float64) bool { return n > 0 && n <= MaxAmount }
 
-// IsNumber reports whether text is written as a number (the prefix command's amount token).
+// IsNumber reports whether a word of a command is written as a number, an amount to be read by
+// ParseAmount: it holds digits and nothing but the "." and "," every supported locale uses as separators
+// (a test pins that), so a malformed amount ("5,00,0", ".5") is still an amount, refused as such, and
+// never taken for a currency name.
 func IsNumber(text string) bool {
 	t := strings.TrimSpace(text)
-	if t == "" || t[0] < '0' || t[0] > '9' {
-		return false
-	}
+	digit := false
 	for _, r := range t {
-		if !(r >= '0' && r <= '9' || r == '.' || r == ',') {
+		switch {
+		case r >= '0' && r <= '9':
+			digit = true
+		case r == '.' || r == ',':
+		default:
 			return false
 		}
 	}
-	return true
+	return digit
 }

@@ -1952,7 +1952,7 @@ func (g *Gateway) shouldAnswer(m *discordgo.MessageCreate, pol config.ChannelPol
 
 func (g *Gateway) runCommand(s *discordgo.Session, m *discordgo.MessageCreate, cmd Command, opts map[string]string) {
 	ictx := InvokeContext{ChannelID: m.ChannelID, GuildID: m.GuildID, UserID: m.Author.ID, Locale: g.locale(m.GuildID), Manager: g.messageManager(s, m),
-		Private: m.GuildID == "", UserName: displayName(m)}
+		Private: m.GuildID == "", UserName: displayName(m), Typed: true}
 	ctx, cancel := context.WithTimeout(g.runCtx(), g.ActionTimeout)
 	defer cancel()
 	mark := g.svc.SettledMark() // before the command reads anything: its result may go on into a chat turn

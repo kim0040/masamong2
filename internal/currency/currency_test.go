@@ -1,7 +1,6 @@
 package currency
 
 import (
-	"strings"
 	"testing"
 
 	"masamong/internal/i18n"
@@ -116,19 +115,77 @@ func TestQuoteUnits(t *testing.T) {
 	}
 }
 
+// One syntax per locale: digits, thousands groups of exactly three, the locale's decimal separator.
 func TestParseAmount(t *testing.T) {
-	for in, want := range map[string]float64{"50000": 50000, "50,000": 50000, " 0.5 ": 0.5, ".5": 0.5, "1,234.5": 1234.5} {
-		if got, ok := ParseAmount(in); !ok || got != want {
-			t.Errorf("ParseAmount(%q) = %v, %v", in, got, ok)
+	for _, tc := range []struct {
+		locale, in string
+		want       float64
+	}{
+		{"en", "50000", 50000}, {"en", "50,000", 50000}, {"en", " 0.5 ", 0.5}, {"en", "1,234.5", 1234.5}, {"en", "1,234,567", 1234567}, {"en", "0.25", 0.25},
+		{"ko", "1,234.56", 1234.56}, {"ja", "12,345", 12345}, {"zh-Hans", "1,000.5", 1000.5},
+		{"es", "1,5", 1.5}, {"es", "1.234,56", 1234.56}, {"es", "1.234", 1234}, {"es", "50000", 50000}, {"es", "0,5", 0.5},
+	} {
+		if got, ok := ParseAmount(tc.locale, tc.in); !ok || got != tc.want {
+			t.Errorf("ParseAmount(%s, %q) = %v, %v; want %v", tc.locale, tc.in, got, ok, tc.want)
 		}
 	}
-	for _, bad := range []string{"", " ", "0", "-5", "abc", "1e3", "inf", "NaN", "1.2.3", "5만", "1000000000000000000"} {
-		if got, ok := ParseAmount(bad); ok {
-			t.Errorf("ParseAmount(%q) = %v, want invalid", bad, got)
+	// ambiguous or malformed: never silently another number
+	for _, tc := range []struct{ locale, in string }{
+		{"en", "1,5"}, {"en", "5,00,0"}, {"en", ".5"}, {"en", "50,"}, {"en", "50."}, {"en", "1,23"}, {"en", "1,2345"}, {"en", "1.2.3"}, {"en", "1,234,56"}, {"en", ",500"},
+		{"ko", "1,5"}, {"ko", "5,00,0"},
+		{"es", "1.234,56,7"}, {"es", "1.5"}, {"es", ",5"}, {"es", "1.23.456"}, {"es", "1,234.5"},
+		{"en", ""}, {"en", " "}, {"en", "0"}, {"en", "0.0"}, {"en", "-5"}, {"en", "+5"}, {"en", "abc"}, {"en", "1e3"}, {"en", "inf"}, {"en", "NaN"}, {"en", "5만"}, {"en", "1 000"},
+		{"en", "1000000000000000.5"}, {"en", "1000000000000000000"},
+	} {
+		if got, ok := ParseAmount(tc.locale, tc.in); ok {
+			t.Errorf("ParseAmount(%s, %q) = %v, want invalid", tc.locale, tc.in, got)
 		}
 	}
-	if !IsNumber("50,000") || IsNumber("엔화") || IsNumber("") || IsNumber("e5") {
-		t.Error("IsNumber misreads tokens")
+	if got, ok := ParseAmount("en", "1,000,000,000,000,000"); !ok || got != MaxAmount {
+		t.Errorf("the cap itself is allowed: %v %v", got, ok)
 	}
-	_ = strings.TrimSpace
+}
+
+// The prefix lexer only needs the separators every supported locale uses; this pins that assumption.
+func TestSeparatorsOfShippedLocales(t *testing.T) {
+	for _, loc := range i18n.New().Locales() {
+		g, d := separators(loc)
+		if (g != "," && g != ".") || (d != "," && d != ".") || g == d {
+			t.Errorf("%s: group %q decimal %q: IsNumber would not recognise its numbers", loc, g, d)
+		}
+	}
+	if g, d := separators("es"); g != "." || d != "," {
+		t.Errorf("es separators = %q %q", g, d)
+	}
+	if g, d := separators("en"); g != "," || d != "." {
+		t.Errorf("en separators = %q %q", g, d)
+	}
+}
+
+func TestIsNumber(t *testing.T) {
+	for _, in := range []string{"50,000", "5", ".5", "1.234,56", "5,00,0", "50,"} {
+		if !IsNumber(in) {
+			t.Errorf("IsNumber(%q) = false: a malformed amount is still an amount", in)
+		}
+	}
+	for _, in := range []string{"엔화", "", ",", ".", "e5", "5만", "USD", "1e3", "-5"} {
+		if IsNumber(in) {
+			t.Errorf("IsNumber(%q) = true", in)
+		}
+	}
+}
+
+func TestAmountMessageParts(t *testing.T) {
+	if got := MaxAmountText("en"); got != "1,000,000,000,000,000" {
+		t.Errorf("max = %q", got)
+	}
+	if got := MaxAmountText("es"); got != "1.000.000.000.000.000" {
+		t.Errorf("max es = %q", got)
+	}
+	if got := AmountExample("es"); got != "1.234,5" {
+		t.Errorf("example es = %q", got)
+	}
+	if got := AmountExample("ko"); got != "1,234.5" {
+		t.Errorf("example ko = %q", got)
+	}
 }

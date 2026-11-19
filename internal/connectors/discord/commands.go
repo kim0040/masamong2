@@ -80,6 +80,7 @@ type InvokeContext struct {
 	Manager   bool // owns or manages the server (Discord permissions)
 	Private   bool // only the invoker sees the answer (a DM, or an ephemeral slash reply)
 	UserName  string
+	Typed     bool // the options are words of a message (a prefix command), not values Discord already typed
 }
 
 func option(t discordgo.ApplicationCommandOptionType, name, desc string, required bool) *discordgo.ApplicationCommandOption {
@@ -173,9 +174,16 @@ func Commands() []Command {
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
 				// what was typed goes to the action as it is: a given option, even a blank one, is checked there
 				in := map[string]any{"home": currency.New(messages).Home(c.Locale)}
-				for _, k := range []string{"currency", "amount"} {
-					if v, given := o[k]; given {
-						in[k] = v
+				if v, given := o["currency"]; given {
+					in["currency"] = v
+				}
+				if v, given := o["amount"]; given {
+					// a number option is already a number; a word of a message is the person's text, read
+					// in their locale's syntax by the action
+					if n, err := strconv.ParseFloat(v, 64); err == nil && !c.Typed {
+						in["amount"] = n
+					} else {
+						in["amount"] = v
 					}
 				}
 				return "finance.fx", in

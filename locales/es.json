@@ -243,7 +243,7 @@
   "discord.render.quote.as_of": "A fecha de",
   "fx.unsupported_currency": "El servicio de tipos de cambio no tiene tipo para esa moneda.",
   "fx.invalid_currency": "No pude saber de qué moneda se trata. Escribe un código como USD o un nombre como dólar.",
-  "fx.invalid_amount": "El importe debe ser un número mayor que cero.",
+  "fx.invalid_amount": "El importe debe ser un número mayor que cero y como máximo {max}, escrito como {example}.",
   "fx.home": "USD",
   "fx.amount.named": "{value} {name}",
   "fx.amount.coded": "{value} {code}",

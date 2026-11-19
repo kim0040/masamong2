@@ -243,7 +243,7 @@
   "discord.render.quote.as_of": "截至",
   "fx.unsupported_currency": "汇率服务没有这种货币的汇率。",
   "fx.invalid_currency": "无法识别该货币。请输入 USD 之类的代码，或“美元”之类的名称。",
-  "fx.invalid_amount": "金额必须是大于 0 的数字。",
+  "fx.invalid_amount": "金额必须是大于 0 且不超过 {max} 的数字，写法如 {example}。",
   "fx.home": "USD",
   "fx.amount.named": "{value}{name}",
   "fx.amount.coded": "{value} {code}",

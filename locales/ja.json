@@ -243,7 +243,7 @@
   "discord.render.quote.as_of": "時点",
   "fx.unsupported_currency": "為替レートのサービスにこの通貨のレートがありません。",
   "fx.invalid_currency": "どの通貨か分かりませんでした。USD のようなコードか「ドル」のような名前で入力してください。",
-  "fx.invalid_amount": "金額は 0 より大きい数字で入力してください。",
+  "fx.invalid_amount": "金額は 0 より大きく {max} 以下の数字で、{example} のように入力してください。",
   "fx.home": "USD",
   "fx.amount.named": "{value}{name}",
   "fx.amount.coded": "{value} {code}",

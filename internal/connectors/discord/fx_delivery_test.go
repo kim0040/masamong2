@@ -300,3 +300,69 @@ func TestFXBlockedUserIsRefusedBeforeInputIsRead(t *testing.T) {
 		t.Fatalf("a blocked member was told about their typo: %+v", res.Error)
 	}
 }
+
+// The prefix words and the action read an amount in one syntax, the locale's: a comma that is a decimal
+// in Spanish is a thousands group in English, and anything ambiguous is refused, never read as another sum.
+func TestFXPrefixAmountsAreReadInTheLocalesSyntax(t *testing.T) {
+	for _, tc := range []struct {
+		locale, text string
+		want         string // a fragment of the card, or of the refusal
+	}{
+		{"es", "!cambio 1,5 USD", "1,5 USD ≈"},
+		{"es", "!cambio 1.234,56 yen", "1.234,56 JPY ≈"},
+		{"es", "!cambio 1.5 yen", "El importe debe ser"},
+		{"en", "!fx 1,234.5 yen", "1,234.5 JPY ≈"},
+		{"en", "!fx 1,5 yen", "The amount must be"},
+		{"en", "!fx 5,00,0 yen", "The amount must be"},
+		{"en", "!fx .5 yen", "The amount must be"}, // the lexer and the action agree: an amount, and a malformed one
+		{"en", "!fx 50, USD", "The amount must be"},
+		{"en", "!fx 0.5 yen", "0.5 JPY ≈"},
+		{"ko", "!환율 50,000 엔화", "50,000엔 ≈"},
+	} {
+		t.Run(tc.locale+" "+tc.text, func(t *testing.T) {
+			d := newFXDelivery(t, nil)
+			cmd, o, ok := ParsePrefix("!", tc.text)
+			if !ok {
+				t.Fatal("did not parse")
+			}
+			if strings.Contains(strings.Join([]string{o["currency"]}, ""), "5") && o["amount"] == "" {
+				t.Fatalf("a number was taken for a currency: %v", o)
+			}
+			r := d.g.svc.Execute(context.Background(), requestFor(cmd, o, InvokeContext{Locale: tc.locale, Typed: true}, "fx-prefix"))
+			got := ""
+			if r.OK {
+				got = Render(r, cmd, tc.locale).Embed.Description
+			} else {
+				got = r.Error.Message
+				if r.Error.MessageKey != "fx.invalid_amount" {
+					t.Errorf("error %s, want fx.invalid_amount", r.Error.MessageKey)
+				}
+				if d.calls.Load() != 0 {
+					t.Error("a provider was called for a refused amount")
+				}
+			}
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("options %v: %q, want %q", o, got, tc.want)
+			}
+		})
+	}
+}
+
+// The amount refusal says what an amount may be, in the locale's own way of writing one.
+func TestFXInvalidAmountMessageStatesTheCap(t *testing.T) {
+	d := newFXDelivery(t, nil)
+	for locale, want := range map[string][]string{
+		"en": {"1,000,000,000,000,000", "1,234.5"}, "es": {"1.000.000.000.000.000", "1.234,5"}, "ko": {"1,000,000,000,000,000", "1,234.5"},
+		"ja": {"1,000,000,000,000,000", "1,234.5"}, "zh-Hans": {"1,000,000,000,000,000", "1,234.5"},
+	} {
+		res := d.g.svc.Execute(context.Background(), action.Request{Action: "finance.fx", Locale: locale, Input: mustJSON(map[string]any{"home": "USD", "amount": 2e15})})
+		if res.OK || res.Error.MessageKey != "fx.invalid_amount" {
+			t.Fatalf("%s: %+v", locale, res)
+		}
+		for _, w := range want {
+			if !strings.Contains(res.Error.Message, w) {
+				t.Errorf("%s: %q lacks %q", locale, res.Error.Message, w)
+			}
+		}
+	}
+}
