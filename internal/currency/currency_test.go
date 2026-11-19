@@ -1,6 +1,8 @@
 package currency
 
 import (
+	"encoding/json"
+	"math"
 	"testing"
 
 	"masamong/internal/i18n"
@@ -187,5 +189,38 @@ func TestAmountMessageParts(t *testing.T) {
 	}
 	if got := AmountExample("ko"); got != "1,234.5" {
 		t.Errorf("example ko = %q", got)
+	}
+}
+
+// Extreme rates and amounts: no quote is ever infinite (it could not be sent as JSON), the unit search
+// goes one power of ten past the amount cap when that is what reaches 1, and the boundaries round as stated.
+func TestQuoteEdgeCases(t *testing.T) {
+	l := New(i18n.New())
+	for _, tc := range []struct {
+		name, locale, from, to string
+		rate, amount, unit     float64
+		want                   string
+	}{
+		{"a tie at the fourth digit may round either way (binary floats)", "en", "USD", "EUR", 0.99995, 0, 10, "10 USD ≈ 9.999 EUR"},
+		{"explicit 0.99995", "en", "USD", "EUR", 0.99995, 1, 1, "1 USD ≈ 1 EUR"},
+		{"the power of ten past the cap reaches 1", "en", "USD", "EUR", 1e-16, 0, 1e16, "10,000,000,000,000,000 USD ≈ 1 EUR"},
+		{"never reaching 1 is stated as the fraction it is", "en", "USD", "EUR", 1e-18, 0, 1e16, "10,000,000,000,000,000 USD ≈ 0.01 EUR"},
+		{"the cap itself, grouped by the locale", "es", "USD", "VND", 25000, 1e15, 1e15, "1.000.000.000.000.000 USD ≈ 25.000.000.000.000.000.000 VND"},
+	} {
+		q, ok := l.Quote(tc.locale, tc.from, tc.to, tc.rate, tc.amount)
+		if !ok || q.Unit != tc.unit || q.Text != tc.want {
+			t.Errorf("%s: %+v ok=%v, want unit %v %q", tc.name, q, ok, tc.unit, tc.want)
+		}
+	}
+	for _, tc := range []struct{ rate, amount float64 }{
+		{math.MaxFloat64, 1e15}, {math.MaxFloat64, 10}, {1e308, 10}, {math.Inf(1), 1}, {math.NaN(), 1},
+	} {
+		if q, ok := l.Quote("en", "USD", "EUR", tc.rate, tc.amount); ok {
+			if _, err := json.Marshal(q); err != nil || math.IsInf(q.Value, 0) {
+				t.Errorf("rate %v amount %v: unusable quote %+v (%v)", tc.rate, tc.amount, q, err)
+			} else {
+				t.Errorf("rate %v amount %v: expected no quote, got %+v", tc.rate, tc.amount, q)
+			}
+		}
 	}
 }

@@ -26,8 +26,10 @@ import (
 const (
 	namePrefix = "fx.currency."
 	unitPrefix = "fx.unit."
-	// maxUnit stops the unit search for a rate so small that no power of ten reaches 1.
-	maxUnit = 1e15
+	// maxUnit is the largest unit the search tries (10^16: the cap on an amount is 10^15, and a rate that
+	// needs one more power of ten than that to reach 1 is still stated). A rate so small that even this unit
+	// stays under 1 is stated in this unit, as the fraction it is.
+	maxUnit = 1e16
 	// MaxAmount is the largest amount a person may ask about.
 	MaxAmount = 1e15
 	// significant is the number of significant digits a converted value is shown with.
@@ -142,7 +144,7 @@ type Quote struct {
 }
 
 // Quote states what unit of from is worth in to, given rate (units of to per one of from). With amount
-// above zero the unit is that amount. Without one the unit is the locale's convention for from or, when
+// above zero the unit is that amount. A product that overflows gives no quote. Without one the unit is the locale's convention for from or, when
 // that gives less than 1 of to, the smallest power of ten (1, 10, 100 …) that gives at least 1.
 func (l *Lexicon) Quote(locale, from, to string, rate, amount float64) (Quote, bool) {
 	if !(rate > 0) || math.IsInf(rate, 0) || math.IsNaN(rate) {
@@ -156,6 +158,9 @@ func (l *Lexicon) Quote(locale, from, to string, rate, amount float64) (Quote, b
 		}
 	}
 	value := roundSignificant(unit * rate)
+	if math.IsInf(value, 0) || math.IsNaN(value) || math.IsInf(unit, 0) {
+		return Quote{}, false // an overflow is no quote: it could not be written, nor sent as JSON
+	}
 	p := message.NewPrinter(language.Make(locale))
 	return Quote{
 		From: from, Unit: unit, To: to, Value: value,

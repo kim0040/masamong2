@@ -294,3 +294,29 @@ func TestFXRawInputKeepsItsOldMeaning(t *testing.T) {
 		t.Errorf("blank command option: %+v", res)
 	}
 }
+
+// A rate that overflows the amount gives no quote, and the result stays one that can be sent as JSON.
+func TestFXOverflowingQuoteIsSkipped(t *testing.T) {
+	s := fixg1Svc(t, []string{"serper"}, nil, nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"result":"success","base_code":"USD","rates":{"JPY":1e308,"KRW":1400}}`)
+	}))
+	defer server.Close()
+	provider := s.Registry().FX
+	provider.OpenBase, provider.KeyedBase = server.URL, server.URL
+	res := s.Execute(context.Background(), action.Request{Action: "finance.fx", Locale: "en", Input: []byte(`{"base":"USD","symbols":"JPY, KRW","amount":10}`)})
+	if !res.OK {
+		t.Fatalf("%+v", res)
+	}
+	if _, err := json.Marshal(res); err != nil {
+		t.Fatalf("the result cannot be encoded: %v", err)
+	}
+	q := quotesOf(t, res.Output)
+	if len(q) != 1 || q[0]["to"] != "KRW" || q[0]["text"] != "10 USD ≈ 14,000 KRW" {
+		t.Errorf("quotes = %v: the overflowing JPY quote must be skipped, KRW kept", q)
+	}
+	if rates := res.Output["rates"].(map[string]any); rates["JPY"] != 1e308 {
+		t.Errorf("the raw rate is reported as it came: %v", rates)
+	}
+}
