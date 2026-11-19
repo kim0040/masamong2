@@ -160,6 +160,7 @@ type lineStats struct {
 	liveBot         int  // the bot's live messages kept as lines of their own
 	liveBotAnswered int  // the bot's live messages left out because their stored answer stands for them
 	liveAge         time.Duration
+	replyLinks      int // replies to a posted message joined to the stored answer it was part of
 }
 
 func (st lineStats) note(ledger map[string]any, att conversation.Attribution) {
@@ -170,6 +171,7 @@ func (st lineStats) note(ledger map[string]any, att conversation.Attribution) {
 		ledger["turns_gated"] = true
 	}
 	ledger["live_age_s"] = int(st.liveAge.Seconds())
+	ledger["reply_links"] = st.replyLinks
 	ledger["before_window"], ledger["after_call"], ledger["caller_earlier"] = att.Before, att.After, att.CallerEarlier
 }
 
@@ -202,7 +204,7 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 			st.stored++
 		}
 	}
-	answered := map[string]bool{} // user messages the stored conversation has the bot's answer to
+	answered := map[string]string{} // user messages the stored conversation has the bot's answer to: its line
 	if turns, err := eng.Store.RecentChatTurns(blocks.ChannelKey(in.GuildID, in.ChannelID), 24); err == nil {
 		st.turnsRead = len(turns)
 		st.turnsGated = len(turns) == 0 && eng.Store.DB.HasPendingEvents("source-change")
@@ -219,9 +221,9 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 					st.turnUser++
 				}
 			case "assistant":
-				answered[t.NativeID] = true
 				// named by its own link, not by the request's ID: reading the reply is not reading the request
-				put(conversation.Line{ID: "turn:" + t.SourceIDs[0], Bot: true, ReplyTo: t.NativeID, At: at.Add(time.Millisecond), Text: t.Content})
+				answered[t.NativeID] = "turn:" + t.SourceIDs[0]
+				put(conversation.Line{ID: answered[t.NativeID], Bot: true, ReplyTo: t.NativeID, At: at.Add(time.Millisecond), Text: t.Content})
 				st.turnBot++
 			}
 		}
@@ -230,10 +232,44 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 	if len(live) > 0 {
 		st.liveAge = s.Clock.Now().Sub(live[0].At)
 	}
+	// The bot's answer was posted as one or more messages (bubbles, parts of a long reply, its rest), and only
+	// the first replies to the request. Each of them is the stored answer's line: a person who replies to any of
+	// them replies to that line. The turn they were posted for names the request (reply_messages, turn_log).
+	var probe []string
 	for _, l := range live {
-		if l.Bot && answered[l.ReplyTo] {
-			st.liveBotAnswered++
-			continue // the stored answer has the whole reply; its posted parts would repeat it
+		if l.Bot {
+			probe = append(probe, l.ID)
+		}
+		if l.ReplyTo != "" {
+			probe = append(probe, l.ReplyTo)
+		}
+	}
+	for _, id := range order {
+		if r := byID[id].ReplyTo; r != "" {
+			probe = append(probe, r)
+		}
+	}
+	posted := s.postedFor(probe)
+	alias := map[string]string{} // a posted message → the stored answer's line
+	for id, request := range posted {
+		if line, ok := answered[request]; ok {
+			alias[id] = line
+		}
+	}
+	for _, l := range live {
+		if l.Bot {
+			request := l.ReplyTo
+			if r, ok := posted[l.ID]; ok && r != "" {
+				request = r
+			}
+			if line, ok := answered[request]; ok {
+				alias[l.ID] = line
+				st.liveBotAnswered++
+				continue // the stored answer has the whole reply; its posted parts would repeat it
+			}
+			if l.ReplyTo == "" {
+				l.ReplyTo = request // a later part of an answer with no stored turn still answers its request
+			}
 		}
 		if l.Bot && l.Text != "" && s.replyWithdrawn(l.ID) {
 			l.Text = ""
@@ -251,6 +287,10 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 	bot := s.botAccount(nil)
 	for _, id := range order {
 		l := byID[id]
+		if line, ok := alias[l.ReplyTo]; ok {
+			l.ReplyTo = line
+			st.replyLinks++
+		}
 		if l.Bot && l.AuthorID == "" {
 			l.AuthorID = bot
 		}
@@ -262,6 +302,41 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 		out = append(out, l)
 	}
 	return out, madeFrom, st
+}
+
+// postedFor maps the bot's posted messages among ids to the request their turn answered (the turn's own message),
+// as reply_messages and the turn's record keep them. Messages that are not the bot's replies are left out.
+func (s *Service) postedFor(ids []string) map[string]string {
+	ids = uniqueStrings(ids)
+	if len(ids) == 0 {
+		return nil
+	}
+	db, err := s.adminDB()
+	if err != nil {
+		return nil
+	}
+	request := `json_extract(t.body,'$.message_id')`
+	if !db.IsSQLite() {
+		request = `JSON_UNQUOTE(JSON_EXTRACT(t.body,'$.message_id'))`
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := db.Reader().Query(`SELECT r.message_id, COALESCE(`+request+`,'') FROM reply_messages r JOIN turn_log t ON t.id=r.turn_id
+		WHERE r.message_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`)`, args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	out := map[string]string{}
+	for rows.Next() {
+		var id, req string
+		if rows.Scan(&id, &req) == nil && req != "" && req != id {
+			out[id] = req
+		}
+	}
+	return out
 }
 
 // replyWithdrawn reports whether a bot message posted a reply that is not to be built on: its turn's record
