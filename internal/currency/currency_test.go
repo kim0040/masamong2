@@ -224,3 +224,18 @@ func TestQuoteEdgeCases(t *testing.T) {
 		}
 	}
 }
+
+// A program's amount (a chat tool call, the CLI, the console) reads the same in every locale: "." is the
+// decimal point and "," only groups thousands, so a Spanish request's "1.500" is one and a half, never 1500.
+func TestParseMachineAmount(t *testing.T) {
+	for text, want := range map[string]float64{"1.5": 1.5, "1.500": 1.5, "50000": 50000, "50,000": 50000, "1,234,567.25": 1234567.25, " 7 ": 7} {
+		if got, ok := ParseMachineAmount(text); !ok || got != want {
+			t.Errorf("%q = %v, %v; want %v", text, got, ok, want)
+		}
+	}
+	for _, text := range []string{"", "1,5", ".5", "5.", "5,00,0", "1.2.3", "1,234.5,6", "-1", "1e3", "0", "1 000", "1234,567"} {
+		if got, ok := ParseMachineAmount(text); ok {
+			t.Errorf("%q read as %v", text, got)
+		}
+	}
+}

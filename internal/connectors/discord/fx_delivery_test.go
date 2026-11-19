@@ -234,8 +234,9 @@ func (r refuseDelete) RoundTrip(req *http.Request) (*http.Response, error) {
 	return r.fake.RoundTrip(req)
 }
 
-// When Discord refuses to delete the public deferred response, the input error still goes out privately
-// and is never patched into the public message.
+// When Discord refuses to delete the public deferred response, the input error is not sent at all: a patch
+// would be public, and Discord may attach the first follow-up to the public deferred response whatever its
+// flags say.
 func TestFXSlashInputErrorStaysPrivateWhenTheDeleteFails(t *testing.T) {
 	for _, input := range []string{"U$D", "   ", "ZZZ", "BTN"} {
 		t.Run(input, func(t *testing.T) {
@@ -248,16 +249,8 @@ func TestFXSlashInputErrorStaysPrivateWhenTheDeleteFails(t *testing.T) {
 			if edit, ok := d.fake.find(http.MethodPatch, "/messages/@original"); ok {
 				t.Fatalf("the error was patched into the public response: %s", edit.body)
 			}
-			follow, ok := d.fake.find(http.MethodPost, "/webhooks/app/tok")
-			if !ok {
-				t.Fatalf("no private follow-up: %+v", d.fake.calls)
-			}
-			var body struct {
-				Flags  int
-				Embeds []struct{ Description string }
-			}
-			if err := json.Unmarshal([]byte(follow.body), &body); err != nil || body.Flags != ephemeral || len(body.Embeds) != 1 {
-				t.Fatalf("follow-up %s: %v", follow.body, err)
+			if follow, ok := d.fake.find(http.MethodPost, "/webhooks/app/tok"); ok {
+				t.Fatalf("a follow-up was sent after the failed delete: %s", follow.body)
 			}
 		})
 	}

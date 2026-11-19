@@ -25,7 +25,8 @@ func IsFXInputError(res action.Result) bool {
 
 func (s *Service) fxInvalid(req action.Request, key string) action.Result {
 	if key == "fx.invalid_amount" { // says what an amount may be, in the way the locale writes it
-		return action.Fail(req, errcode.InvalidInput, key, s.msg(req, key, "max", currency.MaxAmountText(req.Locale), "example", currency.AmountExample(req.Locale)), nil)
+		maxText, example := currency.MaxAmountText(req.Locale), currency.AmountExample(req.Locale)
+		return action.Fail(req, errcode.InvalidInput, key, s.msg(req, key, "max", maxText, "example", example), map[string]any{"max": maxText, "example": example})
 	}
 	return action.Fail(req, errcode.InvalidInput, key, s.msg(req, key), nil)
 }
@@ -63,9 +64,9 @@ func fxText(in map[string]any, key string) (string, bool) {
 }
 
 // fxAmount reads the optional amount: absent is 0, anything but a positive number is an error. A JSON
-// number is taken as it is; text is read in the syntax of the request's locale (currency.ParseAmount),
-// the same as the prefix command's words.
-func fxAmount(locale string, in map[string]any) (float64, bool) {
+// number is taken as it is; text a person typed (human) is read in the syntax of the request's locale
+// (currency.ParseAmount), text a program sent in the locale-free form (currency.ParseMachineAmount).
+func fxAmount(locale string, human bool, in map[string]any) (float64, bool) {
 	v, given := in["amount"]
 	if !given || v == nil {
 		return 0, true
@@ -73,6 +74,9 @@ func fxAmount(locale string, in map[string]any) (float64, bool) {
 	var f float64
 	switch t := v.(type) {
 	case string:
+		if !human {
+			return currency.ParseMachineAmount(t)
+		}
 		return currency.ParseAmount(locale, t)
 	case json.Number:
 		n, err := t.Float64()
@@ -93,7 +97,10 @@ func fxAmount(locale string, in map[string]any) (float64, bool) {
 // fxPlanFor reads and checks what the person typed. A refusal comes back as the result to give; nothing
 // has been fetched or counted by then.
 func (s *Service) fxPlanFor(lex *currency.Lexicon, req action.Request, in map[string]any) (fxPlan, *action.Result) {
-	amount, ok := fxAmount(req.Locale, in)
+	// words a person typed (a Discord prefix command) are read in their locale's way of writing numbers;
+	// what a program sent (a chat tool call, the CLI, the console) in the one locale-free form
+	human := req.Invoker != nil && req.Invoker.Via == "command"
+	amount, ok := fxAmount(req.Locale, human, in)
 	if !ok {
 		res := s.fxInvalid(req, "fx.invalid_amount")
 		return fxPlan{}, &res
@@ -169,6 +176,11 @@ func (s *Service) financeFX(ctx context.Context, req action.Request, in map[stri
 // currency is an error. (Only a command's own option is invalid when blank: fxHomePlan.)
 func (s *Service) fxRawPlan(lex *currency.Lexicon, in map[string]any, amount float64) (fxPlan, bool) {
 	plan := fxPlan{base: "USD"}
+	switch in["base"].(type) {
+	case nil, string, json.Number:
+	default:
+		return plan, false // a base that is not text (false, an object) was refused before, and still is
+	}
 	if text, _ := fxText(in, "base"); strings.TrimSpace(text) != "" {
 		code, ok := lex.Resolve(text)
 		if !ok {

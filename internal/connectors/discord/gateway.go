@@ -863,10 +863,13 @@ func (g *Gateway) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 	}
 	ictx := InvokeContext{ChannelID: i.ChannelID, GuildID: i.GuildID, UserID: actorID(i.Interaction),
 		Manager: interactionManager(i.Interaction)}
-	ictx.Locale = g.svc.LocaleFor(ictx.UserID, localeOf(i.Interaction)) // one language for the request, its result and its card
+	// one language for the request, its result and its card: the saved preference (read from the database,
+	// so only after the acknowledgement below, which Discord wants within three seconds), else Discord's
+	ictx.Locale = localeOf(i.Interaction)
 	ictx.Private = cmd.Ephemeral || i.GuildID == ""
 	ictx.UserName = interactionName(i.Interaction)
 	if cmd.Name == "poll" {
+		ictx.Locale = g.svc.LocaleFor(ictx.UserID, ictx.Locale) // a poll is answered at once, without an acknowledgement
 		ctx, cancel := context.WithTimeout(g.runCtx(), g.ActionTimeout)
 		defer cancel()
 		res := g.svc.Execute(ctx, requestFor(cmd, opts, ictx, "dc:"+i.ID))
@@ -905,6 +908,7 @@ func (g *Gateway) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 	g.work(func(base context.Context) {
 		ctx, cancel := context.WithTimeout(base, g.ActionTimeout)
 		defer cancel()
+		ictx.Locale = g.svc.LocaleFor(ictx.UserID, ictx.Locale)
 		req := requestFor(cmd, opts, ictx, "dc:"+i.ID)
 		mark := g.svc.SettledMark() // before the command reads anything: its result may go on into a chat turn
 		res := g.svc.Execute(ctx, req)
@@ -966,13 +970,15 @@ func (g *Gateway) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 // answerPrivately sends the answer to a slash command's input error to the invoker alone. Discord keeps
 // the visibility the first response was given, so a public deferred response cannot be edited into a
 // private message: it is deleted and the answer goes out as an ephemeral follow-up. If the delete fails the
-// deferred response is left as it is (never patched: the error must not become public) and the follow-up is
-// still sent. The caller has nothing more to do either way.
+// deferred response is left as it is and nothing is sent: Discord may attach the first follow-up to a public
+// deferred response whatever its flags say, so neither a patch nor a follow-up could keep the error private.
+// The caller has nothing more to do either way.
 func (g *Gateway) answerPrivately(base context.Context, s *discordgo.Session, i *discordgo.InteractionCreate, res action.Result, cmd Command, ictx InvokeContext) {
 	final, cancel := g.finalContext(base)
 	defer cancel()
 	if err := s.InteractionResponseDelete(i.Interaction, discordgo.WithContext(final)); err != nil {
-		g.log.Warn("discord: deferred response delete failed; the input error is sent privately and the public response is left unedited", "cmd", cmd.Name, "err", err)
+		g.log.Warn("discord: deferred response delete failed; the input error is not sent, so it cannot become public", "cmd", cmd.Name, "err", err)
+		return
 	}
 	ictx.Private = true
 	r := g.renderInvoked(res, cmd, ictx)

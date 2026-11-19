@@ -294,3 +294,40 @@ func IsNumber(text string) bool {
 	}
 	return digit
 }
+
+// ParseMachineAmount reads an amount a program wrote (a chat tool call, the CLI, the console), the same in
+// every locale: digits, optionally grouped by "," in threes ("50,000"), and an optional "." decimal part
+// ("1.5"). ok is false for anything else ("1,5", ".5", "5,00,0") and for an amount ValidAmount refuses.
+func ParseMachineAmount(text string) (float64, bool) {
+	t := strings.TrimSpace(text)
+	whole, frac, hasFrac := strings.Cut(t, ".")
+	if whole == "" || (hasFrac && (frac == "" || !allDigits(frac))) {
+		return 0, false
+	}
+	groups := strings.Split(whole, ",")
+	for i, g := range groups {
+		if !allDigits(g) || (i > 0 && len(g) != 3) || (len(groups) > 1 && (len(groups[0]) == 0 || len(groups[0]) > 3)) {
+			return 0, false
+		}
+	}
+	n, err := strconv.ParseFloat(strings.Join(groups, "")+"."+frac, 64)
+	if !hasFrac {
+		n, err = strconv.ParseFloat(strings.Join(groups, ""), 64)
+	}
+	if err != nil || !ValidAmount(n) {
+		return 0, false
+	}
+	return n, true
+}
+
+func allDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
