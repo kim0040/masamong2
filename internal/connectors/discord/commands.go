@@ -172,8 +172,9 @@ func Commands() []Command {
 				option(discordgo.ApplicationCommandOptionNumber, "amount", "Amount to convert", false),
 			},
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				// what was typed goes to the action as it is: a given option, even a blank one, is checked there
-				in := map[string]any{"home": currency.New(messages).Home(c.Locale)}
+				// what was typed goes to the action as it is: a given option, even a blank one, is checked there.
+				// The blank home is the home currency of the request's language, which the action knows.
+				in := map[string]any{"home": ""}
 				if v, given := o["currency"]; given {
 					in["currency"] = v
 				}

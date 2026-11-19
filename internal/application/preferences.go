@@ -48,6 +48,16 @@ type UserPrefs struct {
 
 var hhmm = regexp.MustCompile(`^([01]?\d|2[0-3]):([0-5]\d)$`)
 
+// LocaleFor is the language a person's commands are answered in: the one they saved with their
+// preferences, else fallback (the language Discord reported). A command is built, run and drawn in this
+// one language.
+func (s *Service) LocaleFor(userID, fallback string) string {
+	if p := s.userPrefs(userID); p.Locale != "" {
+		return p.Locale
+	}
+	return fallback
+}
+
 func (s *Service) userPrefs(userID string) UserPrefs {
 	p := UserPrefs{UserID: userID}
 	db, err := s.adminDB()

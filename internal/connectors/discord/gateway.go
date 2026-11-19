@@ -861,8 +861,9 @@ func (g *Gateway) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 			opts[o.Name] = fmt.Sprint(o.Value)
 		}
 	}
-	ictx := InvokeContext{ChannelID: i.ChannelID, GuildID: i.GuildID, UserID: actorID(i.Interaction), Locale: localeOf(i.Interaction),
+	ictx := InvokeContext{ChannelID: i.ChannelID, GuildID: i.GuildID, UserID: actorID(i.Interaction),
 		Manager: interactionManager(i.Interaction)}
+	ictx.Locale = g.svc.LocaleFor(ictx.UserID, localeOf(i.Interaction)) // one language for the request, its result and its card
 	ictx.Private = cmd.Ephemeral || i.GuildID == ""
 	ictx.UserName = interactionName(i.Interaction)
 	if cmd.Name == "poll" {
@@ -1951,7 +1952,7 @@ func (g *Gateway) shouldAnswer(m *discordgo.MessageCreate, pol config.ChannelPol
 }
 
 func (g *Gateway) runCommand(s *discordgo.Session, m *discordgo.MessageCreate, cmd Command, opts map[string]string) {
-	ictx := InvokeContext{ChannelID: m.ChannelID, GuildID: m.GuildID, UserID: m.Author.ID, Locale: g.locale(m.GuildID), Manager: g.messageManager(s, m),
+	ictx := InvokeContext{ChannelID: m.ChannelID, GuildID: m.GuildID, UserID: m.Author.ID, Locale: g.svc.LocaleFor(m.Author.ID, g.locale(m.GuildID)), Manager: g.messageManager(s, m),
 		Private: m.GuildID == "", UserName: displayName(m), Typed: true}
 	ctx, cancel := context.WithTimeout(g.runCtx(), g.ActionTimeout)
 	defer cancel()

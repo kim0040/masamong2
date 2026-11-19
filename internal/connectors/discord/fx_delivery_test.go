@@ -366,3 +366,64 @@ func TestFXInvalidAmountMessageStatesTheCap(t *testing.T) {
 		}
 	}
 }
+
+// One language for the whole request: a saved language preference decides the home currency, the way the
+// quotes are written and the card's own words, whatever language Discord reported for the interaction.
+func TestFXOneLocalePerRequest(t *testing.T) {
+	setLocale := func(d *fxDelivery) {
+		res := d.g.svc.Execute(context.Background(), action.Request{Action: "preferences.set", Locale: "ko", Input: mustJSON(map[string]any{"locale": "es"}),
+			Invoker: &action.Invoker{Via: "command", GuildID: "g", ChannelID: "c", UserID: "u"}})
+		if !res.OK {
+			t.Fatalf("set locale: %v", res.Error)
+		}
+	}
+	check := func(t *testing.T, d *fxDelivery, body string) {
+		t.Helper()
+		var payload struct {
+			Embeds []struct{ Title, Description string }
+		}
+		if err := json.Unmarshal([]byte(body), &payload); err != nil || len(payload.Embeds) != 1 {
+			t.Fatalf("malformed answer: %v %s", err, body)
+		}
+		got := payload.Embeds[0]
+		// Spanish: home USD, codes, decimal comma, Spanish title; nothing Korean
+		if !strings.Contains(got.Title, "Tipos de cambio · USD") || !strings.Contains(got.Description, "1 JPY ≈ ") || !strings.Contains(got.Description, ",") {
+			t.Errorf("card is not entirely Spanish: %+v", got)
+		}
+		if strings.Contains(got.Title, "환율") || strings.Contains(got.Description, "원") || strings.Contains(got.Description, "엔") {
+			t.Errorf("a Korean piece in a Spanish card: %+v", got)
+		}
+		if d.paths[0] != "/latest/USD" {
+			t.Errorf("rates asked for %v: the home currency should be the Spanish one (USD)", d.paths)
+		}
+	}
+	t.Run("slash", func(t *testing.T) {
+		d := newFXDelivery(t, nil)
+		setLocale(d)
+		d.slash(t, strOption("currency", "JPY")) // the interaction says Korean
+		edit, ok := d.fake.find(http.MethodPatch, "/messages/@original")
+		if !ok {
+			t.Fatal("no answer")
+		}
+		check(t, d, edit.body)
+	})
+	t.Run("prefix", func(t *testing.T) {
+		d := newFXDelivery(t, nil)
+		setLocale(d)
+		d.prefix(t, "!fx JPY")
+		sent, ok := d.fake.find(http.MethodPost, "/messages")
+		if !ok {
+			t.Fatalf("no reply: %+v", d.fake.calls)
+		}
+		check(t, d, sent.body)
+	})
+	t.Run("an input error is in the same language", func(t *testing.T) {
+		d := newFXDelivery(t, nil)
+		setLocale(d)
+		d.slash(t, strOption("currency", "U$D"))
+		follow, ok := d.fake.find(http.MethodPost, "/webhooks/app/tok")
+		if !ok || !strings.Contains(follow.body, "No pude saber") || strings.Contains(follow.body, "통화") {
+			t.Fatalf("follow-up: %+v", follow)
+		}
+	})
+}

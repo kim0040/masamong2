@@ -12,24 +12,30 @@ import (
 	"masamong/internal/application"
 )
 
-// The command always stays finance.fx and hands the action what was typed, with the home currency of
-// the member's language (KRW for Korean, USD otherwise). Nothing is checked or rewritten here.
+// The command always stays finance.fx and hands the action what was typed. The home currency is the
+// action's to pick from the request's language (KRW for Korean, USD otherwise), so the language that
+// writes the quotes is the one that picks it. Nothing is checked or rewritten here.
 func TestFXBuildHandsOverWhatWasTyped(t *testing.T) {
 	cmd, _ := ByName("fx")
 	for _, tc := range []struct {
 		locale string
+		typed  bool // the options are words of a message
 		opts   map[string]string
 		want   map[string]any
 	}{
-		{"ko", nil, map[string]any{"home": "KRW"}},
-		{"ko-KR", nil, map[string]any{"home": "KRW"}},
-		{"en-US", nil, map[string]any{"home": "USD"}},
-		{"ja", nil, map[string]any{"home": "USD"}},
-		{"ko", map[string]string{"currency": "엔화", "amount": "50000"}, map[string]any{"home": "KRW", "currency": "엔화", "amount": "50000"}},
-		{"en", map[string]string{"currency": "U$D"}, map[string]any{"home": "USD", "currency": "U$D"}},
-		{"ko", map[string]string{"currency": "   "}, map[string]any{"home": "KRW", "currency": "   "}}, // given but blank: not the default
+		{"ko", false, nil, map[string]any{"home": ""}},
+		{"ko-KR", false, nil, map[string]any{"home": ""}},
+		{"en-US", false, nil, map[string]any{"home": ""}},
+		{"ja", false, nil, map[string]any{"home": ""}},
+		// a Discord number option reaches the action as a number, the words of a message as the text typed
+		{"ko", false, map[string]string{"currency": "엔화", "amount": "50000"}, map[string]any{"home": "", "currency": "엔화", "amount": 50000.0}},
+		{"es", false, map[string]string{"amount": "1.5"}, map[string]any{"home": "", "amount": 1.5}},
+		{"es", true, map[string]string{"amount": "1,5"}, map[string]any{"home": "", "amount": "1,5"}},
+		{"es", true, map[string]string{"amount": "1.5"}, map[string]any{"home": "", "amount": "1.5"}},
+		{"en", false, map[string]string{"currency": "U$D"}, map[string]any{"home": "", "currency": "U$D"}},
+		{"ko", false, map[string]string{"currency": "   "}, map[string]any{"home": "", "currency": "   "}}, // given but blank: not the default
 	} {
-		act, input := cmd.Build(tc.opts, InvokeContext{Locale: tc.locale})
+		act, input := cmd.Build(tc.opts, InvokeContext{Locale: tc.locale, Typed: tc.typed})
 		if act != "finance.fx" || len(input) != len(tc.want) {
 			t.Errorf("%s %v: got %s %v, want finance.fx %v", tc.locale, tc.opts, act, input, tc.want)
 			continue
