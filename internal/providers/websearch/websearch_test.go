@@ -367,6 +367,24 @@ func TestMergeDropsSameSiteCopies(t *testing.T) {
 	}
 }
 
+// Copies are told apart by the whole snippet, not its start: two pages of one site that share a title
+// and a snippet's lead-in (a breadcrumb or boilerplate) but go on differently are not one page.
+func TestMergeNeedsTheWholeSnippet(t *testing.T) {
+	head := strings.Repeat("홈 뉴스 더보기 최신 기사 ", 10) // a shared lead-in longer than eighty runes
+	got := MergeResults([]Result{
+		{Title: "동일한 제목의 페이지", URL: "https://s.example/a", Snippet: head + " 첫 번째 본문 내용입니다"},
+		{Title: "동일한 제목의 페이지", URL: "https://s.example/b", Snippet: head + " 두 번째 본문 내용입니다"},
+		{Title: "동일한 제목의 페이지", URL: "https://s.example/c", Snippet: head + " 첫 번째 본문 내용입니다"},
+	})
+	var urls []string
+	for _, r := range got {
+		urls = append(urls, r.URL)
+	}
+	if want := []string{"https://s.example/a", "https://s.example/b"}; !slices.Equal(urls, want) {
+		t.Fatalf("got %v, want %v", urls, want)
+	}
+}
+
 // A copy's address is merged again when it comes back with another snippet (a reworded query), and the
 // pages behind a site's root with a query string ("/?p=1") are one site.
 func TestMergeRemembersCopiesAndRootQueries(t *testing.T) {

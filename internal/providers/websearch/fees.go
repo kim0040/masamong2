@@ -64,14 +64,15 @@ func SearchFee(kind, depth string, extra int) float64 {
 }
 
 // MaybeCharged reports whether a failed search request may still have been charged: it timed out, lost
-// its connection or was cancelled (the turn ended) after it may have been sent, or the service answered with something that could not be
-// read (an answer the service gave, so one it may bill). An HTTP error answer (whatever became of its body), a request never sent, and
+// its connection or was cancelled (the turn ended) after it may have been sent, the service answered with something that could not be
+// read (an answer the service gave, so one it may bill), or the request panicked after it may have been sent and answered.
+// An HTTP error answer (whatever became of its body), a request never sent, and
 // anything that is not the service's (a limit of ours) were not.
 func MaybeCharged(err error) bool {
 	if err == nil {
 		return false
 	}
-	if errors.Is(err, decode.ErrUnexpected) {
+	if errors.Is(err, decode.ErrUnexpected) || errors.Is(err, errPanic) {
 		return true
 	}
 	var pe *providers.Error

@@ -766,9 +766,15 @@ func (d *daum) deepMain(ctx context.Context, q Query, blog bool) (Response, erro
 		return Response{}, err
 	case err != nil:
 		b.res.Requests = 1
+		if MaybeCharged(err) {
+			b.res.Lost++ // the web request's answer was lost after it may have been charged
+		}
 		return b.res, nil
 	case b.err != nil:
 		web.Requests = 1
+		if MaybeCharged(b.err) {
+			web.Lost++ // the blog request's answer was lost after it may have been charged
+		}
 		return web, nil
 	}
 	web.Results = MergeResults(web.Results, b.res.Results)
