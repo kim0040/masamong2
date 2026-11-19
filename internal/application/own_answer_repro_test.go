@@ -9,14 +9,15 @@ import (
 	"time"
 
 	"masamong/internal/application"
+	"masamong/internal/chat"
 	"masamong/internal/config"
 	"masamong/internal/memory/engine"
 )
 
 // ownAnswerRoom drives one channel through the production sequence: a person asks the bot something, the
-// bot answers (stored as chat turns and posted as a reply the live window sees), the room keeps talking for
-// a while, and the same person calls the bot again. Times are simulated in the past; the rows the store
-// stamps with the wall clock (chat_turns.created_at) are moved to the simulated time after each turn.
+// bot answers (stored as chat turns and posted as one or more messages the live window sees), the room keeps
+// talking for a while, and the same person calls the bot again. Times are simulated in the past; the rows the
+// store stamps with the wall clock (chat_turns.created_at) are moved to the simulated time after each turn.
 type ownAnswerRoom struct {
 	t       *testing.T
 	svc     *application.Service
@@ -63,26 +64,46 @@ func (r *ownAnswerRoom) at(d time.Duration) time.Time { return r.t0.Add(d) }
 // human posts a person's message: the gateway captures it (memory_observations) and observes it (live window).
 func (r *ownAnswerRoom) human(id, author, name, text string, at time.Time, mentionBot bool) {
 	r.t.Helper()
+	r.post(application.ObservedMessage{MessageID: id, AuthorID: author, AuthorName: name, Content: text, At: at}, mentionBot)
+}
+
+func (r *ownAnswerRoom) post(m application.ObservedMessage, mentionBot bool) {
+	r.t.Helper()
+	m.GuildID, m.ChannelID = "g", "c"
 	eng, err := r.svc.MemoryEngine()
 	if err != nil {
 		r.t.Fatal(err)
 	}
-	if _, err := eng.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", MessageID: id, AuthorID: author, AuthorName: name,
-		Content: text, At: at}); err != nil {
+	if _, err := eng.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", MessageID: m.MessageID, AuthorID: m.AuthorID, AuthorName: m.AuthorName,
+		Content: m.Content, At: m.At}); err != nil {
 		r.t.Fatal(err)
 	}
-	m := application.ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: id, AuthorID: author, AuthorName: name, Content: text, At: at}
 	if mentionBot {
 		m.Mentions = []string{"bot"}
 	}
 	r.svc.Observe(m)
 }
 
-// call is a person calling the bot: the message, the turn, and the bot's posted reply (a Discord reply to the
-// call, as the gateway posts it) at answeredAt. The turn's chat_turns rows are moved to answeredAt.
-func (r *ownAnswerRoom) call(id, author, name, text string, at, answeredAt time.Time, mention bool, answer string) map[string]any {
+// ownCall is one person calling the bot and the bot's answer.
+type ownCall struct {
+	id, author, name, text string
+	at, answeredAt         time.Time
+	how                    string // "name" (the bot's name only), "mention", or "reply" (a Discord reply to replyTo)
+	replyTo                string
+	ping                   bool   // a reply that pings the bot: Discord lists it among the message's mentions
+	answer                 string // its bubbles are separated by " / "; only the first replies to the call
+}
+
+// call runs one call: the message, the turn, and the bot's posted reply (one Discord message per bubble, the
+// first a reply to the call, as the gateway posts them). The turn's chat_turns rows are moved to answeredAt.
+// It returns the turn's attribution and the bubbles' message IDs.
+func (r *ownAnswerRoom) call(c ownCall) (map[string]any, []string) {
 	r.t.Helper()
-	r.human(id, author, name, text, at, mention)
+	m := application.ObservedMessage{MessageID: c.id, AuthorID: c.author, AuthorName: c.name, Content: c.text, At: c.at}
+	if c.how == "reply" {
+		m.ReplyTo = c.replyTo
+	}
+	r.post(m, c.how == "mention" || c.ping)
 	eng, err := r.svc.MemoryEngine()
 	if err != nil {
 		r.t.Fatal(err)
@@ -90,23 +111,36 @@ func (r *ownAnswerRoom) call(id, author, name, text string, at, answeredAt time.
 	var before int64
 	_ = eng.Store.DB.DB.QueryRow(`SELECT COALESCE(MAX(id),0) FROM chat_turns`).Scan(&before)
 	r.mu.Lock()
-	r.answer = answer
+	r.answer = c.answer
 	r.mu.Unlock()
-	res, err := r.svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: id,
-		Message: text, Speaker: name, SpeakerID: author, NameOnly: !mention})
+	var ids []string
+	res, err := r.svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: c.id,
+		Message: c.text, Speaker: c.name, SpeakerID: c.author, NameOnly: c.how == "name",
+		Deliver: func(_ context.Context, res chat.Result) string {
+			for i, part := range strings.Split(res.Answer, " / ") {
+				r.seq++
+				id := fmt.Sprintf("botmsg%d", r.seq)
+				ids = append(ids, id)
+				if r.noBotPosts {
+					continue
+				}
+				bm := application.ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: id, AuthorID: "bot", AuthorName: "마사몽",
+					Content: part, At: c.answeredAt.Add(time.Duration(i) * time.Second), FromBot: true}
+				if i == 0 {
+					bm.ReplyTo = c.id
+				}
+				r.svc.Observe(bm)
+			}
+			r.svc.NoteReplyMessages(res.TurnID, "g", "c", ids)
+			return res.Answer
+		}})
 	if err != nil || res.Answer == "" {
-		r.t.Fatalf("turn %s: %+v %v", id, res, err)
+		r.t.Fatalf("turn %s: %+v %v", c.id, res, err)
 	}
-	if _, err := eng.Store.DB.DB.Exec(`UPDATE chat_turns SET created_at=? WHERE id>?`, answeredAt.UTC().Format(time.RFC3339), before); err != nil {
+	if _, err := eng.Store.DB.DB.Exec(`UPDATE chat_turns SET created_at=? WHERE id>?`, c.answeredAt.UTC().Format(time.RFC3339), before); err != nil {
 		r.t.Fatal(err)
 	}
-	r.seq++
-	if r.noBotPosts {
-		return r.attribution(res.TurnID)
-	}
-	r.svc.Observe(application.ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: fmt.Sprintf("botmsg%d", r.seq), AuthorID: "bot",
-		AuthorName: "마사몽", Content: answer, At: answeredAt, FromBot: true, ReplyTo: id})
-	return r.attribution(res.TurnID)
+	return r.attribution(res.TurnID), ids
 }
 
 func (r *ownAnswerRoom) attribution(turnID string) map[string]any {
@@ -124,19 +158,60 @@ func (r *ownAnswerRoom) lastPrompt() string {
 	return r.prompts[len(r.prompts)-1]
 }
 
+// shown lists which of the labelled tokens the last answer prompt holds.
+func (r *ownAnswerRoom) shown(tokens [][2]string) string {
+	prompt := r.lastPrompt()
+	var got []string
+	for _, w := range tokens {
+		if strings.Contains(prompt, w[1]) {
+			got = append(got, w[0])
+		}
+	}
+	return strings.Join(got, " ")
+}
+
+// callerAnswersStored counts the bot's answers to a person still kept in chat_turns.
+func (r *ownAnswerRoom) callerAnswersStored(speakerID string) int {
+	r.t.Helper()
+	eng, err := r.svc.MemoryEngine()
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	var n int
+	if err := eng.Store.DB.DB.QueryRow(`SELECT COUNT(*) FROM chat_turns WHERE role='assistant' AND speaker_id=?`, speakerID).Scan(&n); err != nil {
+		r.t.Fatal(err)
+	}
+	return n
+}
+
+// talk fills span after start with n of other people's lines and otherCalls of their exchanges with the bot.
+func (r *ownAnswerRoom) talk(start, span time.Duration, n, otherCalls int) {
+	r.t.Helper()
+	total := n + otherCalls
+	for i := 0; i < total; i++ {
+		at := r.at(start + span*time.Duration(i)/time.Duration(total))
+		if i < otherCalls {
+			who := fmt.Sprintf("o%d", i%3)
+			r.call(ownCall{id: fmt.Sprintf("oreq%d", i), author: who, name: "Other" + who, text: fmt.Sprintf("@마사몽 OTHERREQ%d 날씨 어때", i),
+				at: at, answeredAt: at.Add(10 * time.Second), how: "mention", answer: fmt.Sprintf("OTHERANS%d 맑아", i)})
+			continue
+		}
+		who := fmt.Sprintf("p%d", i%4)
+		r.human(fmt.Sprintf("room%d", i), who, "Person"+who, fmt.Sprintf("ROOMLINE%d 게임 얘기", i), at, false)
+	}
+}
+
+var ownTokens = [][2]string{{"req1", "OWNREQ"}, {"ans1", "OWNANS1"}, {"req2", "OWNFOLLOW"}, {"ans2", "OWNANS2"}}
+
 // TestOwnEarlierExchangeReachesTheNextCall reproduces a production turn: a person called the bot by name for
 // a paper, the bot answered (and answered a follow-up 30 s later), the busy room talked on for 17 minutes,
-// and the same person called the bot by name again ("summarize it"). The turn's attribution kept only the
-// call. Each variant records which of the person's earlier lines reach the second call's prompt: req1/ans1
-// (the request and the bot's answer), req2/ans2 (the follow-up and its answer). want is what the code does
-// today; every variant that does not keep all four is the defect.
+// and the same person called the bot by name again ("summarize it"). Each variant records which of the
+// person's earlier lines reach the second call's prompt: req1/ans1 (the request and the bot's answer),
+// req2/ans2 (the follow-up and its answer).
 //
-// Cause: the caller's earlier request joins the conversation only through the bot's answer line
-// (conversation.Attribute, bot_reply) or a mention of the bot. A stored room message (memory_observations)
-// carries no mention, so a name-called request has no mark of its own, and the bot's answer line exists only
-// in the live window (in memory, empty after a restart) or in the last 24 chat_turns rows channelLines reads
-// (conversation.go), which other people's exchanges push out long before the 30-minute attribution window
-// ends, while the table still keeps 40 rows.
+// Before the fix the exchange was lost whenever the bot's answer line was in neither the live window (in
+// memory, empty after a restart) nor the last 24 chat_turns rows channelLines read, because a stored room
+// message (memory_observations) carries no mark that it was said to the bot.
 func TestOwnEarlierExchangeReachesTheNextCall(t *testing.T) {
 	const all = "req1 ans1 req2 ans2"
 	for _, c := range []struct {
@@ -154,7 +229,7 @@ func TestOwnEarlierExchangeReachesTheNextCall(t *testing.T) {
 		{name: "name call, restart, 5 lines", restart: true, others: 5, want: all},
 		{name: "name call, restart, 30 lines", restart: true, others: 30, want: all},
 		{name: "mention, restart, 30 lines", mention: true, restart: true, others: 30, want: all},
-		// chat_turns: 2 rows for each exchange; channelLines reads the last 24, the table keeps 40
+		// chat_turns: 2 rows for each exchange; the table keeps 40
 		{name: "name call, live window, 12 other exchanges", others: 6, otherCalls: 12, want: all},
 		{name: "name call, live window, 20 other exchanges (past the 40-row cap)", others: 6, otherCalls: 20, want: all},
 		{name: "name call, restart, 11 other exchanges", restart: true, others: 6, otherCalls: 11, want: "req2 ans2"},
@@ -167,56 +242,77 @@ func TestOwnEarlierExchangeReachesTheNextCall(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			r := newOwnAnswerRoom(t)
 			r.noBotPosts = c.noBotPosts
+			how := "name"
+			if c.mention {
+				how = "mention"
+			}
 			// the request and the bot's answer, then a follow-up 30 s later and its answer
-			r.call("req1", "u1", "Caller", "마사몽 OWNREQ 논문 찾아줘", r.at(0), r.at(20*time.Second), c.mention, "OWNANS1 찾은 논문은 이거야")
-			att := r.call("req2", "u1", "Caller", "마사몽 OWNFOLLOW 그거 저자 누구야", r.at(30*time.Second), r.at(50*time.Second), c.mention, "OWNANS2 저자는 이 사람이야")
+			r.call(ownCall{id: "req1", author: "u1", name: "Caller", text: "마사몽 OWNREQ 논문 찾아줘", at: r.at(0), answeredAt: r.at(20 * time.Second),
+				how: how, answer: "OWNANS1 찾은 논문은 이거야"})
+			att, _ := r.call(ownCall{id: "req2", author: "u1", name: "Caller", text: "마사몽 OWNFOLLOW 그거 저자 누구야", at: r.at(30 * time.Second),
+				answeredAt: r.at(50 * time.Second), how: how, answer: "OWNANS2 저자는 이 사람이야"})
 			if n, _ := att["included"].(float64); n < 3 {
 				t.Fatalf("the follow-up 30 s later did not include the exchange: %v", att)
 			}
 			if c.restart {
 				r.svc = restartServiceForTest(t, r.svc)
 			}
-			// the room talks on for 17 minutes; other callers' exchanges interleave
-			span := 16 * time.Minute
-			total := c.others + c.otherCalls
-			for i := 0; i < total; i++ {
-				at := r.at(time.Minute + span*time.Duration(i)/time.Duration(total))
-				if i < c.otherCalls {
-					who := fmt.Sprintf("o%d", i%3)
-					r.call(fmt.Sprintf("oreq%d", i), who, "Other"+who, fmt.Sprintf("@마사몽 OTHERREQ%d 날씨 어때", i), at, at.Add(10*time.Second), true,
-						fmt.Sprintf("OTHERANS%d 맑아", i))
-					continue
-				}
-				who := fmt.Sprintf("p%d", i%4)
-				r.human(fmt.Sprintf("room%d", i), who, "Person"+who, fmt.Sprintf("ROOMLINE%d 게임 얘기", i), at, false)
-			}
+			r.talk(time.Minute, 16*time.Minute, c.others, c.otherCalls)
 			stored := r.callerAnswersStored("u1")
-			att = r.call("req3", "u1", "Caller", "마사몽 그거 요약해줘", r.at(17*time.Minute+30*time.Second), r.at(17*time.Minute+50*time.Second), c.mention, "요약")
-			prompt := r.lastPrompt()
-			var got []string
-			for _, w := range []struct{ label, token string }{{"req1", "OWNREQ"}, {"ans1", "OWNANS1"}, {"req2", "OWNFOLLOW"}, {"ans2", "OWNANS2"}} {
-				if strings.Contains(prompt, w.token) {
-					got = append(got, w.label)
-				}
-			}
-			t.Logf("in prompt %q; caller's answers still in chat_turns %d; attribution %v", strings.Join(got, " "), stored, att)
-			if strings.Join(got, " ") != c.want {
-				t.Fatalf("in prompt %q, want %q (attribution %v)", strings.Join(got, " "), c.want, att)
+			att, _ = r.call(ownCall{id: "req3", author: "u1", name: "Caller", text: "마사몽 그거 요약해줘", at: r.at(17*time.Minute + 30*time.Second),
+				answeredAt: r.at(17*time.Minute + 50*time.Second), how: how, answer: "요약"})
+			got := r.shown(ownTokens)
+			t.Logf("in prompt %q; caller's answers still in chat_turns %d; attribution %v", got, stored, att)
+			if got != c.want {
+				t.Fatalf("in prompt %q, want %q (attribution %v)", got, c.want, att)
 			}
 		})
 	}
 }
 
-// callerAnswersStored counts the bot's answers to a person still kept in chat_turns.
-func (r *ownAnswerRoom) callerAnswersStored(speakerID string) int {
-	r.t.Helper()
-	eng, err := r.svc.MemoryEngine()
-	if err != nil {
-		r.t.Fatal(err)
+// TestReplyToTheBotKeepsTheCallersExchange is the production turn as the ops records show it: the person
+// called the bot by name (req1), then answered the bot's reply with a Discord reply (req2, 30 s later), and
+// 17 minutes later replied to the bot's answer again (req3) — no name, no mention. The bot's answers are
+// posted as two bubbles; only the first is a Discord reply to the request. The live window is intact.
+func TestReplyToTheBotKeepsTheCallersExchange(t *testing.T) {
+	const all = "req1 ans1 req2 ans2"
+	for _, c := range []struct {
+		name      string
+		req2Reply bool // req2 is a Discord reply to the first bubble of ans1 (else a name call)
+		toLater   bool // req3 replies to the second bubble of ans2 (else the first)
+		ping      bool // the replies ping the bot (Discord lists it among their mentions)
+		want      string
+	}{
+		{name: "req2 name call, req3 replies to the first bubble", want: all},
+		{name: "req2 name call, req3 replies to a later bubble", toLater: true, want: all},
+		{name: "req2 reply, req3 replies to the first bubble", req2Reply: true, want: all},
+		{name: "req2 reply, req3 replies to a later bubble", req2Reply: true, toLater: true, want: all},
+		{name: "req2 reply, req3 replies to the first bubble, ping", req2Reply: true, ping: true, want: all},
+		{name: "req2 reply, req3 replies to a later bubble, ping", req2Reply: true, toLater: true, ping: true, want: all},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := newOwnAnswerRoom(t)
+			_, ans1 := r.call(ownCall{id: "req1", author: "u1", name: "Caller", text: "마사몽 OWNREQ 논문 찾아줘", at: r.at(0),
+				answeredAt: r.at(20 * time.Second), how: "name", answer: "OWNANS1-A 찾은 논문은 / OWNANS1-B 이거야"})
+			req2 := ownCall{id: "req2", author: "u1", name: "Caller", text: "마사몽 OWNFOLLOW 그거 저자 누구야", at: r.at(30 * time.Second),
+				answeredAt: r.at(50 * time.Second), how: "name", answer: "OWNANS2-A 저자는 / OWNANS2-B 이 사람이야"}
+			if c.req2Reply {
+				req2.how, req2.replyTo, req2.ping, req2.text = "reply", ans1[0], c.ping, "OWNFOLLOW 그거 저자 누구야"
+			}
+			att, ans2 := r.call(req2)
+			t.Logf("req2 attribution %v", att)
+			r.talk(time.Minute, 16*time.Minute, 5, 0)
+			req3 := ownCall{id: "req3", author: "u1", name: "Caller", text: "그거 요약해줘", at: r.at(17*time.Minute + 30*time.Second),
+				answeredAt: r.at(17*time.Minute + 50*time.Second), how: "reply", replyTo: ans2[0], ping: c.ping, answer: "요약"}
+			if c.toLater {
+				req3.replyTo = ans2[1]
+			}
+			att, _ = r.call(req3)
+			got := r.shown(ownTokens)
+			t.Logf("in prompt %q; attribution %v", got, att)
+			if got != c.want {
+				t.Fatalf("in prompt %q, want %q (attribution %v)", got, c.want, att)
+			}
+		})
 	}
-	var n int
-	if err := eng.Store.DB.DB.QueryRow(`SELECT COUNT(*) FROM chat_turns WHERE role='assistant' AND speaker_id=?`, speakerID).Scan(&n); err != nil {
-		r.t.Fatal(err)
-	}
-	return n
 }
