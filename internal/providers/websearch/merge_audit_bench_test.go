@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// Audit-only benchmark (scratch copy, not in the repo): same inputs on v1.2.0 and v1.2.1.
+// BenchmarkMergeResults guards result merging speed (v1.2.1 took ~10x longer than v1.2.0 on these inputs).
 func auditLists() [][]Result {
 	var lists [][]Result
 	for s := 0; s < 4; s++ {
