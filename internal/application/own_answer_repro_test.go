@@ -26,6 +26,7 @@ type ownAnswerRoom struct {
 	prompts []string
 	t0      time.Time
 	seq     int
+	plan    string // the planner's plan for the next turn ("" plans nothing)
 	// noBotPosts leaves the bot's posted replies out of the live window
 	noBotPosts bool
 }
@@ -39,6 +40,11 @@ func newOwnAnswerRoom(t *testing.T) *ownAnswerRoom {
 			return `{"to":"bot","tone":"neutral"}` // the name-call check hears it said to the bot
 		case strings.Contains(p, "refers_to"):
 			return `{"refers_to": []}`
+		}
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if r.plan != "" {
+			return r.plan
 		}
 		return `{"memory_requirement":"none","tool_plan":[]}`
 	})
@@ -92,6 +98,7 @@ type ownCall struct {
 	replyTo                string
 	ping                   bool   // a reply that pings the bot: Discord lists it among the message's mentions
 	answer                 string // its bubbles are separated by " / "; only the first replies to the call
+	plan                   string // the planner's plan for this turn
 }
 
 // call runs one call: the message, the turn, and the bot's posted reply (one Discord message per bubble, the
@@ -111,7 +118,7 @@ func (r *ownAnswerRoom) call(c ownCall) (map[string]any, []string) {
 	var before int64
 	_ = eng.Store.DB.DB.QueryRow(`SELECT COALESCE(MAX(id),0) FROM chat_turns`).Scan(&before)
 	r.mu.Lock()
-	r.answer = c.answer
+	r.answer, r.plan = c.answer, c.plan
 	r.mu.Unlock()
 	var ids []string
 	res, err := r.svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: c.id,
@@ -347,6 +354,39 @@ func TestReplyToAPostedPartBringsItsAnswer(t *testing.T) {
 			}
 			if strings.Count(r.lastPrompt(), "OWNANS1-C") != 1 {
 				t.Fatalf("the answer is shown more than once:\n%s", r.lastPrompt())
+			}
+		})
+	}
+}
+
+// A request the bot took by its name alone is said to the bot wherever the line comes from: the live window
+// (the turn marks it) and the stored message (its stored request marks it). Here the turn's tool failed, so
+// only the request is stored, and the bot's posted reply is not there to link it.
+func TestNameCalledRequestStaysToTheBot(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		restart bool
+	}{
+		{name: "live window, bot post not seen"},
+		{name: "restart", restart: true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := newOwnAnswerRoom(t)
+			r.noBotPosts = !c.restart
+			r.call(ownCall{id: "req1", author: "u1", name: "Caller", text: "마사몽 OWNREQ 아틀란티스 날씨", at: r.at(0), answeredAt: r.at(20 * time.Second),
+				how: "name", answer: "OWNANS1 못 찾았어",
+				plan: `{"memory_requirement":"none","tool_plan":[{"tool_name":"weather","parameters":{"region":"Atlantis","source":"global"}}]}`})
+			if n := r.callerAnswersStored("u1"); n != 0 {
+				t.Fatalf("the failed tool exchange stored %d answers", n)
+			}
+			if c.restart {
+				r.svc = restartServiceForTest(t, r.svc)
+			}
+			r.talk(time.Minute, 5*time.Minute, 4, 0)
+			att, _ := r.call(ownCall{id: "req2", author: "u1", name: "Caller", text: "마사몽 다시 해봐", at: r.at(7 * time.Minute),
+				answeredAt: r.at(7*time.Minute + 20*time.Second), how: "name", answer: "응"})
+			if got := r.shown([][2]string{{"req1", "OWNREQ"}}); got != "req1" {
+				t.Fatalf("the earlier request is missing (attribution %v)", att)
 			}
 		})
 	}
