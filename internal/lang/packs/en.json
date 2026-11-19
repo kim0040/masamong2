@@ -268,7 +268,7 @@
       "when": "Use for search requests, today's or recent news, who holds a post now, facts that change (rankings, prices, results), or when another tool failed. Also for used prices and what an item costs now. Give topic=news only when looking for press coverage, and topic=research for papers and studies; official notices, admissions and job postings are not news. Give depth=deep for summaries, comparisons and other questions with several sides, or when asked to look in detail or look further.",
       "skip": "Not for word meanings, common knowledge, arithmetic, translation or small talk.",
       "params": {
-        "query": "Search words: key terms only, in the message's language.",
+        "query": "Search words: key terms only, in the message's language. Leave out the bot's name, call words and greetings.",
         "size": "Number of results (usually leave out)",
         "fresh": "day, week or month when only recent pages will do",
         "depth": "How hard to search. Usually leave out (standard: also reads the main pages), also for a light one-thing question like 'why did it go up?' or 'what is that?'. quick: only when one current value (a price, the weather, a score, a date) is all that is needed and nothing has to be explained. When unsure, leave it out. deep: summaries and comparisons, 'why' or 'how did it happen' questions with several sides, research-like questions, requests such as 'in detail', 'look further' or 'dig deeper', and a follow-up saying the last answer was thin.",
@@ -318,9 +318,10 @@
     },
     "summaries.channel": {
       "description": "Summarizes this channel's recent conversation. No input.",
-      "route": "asked what was talked about so far or for a summary of the chat -> summaries.channel",
-      "purpose": "Summary of this channel's recent conversation.",
-      "when": "Use when asked what was talked about so far or for a summary of the chat.",
+      "route": "asked what people said or discussed in this channel, or for a summary of the chat -> summaries.channel",
+      "purpose": "Summary of what people said in this channel recently.",
+      "when": "Use when asked what people talked about in the channel so far, or for a summary of their chat.",
+      "skip": "Not for summarizing or recalling something the bot itself just found or answered (that is already in the conversation).",
       "params": {
         "refresh": "true only when a fresh summary was asked for"
       }

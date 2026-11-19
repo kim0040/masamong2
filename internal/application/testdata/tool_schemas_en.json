@@ -108,7 +108,7 @@
     },
     "query": {
      "type": "string",
-     "description": "Search words: key terms only, in the message's language."
+     "description": "Search words: key terms only, in the message's language. Leave out the bot's name, call words and greetings."
     },
     "size": {
      "type": "integer",
