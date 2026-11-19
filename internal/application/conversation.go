@@ -16,6 +16,7 @@ import (
 	"masamong/internal/memory/blocks"
 	"masamong/internal/memory/corpus"
 	"masamong/internal/memory/engine"
+	"masamong/internal/memory/store"
 )
 
 // The caller's conversation (docs/plan-memory-conversation.md §5.1): instead of handing the reply the
@@ -78,7 +79,7 @@ func (s *Service) callerConversation(ctx context.Context, in ChatInput, eng *eng
 	if mode == "off" || in.MessageID == "" || in.ChannelID == "" {
 		return convContext{}, false
 	}
-	lines, madeFrom, stats := s.channelLines(in, eng)
+	lines, derived, stats := s.channelLines(in, eng)
 	botID := s.botAccount(lines)
 	found := false
 	for _, l := range lines {
@@ -88,8 +89,9 @@ func (s *Service) callerConversation(ctx context.Context, in ChatInput, eng *eng
 		}
 	}
 	if !found {
-		// a console-sent or racing message the window has not seen yet: the call itself is always there
-		lines = append(lines, conversation.Line{ID: in.MessageID, AuthorID: in.SpeakerID, Author: in.Speaker, At: s.Clock.Now(),
+		// An unobserved call still has its arrival clock. Using the time after
+		// admission here would place it after answers published while it waited.
+		lines = append(lines, conversation.Line{ID: in.MessageID, AuthorID: in.SpeakerID, Author: in.Speaker, At: s.callCutoff(in),
 			Text: in.Message, Mentions: []string{botID}})
 	}
 	att := conversation.Attribute(lines, []string{in.MessageID}, in.SpeakerID,
@@ -120,10 +122,20 @@ func (s *Service) callerConversation(ctx context.Context, in ChatInput, eng *eng
 	}
 	out.ledger["callers"] = len(people)
 	var context []conversation.Line
+	pastTarget := false // picked is in delivery order, including ties
 	for _, l := range picked {
+		if l.ID == att.CurrentAnswer {
+			pastTarget = true
+		}
 		if l.ID != in.MessageID && strings.TrimSpace(l.Text) != "" {
-			if l.Bot && att.Reasons[l.ID] == "own" {
+			current := l.ID == att.CurrentAnswer || (l.ReplyTo != "" && l.ReplyTo == att.CurrentRequest)
+			if l.Bot && !current && (!pastTarget || l.At.Before(att.WindowStart)) {
 				l.Text = clip(l.Text, ownClipRunes)
+			} else if req := derived[l.ID]; req != nil && att.Reasons[l.ID] == "own" && l.RevisedAt.IsZero() {
+				// Outside the room window only the last fragment is selected. Use the
+				// complete request the turn reader cleared, with its direct sources.
+				l.Text = req.content
+				req.used = true
 			}
 			context = append(context, l)
 		}
@@ -155,7 +167,9 @@ func (s *Service) callerConversation(ctx context.Context, in ChatInput, eng *eng
 		out.sources = append(out.sources, id)
 		if !l.Bot {
 			out.sources = append(out.sources, corpus.DiscordLiveObservationID(room, id))
-			out.sources = append(out.sources, madeFrom[id]...)
+			if req := derived[id]; req != nil && req.used {
+				out.sources = append(out.sources, req.sources...)
+			}
 		}
 	}
 	return out, true
@@ -176,6 +190,7 @@ type lineStats struct {
 	liveBotAnswered int  // the bot's live messages left out because their stored answer stands for them
 	liveAge         time.Duration
 	replyLinks      int // replies to a posted message joined to the stored answer it was part of
+	postedErrors    int
 }
 
 func (st lineStats) note(ledger map[string]any, att conversation.Attribution) {
@@ -187,15 +202,18 @@ func (st lineStats) note(ledger map[string]any, att conversation.Attribution) {
 	}
 	ledger["live_age_s"] = int(st.liveAge.Seconds())
 	ledger["reply_links"] = st.replyLinks
+	if st.postedErrors != 0 {
+		ledger["posted_lookup_errors"] = st.postedErrors
+	}
 	ledger["before_window"], ledger["after_call"], ledger["caller_earlier"] = att.Before, att.After, att.CallerEarlier
 }
 
 // channelLines merges what is known of the channel's recent messages: stored messages (capture on), the
 // stored conversation with the bot (its answers keep exactly what reached the channel) and the live window
-// (reply and mention links, the bot's own posts), one line per message. madeFrom lists, by line, the other messages
-// a line that came from a stored turn holds words of (a burst, a picture's description).
-func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conversation.Line, madeFrom map[string][]string, st lineStats) {
-	madeFrom = map[string][]string{}
+// (reply and mention links, the bot's own posts), one line per message. Derived requests keep the
+// gated reader's text and provenance together (a burst, a picture's description).
+func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conversation.Line, derived map[string]*derivedRequest, st lineStats) {
+	derived = map[string]*derivedRequest{}
 	byID := map[string]conversation.Line{}
 	var order []string
 	put := func(l conversation.Line) {
@@ -204,7 +222,7 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 		}
 		if old, ok := byID[l.ID]; !ok {
 			order = append(order, l.ID)
-		} else {
+		} else if l.RevisedAt.IsZero() {
 			l.ToBot = l.ToBot || old.ToBot // what one source knows of the call, another may not
 		}
 		byID[l.ID] = l
@@ -222,7 +240,14 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 		}
 	}
 	answered := map[string]string{} // user messages the stored conversation has the bot's answer to: its line
+	byDelivery, legacy := map[string]string{}, map[string]string{}
+	full := map[string]string{} // gated answer text for replies to a particular continuation span
+	cutoff := s.callCutoff(in)
+	requests := map[string]bool{}
 	if turns, err := eng.Store.RecentChatTurns(blocks.ChannelKey(in.GuildID, in.ChannelID), chatTurnsKept); err == nil {
+		if err := s.timeChatTurns(in, turns); err != nil {
+			st.postedErrors++
+		}
 		st.turnsRead = len(turns)
 		st.turnsGated = len(turns) == 0 && eng.Store.DB.HasPendingEvents("source-change")
 		for _, t := range turns {
@@ -230,24 +255,47 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 				continue
 			}
 			at, _ := time.Parse(time.RFC3339Nano, t.CreatedAt)
+			if spoken, err := time.Parse(time.RFC3339Nano, t.SpokenAt); err == nil {
+				at = spoken
+			}
 			switch t.Role {
 			case "user":
+				requests[t.NativeID] = true
 				// a request the bot answered was said to it, however it was called
-				if l, ok := byID[t.NativeID]; ok {
-					if !l.ToBot {
-						l.ToBot = true
-						byID[t.NativeID] = l
+				if len(t.DerivedFrom) > 0 {
+					_, raw := byID[t.NativeID]
+					derived[t.NativeID] = &derivedRequest{content: t.Content, sources: t.SourceIDs, used: !raw}
+				}
+				l, exists := byID[t.NativeID]
+				if !exists {
+					l = conversation.Line{ID: t.NativeID, AuthorID: t.SpeakerID, Author: t.Speaker, At: at, Text: t.Content, Mentions: []string{"bot"}}
+					st.turnUser++
+				}
+				wasToBot := l.ToBot
+				l.ReplyToBot = t.CallAddress == store.CallReply
+				l.ToBot = true
+				if t.CallAddress == store.CallEdited {
+					editedAddress(&l, t.Content, s.botAccount(nil))
+				}
+				if exists {
+					byID[l.ID] = l
+					if !wasToBot && l.ToBot {
 						st.turnUserMerged++
 					}
 				} else {
-					put(conversation.Line{ID: t.NativeID, AuthorID: t.SpeakerID, Author: t.Speaker, At: at, Text: t.Content, Mentions: []string{"bot"}, ToBot: true})
-					madeFrom[t.NativeID] = t.DerivedFrom
-					st.turnUser++
+					put(l)
 				}
 			case "assistant":
 				// named by its own link, not by the request's ID: reading the reply is not reading the request
 				answered[t.NativeID] = "turn:" + t.SourceIDs[0]
-				put(conversation.Line{ID: answered[t.NativeID], Bot: true, ReplyTo: t.NativeID, At: at.Add(time.Millisecond), Text: t.Content})
+				full[answered[t.NativeID]] = t.Content
+				if t.DeliveryTurn == "" {
+					legacy[t.NativeID] = answered[t.NativeID]
+				} else {
+					byDelivery[t.DeliveryTurn] = answered[t.NativeID]
+				}
+				visible := visibleDelivery(t.Content, t.DeliverySpans, cutoff)
+				put(conversation.Line{ID: answered[t.NativeID], Bot: true, ReplyTo: t.NativeID, At: at, Text: visible, Withdrawn: visible == "" && t.Content != ""})
 				st.turnBot++
 			}
 		}
@@ -258,7 +306,7 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 	}
 	// The bot's answer was posted as one or more messages (bubbles, parts of a long reply, its rest), and only
 	// the first replies to the request. Each of them is the stored answer's line: a person who replies to any of
-	// them replies to that line. The turn they were posted for names the request (reply_messages, turn_log).
+	// them replies to that line. The posted-message record names its request.
 	var probe []string
 	for _, l := range live {
 		if l.Bot {
@@ -273,38 +321,77 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 			probe = append(probe, r)
 		}
 	}
-	posted := s.postedFor(probe)
+	posted, err := s.postedDetails(probe)
+	if err != nil {
+		st.postedErrors++
+	}
 	alias := map[string]string{} // a posted message → the stored answer's line
-	for id, request := range posted {
-		if line, ok := answered[request]; ok {
+	for id, post := range posted {
+		line := byDelivery[post.turn]
+		if line == "" {
+			line = legacy[post.request]
+		}
+		if line != "" && post.request != "" && byID[line].ReplyTo == post.request {
 			alias[id] = line
 		}
 	}
 	for _, l := range live {
 		if l.Bot {
-			request := l.ReplyTo
-			if r, ok := posted[l.ID]; ok && r != "" {
-				request = r
+			if err != nil {
+				continue // an unreadable registry cannot clear a raw post for replay
 			}
-			if line, ok := answered[request]; ok {
+			request := l.ReplyTo
+			post, registered := posted[l.ID]
+			if l.RegistryGap && !registered {
+				continue
+			}
+			if registered {
+				if alias[l.ID] != "" {
+					st.liveBotAnswered++
+					continue
+				}
+				if post.request == "" || requests[post.request] || answered[post.request] != "" {
+					continue // not cleared, refused, or belongs to a different surviving delivery
+				}
+				// A cleared exchange can age out of the 40-row store while its post
+				// is still live. The usual redaction check still governs its words.
+				l.ReplyTo = post.request
+			} else if line, ok := answered[request]; ok {
 				alias[l.ID] = line
 				st.liveBotAnswered++
 				continue // the stored answer has the whole reply; its posted parts would repeat it
-			}
-			if l.ReplyTo == "" {
-				l.ReplyTo = request // a later part of an answer with no stored turn still answers its request
+			} else if requests[request] {
+				continue // only the user turn was kept; a raw bot reply cannot restore its missing answer
 			}
 		}
-		if l.Bot && l.Text != "" && s.replyWithdrawn(l.ID) {
-			l.Text = ""
+		if l.Bot && !l.Withdrawn && s.replyWithdrawn(l.ID) {
+			l.Text, l.Withdrawn = "", true
 		}
 		if old, ok := byID[l.ID]; ok && l.Text == "" && old.Text != "" && !l.Bot {
 			l.Text = old.Text // consent is checked when the window is filled; the store checks its own
+		} else if req := derived[l.ID]; req != nil {
+			req.used = false // the live line supplies its own words
 		}
 		put(l)
 		st.live++
 		if l.Bot {
 			st.liveBot++
+		}
+	}
+	target := byID[in.MessageID].ReplyTo
+	if post, ok := posted[target]; ok && post.start > 0 {
+		answer := byID[alias[target]]
+		content := full[answer.ID]
+		if answer.ID != "" && post.start < post.end && post.end <= len(content) {
+			// A reply itself proves its target was visible even with no transport
+			// clock (registration may be later). Never expose a later part this way.
+			prefix := content[:post.end]
+			if len([]rune(prefix)) <= ownClipRunes {
+				answer.Text = prefix
+			} else {
+				answer.Text = content[post.start:post.end]
+			}
+			byID[answer.ID] = answer
 		}
 	}
 	out := make([]conversation.Line, 0, len(order))
@@ -325,42 +412,64 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 		}
 		out = append(out, l)
 	}
-	return out, madeFrom, st
+	return out, derived, st
+}
+
+type derivedRequest struct {
+	content string
+	sources []string
+	used    bool // this line got its words from the stored turn
 }
 
 // postedFor maps the bot's posted messages among ids to the request their turn answered (the turn's own message),
-// as reply_messages and the turn's record keep them. Messages that are not the bot's replies are left out.
-func (s *Service) postedFor(ids []string) map[string]string {
+// or "" when the delivery did not clear the answer for replay. Unregistered messages are left out.
+func (s *Service) postedFor(ids []string) (map[string]string, error) {
+	details, err := s.postedDetails(ids)
+	out := make(map[string]string, len(details))
+	for id, post := range details {
+		out[id] = post.request
+	}
+	return out, err
+}
+
+type postedDetail struct {
+	request, turn string
+	start, end    int
+}
+
+func (s *Service) postedDetails(ids []string) (map[string]postedDetail, error) {
 	ids = uniqueStrings(ids)
 	if len(ids) == 0 {
-		return nil
+		return nil, nil
 	}
 	db, err := s.adminDB()
 	if err != nil {
-		return nil
-	}
-	request := `json_extract(t.body,'$.message_id')`
-	if !db.IsSQLite() {
-		request = `JSON_UNQUOTE(JSON_EXTRACT(t.body,'$.message_id'))`
+		return nil, err
 	}
 	args := make([]any, len(ids))
 	for i, id := range ids {
 		args[i] = id
 	}
-	rows, err := db.Reader().Query(`SELECT r.message_id, COALESCE(`+request+`,'') FROM reply_messages r JOIN turn_log t ON t.id=r.turn_id
+	// Only posts from before request_id existed consult the diagnostic record.
+	rows, err := db.Reader().Query(`SELECT r.message_id, `+postedRequestSQL(db.IsSQLite())+`,r.turn_id,r.rest_start,r.part_end FROM reply_messages r
+		LEFT JOIN turn_log t ON r.request_id IS NULL AND t.id=r.turn_id
 		WHERE r.message_id IN (`+strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")+`)`, args...)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer rows.Close()
-	out := map[string]string{}
+	out := map[string]postedDetail{}
 	for rows.Next() {
-		var id, req string
-		if rows.Scan(&id, &req) == nil && req != "" && req != id {
-			out[id] = req
+		var id string
+		var post postedDetail
+		if err := rows.Scan(&id, &post.request, &post.turn, &post.start, &post.end); err != nil {
+			return nil, err
+		}
+		if post.request != id {
+			out[id] = post
 		}
 	}
-	return out
+	return out, rows.Err()
 }
 
 // replyWithdrawn reports whether a bot message posted a reply that is not to be built on: its turn's record

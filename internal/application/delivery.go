@@ -25,6 +25,7 @@ type DeliveryReport struct {
 	Class            errclass.Class // why delivery stopped; errclass.None when every part was sent
 	ReferenceDropped bool           // the message replied to was gone, so the reply went out without the reference
 	MessageIDs       []string       // Discord IDs of the parts that were sent
+	PartEnds         []int          // byte ends in the connector's delivered text, in send order
 }
 
 const (

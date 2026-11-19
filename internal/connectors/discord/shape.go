@@ -118,12 +118,14 @@ type moreStore struct {
 }
 
 type moreEntry struct {
-	text    string
-	channel string
-	at      time.Time
+	text     string
+	channel  string
+	at       time.Time
+	turnDone <-chan struct{}
+	reserved bool
 }
 
-func (s *moreStore) put(messageID, channelID, text string) {
+func (s *moreStore) put(messageID, channelID, text string, turnDone <-chan struct{}) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.rest == nil {
@@ -135,7 +137,7 @@ func (s *moreStore) put(messageID, channelID, text string) {
 			delete(s.rest, k)
 		}
 	}
-	s.rest[messageID] = moreEntry{text: text, channel: channelID, at: now}
+	s.rest[messageID] = moreEntry{text: text, channel: channelID, at: now, turnDone: turnDone}
 }
 
 func (s *moreStore) peek(messageID string) (moreEntry, bool) {
@@ -155,17 +157,42 @@ func (s *moreStore) take(messageID string) (moreEntry, bool) {
 	return e, ok && time.Since(e.at) <= moreKeep
 }
 
+// Reserve once across concurrent presses. Finishing without a post makes the unchanged button retryable.
+func (s *moreStore) reserve(id string) (moreEntry, func(bool), bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e, ok := s.rest[id]
+	if !ok || e.reserved || time.Since(e.at) > moreKeep {
+		return moreEntry{}, nil, false
+	}
+	e.reserved = true
+	s.rest[id] = e
+	return e, func(sent bool) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.rest[id].at != e.at {
+			return
+		}
+		if sent {
+			delete(s.rest, id)
+		} else {
+			e.reserved = false
+			s.rest[id] = e
+		}
+	}, true
+}
+
 // sendShaped sends a chat reply in the channel's reply shape. It returns what reached the channel (the
 // head only, for a trimmed reply), the message IDs, and the delivery report. lead, when set, is a line
 // said before the answer (the partial-picture notice): it is the first line or bubble, and a trimmed
 // reply keeps it in the part shown, so no path hides it.
 func (g *Gateway) sendShaped(ctx context.Context, s *discordgo.Session, guildID, channelID string, ref *discordgo.MessageReference, text, lead, shape string) (string, []string, deliveryReport) {
-	return g.sendShapedFor(ctx, s, guildID, channelID, ref, text, lead, shape, false)
+	return g.sendShapedFor(ctx, s, guildID, channelID, ref, text, lead, shape, false, nil)
 }
 
 // sendShapedFor is sendShaped for a reply that may rest on a deep search (deep): such a reply is trimmed at
 // a greater length. Bubbles are unchanged.
-func (g *Gateway) sendShapedFor(ctx context.Context, s *discordgo.Session, guildID, channelID string, ref *discordgo.MessageReference, text, lead, shape string, deep bool) (string, []string, deliveryReport) {
+func (g *Gateway) sendShapedFor(ctx context.Context, s *discordgo.Session, guildID, channelID string, ref *discordgo.MessageReference, text, lead, shape string, deep bool, turnDone <-chan struct{}) (string, []string, deliveryReport) {
 	lead = strings.Join(strings.Fields(lead), " ")
 	if shape == "plain" {
 		return g.sendReply(ctx, s, guildID, channelID, ref, withLead(lead, text))
@@ -184,7 +211,7 @@ func (g *Gateway) sendShapedFor(ctx context.Context, s *discordgo.Session, guild
 	said, ids, rep := g.sendReply(ctx, s, guildID, channelID, ref, head)
 	if rest != "" && len(ids) > 0 && rep.Sent == rep.Parts {
 		last := ids[len(ids)-1]
-		g.more.put(last, channelID, rest)
+		g.more.put(last, channelID, rest, turnDone)
 		edit := discordgo.NewMessageEdit(channelID, last)
 		edit.Components = &[]discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
 			discordgo.Button{Label: g.svc.MoreLabel(guildID, channelID), Style: discordgo.SecondaryButton, CustomID: "more:" + last},
@@ -192,7 +219,10 @@ func (g *Gateway) sendShapedFor(ctx context.Context, s *discordgo.Session, guild
 		if _, err := s.ChannelMessageEditComplex(edit, discordgo.WithContext(ctx)); err != nil {
 			// the button could not be attached: send the rest as it is, so nothing is lost
 			g.more.take(last)
-			restSaid, restIDs, _ := g.sendReply(ctx, s, guildID, channelID, nil, rest)
+			restSaid, restIDs, restReport := g.sendReply(ctx, s, guildID, channelID, nil, rest)
+			for _, end := range restReport.PartEnds {
+				rep.PartEnds = append(rep.PartEnds, len(said)+2+end)
+			}
 			return said + "\n\n" + restSaid, append(ids, restIDs...), rep
 		}
 	}
@@ -215,6 +245,7 @@ func (g *Gateway) sendBubbles(ctx context.Context, s *discordgo.Session, guildID
 	var said []string
 	var ids []string
 	rep := deliveryReport{Parts: len(parts)} // each bubble is shorter than Discord's limit: one part
+	total := 0
 	for i, p := range parts {
 		if i > 0 {
 			_ = s.ChannelTyping(channelID, discordgo.WithContext(ctx))
@@ -235,6 +266,9 @@ func (g *Gateway) sendBubbles(ctx context.Context, s *discordgo.Session, guildID
 		}
 		said = append(said, got)
 		ids = append(ids, pid...)
+		total += len(got)
+		rep.PartEnds = append(rep.PartEnds, total)
+		total++ // the newline between delivered bubbles
 	}
 	rep.MessageIDs = ids
 	return strings.Join(said, "\n"), ids, rep
@@ -244,7 +278,7 @@ func (g *Gateway) sendBubbles(ctx context.Context, s *discordgo.Session, guildID
 func (g *Gateway) handleMore(s *discordgo.Session, i *discordgo.InteractionCreate, messageID string) {
 	ctx, cancel := context.WithTimeout(g.runCtx(), 2500*time.Millisecond)
 	defer cancel()
-	e, ok := g.more.peek(messageID)
+	_, ok := g.more.peek(messageID)
 	if !ok {
 		// kept for an hour in memory only (or the bot restarted): say so instead of doing nothing
 		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -252,24 +286,57 @@ func (g *Gateway) handleMore(s *discordgo.Session, i *discordgo.InteractionCreat
 			discordgo.WithContext(ctx))
 		return
 	}
-	content := ""
-	var rows []discordgo.MessageComponent
-	if i.Message != nil {
-		content, rows = i.Message.Content, i.Message.Components
-	}
-	// the thread offer's buttons, if any, stay
-	data := &discordgo.InteractionResponseData{Content: content, Components: componentsWithout(rows, "more:"), AllowedMentions: noMentions}
-	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseUpdateMessage, Data: data},
+	if err := s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseDeferredMessageUpdate},
 		discordgo.WithContext(ctx)); err != nil {
 		return // the rest stays for another press
 	}
-	if _, ok := g.more.take(messageID); !ok {
-		return // a second press got there first
-	}
 	g.work(func(base context.Context) {
-		wctx, wcancel := context.WithTimeout(base, g.ActionTimeout)
-		defer wcancel()
-		g.sendReply(wctx, s, i.GuildID, e.channel, &discordgo.MessageReference{MessageID: messageID, ChannelID: e.channel, FailIfNotExists: ptrBool(false)}, e.text)
+		e, finish, ok := g.more.reserve(messageID)
+		if !ok {
+			return
+		}
+		// attempted: a send was started. Its post may exist even when no ID came back (a lost
+		// acknowledgement), so the rest is not offered again; only a press that never reached the
+		// send keeps its button for another try.
+		sent, attempted := false, false
+		defer func() { finish(sent || attempted) }()
+		// The button may be pressed inside the original Deliver. Its head and replay
+		// decision must have committed before the continuation extends the answer.
+		if e.turnDone != nil {
+			select {
+			case <-e.turnDone:
+			case <-base.Done():
+				return
+			}
+		}
+		wait, stopWait := context.WithTimeout(base, g.ActionTimeout)
+		defer stopWait()
+		err := g.svc.DeliverReplyContinuation(wait, i.GuildID, e.channel, messageID, func() (string, []string, []int) {
+			ctx, cancel := context.WithTimeout(base, g.ActionTimeout)
+			defer cancel()
+			attempted = true
+			said, ids, rep := g.sendReply(ctx, s, i.GuildID, e.channel, &discordgo.MessageReference{MessageID: messageID, ChannelID: e.channel, FailIfNotExists: ptrBool(false)}, e.text)
+			sent = len(ids) != 0
+			return said, ids, rep.PartEnds
+		})
+		if err != nil {
+			g.log.Warn("discord: continued reply failed", "posted", sent, "err", err)
+		}
+		if sent {
+			// A thread offer may have changed during the wait. Remove only More.
+			ctx, cancel := g.finalContext(base)
+			defer cancel()
+			msg, err := s.ChannelMessage(e.channel, messageID, discordgo.WithContext(ctx))
+			if err == nil {
+				rows := componentsWithout(msg.Components, "more:")
+				edit := discordgo.NewMessageEdit(e.channel, messageID)
+				edit.Components = &rows
+				_, err = s.ChannelMessageEditComplex(edit, discordgo.WithContext(ctx))
+			}
+			if err != nil {
+				g.log.Debug("discord: could not remove More button", "err", err)
+			}
+		}
 	})
 }
 

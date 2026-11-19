@@ -57,6 +57,10 @@ type Attribution struct {
 	// Reasons says why each included line is in (call, reply, replied_to, bot_reply, to_bot, follow,
 	// burst, to_caller, own) — recorded in the turn ledger so a wrong answer can be traced.
 	Reasons map[string]string
+	// CurrentAnswer and its request name the exchange the call replies to, or the
+	// latest included answer inside the window. A post may have no request link.
+	CurrentAnswer, CurrentRequest string
+	WindowStart                   time.Time // excludes lines included only by the extended own window
 	// Candidates are recent lines from other conversations the call might still point at ("what about
 	// that one?"). They stay out of the prompt unless a classifier picks them (fail-closed).
 	Candidates []string
@@ -100,6 +104,7 @@ func Attribute(lines []Line, callIDs []string, callerID string, opt Options) Att
 		return out
 	}
 	lastAt := sorted[last].At
+	out.WindowStart = lastAt.Add(-opt.Window)
 	from := 0
 	for from < last && lastAt.Sub(sorted[from].At) > opt.Window {
 		from++
@@ -165,13 +170,13 @@ func Attribute(lines []Line, callIDs []string, callerID string, opt Options) Att
 	for changed := true; changed; {
 		changed = false
 		for i, l := range window {
-			if l.ID == "" {
+			if l.ID == "" || l.Withdrawn {
 				continue
 			}
 			if in[l.ID] {
 				// what an included line replies to is part of the conversation
 				if l.ReplyTo != "" && !in[l.ReplyTo] {
-					if j, ok := byID[l.ReplyTo]; ok && j >= from && j <= last {
+					if j, ok := byID[l.ReplyTo]; ok && j >= from && j <= last && !sorted[j].Withdrawn {
 						changed = add(l.ReplyTo, "replied_to") || changed
 					}
 				}
@@ -186,7 +191,7 @@ func Attribute(lines []Line, callIDs []string, callerID string, opt Options) Att
 				if a, _, ok := authorOf(l.ReplyTo); (ok && a == callerID) || in[l.ReplyTo] {
 					changed = add(l.ID, "bot_reply") || changed
 					if !in[l.ReplyTo] {
-						if _, ok := byID[l.ReplyTo]; ok {
+						if j, ok := byID[l.ReplyTo]; ok && j >= from && j <= last {
 							add(l.ReplyTo, "to_bot")
 						}
 					}
@@ -207,20 +212,23 @@ func Attribute(lines []Line, callIDs []string, callerID string, opt Options) Att
 	ownFrom := from
 	ownLines := map[string]bool{}
 	if opt.OwnWindow > 0 && opt.OwnExchanges > 0 {
-		own := 0
-		for i := last - 1; i >= 0 && own < opt.OwnExchanges; i-- {
+		requests := map[string]bool{}
+		for i := last - 1; i >= 0; i-- {
 			l := sorted[i]
 			if lastAt.Sub(l.At) > opt.OwnWindow {
 				break
 			}
-			if !l.Bot || l.ID == "" || l.ReplyTo == "" {
+			if !l.Bot || l.ID == "" || l.ReplyTo == "" || l.Withdrawn {
 				continue
 			}
 			j, ok := byID[l.ReplyTo]
 			if !ok || j > i || sorted[j].Bot || sorted[j].AuthorID != callerID || callerID == "" {
 				continue
 			}
-			own++
+			if !requests[l.ReplyTo] && len(requests) >= opt.OwnExchanges {
+				continue
+			}
+			requests[l.ReplyTo] = true
 			add(l.ID, "own")
 			ownLines[l.ID] = true
 			if lastAt.Sub(sorted[j].At) <= opt.OwnWindow {
@@ -233,11 +241,21 @@ func Attribute(lines []Line, callIDs []string, callerID string, opt Options) Att
 	}
 	start := lastAt
 	for _, l := range window {
+		if l.Bot && in[l.ID] {
+			out.CurrentAnswer, out.CurrentRequest = l.ID, l.ReplyTo
+		}
 		if in[l.ID] && l.At.Before(start) {
 			start = l.At
 		}
 		if !in[l.ID] {
 			out.Excluded++
+		}
+	}
+	for _, id := range callIDs {
+		if i, ok := byID[id]; ok {
+			if j, ok := byID[sorted[i].ReplyTo]; ok && sorted[j].Bot && in[sorted[j].ID] {
+				out.CurrentAnswer, out.CurrentRequest = sorted[j].ID, sorted[j].ReplyTo
+			}
 		}
 	}
 	for i := ownFrom; i <= last; i++ {

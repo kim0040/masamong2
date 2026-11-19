@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,17 +36,50 @@ func NoteFirstSend(ctx context.Context) {
 	}
 }
 
-// deliverTimed runs the turn's Deliver and says how long the reply took to appear (-1: the connector did
-// not report a first message, as when nothing was sent).
-func deliverTimed(ctx context.Context, in ChatInput, res chat.Result) (said string, firstMS int, deliverEnd time.Time) {
+// deliverTimed preserves the exact acknowledgement time for a connector editing a pre-existing post.
+func deliverTimed(ctx context.Context, in ChatInput, res chat.Result) (said string, firstSend, deliverEnd time.Time) {
 	dctx, mark := withFirstSend(ctx)
 	said = in.Deliver(dctx, res)
-	deliverEnd = time.Now()
-	firstMS = -1
-	if !mark.at.IsZero() && !in.started.IsZero() {
-		firstMS = max(int(mark.at.Sub(in.started).Milliseconds()), 0)
+	return said, mark.at, time.Now()
+}
+
+// spokenTimes uses Discord's clock for both sides of an exchange. The observation or send
+// acknowledgement fills in for a connector without snowflakes; neither time waits for storage.
+func (s *Service) spokenTimes(in ChatInput, firstSend, deliverEnd time.Time, text string) (request, answer time.Time, spans string) {
+	request = s.callCutoff(in)
+	live := s.liveLines(in.GuildID, in.ChannelID)
+	for _, l := range live {
+		if l.Bot && !deliverEnd.IsZero() {
+			if in.MessageID != "" && l.ReplyTo == in.MessageID && (answer.IsZero() || l.At.Before(answer)) {
+				answer = l.At
+			}
+		}
 	}
-	return said, firstMS, deliverEnd
+	if !deliverEnd.IsZero() {
+		// A tool attachment may also reply directly to the request, before the
+		// text. The registered parts identify which post actually carried the answer.
+		if parts := s.registeredParts(in.turnID, live); len(parts) != 0 {
+			if strings.HasPrefix(in.MessageID, "dc:") && !firstSend.IsZero() {
+				// Slash follow-ups edit the deferred first post. Its snowflake
+				// dates the placeholder, not the publication of its text.
+				parts[0].At = firstSend
+			}
+			if len(parts) > 1 {
+				spans = encodeSpans(partSpans(text, parts))
+			}
+			return request, parts[0].At, spans
+		}
+		if answer.IsZero() {
+			answer = deliverEnd
+			if !firstSend.IsZero() {
+				answer = firstSend
+			}
+		}
+	}
+	if answer.IsZero() {
+		answer = s.Clock.Now() // a synchronous reply with no delivery callback
+	}
+	return request, answer, spans
 }
 
 // addTurnSpans puts the runtime's spans and the join's side into a turn record, as fields of their own

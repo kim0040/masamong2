@@ -27,8 +27,9 @@ type turnGate struct {
 }
 
 type turnLane struct {
-	token chan struct{} // capacity 1: held by the running turn
-	users int           // the running turn plus the ones waiting
+	token       chan struct{} // held by the running model turn
+	publication chan struct{} // held across a More send and its registration
+	users       int
 }
 
 // slotsFor returns the slot pool for limit. A changed limit starts a new pool; turns already running
@@ -40,21 +41,25 @@ func (g *turnGate) slotsFor(limit int) chan struct{} {
 	return g.slots
 }
 
-// enter waits for the channel lane and a global slot. The returned func releases both.
+// enter waits for the channel lane and a global slot. A continuation (limit zero)
+// needs only the channel's publication lane and never changes the model slot pool.
 func (g *turnGate) enter(ctx context.Context, key string, limit int) (func(), error) {
 	g.mu.Lock()
-	slots := g.slotsFor(limit)
 	if g.lanes == nil {
 		g.lanes = map[string]*turnLane{}
 	}
 	l := g.lanes[key]
 	if l == nil {
-		l = &turnLane{token: make(chan struct{}, 1)}
+		l = &turnLane{token: make(chan struct{}, 1), publication: make(chan struct{}, 1)}
 		g.lanes[key] = l
 	}
-	if l.users > maxQueuedPerChannel {
-		g.mu.Unlock()
-		return nil, ErrChatBusy
+	var slots chan struct{}
+	if limit > 0 {
+		if l.users > maxQueuedPerChannel {
+			g.mu.Unlock()
+			return nil, ErrChatBusy
+		}
+		slots = g.slotsFor(limit)
 	}
 	l.users++
 	g.mu.Unlock()
@@ -65,9 +70,29 @@ func (g *turnGate) enter(ctx context.Context, key string, limit int) (func(), er
 		}
 		g.mu.Unlock()
 	}
+	if slots == nil {
+		select {
+		case l.publication <- struct{}{}:
+			return sync.OnceFunc(func() { <-l.publication; leave() }), nil
+		case <-ctx.Done():
+			leave()
+			return nil, ctx.Err()
+		}
+	}
 	select {
 	case l.token <- struct{}{}:
 	case <-ctx.Done():
+		leave()
+		return nil, ctx.Err()
+	}
+	// A reply to a continuation must cross after that post's registration. Once
+	// admitted, this call cannot be a reply to a future More post; its model run
+	// need not block an unrelated press.
+	select {
+	case l.publication <- struct{}{}:
+		<-l.publication
+	case <-ctx.Done():
+		<-l.token
 		leave()
 		return nil, ctx.Err()
 	}
@@ -78,12 +103,9 @@ func (g *turnGate) enter(ctx context.Context, key string, limit int) (func(), er
 		leave()
 		return nil, ctx.Err()
 	}
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			<-slots
-			<-l.token
-			leave()
-		})
-	}, nil
+	return sync.OnceFunc(func() {
+		<-slots
+		<-l.token
+		leave()
+	}), nil
 }

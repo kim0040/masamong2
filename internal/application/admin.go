@@ -173,6 +173,10 @@ func migrateAdmin(st *storage.Store) error {
 		{"audit_log", "guild_id", "TEXT NOT NULL DEFAULT ''", "VARCHAR(64) NOT NULL DEFAULT ''"},
 		// whose message a turn answered or a candidate was, as personRef (withdrawn consent)
 		{"turn_log", "speaker_ref", "TEXT NOT NULL DEFAULT ''", "VARCHAR(32) NOT NULL DEFAULT ''"},
+		// NULL is a pre-migration post; new posts start ineligible until delivery is confirmed.
+		{"reply_messages", "request_id", "TEXT", "VARCHAR(80)"},
+		{"reply_messages", "part_end", "INTEGER NOT NULL DEFAULT 0", "INT NOT NULL DEFAULT 0"},
+		{"reply_messages", "rest_start", "INTEGER NOT NULL DEFAULT 0", "INT NOT NULL DEFAULT 0"},
 		{"participation_log", "author_ref", "TEXT NOT NULL DEFAULT ''", "VARCHAR(32) NOT NULL DEFAULT ''"},
 		// 0 = not looked at yet, 1 = its sources are in evidence_refs, 2 = it kept copied text (evidence_index.go)
 		{"turn_log", "evidence_state", "INTEGER NOT NULL DEFAULT 0", "TINYINT NOT NULL DEFAULT 0"},
@@ -205,6 +209,8 @@ func migrateAdmin(st *storage.Store) error {
 		}
 	}
 	for _, q := range []string{`CREATE INDEX IF NOT EXISTS idx_turn_log_speaker ON turn_log(speaker_ref)`,
+		`CREATE INDEX IF NOT EXISTS idx_reply_messages_turn ON reply_messages(turn_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_reply_messages_channel ON reply_messages(guild_id,channel_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_participation_log_author ON participation_log(author_ref)`} {
 		if _, err := st.DB.Exec(q); err != nil {
 			return fmt.Errorf("admin tables: %w", err)

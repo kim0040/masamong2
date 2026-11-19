@@ -97,5 +97,9 @@ func (f *turnFlights) toKeep(fl *turnFlight, turns []store.ChatTurn) []store.Cha
 		return turns
 	}
 	user := turns[0]
-	return []store.ChatTurn{{Role: user.Role, Speaker: user.Speaker, Content: fl.words, NativeID: user.NativeID, SpeakerID: user.SpeakerID, Revision: fl.at.UTC().Format(time.RFC3339Nano)}}
+	address := user.CallAddress
+	if address != store.CallReply {
+		address = store.CallEdited
+	}
+	return []store.ChatTurn{{Role: user.Role, Speaker: user.Speaker, Content: fl.words, NativeID: user.NativeID, SpeakerID: user.SpeakerID, SpokenAt: user.SpokenAt, Revision: fl.at.UTC().Format(time.RFC3339Nano), CallAddress: address}}
 }
