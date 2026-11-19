@@ -66,7 +66,7 @@ func (s *Service) callerConversation(ctx context.Context, in ChatInput, eng *eng
 	if mode == "off" || in.MessageID == "" || in.ChannelID == "" {
 		return convContext{}, false
 	}
-	lines, madeFrom := s.channelLines(in, eng)
+	lines, madeFrom, stats := s.channelLines(in, eng)
 	botID := s.botAccount(lines)
 	found := false
 	for _, l := range lines {
@@ -84,6 +84,7 @@ func (s *Service) callerConversation(ctx context.Context, in ChatInput, eng *eng
 		conversation.Options{BotID: botID, Names: conversation.NamesFrom(lines)})
 	out := convContext{ledger: map[string]any{"mode": mode, "included": len(att.Included), "excluded": att.Excluded,
 		"candidates": len(att.Candidates)}}
+	stats.note(out.ledger, att)
 	reasons := map[string]int{}
 	for _, why := range att.Reasons {
 		reasons[why]++
@@ -145,11 +146,38 @@ func (s *Service) callerConversation(ctx context.Context, in ChatInput, eng *eng
 	return out, true
 }
 
+// lineStats counts, body-free, where a turn's lines came from, for the attribution ledger: a conversation that
+// came out short can be traced to the source that was missing (a live window emptied by a restart, stored turns
+// held back while a change is pending, a bot message that was not joined to its stored answer).
+type lineStats struct {
+	stored          int  // stored room messages
+	turnUser        int  // stored requests with no stored message or live line of their own
+	turnUserMerged  int  // stored requests that marked a line already there as said to the bot
+	turnBot         int  // stored answers
+	turnsRead       int  // chat_turns rows read
+	turnsGated      bool // no stored turns: a change of a source is pending
+	live            int  // live window lines put
+	liveBot         int  // the bot's live messages kept as lines of their own
+	liveBotAnswered int  // the bot's live messages left out because their stored answer stands for them
+	liveAge         time.Duration
+}
+
+func (st lineStats) note(ledger map[string]any, att conversation.Attribution) {
+	ledger["sources"] = map[string]int{"stored": st.stored, "turn_user": st.turnUser, "turn_user_merged": st.turnUserMerged,
+		"turn_bot": st.turnBot, "live": st.live, "live_bot": st.liveBot, "live_bot_answered": st.liveBotAnswered}
+	ledger["turns_read"] = st.turnsRead
+	if st.turnsGated {
+		ledger["turns_gated"] = true
+	}
+	ledger["live_age_s"] = int(st.liveAge.Seconds())
+	ledger["before_window"], ledger["after_call"], ledger["caller_earlier"] = att.Before, att.After, att.CallerEarlier
+}
+
 // channelLines merges what is known of the channel's recent messages: stored messages (capture on), the
 // stored conversation with the bot (its answers keep exactly what reached the channel) and the live window
 // (reply and mention links, the bot's own posts), one line per message. madeFrom lists, by line, the other messages
 // a line that came from a stored turn holds words of (a burst, a picture's description).
-func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conversation.Line, madeFrom map[string][]string) {
+func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conversation.Line, madeFrom map[string][]string, st lineStats) {
 	madeFrom = map[string][]string{}
 	byID := map[string]conversation.Line{}
 	var order []string
@@ -171,10 +199,13 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 				id = m.ObservationID
 			}
 			put(conversation.Line{ID: id, AuthorID: m.Account, Author: m.Label, At: at, Text: m.Content})
+			st.stored++
 		}
 	}
 	answered := map[string]bool{} // user messages the stored conversation has the bot's answer to
 	if turns, err := eng.Store.RecentChatTurns(blocks.ChannelKey(in.GuildID, in.ChannelID), 24); err == nil {
+		st.turnsRead = len(turns)
+		st.turnsGated = len(turns) == 0 && eng.Store.DB.HasPendingEvents("source-change")
 		for _, t := range turns {
 			if t.NativeID == "" {
 				continue
@@ -185,16 +216,23 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 				if _, ok := byID[t.NativeID]; !ok {
 					put(conversation.Line{ID: t.NativeID, AuthorID: t.SpeakerID, Author: t.Speaker, At: at, Text: t.Content, Mentions: []string{"bot"}})
 					madeFrom[t.NativeID] = t.DerivedFrom
+					st.turnUser++
 				}
 			case "assistant":
 				answered[t.NativeID] = true
 				// named by its own link, not by the request's ID: reading the reply is not reading the request
 				put(conversation.Line{ID: "turn:" + t.SourceIDs[0], Bot: true, ReplyTo: t.NativeID, At: at.Add(time.Millisecond), Text: t.Content})
+				st.turnBot++
 			}
 		}
 	}
-	for _, l := range s.liveLines(in.GuildID, in.ChannelID) {
+	live := s.liveLines(in.GuildID, in.ChannelID)
+	if len(live) > 0 {
+		st.liveAge = s.Clock.Now().Sub(live[0].At)
+	}
+	for _, l := range live {
 		if l.Bot && answered[l.ReplyTo] {
+			st.liveBotAnswered++
 			continue // the stored answer has the whole reply; its posted parts would repeat it
 		}
 		if l.Bot && l.Text != "" && s.replyWithdrawn(l.ID) {
@@ -204,6 +242,10 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 			l.Text = old.Text // consent is checked when the window is filled; the store checks its own
 		}
 		put(l)
+		st.live++
+		if l.Bot {
+			st.liveBot++
+		}
 	}
 	out := make([]conversation.Line, 0, len(order))
 	bot := s.botAccount(nil)
@@ -219,7 +261,7 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 		}
 		out = append(out, l)
 	}
-	return out, madeFrom
+	return out, madeFrom, st
 }
 
 // replyWithdrawn reports whether a bot message posted a reply that is not to be built on: its turn's record
