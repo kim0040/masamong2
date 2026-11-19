@@ -136,7 +136,7 @@ func Attribute(lines []Line, callIDs []string, callerID string, opt Options) Att
 		return false
 	}
 	toBot := func(l Line) bool {
-		if l.mentions(opt.BotID) {
+		if l.ToBot || l.mentions(opt.BotID) {
 			return true
 		}
 		if l.ReplyTo != "" {

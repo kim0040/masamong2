@@ -187,8 +187,10 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 		if l.ID == "" {
 			return
 		}
-		if _, ok := byID[l.ID]; !ok {
+		if old, ok := byID[l.ID]; !ok {
 			order = append(order, l.ID)
+		} else {
+			l.ToBot = l.ToBot || old.ToBot // what one source knows of the call, another may not
 		}
 		byID[l.ID] = l
 	}
@@ -215,8 +217,15 @@ func (s *Service) channelLines(in ChatInput, eng *engine.Engine) (lines []conver
 			at, _ := time.Parse(time.RFC3339Nano, t.CreatedAt)
 			switch t.Role {
 			case "user":
-				if _, ok := byID[t.NativeID]; !ok {
-					put(conversation.Line{ID: t.NativeID, AuthorID: t.SpeakerID, Author: t.Speaker, At: at, Text: t.Content, Mentions: []string{"bot"}})
+				// a request the bot answered was said to it, however it was called
+				if l, ok := byID[t.NativeID]; ok {
+					if !l.ToBot {
+						l.ToBot = true
+						byID[t.NativeID] = l
+						st.turnUserMerged++
+					}
+				} else {
+					put(conversation.Line{ID: t.NativeID, AuthorID: t.SpeakerID, Author: t.Speaker, At: at, Text: t.Content, Mentions: []string{"bot"}, ToBot: true})
 					madeFrom[t.NativeID] = t.DerivedFrom
 					st.turnUser++
 				}

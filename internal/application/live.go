@@ -1,6 +1,7 @@
 package application
 
 import (
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -44,8 +45,10 @@ func (s *Service) noteLive(m ObservedMessage) {
 	if !m.FromBot && !s.MemoryAllowed(m.AuthorID) {
 		text = ""
 	}
+	// a mention of the bot or a reply to it is said to it; a call by its name only once the turn takes it (liveToBot)
 	l := conversation.Line{ID: m.MessageID, AuthorID: m.AuthorID, Author: m.AuthorName, Bot: m.FromBot, ReplyTo: m.ReplyTo,
-		Mentions: append([]string(nil), m.Mentions...), MentionsOthers: m.MentionsOthers, At: m.At, Text: clip(text, liveTextRunes)}
+		Mentions: append([]string(nil), m.Mentions...), MentionsOthers: m.MentionsOthers, ToBot: !m.FromBot && m.BotCall == "mention",
+		At: m.At, Text: clip(text, liveTextRunes)}
 	key := liveKey(m.GuildID, m.ChannelID)
 	w := &s.live
 	w.mu.Lock()
@@ -56,6 +59,7 @@ func (s *Service) noteLive(m ObservedMessage) {
 	lines := w.chans[key]
 	for i := range lines {
 		if lines[i].ID == l.ID {
+			l.ToBot = l.ToBot || lines[i].ToBot
 			lines[i] = l
 			return
 		}
@@ -66,6 +70,20 @@ func (s *Service) noteLive(m ObservedMessage) {
 		cut++
 	}
 	w.chans[key] = append([]conversation.Line(nil), lines[cut:]...)
+}
+
+// liveToBot marks messages of the window as said to the bot: the turn took them as a call (a call by name the
+// name-call check heard as one, a follow-up the window chose, the rest of a burst).
+func (s *Service) liveToBot(guildID, channelID string, messageIDs []string) {
+	w := &s.live
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	lines := w.chans[liveKey(guildID, channelID)]
+	for i := range lines {
+		if !lines[i].Bot && slices.Contains(messageIDs, lines[i].ID) {
+			lines[i].ToBot = true
+		}
+	}
 }
 
 // liveLines is a copy of a channel's live window, oldest first.

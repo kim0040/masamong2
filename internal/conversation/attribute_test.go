@@ -186,3 +186,22 @@ func TestSelectAndNumbered(t *testing.T) {
 		t.Fatalf("%q %v", text, labels)
 	}
 }
+
+// A line marked as said to the bot (its name in a call the bot took, a stored request) counts as one even
+// without a mention or a reply: the caller's earlier call comes in, another person's stays their own.
+func TestToBotMark(t *testing.T) {
+	toBot := func(l *Line) { l.ToBot = true }
+	lines := []Line{
+		ln("1", "C", 0, "masamong find the paper", toBot),
+		ln("2", "A", 5, "masamong what time is it", toBot),
+		ln("3", "D", 9, "lunch?"),
+		ln("4", "C", 60, "masamong summarize it", toBot),
+	}
+	a := Attribute(lines, []string{"4"}, "C", Options{BotID: bot, Names: NamesFrom(lines)})
+	if got := ids(a); got != "1,4" || a.Reasons["1"] != "to_bot" {
+		t.Fatalf("included %s (reasons %v), want 1,4", got, a.Reasons)
+	}
+	if a.CallerEarlier != 1 || a.Before != 0 || a.After != 0 {
+		t.Fatalf("counts: caller earlier %d, before %d, after %d", a.CallerEarlier, a.Before, a.After)
+	}
+}

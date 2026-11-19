@@ -28,8 +28,12 @@ type Line struct {
 	// @everyone mention, which is directed at people in general.
 	Mentions       []string
 	MentionsOthers bool
-	At             time.Time
-	Text           string
+	// ToBot marks a message said to the bot however it called it: a mention, a reply to one of its messages,
+	// or its name in a call it took (the name-call check said so, or it answered the message). Mentions and
+	// ReplyTo show the first two only when the source keeps them; a stored message keeps neither.
+	ToBot bool
+	At    time.Time
+	Text  string
 }
 
 func (l Line) mentions(id string) bool {

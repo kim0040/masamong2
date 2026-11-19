@@ -1532,6 +1532,11 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	if err := s.chatGate(in); err != nil {
 		return chat.Result{}, err
 	}
+	if !in.DryRun && !in.Proactive && !in.banter && in.MessageID != "" {
+		// the turn takes the message as said to the bot (its name alone included): the person's next call
+		// finds it as part of their conversation with the bot
+		s.liveToBot(in.GuildID, in.ChannelID, append([]string{in.MessageID}, in.Fragments...))
+	}
 	doc := s.Doc()
 	eng, err := s.MemoryEngine()
 	if err != nil {
