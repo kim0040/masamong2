@@ -3,18 +3,30 @@ package discord
 import (
 	"encoding/json"
 	"io/fs"
+	"os"
+	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
 	"testing"
-	"unicode"
-	"unicode/utf8"
 
+	"masamong/internal/docnames"
 	"masamong/internal/i18n"
 	"masamong/locales"
 )
 
-var slashWord = regexp.MustCompile(`(?:^|[^\p{L}\p{N}_/<>])/(\p{L}[\p{L}\p{N}_-]*)`)
+// slashCommands is the registered slash surface: PrefixOnly entries are extra "!" words, not
+// slash commands.
+func slashCommands() []Command {
+	var out []Command
+	for _, c := range Commands() {
+		if !c.PrefixOnly {
+			out = append(out, c)
+		}
+	}
+	return out
+}
 
 // TestSlashNamesInCatalogs keeps message and console strings honest: a string that names a slash
 // command must use the name its own locale shows. Discord registers the canonical English name
@@ -25,6 +37,7 @@ func TestSlashNamesInCatalogs(t *testing.T) {
 	if err := cat.LoadFS(locales.UIFS); err != nil {
 		t.Fatalf("ui catalogs: %v", err)
 	}
+	cmds := slashCommands()
 	name := func(locale string, c Command) string {
 		if v, ok := cat.Lookup(locale, "discord.command."+c.Name+".name"); ok {
 			return v
@@ -42,7 +55,7 @@ func TestSlashNamesInCatalogs(t *testing.T) {
 		}
 	}
 	valid["en"] = map[string]bool{}
-	for _, c := range Commands() {
+	for _, c := range cmds {
 		valid["en"][c.Name] = true
 		add(c.Name)
 	}
@@ -51,7 +64,7 @@ func TestSlashNamesInCatalogs(t *testing.T) {
 			continue
 		}
 		valid[loc] = map[string]bool{}
-		for _, c := range Commands() {
+		for _, c := range cmds {
 			n := name(loc, c)
 			valid[loc][n] = true
 			add(n)
@@ -61,7 +74,8 @@ func TestSlashNamesInCatalogs(t *testing.T) {
 
 	check := func(source, locale, text string) {
 		// `/own`(`/other`) shows another language's name as an aside; that form is allowed
-		for _, c := range Commands() {
+		var asides []*regexp.Regexp
+		for _, c := range cmds {
 			own := name(locale, c)
 			var others []string
 			for loc := range valid {
@@ -73,28 +87,14 @@ func TestSlashNamesInCatalogs(t *testing.T) {
 				others = append(others, c.Name)
 			}
 			for _, o := range others {
-				text = annotation(own, o).ReplaceAllString(text, "")
+				asides = append(asides, docnames.Aside(own, o))
 			}
 		}
-		for _, m := range slashWord.FindAllStringSubmatchIndex(text, -1) {
-			word := text[m[2]:m[3]]
-			got := ""
-			for _, k := range known {
-				if !strings.HasPrefix(word, k) {
-					continue
-				}
-				// a CJK name may run into a particle (날씨를); an ASCII name only when the rest is
-				// another script, never more ASCII (/admins, /images are not the command)
-				rest := word[len(k):]
-				if r, _ := utf8.DecodeRuneInString(rest); rest == "" || nonASCII(k) || r > unicode.MaxASCII && unicode.IsLetter(r) {
-					got = k
-					break
-				}
+		docnames.Scan(text, asides, func(w string, _ int) {
+			if got := docnames.Match(w, known); got != "" && !valid[locale][got] {
+				t.Errorf("%s: /%s is not the %s command name", source, w, locale)
 			}
-			if got != "" && !valid[locale][got] {
-				t.Errorf("%s: /%s is not the %s command name", source, word, locale)
-			}
-		}
+		})
 	}
 	for _, bundle := range []fs.FS{locales.FS, locales.UIFS} {
 		err := fs.WalkDir(bundle, ".", func(p string, e fs.DirEntry, err error) error {
@@ -127,15 +127,24 @@ func TestSlashNamesInCatalogs(t *testing.T) {
 	}
 }
 
-func annotation(own, other string) *regexp.Regexp {
-	return regexp.MustCompile("`?" + regexp.QuoteMeta("/"+own) + "`?" + ` *\(` + "`?" + regexp.QuoteMeta("/"+other) + "`?" + `\)`)
-}
-
-func nonASCII(s string) bool {
-	for _, r := range s {
-		if r > unicode.MaxASCII {
-			return true
-		}
+// TestRegistryNamesMatchCommands keeps the names tools/doccheck parses out of this file in step
+// with the commands it actually registers: a new slash command is checked in docs, and a renamed or
+// prefix-only one stops being treated as a slash name.
+func TestRegistryNamesMatchCommands(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(findRepoRoot(t), "internal/connectors/discord/commands.go"))
+	if err != nil {
+		t.Fatal(err)
 	}
-	return false
+	got, err := docnames.RegistryNames(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want []string
+	for _, c := range slashCommands() {
+		want = append(want, c.Name)
+	}
+	sort.Strings(want)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("registry names %v, want %v", got, want)
+	}
 }
