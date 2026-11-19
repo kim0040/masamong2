@@ -239,6 +239,7 @@
   "discord.render.quote.unconfigured": "Las cotizaciones aún no están configuradas en este bot.",
   "discord.render.quote.fx_missing": "Tipo de cambio no disponible; se muestra solo USD.",
   "discord.render.quote.as_of": "A fecha de",
+  "fx.unsupported_currency": "Moneda no admitida. Escribe un código de moneda de tres letras, como USD.",
   "discord.render.fx.title": "Tipos de cambio · {base}",
   "discord.render.fx.unconfigured": "Los tipos de cambio no están configurados.",
   "discord.render.fx.updated": "Actualizado",

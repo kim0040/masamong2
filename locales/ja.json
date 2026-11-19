@@ -239,6 +239,7 @@
   "discord.render.quote.unconfigured": "このボットでは株価がまだ設定されていません。",
   "discord.render.quote.fx_missing": "為替レートを取得できないため、USDのみ表示します。",
   "discord.render.quote.as_of": "時点",
+  "fx.unsupported_currency": "未対応の通貨です。USD などの英字3文字の通貨コードを入力してください。",
   "discord.render.fx.title": "為替レート · {base}",
   "discord.render.fx.unconfigured": "為替レートが設定されていません。",
   "discord.render.fx.updated": "更新",

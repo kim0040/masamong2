@@ -46,12 +46,27 @@ type Rates struct {
 }
 
 var ErrProvider = errors.New("fx: provider error")
+var ErrUnsupportedCurrency = errors.New("fx: unsupported currency")
+
+// ValidCode checks the input format. The provider decides which codes it supports.
+func ValidCode(code string) bool {
+	code = strings.TrimSpace(code)
+	if len(code) != 3 {
+		return false
+	}
+	for _, c := range code {
+		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z') {
+			return false
+		}
+	}
+	return true
+}
 
 func (a *Adapter) Latest(ctx context.Context, base string) (Rates, error) {
-	base = strings.ToUpper(strings.TrimSpace(base))
-	if len(base) != 3 {
-		return Rates{}, fmt.Errorf("fx: base currency must be a 3-letter code, got %q", base)
+	if !ValidCode(base) {
+		return Rates{}, ErrUnsupportedCurrency
 	}
+	base = strings.ToUpper(strings.TrimSpace(base))
 	url := a.OpenBase + "/latest/" + base
 	headers := map[string]string{}
 	source := "open"
@@ -84,6 +99,9 @@ func Parse(contentType string, body []byte) (Rates, error) {
 	}
 	if decode.Str(obj["result"]) != "success" {
 		et := decode.Str(obj["error-type"])
+		if et == "unsupported-code" || et == "unknown-code" {
+			return Rates{}, ErrUnsupportedCurrency
+		}
 		if et == "" {
 			et = "unknown"
 		}

@@ -239,6 +239,7 @@
   "discord.render.quote.unconfigured": "이 봇에는 아직 시세 인증키가 설정되지 않았습니다.",
   "discord.render.quote.fx_missing": "환율을 가져오지 못해 USD만 표시합니다.",
   "discord.render.quote.as_of": "기준 시각",
+  "fx.unsupported_currency": "지원하지 않는 통화입니다. USD와 같은 영문 세 글자 통화 코드를 입력하세요.",
   "discord.render.fx.title": "환율 · {base}",
   "discord.render.fx.unconfigured": "환율 조회가 설정되지 않았습니다.",
   "discord.render.fx.updated": "갱신",

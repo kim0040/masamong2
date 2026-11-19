@@ -371,6 +371,9 @@ func (s *Service) finance(ctx context.Context, req action.Request) action.Result
 		}
 		base := strVal(in, "base", "USD")
 		rates, err := s.Registry().FX.Latest(ctx, base)
+		if errors.Is(err, fx.ErrUnsupportedCurrency) {
+			return action.Fail(req, errcode.InvalidInput, "fx.unsupported_currency", s.msg(req, "fx.unsupported_currency"), nil)
+		}
 		if err != nil {
 			return s.providerFail(req, s.Registry().fxID, err)
 		}

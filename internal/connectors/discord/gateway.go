@@ -486,7 +486,7 @@ func (g *Gateway) mayAdmin(ictx InvokeContext) bool {
 }
 
 func (g *Gateway) renderCommand(res action.Result, cmd Command, locale string, manager bool) Rendered {
-	if res.Action != "help.version" {
+	if !res.OK || res.Action != "help.version" {
 		return Render(res, cmd, locale)
 	}
 	var slash, prefixes []string
@@ -889,9 +889,12 @@ func (g *Gateway) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 		}
 		return
 	}
+	req := requestFor(cmd, opts, ictx, "dc:"+i.ID)
 	flags := discordgo.MessageFlags(0)
-	if cmd.Ephemeral {
+	if cmd.Ephemeral || req.Action == "help.version" {
 		flags = discordgo.MessageFlagsEphemeral
+		ictx.Private = true
+		req.Invoker.Private = true
 	}
 	ackCtx, cancelAck := g.ackContext()
 	defer cancelAck()
@@ -902,9 +905,8 @@ func (g *Gateway) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 	g.work(func(base context.Context) {
 		ctx, cancel := context.WithTimeout(base, g.ActionTimeout)
 		defer cancel()
-		req := requestFor(cmd, opts, ictx, "dc:"+i.ID)
 		mark := g.svc.SettledMark() // before the command reads anything: its result may go on into a chat turn
-		res := g.svc.Execute(ctx, req)
+		res := g.executeCommand(ctx, req)
 		if application.Unanswered(res) && !ictx.Private {
 			// the reply is posted inside the turn: the conversation keeps only what reached Discord
 			deliver := func(deliverCtx context.Context, out chat.Result) string {
@@ -1926,13 +1928,22 @@ func (g *Gateway) shouldAnswer(m *discordgo.MessageCreate, pol config.ChannelPol
 	return false
 }
 
+func (g *Gateway) executeCommand(ctx context.Context, req action.Request) action.Result {
+	res := g.svc.Execute(ctx, req)
+	if req.Action == "finance.fx" && res.Error != nil && res.Error.MessageKey == "fx.unsupported_currency" {
+		req.Action, req.Input = "help.version", nil
+		return g.svc.Execute(ctx, req)
+	}
+	return res
+}
+
 func (g *Gateway) runCommand(s *discordgo.Session, m *discordgo.MessageCreate, cmd Command, opts map[string]string) {
 	ictx := InvokeContext{ChannelID: m.ChannelID, GuildID: m.GuildID, UserID: m.Author.ID, Locale: g.locale(m.GuildID), Manager: g.messageManager(s, m),
 		Private: m.GuildID == "", UserName: displayName(m)}
 	ctx, cancel := context.WithTimeout(g.runCtx(), g.ActionTimeout)
 	defer cancel()
 	mark := g.svc.SettledMark() // before the command reads anything: its result may go on into a chat turn
-	res := g.svc.Execute(ctx, requestFor(cmd, opts, ictx, "dc:"+m.ID))
+	res := g.executeCommand(ctx, requestFor(cmd, opts, ictx, "dc:"+m.ID))
 	if application.Unanswered(res) && (!ictx.Private || m.GuildID == "") { // a DM: CommandToChat checks DM chat is open
 		// no answer from the tool: carry on as a conversation, off the event loop
 		g.work(func(base context.Context) {

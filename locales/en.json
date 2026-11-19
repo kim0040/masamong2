@@ -239,6 +239,7 @@
   "discord.render.quote.unconfigured": "Quotes are not configured on this bot yet.",
   "discord.render.quote.fx_missing": "Exchange rate unavailable; showing USD only.",
   "discord.render.quote.as_of": "As of",
+  "fx.unsupported_currency": "Unsupported currency. Enter a three-letter currency code such as USD.",
   "discord.render.fx.title": "Exchange rates · {base}",
   "discord.render.fx.unconfigured": "Exchange rates are not configured.",
   "discord.render.fx.updated": "Updated",
