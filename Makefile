@@ -15,7 +15,7 @@ build:
 test:
 	go test ./...
 
-# documentation: links resolve and translated pages are in step (docs/translations.json)
+# documentation: links resolve, translated pages are in step (docs/translations.json), and command names match the page's language
 docs:
 	go run ./tools/doccheck
 

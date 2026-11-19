@@ -143,10 +143,11 @@ The source of this wiki is the repository's `docs/wiki/` folder. When changes re
 
 ### Link and translation check
 
-`make docs` (`go run ./tools/doccheck`) checks two things. `go test ./...` and the `wiki` workflow run the same check, and a failure keeps the wiki from being published.
+`make docs` (`go run ./tools/doccheck`) checks three things. `go test ./...` and the `wiki` workflow run the same check, and a failure keeps the wiki from being published.
 
 - **Links**: relative links and links to this repository's files and wiki pages must point at files that exist. `docs/archive/` is a local record that is not in Git, so it is left out.
 - **Translations**: the five READMEs, and each Korean wiki page with its English page, form groups. `docs/translations.json` records a hash of every file. Editing one language alone fails the check; update the others, then record again with `make docs-record`. A new wiki page needs the language switch near the top (`**한국어** | [English](…/wiki/English-Page)`) to be paired.
+- **Command names**: a slash command is named the way Discord shows it in the page's language — `/weather` on an English page, `/날씨` on a Korean one — from `internal/connectors/discord/commands.go` and `locales/<lang>.json`. Another language's name is allowed only as a parenthesized aside right after the page's own, like `/날씨`(`/weather`). Fenced code, paths and quoted routes are not mentions, and a `<!-- doccheck:not-command -->` marker excuses a `/word` that is a route rather than a command.
 
 English pages have English file names (`Installation.md`, `Quick-Start.md`, …; the English home is `English.md`), with a language switch at the top of both versions pointing at each other. When you change one, change the other. The sidebar (`_Sidebar.md`) lists both languages.
 
