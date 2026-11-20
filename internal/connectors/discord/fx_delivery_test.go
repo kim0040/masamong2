@@ -101,6 +101,59 @@ func (d *fxDelivery) deferredFlags(t *testing.T) int {
 
 const ephemeral = int(discordgo.MessageFlagsEphemeral)
 
+// The region a card's home currency is read from, in order: the region the person's saved language
+// names itself, else the region Discord's tag names (the interaction's for a slash command, the
+// server's for a message), else the likely region of the saved language, else USD.
+func TestFXHomeFollowsTheFirstRegionThatNamesOne(t *testing.T) {
+	saved := func(t *testing.T, d *fxDelivery, locale string) {
+		t.Helper()
+		res := d.g.svc.Execute(context.Background(), action.Request{Action: "preferences.set",
+			Input:   mustJSON(map[string]any{"locale": locale}),
+			Invoker: &action.Invoker{Via: "command", GuildID: "g", ChannelID: "c", UserID: "u"}})
+		if !res.OK {
+			t.Fatalf("saved locale: %+v", res.Error)
+		}
+	}
+	t.Run("saved English, a slash command in pt-BR: Brazil's home, the card in English", func(t *testing.T) {
+		d := newFXDelivery(t, nil)
+		saved(t, d, "en")
+		i := &discordgo.InteractionCreate{Interaction: &discordgo.Interaction{ID: "i", AppID: "app", Token: "tok",
+			Type: discordgo.InteractionApplicationCommand, ChannelID: "c", GuildID: "g",
+			Locale: discordgo.Locale("pt-BR"), Member: &discordgo.Member{User: &discordgo.User{ID: "u", Username: "tester"}},
+			Data: discordgo.ApplicationCommandInteractionData{Name: "fx"}}}
+		d.g.handleCommand(d.g.sess, i)
+		if !d.g.Wait(5 * time.Second) {
+			t.Fatal("gateway did not settle")
+		}
+		if len(d.paths) != 1 || d.paths[0] != "/latest/BRL" {
+			t.Fatalf("provider paths %v, want /latest/BRL", d.paths)
+		}
+		edit, ok := d.fake.find(http.MethodPatch, "/messages/@original")
+		if !ok || !strings.Contains(edit.body, "Exchange rates") {
+			t.Errorf("the card is not in the saved language: %v", edit.body)
+		}
+	})
+	for _, tc := range []struct {
+		saved, want string
+	}{
+		{"en", "/latest/GBP"},    // no region of its own: the guild's
+		{"en-US", "/latest/USD"}, // its own region wins over the guild's
+		{"es", "/latest/GBP"},    // the guild's region beats the language's likely one
+	} {
+		t.Run("guild en-GB, saved "+tc.saved, func(t *testing.T) {
+			d := newFXDelivery(t, nil)
+			saved(t, d, tc.saved)
+			if err := d.g.sess.State.GuildAdd(&discordgo.Guild{ID: "g", PreferredLocale: "en-GB"}); err != nil {
+				t.Fatal(err)
+			}
+			d.prefix(t, "!fx")
+			if len(d.paths) != 1 || d.paths[0] != tc.want {
+				t.Errorf("provider paths %v, want %s", d.paths, tc.want)
+			}
+		})
+	}
+}
+
 // A currency that cannot be read, or that the rate service lacks, is told to the member alone, with how
 // to write one. Nothing is rewritten into another command, and a malformed one costs no provider call.
 func TestFXSlashInputErrorsAreAnsweredPrivately(t *testing.T) {

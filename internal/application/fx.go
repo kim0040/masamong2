@@ -218,25 +218,22 @@ func (s *Service) fxRawPlan(lex *currency.Lexicon, in map[string]any, amount flo
 	return plan, true
 }
 
-// fxHomeTag is the locale tag the home currency is read from. The request's locale (the person's saved
-// language, else the Discord locale) says it when it names a region ("en-GB"); one that only names a
-// language ("en", a saved preference) takes the region of Discord's own tag when that is the same language
-// (en-GB), else the likely region of the language.
+// fxHomeTag is the locale tag the home currency is read from. The first tag that names a region wins:
+// the person's saved language when it names one ("en-US" is a choice of theirs), else the tag Discord
+// sent (the interaction's for a slash command, the server's for a message), else the saved language for
+// its likely region. Home then reads the tag: a region with no single currency (es-419) gives USD.
 func fxHomeTag(locale string, in map[string]any) string {
 	tag, _ := fxText(in, "locale_tag")
-	if strings.TrimSpace(tag) == "" {
-		return locale
-	}
-	have, discord := language.Make(locale), language.Make(tag)
-	if _, conf := have.Region(); conf == language.Exact {
-		return locale
-	}
-	haveBase, _ := have.Base()
-	discordBase, _ := discord.Base()
-	if haveBase == discordBase {
+	if !namesRegion(locale) && namesRegion(tag) {
 		return tag
 	}
 	return locale
+}
+
+// namesRegion reports whether tag itself names a region ("en-GB" does; "en" only has a likely one).
+func namesRegion(tag string) bool {
+	_, conf := language.Make(strings.TrimSpace(tag)).Region()
+	return conf == language.Exact
 }
 
 // fxHomePlan is a request from a command: the person's home currency (the currency of their region), and

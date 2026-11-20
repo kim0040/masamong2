@@ -216,14 +216,17 @@ func TestFXHomeCurrencyFollowsTheRegion(t *testing.T) {
 		{"zh-CN", "zh-CN", "", "CNY", 5},
 		{"pt-BR", "pt-BR", "", "BRL", 6},
 		{"a bare language takes its likely region", "es", "", "EUR", 5},
-		// a saved language without a region takes Discord's region when it is the same language
+		// a saved tag without a region yields to the region Discord reports, whatever its language
 		{"saved en, Discord en-GB", "en", "en-GB", "GBP", 5},
+		{"saved en, Discord pt-BR", "en", "pt-BR", "BRL", 6},
+		{"saved es, Discord en-GB", "es", "en-GB", "GBP", 5},
+		{"saved ko, Discord en-GB", "ko", "en-GB", "GBP", 5},
 		{"saved ko, Discord ko", "ko", "ko", "KRW", 5},
-		{"saved es, Discord es-419", "es", "es-419", "USD", 5},
-		// ... and not when it is another language
-		{"saved ko, Discord en-GB", "ko", "en-GB", "KRW", 5},
+		// a tag that names no region (ko) or a region without one currency (es-419) skips to the
+		// likely region of the saved language
 		{"saved es, Discord ko", "es", "ko", "EUR", 5},
-		// a region the locale names itself wins over Discord's
+		{"saved es, Discord es-419", "es", "es-419", "USD", 5},
+		// a region the saved language names itself wins over Discord's
 		{"en-US, Discord en-GB", "en-US", "en-GB", "USD", 5},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
