@@ -1,6 +1,6 @@
 # Common builds. The console (internal/transport/web/ui) is committed pre-built in ui/dist, so plain
 # `go build` works without Node; run `make ui` after changing the console.
-.PHONY: ui check build test docs docs-record try install uninstall app release
+.PHONY: ui check build test docs docs-record codemap try install uninstall app release
 
 ui:
 	cd internal/transport/web/ui && npm ci && npm run build
@@ -22,6 +22,10 @@ docs:
 # after updating every language of a changed page
 docs-record:
 	go run ./tools/doccheck -write
+
+# code map: writes the generated indexes under docs/code-map (a stale map fails go test ./tools/codemap)
+codemap:
+	go run ./tools/codemap
 
 # build from source and run a separate test instance (~/.masamong-try), console opened; Ctrl+C stops it
 ifeq ($(OS),Windows_NT)
