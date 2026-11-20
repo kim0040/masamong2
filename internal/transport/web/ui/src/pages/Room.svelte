@@ -283,12 +283,21 @@
               <legend>{t('room.watch_levels')}</legend>
               <p class="small muted">{t('room.watch_hint')}</p>
               {#each form.watch_level as row, i}
+                <!-- a saved key shows the KMA area it matched, or a flag when KMA has reported no such area yet -->
+                {@const key = row.region.trim()}
+                {@const checked = !!ch.watch_areas?.checked && Object.hasOwn(ch.watch_level ?? {}, key)}
+                {@const area = checked ? ch.watch_areas.matched?.[key] : undefined}
                 <div class="watch-row">
-                  <Input aria-label={t('room.watch_region')} placeholder={t('room.watch_region')} bind:value={row.region} />
+                  <Input aria-label={t('room.watch_region')} placeholder={t('room.watch_region')} bind:value={row.region} aria-describedby={checked ? `watch-area-${i}` : undefined} />
                   <Select aria-label={t('room.watch_levels')} bind:value={row.level} options={['1','2','3','4','5'].map(value => ({ value, label: value }))} />
                   <Button size="sm" onclick={() => form.watch_level.splice(i, 1)}>{t('room.watch_remove')}</Button>
+                  {#if checked}
+                    {#if area}<p id="watch-area-{i}" class="watch-area xs muted">{t('room.watch_matched', { area })}</p>
+                    {:else}<p id="watch-area-{i}" class="watch-area xs warn-text"><I.TriangleAlert size={12} aria-hidden="true" />{t('room.watch_unknown')}</p>{/if}
+                  {/if}
                 </div>
               {/each}
+              {#if ch.watch_areas && !ch.watch_areas.checked}<p class="xs muted">{t('room.watch_unchecked')}</p>{/if}
               <Button size="sm" onclick={() => form.watch_level.push({ region: '', level: '2' })}>{t('room.watch_add')}</Button>
               <details><summary class="small">{t('room.watch_guide')}</summary>
                 <ol class="small">{#each [1,2,3,4,5] as level}<li>{t(`room.watch_level.${level}`)}</li>{/each}</ol>
@@ -556,6 +565,16 @@
   }
   .watch-levels ol {
     padding-inline-start: 1.5em;
+  }
+  .watch-area {
+    grid-column: 1 / -1;
+    margin: 0;
+    display: flex;
+    gap: 4px;
+    align-items: baseline;
+  }
+  .warn-text {
+    color: var(--warn);
   }
   .panel {
     margin-top: var(--s-4);
