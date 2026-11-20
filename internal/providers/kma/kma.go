@@ -445,6 +445,7 @@ var kindCodes = func() map[string]string {
 	for code, name := range kindNames {
 		m[name] = code
 	}
+	m["해일"] = "O" // wrn_now_data uses this short name for 폭풍해일
 	return m
 }()
 
@@ -470,7 +471,7 @@ func parseWarningsJSON(body []byte) ([]Warning, error) {
 			Command: f("CMD"), Announced: f("TM_FC"), Effective: f("TM_EF"),
 		}
 		if code, ok := kindCodes[name]; ok {
-			w.Kind = code
+			w.Kind, w.KindName = code, kindNames[code]
 		} else if n, ok := kindNames[name]; ok { // already a code
 			w.KindName = n
 		}

@@ -58,22 +58,28 @@
   const paused = $derived(!!overview.data?.pause?.channels?.[`${g}:${c}`] || !!overview.data?.pause?.guilds?.[g])
 
   // editable copy of the behavior form
-  let form = $state({ respond: 'mention', persona_ref: '', rules: '', capture: false, logging_level: 'ops', memory_use: 'on', disaster_alerts: 'on' })
+  let form = $state({ respond: 'mention', persona_ref: '', rules: '', capture: false, logging_level: 'ops', memory_use: 'on', disaster_alerts: 'on', watch_level: [] as { region: string; level: string }[] })
   let base = $state('')
   let saving = $state(false)
   $effect(() => {
     if (!ch) return
-    const f = { respond: ch.respond, persona_ref: ch.persona_ref, rules: pol.rules ?? '', capture: !!ch.capture, logging_level: ch.logging_level, memory_use: ch.memory_use, disaster_alerts: ch.disaster_alerts === false ? 'off' : 'on' }
+    const watch_level = Object.entries(ch.watch_level ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([region, level]) => ({ region, level: String(level) }))
+    const f = { respond: ch.respond, persona_ref: ch.persona_ref, rules: pol.rules ?? '', capture: !!ch.capture, logging_level: ch.logging_level, memory_use: ch.memory_use, disaster_alerts: ch.disaster_alerts === false ? 'off' : 'on', watch_level }
     const s = JSON.stringify(f)
     if (s !== base) {
       form = f
       base = s
     }
   })
-  const dirty = $derived(base ? Object.entries(form).filter(([k, v]) => (JSON.parse(base) as any)[k] !== v).length : 0)
+  const dirty = $derived(base ? Object.entries(form).filter(([k, v]) => JSON.stringify((JSON.parse(base) as any)[k]) !== JSON.stringify(v)).length : 0)
   async function save() {
+    const entries = form.watch_level.map(({ region, level }) => [region.trim(), Number(level)] as const)
+    if (entries.some(([region]) => !region) || new Set(entries.map(([region]) => region)).size !== entries.length) {
+      toast('error', t('room.watch_region_invalid'))
+      return
+    }
     saving = true
-    const r = await call('channels.configure', { guild_id: g, channel_id: c, ...form, capture: form.capture ? 'true' : 'false' })
+    const r = await call('channels.configure', { guild_id: g, channel_id: c, ...form, watch_level: Object.fromEntries(entries), capture: form.capture ? 'true' : 'false' })
     saving = false
     if (r.ok) {
       toast('ok', t('rooms.saved'))
@@ -264,6 +270,23 @@
           <Segmented label={t('rooms.respond')} bind:value={form.respond} options={['always', 'mention', 'command', 'off'].map((v) => ({ value: v, label: t(`rooms.respond.${v}`) }))} />
           <p class="small muted">{t(`rooms.respond_hint.${form.respond}`)}</p>
           <Switch checked={form.disaster_alerts === 'on'} disabled={form.respond === 'off'} onchange={(v) => (form.disaster_alerts = v ? 'on' : 'off')} label={t('room.disaster_alerts')} hint={form.respond === 'off' ? t('room.disaster_alerts_off_respond') : t('room.disaster_alerts_hint')} />
+          {#if form.disaster_alerts === 'on' && form.respond !== 'off'}
+            <fieldset class="watch-levels stack">
+              <legend>{t('room.watch_levels')}</legend>
+              <p class="small muted">{t('room.watch_hint')}</p>
+              {#each form.watch_level as row, i}
+                <div class="watch-row">
+                  <Input aria-label={t('room.watch_region')} placeholder={t('room.watch_region')} bind:value={row.region} />
+                  <Select aria-label={t('room.watch_levels')} bind:value={row.level} options={['1','2','3','4','5'].map(value => ({ value, label: value }))} />
+                  <Button size="sm" onclick={() => form.watch_level.splice(i, 1)}>{t('room.watch_remove')}</Button>
+                </div>
+              {/each}
+              <Button size="sm" onclick={() => form.watch_level.push({ region: '', level: '2' })}>{t('room.watch_add')}</Button>
+              <details><summary class="small">{t('room.watch_guide')}</summary>
+                <ol class="small">{#each [1,2,3,4,5] as level}<li>{t(`room.watch_level.${level}`)}</li>{/each}</ol>
+              </details>
+            </fieldset>
+          {/if}
           <Field id="persona" label={t('rooms.col.persona')} hint={t('room.persona_hint')}>
             {#snippet children({ id, describedby })}<Select {id} aria-describedby={describedby} bind:value={form.persona_ref} options={personaOptions} />{/snippet}
           </Field>
@@ -512,6 +535,20 @@
 <SaveBar count={dirty} saving={saving} onsave={save} onreset={() => (form = JSON.parse(base))} />
 
 <style>
+  .watch-levels {
+    margin: 0;
+    padding: var(--s-3);
+    min-width: 0;
+  }
+  .watch-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: var(--s-2);
+    align-items: center;
+  }
+  .watch-levels ol {
+    padding-inline-start: 1.5em;
+  }
   .panel {
     margin-top: var(--s-4);
   }

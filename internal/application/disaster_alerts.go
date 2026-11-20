@@ -27,8 +27,8 @@ import (
 //     kept in the database and advanced before sending, so a restart or a failed channel never
 //     announces an event twice. The first check only sets the watermark: what was already published
 //     before the bot started watching is not announced.
-//   - Weather warnings: 경보 for every land region, 주의보 only for disaster_alerts.warning_regions, sea
-//     areas only with disaster_alerts.marine. A warning that appears is announced as issued, one that
+//   - Weather warnings: each room selects its watch level by KMA area; sea areas also require
+//     disaster_alerts.marine. A warning that appears is announced as issued, one that
 //     disappears as lifted. A rise in level for the same area and kind is one upgrade. The first check only
 //     records what is active.
 //
@@ -67,6 +67,7 @@ type disasterState struct {
 // disasterChannel is one channel announcements go to, with its server's language.
 type disasterChannel struct {
 	Guild, Channel, Locale string
+	WatchLevel             map[string]int
 }
 
 // disasterChannels are the channels the bot answers in on approved servers, minus those that turned
@@ -90,7 +91,7 @@ func (s *Service) disasterChannels() []disasterChannel {
 			if c.Respond == "off" || c.DisasterAlerts == "off" || pause.Channels[gid+":"+cid] {
 				continue
 			}
-			out = append(out, disasterChannel{Guild: gid, Channel: cid, Locale: loc})
+			out = append(out, disasterChannel{Guild: gid, Channel: cid, Locale: loc, WatchLevel: c.WatchLevel})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Guild+out[i].Channel < out[j].Guild+out[j].Channel })
@@ -332,14 +333,35 @@ func (s *Service) earthquakeCard(locale string, inc []kma.Earthquake) action.Car
 // Weather warnings
 // ---------------------------------------------------------------------------
 
-// trackedWarning also remembers advisories outside the selected regions, so a later
-// nationwide warning can be identified as an upgrade. Older snapshots contain only visible rows.
-type trackedWarning struct {
-	kma.Warning
-	Silent bool `json:"silent,omitempty"`
+// All rooms compare the same KMA observations, including advisories below a room's watch level.
+type warningSnapshot map[string]kma.Warning
+
+// Lower levels are cumulative. Other advisories and warnings require level 5.
+var warningWatchLevels = map[string]map[string]int{
+	"N": {"2": 2, "3": 2},            // 지진해일
+	"H": {"2": 4, "3": 3, "중대경보": 3}, // 폭염
+	"S": {"2": 4, "3": 3},            // 대설
+	"C": {"2": 4, "3": 3},            // 한파
+	"T": {"2": 4, "3": 3},            // 태풍
+	"R": {"3": 3},                    // 호우
+	"O": {"3": 3},                    // 폭풍해일
+	"Y": {"3": 4},                    // 황사
+	"V": {"3": 4},                    // 풍랑
+	"W": {"3": 4},                    // 강풍
 }
 
-type warningSnapshot map[string]trackedWarning
+func (ch disasterChannel) watches(w kma.Warning) bool {
+	required := warningWatchLevels[w.Kind][w.Level]
+	if required == 0 {
+		required = 5
+	}
+	for _, region := range []string{w.RegionCode, w.Region, w.ParentCode, w.Parent} {
+		if level, ok := ch.WatchLevel[region]; ok {
+			return level >= required
+		}
+	}
+	return false // unconfigured regions are level 1, earthquakes only
+}
 
 // Rank orders the levels locally. KMA sends the heat emergency as the literal "중대경보".
 func warningRank(w kma.Warning) int {
@@ -364,13 +386,13 @@ func warningCancelled(command string) bool {
 	return false
 }
 
-func (snapshot warningSnapshot) record(w trackedWarning) {
+func (snapshot warningSnapshot) record(w kma.Warning) {
 	key := w.RegionCode + "|" + w.Kind
 	old := snapshot[key]
 	if w.Effective < old.Effective || (w.Effective == old.Effective && w.Announced < old.Announced) {
 		return
 	}
-	if w.Effective == old.Effective && w.Announced == old.Announced && warningRank(w.Warning) < warningRank(old.Warning) {
+	if w.Effective == old.Effective && w.Announced == old.Announced && warningRank(w) < warningRank(old) {
 		return
 	}
 	snapshot[key] = w
@@ -392,14 +414,14 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 	cancelled := warningSnapshot{}
 	for _, w := range all {
 		rank := warningRank(w)
-		if rank == 0 || (!cfg.Marine && strings.HasPrefix(w.RegionCode, "S")) {
+		if rank == 0 {
 			continue
 		}
 		if warningCancelled(w.Command) {
-			cancelled.record(trackedWarning{Warning: w})
+			cancelled.record(w)
 			continue
 		}
-		current.record(trackedWarning{Warning: w, Silent: rank == 2 && !advisoryRegion(cfg.WarningRegions, w)})
+		current.record(w)
 	}
 	var stored warningSnapshot
 	seen, err := s.kvGet("disaster:wrn_active", &stored)
@@ -409,6 +431,12 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 	// Rebuild from values so snapshots saved with region|kind|level also compare correctly.
 	before := warningSnapshot{}
 	for _, w := range stored {
+		if w.Kind == "해일" { // older JSON snapshots used the API's short name as their key
+			w.Kind, w.KindName = "O", "폭풍해일"
+		}
+		if w.Kind == "안개" || w.Kind == "F" {
+			continue
+		}
 		before.record(w)
 	}
 	// the set is stored only when it changed (or on the first check): most checks find the same warnings
@@ -422,16 +450,16 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 	}
 	type group struct {
 		kind, level, change, from string
-		regions                   []string
+		warnings                  []kma.Warning
 		at                        string
 	}
 	groups := map[string]*group{}
-	add := func(w trackedWarning, change, from string) {
-		if w.Silent {
+	add := func(w kma.Warning, change, from string) {
+		if !cfg.Marine && strings.HasPrefix(w.RegionCode, "S") {
 			return
 		}
 		k := strings.Join([]string{w.KindName, w.LevelName, change, from}, "|")
-		if change == "upgraded" {
+		if change != "lifted" {
 			k += "|" + w.Effective // one card shows one effective time
 		}
 		g := groups[k]
@@ -439,21 +467,21 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 			g = &group{kind: w.KindName, level: w.LevelName, change: change, from: from, at: w.Effective}
 			groups[k] = g
 		}
-		g.regions = append(g.regions, w.Region)
+		g.warnings = append(g.warnings, w)
 	}
 	for k, w := range current {
 		old, was := before[k]
 		// Both commands can fall between polls. An explicit cancellation at the same
 		// effective time supplies the old level even if the advisory was never observed.
-		if ended, ok := cancelled[k]; !was && !w.Silent && ok && w.Effective != "" && ended.Effective == w.Effective && warningRank(ended.Warning) < warningRank(w.Warning) {
+		if ended, ok := cancelled[k]; !was && ok && w.Effective != "" && ended.Effective == w.Effective && warningRank(ended) < warningRank(w) {
 			old, was = ended, true
 		}
 		switch {
 		case !was:
 			add(w, "issued", "")
-		case warningRank(w.Warning) > warningRank(old.Warning) && !w.Silent:
+		case warningRank(w) > warningRank(old):
 			add(w, "upgraded", old.LevelName)
-		case old.Level != w.Level || old.Silent != w.Silent:
+		case old.Level != w.Level:
 			add(old, "lifted", "")
 			add(w, "issued", "")
 		}
@@ -471,15 +499,24 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 	sent := 0
 	for _, k := range keys {
 		g := groups[k]
-		sort.Strings(g.regions)
 		for _, ch := range channels {
+			var regions []string
+			for _, w := range g.warnings {
+				if ch.watches(w) {
+					regions = append(regions, w.Region)
+				}
+			}
+			if len(regions) == 0 {
+				continue
+			}
+			sort.Strings(regions)
 			t := func(key string, args ...any) string { return s.I18n.T(ch.Locale, key, args...) }
 			title := t("disaster.wrn."+g.change, "kind", g.kind, "level", g.level, "from", g.from)
 			tone := "warn"
 			if g.change == "lifted" {
 				tone = "ok"
 			}
-			text := clip(strings.Join(g.regions, ", "), 1500)
+			text := clip(strings.Join(regions, ", "), 1500)
 			if at := warningTime(g.at); at != "" && g.change != "lifted" {
 				text += "\n" + t("disaster.wrn.effective", "time", at)
 			}
@@ -493,15 +530,6 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 		}
 	}
 	return sent, nil
-}
-
-func advisoryRegion(regions []string, w kma.Warning) bool {
-	for _, r := range regions {
-		if r = strings.TrimSpace(r); r != "" && (strings.Contains(w.Region, r) || strings.Contains(w.Parent, r)) {
-			return true
-		}
-	}
-	return false
 }
 
 // warningTime is TM_EF (YYYYMMDDHHMM) as "MM-DD HH:MM".
