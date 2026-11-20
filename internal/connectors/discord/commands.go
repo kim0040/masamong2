@@ -179,7 +179,9 @@ func Commands() []Command {
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
 				// what was typed goes to the action as it is: a given option, even a blank one, is checked there.
 				// The blank home is the home currency of the request's language, which the action knows.
-				in := map[string]any{"home": ""}
+				// The base is sent even when nothing was typed: set, a configured tool default cannot be
+				// merged in as if the person had asked for it, and blank is the home default anyway.
+				in := map[string]any{"home": "", "base": ""}
 				if c.Tag != "" {
 					in["locale_tag"] = c.Tag
 				}

@@ -180,6 +180,33 @@ func TestFXHomeFollowsTheFirstRegionThatNamesOne(t *testing.T) {
 	}
 }
 
+// A base the operator configured as the raw tool's default is for raw callers (chat, the CLI): a bare
+// or single-currency command still means the home currency's default, not a filled-in pair.
+func TestFXConfiguredDefaultBaseIsForRawCallersOnly(t *testing.T) {
+	d := newFXDelivery(t, func(g *Gateway) {
+		res := g.svc.Execute(context.Background(), action.Request{Action: "tools.configure",
+			Input: mustJSON(map[string]any{"id": "finance.fx", "defaults": `{"base":"CHF"}`})})
+		if !res.OK {
+			t.Fatalf("tool configuration failed: %+v", res.Error)
+		}
+	})
+	d.slash(t)
+	if len(d.paths) != 1 || d.paths[0] != "/latest/KRW" {
+		t.Errorf("a configured default won over the home currency: provider=%v, want /latest/KRW", d.paths)
+	}
+	d2 := newFXDelivery(t, func(g *Gateway) {
+		res := g.svc.Execute(context.Background(), action.Request{Action: "tools.configure",
+			Input: mustJSON(map[string]any{"id": "finance.fx", "defaults": `{"base":"CHF"}`})})
+		if !res.OK {
+			t.Fatalf("tool configuration failed: %+v", res.Error)
+		}
+	})
+	d2.slash(t, strOption("currency", "yen"))
+	if len(d2.paths) != 1 || d2.paths[0] != "/latest/JPY" {
+		t.Errorf("a configured default made a currency-only command a pair: provider=%v, want /latest/JPY", d2.paths)
+	}
+}
+
 // A base option left blank keeps its old meaning — the home currency's board — and a code the rate
 // service documents that is not ISO 4217 is a base like any other. Both reach the provider; only
 // something unreadable is refused.
