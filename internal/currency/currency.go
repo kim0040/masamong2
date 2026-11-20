@@ -58,19 +58,46 @@ type Lexicon struct{ cat *i18n.Catalog }
 // New reads currency data from cat.
 func New(cat *i18n.Catalog) *Lexicon { return &Lexicon{cat: cat} }
 
-// ValidCode reports whether code is an ISO 4217 currency code, without asking any service.
+// providerCodes is every currency code ExchangeRate-API publishes it serves rates for
+// (https://www.exchangerate-api.com/docs/supported-currencies, checked 2026-11-20). Nine of them —
+// FOK, GGP, IMP, JEP, KID, MRU, SLE, TVD and VES — are not ISO 4217 codes and are accepted anyway.
+var providerCodes = func() map[string]bool {
+	out := map[string]bool{}
+	for _, c := range strings.Fields(providerCodeList) {
+		out[c] = true
+	}
+	return out
+}()
+
+const providerCodeList = `AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND BOB
+BRL BSD BTN BWP BYN BZD CAD CDF CHF CLF CLP CNH CNY COP CRC CUP CVE CZK DJF DKK DOP DZD EGP ERN ETB
+EUR FJD FKP FOK GBP GEL GGP GHS GIP GMD GNF GTQ GYD HKD HNL HRK HTG HUF IDR ILS IMP INR IQD IRR ISK
+JEP JMD JOD JPY KES KGS KHR KID KMF KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT
+MOP MRU MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN PGK PHP PKR PLN PYG QAR RON RSD
+RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP STN SYP SZL THB TJS TMT TND TOP TRY TTD TVD TWD
+TZS UAH UGX USD UYU UZS VES VND VUV WST XAF XCD XDR XOF XPF YER ZAR ZMW ZWL`
+
+// obsoleteCodes are currency codes CLDR still gives a region that the rate provider lists under a
+// newer code (Mauritania's and Sierra Leone's redenominations, Venezuela's). A region whose code has
+// no provider replacement, like North Korea's KPW, falls back to USD instead.
+var obsoleteCodes = map[string]string{"MRO": "MRU", "SLL": "SLE", "VEF": "VES"}
+
+// ValidCode reports whether code is a currency code a rate request may ask for: an ISO 4217 code, or
+// one the rate provider lists that is not ISO, without asking any service.
 func ValidCode(code string) bool {
-	code = strings.TrimSpace(code)
+	code = strings.ToUpper(strings.TrimSpace(code))
 	if len(code) != 3 {
 		return false
 	}
 	for _, c := range code {
-		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z') {
+		if !(c >= 'A' && c <= 'Z') {
 			return false
 		}
 	}
-	_, err := xcur.ParseISO(strings.ToUpper(code))
-	return err == nil
+	if _, err := xcur.ParseISO(code); err == nil {
+		return true
+	}
+	return providerCodes[code]
 }
 
 // fold is how names are compared: case and spaces do not matter ("미국 달러" is "미국달러").

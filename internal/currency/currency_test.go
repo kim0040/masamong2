@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	xcur "golang.org/x/text/currency"
+
 	"masamong/internal/i18n"
 )
 
@@ -38,6 +40,27 @@ func TestValidCodeIsISO(t *testing.T) {
 	for _, c := range []string{"", "US", "USDD", "U$D", "ZZZ", "123", "ÜSD"} {
 		if ValidCode(c) {
 			t.Errorf("%q should be invalid", c)
+		}
+	}
+}
+
+// The pinned provider list is the published one: every code it names is accepted, including the nine
+// that are not ISO 4217, and the list holds the full 163.
+func TestProviderCodesAreAccepted(t *testing.T) {
+	if len(providerCodes) != 163 {
+		t.Errorf("%d provider codes pinned, want 163", len(providerCodes))
+	}
+	for code := range providerCodes {
+		if !ValidCode(code) {
+			t.Errorf("provider-listed %s rejected", code)
+		}
+	}
+	for _, code := range []string{"FOK", "GGP", "IMP", "JEP", "KID", "MRU", "SLE", "TVD", "VES"} {
+		if _, err := xcur.ParseISO(code); err == nil {
+			t.Errorf("%s is ISO after all: the list may be stale", code)
+		}
+		if !ValidCode(code) {
+			t.Errorf("non-ISO provider code %s rejected", code)
 		}
 	}
 }

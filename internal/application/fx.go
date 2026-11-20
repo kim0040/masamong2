@@ -259,11 +259,17 @@ func (s *Service) fxHomePlan(lex *currency.Lexicon, locale string, in map[string
 	}
 	base, other := "", ""
 	if text, given := fxText(in, "base"); given {
-		code, ok := lex.Resolve(text)
-		if !ok {
-			return fxPlan{}, false
+		if _, isText := in["base"].(string); !isText && in["base"] != nil {
+			return fxPlan{}, false // a base that is not text is refused, as in fxRawPlan
 		}
-		base = code
+		if strings.TrimSpace(text) != "" {
+			code, ok := lex.Resolve(text)
+			if !ok {
+				return fxPlan{}, false
+			}
+			base = code
+		}
+		// an absent, empty or whitespace-only base is the home currency's default, not an error
 	}
 	if text, given := fxText(in, "currency"); given {
 		code, ok := lex.Resolve(text)

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -174,6 +175,21 @@ func TestFXHomeFollowsTheFirstRegionThatNamesOne(t *testing.T) {
 			d.prefix(t, "!fx")
 			if len(d.paths) != 1 || d.paths[0] != tc.want {
 				t.Errorf("provider paths %v, want %s", d.paths, tc.want)
+			}
+		})
+	}
+}
+
+// A base option left blank keeps its old meaning — the home currency's board — and a code the rate
+// service documents that is not ISO 4217 is a base like any other. Both reach the provider; only
+// something unreadable is refused.
+func TestFXSlashBaseKeepsLegacyAndProviderCodes(t *testing.T) {
+	for _, base := range []string{"", " \t ", "FOK", "GGP", "IMP", "JEP", "KID", "MRU", "SLE", "TVD", "VES"} {
+		t.Run("base="+strconv.Quote(base), func(t *testing.T) {
+			d := newFXDelivery(t, nil)
+			d.slash(t, strOption("base", base))
+			if _, ok := d.fake.find(http.MethodPatch, "/messages/@original"); !ok {
+				t.Errorf("base %q produced no public result (provider=%v)", base, d.paths)
 			}
 		})
 	}
