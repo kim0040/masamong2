@@ -16,6 +16,7 @@ import (
 	"masamong/internal/lang"
 	"masamong/internal/memory/corpus"
 	"masamong/internal/memory/search"
+	"masamong/internal/memory/store"
 	"masamong/internal/storage"
 )
 
@@ -80,6 +81,8 @@ type turnNames struct {
 	current      map[string]string
 	sources      map[string]string
 	aliases      map[string][]string
+	accounts     map[string]string // ref → account, for the name check
+	keys         []string
 	denied       map[string]bool
 	tx           *sql.Tx
 	guild, rooms string
@@ -120,6 +123,10 @@ func (n turnNames) label(ref string) string {
 	return label
 }
 
+// Discord display names are at most 32 characters (37 with an old #0000 tag);
+// a longer stored label is never matched and never checked.
+const maxNameRunes = 40
+
 // Look up bounded starts in the message, not every name in the guild. For
 // unusually long/punctuation-heavy prose prefer missing a name to guessing.
 func aliasKeys(text string) []string {
@@ -132,7 +139,7 @@ func aliasKeys(text string) []string {
 		if unicode.IsSpace(r) || i > 0 && (unicode.IsLetter(runes[i-1]) || unicode.IsDigit(runes[i-1])) {
 			continue
 		}
-		for j := i + 2; j <= len(runes); j++ {
+		for j := i + 2; j <= min(len(runes), i+maxNameRunes); j++ {
 			if !unicode.IsSpace(runes[j-1]) {
 				if len(keys) == 1024 {
 					return nil
@@ -147,71 +154,107 @@ func aliasKeys(text string) []string {
 func (s *Service) readPersonNames(tx *sql.Tx, guild string, rooms map[string]bool, text string) (turnNames, error) {
 	denied, err := s.deniedPeople(tx, guild)
 	raw, _ := json.Marshal(rooms)
-	n := turnNames{current: map[string]string{}, sources: map[string]string{}, aliases: map[string][]string{}, denied: denied, tx: tx, guild: guild, rooms: string(raw)}
+	n := turnNames{current: map[string]string{}, sources: map[string]string{}, aliases: map[string][]string{}, accounts: map[string]string{},
+		denied: denied, tx: tx, guild: guild, rooms: string(raw)}
 	if err != nil {
 		return n, err
 	}
-	keys := aliasKeys(text)
-	if len(keys) == 0 {
+	n.keys = aliasKeys(text)
+	if len(n.keys) == 0 {
 		return n, nil
 	}
-	rawKeys, _ := json.Marshal(keys)
-	rows, err := tx.Query(`SELECT a.person_ref,a.folded FROM person_alias a INDEXED BY idx_person_alias_name`+liveAliasSQL+`
+	rawKeys, _ := json.Marshal(n.keys)
+	rows, err := tx.Query(`SELECT a.person_ref,a.folded,o.actor_account FROM person_alias a INDEXED BY idx_person_alias_name`+liveAliasSQL+`
 		AND a.folded IN (SELECT value FROM json_each(?)) AND (SELECT cursor FROM person_alias_fill WHERE id=1)=-1`, guild, n.rooms, string(rawKeys))
 	if err != nil {
 		return n, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var ref, key string
-		if err := rows.Scan(&ref, &key); err != nil {
+		var ref, key, account string
+		if err := rows.Scan(&ref, &key, &account); err != nil {
 			return n, err
 		}
 		if !slices.Contains(n.aliases[key], ref) {
 			n.aliases[key] = append(n.aliases[key], ref)
 		}
+		n.accounts[ref] = account
 	}
 	return n, rows.Err()
+}
+
+type nameSpan struct{ lo, hi int }
+
+// spans are the words of text (lowercased) that label names: the label plus
+// an allowed particle or honorific.
+func nameSpans(text, label string, matches func(string, string) bool) []nameSpan {
+	var out []nameSpan
+	for from := 0; from < len(text); {
+		offset := strings.Index(text[from:], label)
+		if offset < 0 {
+			break
+		}
+		lo := from + offset
+		hi := lo + len(label)
+		from = hi
+		for lo > 0 {
+			r, size := utf8.DecodeLastRuneInString(text[:lo])
+			if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+				break
+			}
+			lo -= size
+		}
+		for hi < len(text) {
+			r, size := utf8.DecodeRuneInString(text[hi:])
+			if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+				break
+			}
+			hi += size
+		}
+		if matches(text[lo:hi], label) {
+			out = append(out, nameSpan{lo, hi})
+		}
+	}
+	return out
+}
+
+// unique checks a span resolved to one indexed account against the captured
+// messages: any other account seen in these rooms under a label that names an
+// overlapping word (hidden or not yet indexed) makes it ambiguous.
+func (n turnNames) unique(text string, lo, hi int, ref string, matches func(string, string) bool) bool {
+	account := n.accounts[ref]
+	if account == "" {
+		return false
+	}
+	var labels []string
+	seen := map[string]bool{}
+	for _, key := range n.keys {
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		for _, sp := range nameSpans(text, key, matches) {
+			if sp.lo < hi && lo < sp.hi {
+				labels = append(labels, key)
+				break
+			}
+		}
+	}
+	taken, err := store.OtherPersonNamed(n.tx, labels, account, n.rooms)
+	return err == nil && !taken
 }
 
 // Group matches by their position in the request: two accounts matching the
 // same word resolve neither, without suppressing a different unambiguous name.
 func (n turnNames) match(text string, matches func(string, string) bool) []string {
-	type span struct{ lo, hi int }
-	at := map[span][]string{}
+	at := map[nameSpan][]string{}
 	text = strings.ToLower(text)
 	for label, refs := range n.aliases {
-		for from := 0; from < len(text); {
-			offset := strings.Index(text[from:], label)
-			if offset < 0 {
-				break
-			}
-			lo := from + offset
-			hi := lo + len(label)
-			from = hi
-			for lo > 0 {
-				r, size := utf8.DecodeLastRuneInString(text[:lo])
-				if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
-					break
-				}
-				lo -= size
-			}
-			for hi < len(text) {
-				r, size := utf8.DecodeRuneInString(text[hi:])
-				if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
-					break
-				}
-				hi += size
-			}
-			word := text[lo:hi]
-			ok := matches(word, label)
-			if ok {
-				k := span{lo, hi}
-				at[k] = uniqueStrings(append(at[k], refs...))
-			}
+		for _, k := range nameSpans(text, label, matches) {
+			at[k] = uniqueStrings(append(at[k], refs...))
 		}
 	}
-	var keys []span
+	var keys []nameSpan
 	for k := range at {
 		keys = append(keys, k)
 	}
@@ -220,14 +263,14 @@ func (n turnNames) match(text string, matches func(string, string) bool) []strin
 	})
 	var out []string
 	for i := 0; i < len(keys); {
-		end, refs := keys[i].hi, at[keys[i]]
+		lo, end, refs := keys[i].lo, keys[i].hi, at[keys[i]]
 		i++
 		for i < len(keys) && keys[i].lo < end {
 			refs = uniqueStrings(append(refs, at[keys[i]]...))
 			end = max(end, keys[i].hi)
 			i++
 		}
-		if len(refs) == 1 {
+		if len(refs) == 1 && n.unique(text, lo, end, refs[0], matches) {
 			out = append(out, refs[0])
 		}
 	}

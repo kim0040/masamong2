@@ -76,12 +76,15 @@ func reviewAliasMigration(t testing.TB, size int, bound time.Duration) {
 		SELECT 'o'||i,'discord','discord','discord:1:'||(i%20),'discord:1:'||(i%20),'m'||i,'Person'||(i%1000),'u'||(i%1000),'fixture','2026-10-01T00:00:00Z','human_text','2026-10-01T00:00:00Z' FROM ids`, size); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.DB.Exec(`DELETE FROM person_alias_fill`); err != nil {
+	if _, err := db.DB.Exec(`DELETE FROM person_alias_fill; DROP INDEX idx_memory_obs_person_name`); err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()
 	if err := migratePersonAliases(db); err != nil {
 		t.Fatal(err)
+	}
+	if personNameIndexed(t, db) {
+		t.Fatal("startup built the name index over a stored history")
 	}
 	var cursor int
 	checkCursor := func(want int) {
@@ -107,6 +110,9 @@ func reviewAliasMigration(t testing.TB, size int, bound time.Duration) {
 		t.Fatalf("fill exceeded %v: %v", bound, elapsed)
 	}
 	checkCursor(-1)
+	if !personNameIndexed(t, db) {
+		t.Fatal("background fill did not build the name index")
+	}
 	var n int
 	if err := db.Reader().QueryRow(`SELECT count(*) FROM person_alias WHERE guild_id='1'`).Scan(&n); err != nil || n != 1000 {
 		t.Fatalf("aliases=%d: %v", n, err)

@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"masamong/internal/action"
 )
 
 // A thread hidden by a deletion whose tombstone write is still pending must not
@@ -57,5 +59,28 @@ func TestRound2IncidentalSelfRecall(t *testing.T) {
 		if got := block(f.ask(t, q), cardOpen, cardClose); got != "" {
 			t.Fatalf("%q: incidental first person recalled the caller's card: %q", q, got)
 		}
+	}
+}
+
+// A profile-withdrawn account is never indexed, yet its captured name still
+// makes the plain name ambiguous: no fact of the other account is sent.
+func TestRound2HiddenCollisionPrompt(t *testing.T) {
+	s, m, e := memorySvc(t)
+	f := reviewPerson{s, m, e, time.Now().UTC().Add(-3 * time.Hour)}
+	const q = "동명이인은 어떤 사람이야?"
+	ev := f.source(t, "g", "c", "first-account", "101", "동명이인", f.at)
+	f.fact(t, "g", "c", "first-account-fact", "101", "101", ev)
+	if got := block(f.ask(t, q), cardOpen, cardClose); !strings.Contains(got, "first-account-fact") {
+		t.Fatalf("unique account control failed: %q", got)
+	}
+	if r := s.Execute(t.Context(), action.Request{Action: "privacy.consent", Input: []byte(`{"scope":"profile","user_id":"202","decision":"withdraw"}`)}); !r.OK {
+		t.Fatal(r.Error)
+	}
+	f.source(t, "g", "c", "second-account", "202", "동명이인", f.at.Add(time.Minute))
+	if got := block(f.ask(t, q), cardOpen, cardClose); got != "" {
+		t.Fatalf("an ambiguous query supplied a different account's fact: %q", got)
+	}
+	if got := block(f.ask(t, "<@101> 어떤 사람이야?"), cardOpen, cardClose); !strings.Contains(got, "first-account-fact") {
+		t.Fatalf("an explicit mention stopped working: %q", got)
 	}
 }

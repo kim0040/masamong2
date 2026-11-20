@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
 
 	"masamong/internal/memory/corpus"
 	"masamong/internal/storage"
@@ -73,9 +75,132 @@ func migratePersonAliases(db *storage.Store) error {
 				return err
 			}
 		}
+		var stored bool
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM memory_observations)`).Scan(&stored); err != nil {
+			return err
+		}
+		if !stored { // instant on an empty table; a stored history gets it from the background fill
+			if _, err := tx.Exec(personNameIndexSQL); err != nil {
+				return err
+			}
+		}
 		_, err := tx.Exec(`INSERT OR IGNORE INTO person_alias_fill SELECT 1,CASE WHEN EXISTS(SELECT 1 FROM memory_observations) THEN 0 ELSE -1 END`)
 		return err
 	})
+}
+
+// personNameExpr is a stored label as aliasValues folds it: the characters
+// strings.TrimSpace removes (unicode.IsSpace) are trimmed, ASCII case is
+// compared NOCASE and other case variants are enumerated by nameVariants.
+const personNameExpr = `trim(actor_label,char(9,10,11,12,13,32,133,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288))`
+
+// The name check reads every captured label, so it also sees accounts the
+// alias index leaves out. Additive; built off the startup path for a stored history.
+const personNameIndexSQL = `CREATE INDEX IF NOT EXISTS idx_memory_obs_person_name ON memory_observations(` + personNameExpr + ` COLLATE NOCASE,actor_account,source_room)`
+
+// lowerFrom maps a lowercase rune to the other runes unicode.ToLower maps to it.
+var lowerFrom = sync.OnceValue(func() map[rune][]rune {
+	m := map[rune][]rune{}
+	for _, cr := range unicode.CaseRanges {
+		for r := rune(cr.Lo); r <= rune(cr.Hi); r++ {
+			if l := unicode.ToLower(r); l != r {
+				m[l] = append(m[l], r)
+			}
+		}
+	}
+	return m
+})
+
+const maxNameVariants = 16
+
+// nameVariants are the trimmed raw labels, up to ASCII case, that fold to key
+// (strings.ToLower maps rune by rune): "kim" also stands for "\u212aim" and
+// "émile" for "Émile". false: too many to check.
+func nameVariants(key string) ([]string, bool) {
+	out := []string{""}
+	for _, r := range key {
+		var choices []rune
+		if unicode.ToLower(r) == r {
+			choices = append(choices, r)
+		}
+		for _, u := range lowerFrom()[r] {
+			if u >= 0x80 { // an ASCII capital is the same label under NOCASE
+				choices = append(choices, u)
+			}
+		}
+		if len(out)*len(choices) > maxNameVariants {
+			return nil, false
+		}
+		next := make([]string, 0, len(out)*len(choices))
+		for _, prefix := range out {
+			for _, c := range choices {
+				next = append(next, prefix+string(c))
+			}
+		}
+		out = next
+	}
+	return out, true
+}
+
+const maxNameAccounts = 16
+
+// OtherPersonNamed reports whether an account other than account has a live
+// Discord message in rooms (a JSON object keyed by room) under a label that
+// folds to one of labels. It reads the captured messages, not person_alias, so
+// accounts the index hides (profile withdrawal) or has not caught up with (a
+// pending or failed alias write) still make a name ambiguous. Any input it
+// cannot check completely, including a missing index, counts as taken.
+func OtherPersonNamed(tx *sql.Tx, labels []string, account, rooms string) (bool, error) {
+	var values []string
+	for _, label := range labels {
+		v, ok := nameVariants(label)
+		if !ok {
+			return true, nil
+		}
+		values = append(values, v...)
+	}
+	if len(values) > 16*maxNameVariants {
+		return true, nil
+	}
+	if len(values) == 0 {
+		return false, nil
+	}
+	next, err := tx.Prepare(`SELECT actor_account FROM memory_observations INDEXED BY idx_memory_obs_person_name
+		WHERE ` + personNameExpr + `=? COLLATE NOCASE AND actor_account>? ORDER BY actor_account LIMIT 1`)
+	if err != nil {
+		return true, err
+	}
+	defer next.Close()
+	here, err := tx.Prepare(`SELECT EXISTS(SELECT 1 FROM memory_observations INDEXED BY idx_memory_obs_person_name
+		WHERE ` + personNameExpr + `=? COLLATE NOCASE AND actor_account=? AND source_room IN (SELECT key FROM json_each(?))
+		AND platform='discord' AND record_kind=? AND deleted_at='')`)
+	if err != nil {
+		return true, err
+	}
+	defer here.Close()
+	for _, v := range values {
+		// Skip from account to account; a label shared by many accounts anywhere is not checked further.
+		for cursor, n := "", 0; ; n++ {
+			if n == maxNameAccounts {
+				return true, nil
+			}
+			var other string
+			if err := next.QueryRow(v, cursor).Scan(&other); err == sql.ErrNoRows {
+				break
+			} else if err != nil {
+				return true, err
+			}
+			cursor = other
+			if other == account {
+				continue
+			}
+			var found bool
+			if err := here.QueryRow(v, other, rooms, corpus.HumanText).Scan(&found); err != nil || found {
+				return true, err
+			}
+		}
+	}
+	return false, nil
 }
 
 const aliasRangeSQL = `SELECT observation_id,source_room,actor_account,actor_label,parsed_time FROM memory_observations o NOT INDEXED WHERE rowid>? AND rowid<=? AND `
@@ -165,11 +290,19 @@ func fillAliasBatch(ctx context.Context, db *storage.Store) (bool, error) {
 	return done, err
 }
 
-// FillPersonAliases runs outside startup. Each batch releases the writer and
-// gives competing captures time to acquire it; cancellation preserves the cursor.
+// FillPersonAliases runs outside startup: it builds the name check's index, then
+// fills. Each batch releases the writer and gives competing captures time to
+// acquire it; cancellation preserves the cursor.
 func FillPersonAliases(ctx context.Context, db *storage.Store) error {
 	if !db.IsSQLite() {
 		return nil
+	}
+	// One writer transaction: captures wait for it (about a second per 200,000 rows).
+	if err := db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, personNameIndexSQL)
+		return err
+	}); err != nil {
+		return err
 	}
 	for {
 		done, err := fillAliasBatch(ctx, db)
