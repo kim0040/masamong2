@@ -471,6 +471,7 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 	if err != nil {
 		return 0, err
 	}
+	s.learnWarningAreas(all)
 	current := warningSnapshot{}
 	cancelled := warningSnapshot{}
 	released := map[string]kma.Warning{} // the latest cancellation of each area, kind and level
@@ -646,6 +647,56 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 		}
 	}
 	return sent, nil
+}
+
+// warningAreasMax bounds the area names and codes the watcher remembers; KMA has a few hundred areas.
+const warningAreasMax = 4000
+
+// learnWarningAreas remembers every area code and name KMA reports (an area and the area it belongs
+// to), each pointing at "name (code)". The bot ships no KMA area list, so this is what the console
+// checks a room's watch_level keys against. It writes only when a new name or code appears.
+func (s *Service) learnWarningAreas(all []kma.Warning) {
+	known := map[string]string{}
+	_, _ = s.kvGet("disaster:wrn_areas", &known)
+	added := false
+	for _, w := range all {
+		for _, area := range [][2]string{{w.RegionCode, w.Region}, {w.ParentCode, w.Parent}} {
+			label := area[1] + " (" + area[0] + ")"
+			if area[0] == "" || area[1] == "" {
+				label = area[0] + area[1]
+			}
+			for _, key := range area {
+				if key != "" && known[key] == "" && len(known) < warningAreasMax {
+					known[key] = label
+					added = true
+				}
+			}
+		}
+	}
+	if added {
+		if err := s.kvSet("disaster:wrn_areas", known); err != nil {
+			s.Log.Warn("disaster alerts: could not remember KMA areas", "err", err)
+		}
+	}
+}
+
+// watchLevelCheck is a room's watch_areas for the console: which of its watch_level keys match an
+// area KMA has reported so far ("matched": key → "name (code)"). A key that matches nothing yet is
+// saved as it is, and the console flags it: it may be misspelled, or its area has had no warning since
+// the bot began watching. "checked" is false until the watcher has seen any area at all.
+func (s *Service) watchLevelCheck(levels map[string]int) map[string]any {
+	if len(levels) == 0 {
+		return nil
+	}
+	known := map[string]string{}
+	_, _ = s.kvGet("disaster:wrn_areas", &known)
+	matched := map[string]string{}
+	for key := range levels {
+		if label := known[key]; label != "" {
+			matched[key] = label
+		}
+	}
+	return map[string]any{"checked": len(known) > 0, "matched": matched}
 }
 
 // warningTime is TM_EF (YYYYMMDDHHMM) as "MM-DD HH:MM".

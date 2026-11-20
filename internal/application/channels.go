@@ -146,6 +146,7 @@ func (s *Service) channelView(guildID, channelID, name, typ string, live bool) m
 		"memory_use":      pol.MemoryUse,
 		"disaster_alerts": pol.DisasterAlerts != "off",
 		"watch_level":     pol.WatchLevel,
+		"watch_areas":     s.watchLevelCheck(pol.WatchLevel),
 		"rules_set":       pol.Rules != "",
 		"proactive":       false,
 		"rag_attachments": atts,
@@ -337,6 +338,7 @@ func (s *Service) channelsConfigure(req action.Request, in map[string]any) actio
 	res.Output["capture"] = pol.Capture
 	res.Output["disaster_alerts"] = pol.DisasterAlerts != "off"
 	res.Output["watch_level"] = pol.WatchLevel
+	res.Output["watch_areas"] = s.watchLevelCheck(pol.WatchLevel)
 	res.Output["logging_level"] = pol.Logging.Level
 	res.Output["memory_use"] = pol.MemoryUse
 	res.Output["rules_set"] = pol.Rules != ""

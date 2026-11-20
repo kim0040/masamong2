@@ -718,3 +718,47 @@ func TestDisasterReleaseInTheSameResponse(t *testing.T) {
 		}
 	}
 }
+
+// A watch_level key must match a KMA area name or code exactly; the bot ships no KMA area list, so the
+// room's watch_areas tell the console which keys match an area KMA has reported so far. A key that
+// matches nothing (서울 is not an area name) is saved and flagged by its absence from "matched".
+func TestDisasterWatchAreasMatchWhatKMAReported(t *testing.T) {
+	svc := setupSvc(t)
+	feed := &kmaFeed{}
+	pointAt(t, svc, "kma", feed.server(t).URL, "KMA_TEST_KEY", "k")
+	levels := map[string]int{"목포시": 3, "L1050000": 5, "서울": 5}
+	configure := func() map[string]any {
+		t.Helper()
+		r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "c1", "respond": "mention", "watch_level": levels})
+		if !r.OK {
+			t.Fatal(r.Error)
+		}
+		areas, _ := r.Output["watch_areas"].(map[string]any)
+		return areas
+	}
+	if areas := configure(); areas["checked"] != false || len(areas["matched"].(map[string]string)) != 0 {
+		t.Fatalf("nothing can be checked before KMA reported any area: %v", areas)
+	}
+	gw := &postingGateway{}
+	svc.Discord = gw
+	feed.warnings = []string{warning("L1052100", "광주·전라남도", "목포시", "건조", "주의", "발표")}
+	feed.warnings[0] = strings.Replace(feed.warnings[0], `"REG_UP":"L1000000"`, `"REG_UP":"L1050000"`, 1)
+	svc.Clock = clock.Fixed{T: time.Date(2026, 10, 1, 3, 10, 0, 0, time.UTC)}
+	application.DisasterTickForTest(svc, context.Background())
+	areas := configure()
+	matched := areas["matched"].(map[string]string)
+	if areas["checked"] != true || matched["목포시"] != "목포시 (L1052100)" || matched["L1050000"] != "광주·전라남도 (L1050000)" || matched["서울"] != "" {
+		t.Fatalf("watch areas after a KMA report: %v", areas)
+	}
+	list := out(t, svc, "channels.list", nil)
+	for _, ch := range list["channels"].([]any) {
+		c := ch.(map[string]any)
+		if c["id"] == "c1" {
+			if got := fmt.Sprint(c["watch_areas"]); !strings.Contains(got, "목포시:목포시 (L1052100)") || strings.Contains(got, "서울:") {
+				t.Fatalf("channels.list watch_areas: %s", got)
+			}
+			return
+		}
+	}
+	t.Fatal("room missing from channels.list")
+}
