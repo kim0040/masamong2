@@ -170,8 +170,11 @@ func receiverName(fd *ast.FuncDecl) string {
 	return fd.Recv.List[0].Names[0].Name
 }
 
-// collectSites finds every case clause and map entry in the package whose literal is a catalog
-// Action ID. Other shapes (call arguments, comparisons) are not recorded dispatch and stay out.
+// collectSites finds the package's dispatch sites for catalog Actions: the case clauses of a
+// switch on the request's Action and the map entries keyed by an Action ID. A site counts only
+// inside a function returning action.Result — the switches on req.Action in a guard, audit or
+// predicate (gateDiscord, audit, readForm) never handle the request, and a package-level table
+// like practiceBlocked is data, not dispatch.
 func collectSites(idx *pkgIndex, ids map[string]bool) map[string][]*dispatchSite {
 	out := map[string][]*dispatchSite{}
 	match := func(e ast.Expr) (string, bool) {
@@ -194,18 +197,25 @@ func collectSites(idx *pkgIndex, ids map[string]bool) map[string][]*dispatchSite
 			}
 			switch x := n.(type) {
 			case *ast.CaseClause:
+				// a case clause sits in its switch's body block: the switch is the grandparent.
+				var sw *ast.SwitchStmt
+				if len(stack) >= 2 {
+					sw, _ = stack[len(stack)-2].(*ast.SwitchStmt)
+				}
+				enc, encFn := idx.enclosing(stack)
+				if sw == nil || encFn == nil || !returnsResult(encFn) || !actionTag(sw.Tag, requestParams(encFn.decl)) {
+					break
+				}
 				for _, expr := range x.List {
 					if v, ok := match(expr); ok {
-						s := &dispatchSite{id: v, file: pf, body: x.Body, pos: expr.Pos()}
-						s.enc, s.encFn = idx.enclosing(stack)
-						out[v] = append(out[v], s)
+						out[v] = append(out[v], &dispatchSite{id: v, file: pf, enc: enc, encFn: encFn, body: x.Body, pos: expr.Pos()})
 					}
 				}
 			case *ast.KeyValueExpr:
 				if v, ok := match(x.Key); ok {
-					s := &dispatchSite{id: v, file: pf, value: x.Value, pos: x.Key.Pos()}
-					s.enc, s.encFn = idx.enclosing(stack)
-					out[v] = append(out[v], s)
+					if enc, encFn := idx.enclosing(stack); encFn != nil && returnsResult(encFn) {
+						out[v] = append(out[v], &dispatchSite{id: v, file: pf, enc: enc, encFn: encFn, value: x.Value, pos: x.Key.Pos()})
+					}
 				}
 			}
 			stack = append(stack, n)
@@ -239,69 +249,110 @@ func (idx *pkgIndex) enclosing(stack []ast.Node) (string, *funcDecl) {
 	return "", nil
 }
 
-// handler is the function a dispatch site hands the request to. The site's call is followed
-// into the package, and when the callee itself dispatches the same Action again (a grouped
-// dispatcher such as channels or finance) the inner dispatch is followed in turn, so the map
-// names the function that does the work rather than the switch. A site that calls nothing in
-// the package reports its own enclosing declaration: the work is inline there.
+// returnsResult reports whether fn yields an action.Result: only such a function can dispatch a
+// request. A switch on req.Action in a void (audit), bool (readForm) or *action.Result
+// (gateDiscord) function is a guard or predicate, not a handler.
+func returnsResult(fn *funcDecl) bool {
+	res := fn.decl.Type.Results
+	if res == nil {
+		return false
+	}
+	for _, f := range res.List {
+		sel, ok := f.Type.(*ast.SelectorExpr)
+		if ok && sel.Sel.Name == "Result" {
+			if x, ok := sel.X.(*ast.Ident); ok && x.Name == "action" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// actionTag reports whether expr is `req.Action` for a request parameter name — the tag a
+// dispatch switch has.
+func actionTag(e ast.Expr, reqNames map[string]bool) bool {
+	sel, ok := e.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Action" {
+		return false
+	}
+	x, ok := sel.X.(*ast.Ident)
+	return ok && reqNames[x.Name]
+}
+
+// handler is the function a dispatch site hands the Action to. A site is a pure relay when its
+// whole body is a single call that takes the request (return s.X(ctx, req, ...) or s.X(...)):
+// the handler is then the callee, followed through further pure relays for the same Action, so
+// a grouped dispatcher (channels, adminActions) names the function doing the work. Any other
+// site handles the Action where it stands: the handler is the function containing the case
+// clause, `if req.Action == "<id>"` or map entry.
 func (idx *pkgIndex) handler(s *dispatchSite) codeRef {
-	f := idx.siteCall(s, s.encFn)
+	f := idx.relay(s, s.encFn)
 	if f == nil {
 		return codeRef{s.file.name, s.enc}
 	}
-	seen := map[*funcDecl]bool{}
+	seen := map[*funcDecl]bool{f: true}
 	for range 8 {
-		if seen[f] {
-			return codeRef{f.file.name, f.name}
-		}
-		seen[f] = true
 		inner := innerSites(f, s.id)
 		if len(inner) == 0 {
 			return codeRef{f.file.name, f.name}
 		}
-		g := idx.siteCall(inner[0], f)
-		if g == nil {
+		g := idx.relay(inner[0], f)
+		if g == nil || seen[g] {
 			return codeRef{f.file.name, f.name}
 		}
+		seen[g] = true
 		f = g
 	}
 	return codeRef{f.file.name, f.name}
 }
 
-// innerSites finds the spots inside f that dispatch id again: a case clause on the Action, a map
-// entry, or a branch on req.Action == "id". Only sites inside f's own body count, so a relay
-// function is followed exactly along the branch this Action takes.
+// innerSites finds the spots inside f that dispatch id again: a case clause of an Action
+// switch, a map entry, or a branch on req.Action == "id". Only sites inside f's own body count,
+// so a relay function is followed exactly along the branch this Action takes.
 func innerSites(f *funcDecl, id string) []*dispatchSite {
 	var out []*dispatchSite
 	reqNames := requestParams(f.decl)
+	var stack []ast.Node
 	ast.Inspect(f.decl.Body, func(n ast.Node) bool {
+		if n == nil {
+			stack = stack[:len(stack)-1]
+			return true
+		}
 		switch x := n.(type) {
 		case *ast.FuncLit:
 			return false
 		case *ast.CaseClause:
+			var sw *ast.SwitchStmt
+			if len(stack) >= 2 {
+				sw, _ = stack[len(stack)-2].(*ast.SwitchStmt)
+			}
+			if sw == nil || !actionTag(sw.Tag, reqNames) {
+				break
+			}
 			for _, expr := range x.List {
-				if lit, ok := expr.(*ast.BasicLit); ok && lit.Kind == token.STRING {
-					if v, err := strconv.Unquote(lit.Value); err == nil && v == id {
-						out = append(out, &dispatchSite{id: id, file: f.file, enc: f.name, encFn: f, body: x.Body, pos: expr.Pos()})
-						break
-					}
+				lit, ok := expr.(*ast.BasicLit)
+				if !ok || lit.Kind != token.STRING {
+					continue
 				}
-				if isActionCompare(expr, id, reqNames) {
+				if v, err := strconv.Unquote(lit.Value); err == nil && v == id {
 					out = append(out, &dispatchSite{id: id, file: f.file, enc: f.name, encFn: f, body: x.Body, pos: expr.Pos()})
 					break
 				}
 			}
 		case *ast.KeyValueExpr:
-			if lit, ok := x.Key.(*ast.BasicLit); ok && lit.Kind == token.STRING {
-				if v, err := strconv.Unquote(lit.Value); err == nil && v == id {
-					out = append(out, &dispatchSite{id: id, file: f.file, enc: f.name, encFn: f, value: x.Value, pos: x.Key.Pos()})
-				}
+			lit, ok := x.Key.(*ast.BasicLit)
+			if !ok || lit.Kind != token.STRING {
+				break
+			}
+			if v, err := strconv.Unquote(lit.Value); err == nil && v == id {
+				out = append(out, &dispatchSite{id: id, file: f.file, enc: f.name, encFn: f, value: x.Value, pos: x.Key.Pos()})
 			}
 		case *ast.IfStmt:
 			if condDispatches(x.Cond, id, reqNames) {
 				out = append(out, &dispatchSite{id: id, file: f.file, enc: f.name, encFn: f, body: x.Body.List, pos: x.Pos()})
 			}
 		}
+		stack = append(stack, n)
 		return true
 	})
 	sort.Slice(out, func(i, j int) bool { return out[i].pos < out[j].pos })
@@ -378,174 +429,64 @@ func condDispatches(cond ast.Expr, id string, reqNames map[string]bool) bool {
 	return found
 }
 
-// siteCall resolves the function a site hands the request to: for a map entry the function its
-// value names or calls, for a case body the in-package call that produces the returned result —
-// the first that takes the request when the body makes several calls. nil when nothing in the
-// body resolves to a package function (the work is then inline in the enclosing declaration).
-func (idx *pkgIndex) siteCall(s *dispatchSite, encFn *funcDecl) *funcDecl {
+// relay resolves the function a pure-relay site hands the request to: a site whose whole body
+// is a single call taking the request, or a map entry naming one. nil when the site's body does
+// anything else — the work is then inline in the containing function — or when the call names
+// nothing in the package (an external helper like action.OK produces the result, so the
+// containing function still handles it).
+func (idx *pkgIndex) relay(s *dispatchSite, owner *funcDecl) *funcDecl {
+	if owner == nil {
+		return nil
+	}
 	if s.value != nil {
-		if f := idx.exprFunc(s.file, encFn, s.value); f != nil {
-			return f
-		}
-		var f *funcDecl
-		ast.Inspect(s.value, func(n ast.Node) bool {
-			if f != nil {
-				return false
-			}
-			if c, ok := n.(*ast.CallExpr); ok {
-				f = idx.callFunc(s.file, encFn, c)
-			}
-			return f == nil
-		})
-		return f
-	}
-	reqNames := requestIdents(s.body, encFn)
-	var first *funcDecl
-	for _, c := range candidateCalls(s.body, reqNames) {
-		f := idx.callFunc(s.file, encFn, c)
-		if f == nil {
-			continue
-		}
-		if first == nil {
-			first = f
-		}
-		if takesAny(c, reqNames) {
-			return f
+		switch v := s.value.(type) {
+		case *ast.CallExpr:
+			return idx.relayCall(s.file, owner, v)
+		case *ast.FuncLit:
+			return idx.relay(&dispatchSite{file: s.file, body: v.Body.List}, owner)
+		default:
+			return idx.exprFunc(s.file, owner, v)
 		}
 	}
-	return first
+	if len(s.body) != 1 {
+		return nil
+	}
+	var c *ast.CallExpr
+	switch st := s.body[0].(type) {
+	case *ast.ReturnStmt:
+		if len(st.Results) != 1 {
+			return nil
+		}
+		c, _ = st.Results[0].(*ast.CallExpr)
+	case *ast.ExprStmt:
+		c, _ = st.X.(*ast.CallExpr)
+	}
+	if c == nil {
+		return nil
+	}
+	return idx.relayCall(s.file, owner, c)
 }
 
-// candidateCalls lists the calls a case body makes that can produce its result or receive the
-// request, in source order: calls in a return statement, calls whose result is assigned to a
-// variable a return gives back, and statement-level calls passed the request. Input-shaping
-// calls inside expressions (inputMap(req), strVal(...)) and side-effect calls that do not take
-// it (s.jobChanged(j)) are neither, so they never become the handler.
-func candidateCalls(body []ast.Stmt, reqNames map[string]bool) []*ast.CallExpr {
-	returned := map[string]bool{}
-	inspect := func(n ast.Node, fn func(ast.Node) bool) {
-		ast.Inspect(n, func(x ast.Node) bool {
-			if _, ok := x.(*ast.FuncLit); ok {
-				return false
-			}
-			return fn(x)
-		})
+// relayCall resolves a call that hands the request on, or nil when it is not a pure relay: the
+// request must be a direct argument (a renamed or rebuilt request is the callee's own work),
+// and a call taking a function literal (mutateConfig, applyCandidate) does its work through
+// that closure rather than handing the request to a handler.
+func (idx *pkgIndex) relayCall(pf *pkgFile, owner *funcDecl, c *ast.CallExpr) *funcDecl {
+	if !passesRequest(c, requestParams(owner.decl)) {
+		return nil
 	}
-	for _, st := range body {
-		inspect(st, func(n ast.Node) bool {
-			if r, ok := n.(*ast.ReturnStmt); ok {
-				for _, res := range r.Results {
-					if id, ok := res.(*ast.Ident); ok {
-						returned[id.Name] = true
-					}
-				}
-			}
-			return true
-		})
-	}
-	var out []*ast.CallExpr
-	for _, st := range body {
-		inspect(st, func(n ast.Node) bool {
-			switch x := n.(type) {
-			case *ast.ReturnStmt:
-				for _, res := range x.Results {
-					if c, ok := res.(*ast.CallExpr); ok {
-						out = append(out, c)
-					}
-				}
-			case *ast.AssignStmt:
-				if len(x.Rhs) != 1 {
-					return true
-				}
-				c, ok := x.Rhs[0].(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				for _, l := range x.Lhs {
-					if id, ok := l.(*ast.Ident); ok && returned[id.Name] {
-						out = append(out, c)
-						break
-					}
-				}
-			case *ast.ValueSpec:
-				if len(x.Values) != 1 {
-					return true
-				}
-				c, ok := x.Values[0].(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				for _, l := range x.Names {
-					if returned[l.Name] {
-						out = append(out, c)
-						break
-					}
-				}
-			case *ast.ExprStmt:
-				if c, ok := x.X.(*ast.CallExpr); ok && takesAny(c, reqNames) {
-					out = append(out, c)
-				}
-			}
-			return true
-		})
-	}
-	return out
-}
-
-// requestIdents is every name in body that holds the request: the enclosing function's
-// action.Request parameters plus variables copied from them (pauseReq := req).
-func requestIdents(body []ast.Stmt, encFn *funcDecl) map[string]bool {
-	names := map[string]bool{}
-	if encFn != nil {
-		for n := range requestParams(encFn.decl) {
-			names[n] = true
-		}
-	}
-	changed := true
-	for changed {
-		changed = false
-		for _, st := range body {
-			ast.Inspect(st, func(n ast.Node) bool {
-				if _, ok := n.(*ast.FuncLit); ok {
-					return false
-				}
-				switch x := n.(type) {
-				case *ast.AssignStmt:
-					if len(x.Rhs) != 1 {
-						return true
-					}
-					if rhs, ok := x.Rhs[0].(*ast.Ident); ok && names[rhs.Name] {
-						for _, l := range x.Lhs {
-							if id, ok := l.(*ast.Ident); ok && !names[id.Name] {
-								names[id.Name] = true
-								changed = true
-							}
-						}
-					}
-				case *ast.ValueSpec:
-					if len(x.Values) != 1 {
-						return true
-					}
-					if rhs, ok := x.Values[0].(*ast.Ident); ok && names[rhs.Name] {
-						for _, l := range x.Names {
-							if !names[l.Name] {
-								names[l.Name] = true
-								changed = true
-							}
-						}
-					}
-				}
-				return true
-			})
-		}
-	}
-	return names
-}
-
-// takesAny reports whether the call passes one of the request identifiers as an argument.
-func takesAny(c *ast.CallExpr, names map[string]bool) bool {
 	for _, a := range c.Args {
-		if id, ok := a.(*ast.Ident); ok && names[id.Name] {
+		if _, ok := a.(*ast.FuncLit); ok {
+			return nil
+		}
+	}
+	return idx.callFunc(pf, owner, c)
+}
+
+// passesRequest reports whether the call hands the request on directly.
+func passesRequest(c *ast.CallExpr, reqNames map[string]bool) bool {
+	for _, a := range c.Args {
+		if id, ok := a.(*ast.Ident); ok && reqNames[id.Name] {
 			return true
 		}
 	}
@@ -645,12 +586,9 @@ func actionsIndex(root string) (string, error) {
 	}
 	sites := collectSites(idx, ids)
 	handlers := map[string][]codeRef{}
-	branches := map[string][]codeRef{}
 	for id, ss := range sites {
 		for _, s := range ss {
-			h := idx.handler(s)
-			handlers[id] = appendUniqueRef(handlers[id], h)
-			branches[id] = appendUniqueRef(branches[id], codeRef{s.file.name, s.enc})
+			handlers[id] = appendUniqueRef(handlers[id], idx.handler(s))
 		}
 	}
 	sortRefs := func(l []codeRef) {
@@ -663,7 +601,6 @@ func actionsIndex(root string) (string, error) {
 	}
 	for id := range handlers {
 		sortRefs(handlers[id])
-		sortRefs(branches[id])
 	}
 	var rows [][]string
 	for _, d := range catalog.All() {
@@ -673,14 +610,14 @@ func actionsIndex(root string) (string, error) {
 		}
 		rows = append(rows, []string{
 			cell(d.ID), cell(avail), cell(d.Effects),
-			"`" + cell(d.CLI) + "`", "`" + cell(d.GUIRoute) + "`", links(handlers[d.ID]), links(branches[d.ID]),
+			"`" + cell(d.CLI) + "`", "`" + cell(d.GUIRoute) + "`", links(handlers[d.ID]),
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i][0] < rows[j][0] })
 	var b strings.Builder
-	b.WriteString("# Action 색인\n\ninternal/catalog의 모든 Action: CLI 명령, 콘솔 경로와 internal/application에서의 처리 함수.\n\n" + generatedHeader + "\n\n원본: `internal/catalog/catalog.go`의 `catalog.All()` (ID·상태·효과·CLI·경로), `internal/application`의 `case` 절과 맵 항목 (분기) 및 그 본문이 호출하는 패키지 함수 (처리) — go/parser로 읽은 위치는 줄 번호를 쓰지 않아 관련 없는 편집에 지도가 낡지 않음\n\n")
+	b.WriteString("# Action 색인\n\ninternal/catalog의 모든 Action: CLI 명령, 콘솔 경로와 internal/application에서의 처리 함수.\n\n" + generatedHeader + "\n\n원본: `internal/catalog/catalog.go`의 `catalog.All()` (ID·상태·효과·CLI·경로), `internal/application`의 `switch req.Action`/`if req.Action ==` 분기 (처리: 본문이 요청을 넘기는 한 호출뿐인 순수 중계를 따라간 도착 함수, 아니면 그 분기를 품은 함수) — go/parser로 읽은 위치는 줄 번호를 쓰지 않아 관련 없는 편집에 지도가 낡지 않음\n\n")
 	b.WriteString(table(
-		[]string{"Action", "상태", "효과", "CLI 명령", "콘솔 경로", "처리", "분기"},
+		[]string{"Action", "상태", "효과", "CLI 명령", "콘솔 경로", "처리"},
 		rows))
 	return b.String(), nil
 }

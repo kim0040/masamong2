@@ -88,6 +88,56 @@ func renderHandlers(idx *pkgIndex) string {
 	return b.String()
 }
 
+// TestActionsIndexPinsHandlers keeps the handler column honest: a wrong row regenerates
+// "successfully" forever, so handlers that were wrong once (or could drift into helpers) are
+// pinned against the source here. The second part asserts the names that are never handlers —
+// guards, audits, predicates, helper calls and package variables — appear in no row.
+func TestActionsIndexPinsHandlers(t *testing.T) {
+	root, err := repoRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := actionsIndex(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := map[string]string{}
+	for _, l := range strings.Split(out, "\n") {
+		cells := strings.Split(l, " | ")
+		if len(cells) < 2 || !strings.HasPrefix(cells[0], "| ") {
+			continue
+		}
+		rows[strings.TrimPrefix(cells[0], "| ")] = strings.TrimSuffix(cells[len(cells)-1], " |")
+	}
+	want := map[string]string{
+		"people.merge":            "memory_review.go · peopleAction",
+		"personas.apply":          "channels.go · personas",
+		"models.select":           "providers_persona.go · providers",
+		"providers.remove":        "providers_persona.go · providers",
+		"models.list":             "providers_persona.go · providers",
+		"providers.test":          "providers_persona.go · providers",
+		"agent.simulate":          "agent_backup.go · agent",
+		"imports.start":           "memory.go · memoryActions",
+		"lab.review":              "admin.go · labReviews",
+		"config.snapshot.restore": "ops_extra.go · snapshotsAction",
+		"finance.fx":              "fx.go · financeFX",
+		"images.generate":         "images.go · images",
+	}
+	for id, h := range want {
+		file, _, _ := strings.Cut(h, " ")
+		link := "[" + h + "](../../internal/application/" + file + ")"
+		if rows[id] != link {
+			t.Errorf("%s: handler = %s, want %s", id, rows[id], link)
+		}
+	}
+	for _, n := range []string{"readForm", "audit", "gateDiscord", "practiceBlocked", "boolVal",
+		"withFeeBounds", "providerFail", "evidenceWriteError", "mutateConfig", "applyCandidate"} {
+		if strings.Contains(out, " · "+n+"](") {
+			t.Errorf("actions index still names %s as a handler", n)
+		}
+	}
+}
+
 // TestActionsIndexReferencesFunctions checks the map points at functions, not lines: finance.fx
 // lands on financeFX in fx.go (through the finance relay), and no file:line reference appears.
 func TestActionsIndexReferencesFunctions(t *testing.T) {
