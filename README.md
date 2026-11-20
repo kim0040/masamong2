@@ -215,7 +215,7 @@ Commands work too. Prefix commands need the Message Content Intent. The prefix w
 | `!weather Paris` | `/weather` | Current weather and a forecast up to 14 days (rough beyond a week) |
 | `!alerts` | `/alerts` | Weather warnings, earthquakes |
 | `!quote AAPL` | `/quote` | Stock quote |
-| `!fx yen 50000` | `/fx` | Exchange rates: no option shows the main currencies in your home currency; `currency` (code or name) shows it against your home currency in both directions; `base` shows the main currencies valued in that currency (with `currency`, those two against each other: `!fx usd eur`); add an `amount` to convert it |
+| `!fx yen 50000` | `/fx` | Exchange rates: no option shows the main currencies in your home currency (the currency of your region); `currency` (code or name) shows its value in your home currency and the main ones; `base` shows the main currencies valued in that currency (with `currency`, those two against each other in both directions: `!fx usd eur`); add an `amount` to convert it |
 | `!search …` | `/search` | Web search |
 | `!places Seongsu cafe` | `/places` | Find places in Korea (Kakao Map) |
 | `!image …` | `/image` | Draw a picture |
