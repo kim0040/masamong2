@@ -110,7 +110,10 @@ func (a *Adapter) estimateCachedAt(cost **float64, estimated *bool, model string
 // cacheWriteFactor is the host's prompt-cache write price as a share of the input price
 // (hosts.json cache_write_factor): Anthropic's five-minute write is 1.25 by default on an Anthropic
 // route, the plain input price elsewhere.
-func (a *Adapter) cacheWriteFactor() float64 {
+func (a *Adapter) cacheWriteFactor(model string) float64 {
+	if strings.HasPrefix(strings.ToLower(model), "anthropic/") {
+		return 1.25 // a Claude model on a router still bills Anthropic's five-minute write
+	}
 	if h, ok := HostByURL(a.BaseURL); ok && h.CacheWriteFactor > 0 {
 		return h.CacheWriteFactor
 	}
@@ -148,7 +151,7 @@ func (a *Adapter) estimateWrittenAt(cost **float64, estimated *bool, model strin
 	}
 	cached = min(max(cached, 0), in)
 	written = min(max(written, 0), in-cached)
-	v := float64(in-cached-written)*pin + float64(cached)*pc + float64(written)*pin*a.cacheWriteFactor() + float64(out)*pout
+	v := float64(in-cached-written)*pin + float64(cached)*pc + float64(written)*pin*a.cacheWriteFactor(model) + float64(out)*pout
 	*cost, *estimated = &v, true
 }
 
