@@ -32,6 +32,7 @@
 | `fixtures/` | 합성 테스트 fixture |
 | `tools/` | 오프라인 데이터 준비·이행·평가 도구 |
 | `docs/` | 현재 제품·운영·개발 공식 문서(먼저 [MAINTAINING.md](MAINTAINING.md)). `docs/archive/`는 Git에서 제외한 로컬 보관소 |
+| [docs/code-map](code-map/README.md) | 생성된 코드 지도: Action, Discord 명령, 채팅 도구, 로케일 색인. 소스와 어긋나면 `go test`가 실패하며 `go run ./tools/codemap`으로 다시 생성 |
 
 ## 설치·실행 스크립트(저장소 루트)
 

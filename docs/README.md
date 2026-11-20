@@ -29,6 +29,7 @@
 |---|---|
 | [ARCHITECTURE.html](ARCHITECTURE.html) | 시스템 구조도: 전체 구조, 답 하나의 흐름, 기억(RAG) 흐름, 코드 위치 (브라우저로 열기) |
 | [REPO_MAP.md](REPO_MAP.md) | 디렉터리와 주요 패키지 지도 |
+| [code-map/](code-map/README.md) | 생성된 코드 지도: Action, Discord 명령, 채팅 도구, 로케일 색인(소스와 어긋나면 테스트 실패) |
 | [plan-discord-experience.md](plan-discord-experience.md) | 역사 문서(구현됨): Discord 사용 경험·운영 개선(2026-10-15): 예약 작업, 운세·공지 카드, 콘솔 페이지 전환 버그, 기다리는 동안 안내·팁, 운영 데이터 점검 |
 | [plan-memory-conversation.md](plan-memory-conversation.md) | 기억·대화·도구 설계 근거(2026-10, 구현 완료): 의도, 설계 원칙, 기능별 설계. 코드 주석이 절 번호를 가리킴 |
 | [plan-fortune.md](plan-fortune.md) | 매일 운세 개선 계획(2026-11-02, 구현 전): 확인한 문제, 우선순위별 제안, 하지 않을 것, 결정할 것 |
