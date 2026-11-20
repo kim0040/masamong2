@@ -14,7 +14,7 @@ Discord에 등록하는 애플리케이션 명령: 한국어 이름, 호출하�
 | `forgetme` | 잊어줘 | 슬래시 | memory.mine.forget | — |
 | `fortune` | 운세 | 슬래시 | fortune.query | what (보기, string, 선택)<br>time (시간, string, 선택) |
 | `fortune-register` | 운세등록 | 슬래시 | fortune.subscribe | birth_date (생년월일, string, 필수)<br>birth_time (태어난시간, string, 선택)<br>gender (성별, string, 선택)<br>birth_place (출생지, string, 선택) |
-| `fx` | 환율 | 슬래시 | finance.fx | currency (통화, string, 선택)<br>amount (금액, number, 선택) |
+| `fx` | 환율 | 슬래시 | finance.fx | currency (통화, string, 선택)<br>base (기준통화, string, 선택)<br>amount (금액, number, 선택) |
 | `help` | 도움말 | 슬래시 | help.version | — |
 | `image` | 이미지 | 슬래시 | images.generate | prompt (장면, string, 필수) |
 | `mymemory` | 내기억 | 슬래시 | memory.mine.show | — |
