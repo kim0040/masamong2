@@ -216,7 +216,7 @@ func TestFXHomeRequest(t *testing.T) {
 		t.Fatalf("pair: %+v", res)
 	}
 	// the region of the locale decides the home currency: Japan's is the yen, and a currency that is home
-	// is the board valued in it
+	// stays the subject, against the rest of the board
 	res = s.Execute(context.Background(), action.Request{Action: "finance.fx", Locale: "ja", Input: []byte(`{"home":"","currency":"JPY"}`)})
 	if !res.OK || res.Output["base"] != "JPY" || len(quotesOf(t, res.Output)) != 5 {
 		t.Fatalf("ja: %+v", res)

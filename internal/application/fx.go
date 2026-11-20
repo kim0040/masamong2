@@ -247,9 +247,10 @@ func namesRegion(tag string) bool {
 //	currency and base                 the two against each other, both directions; with an amount, that
 //	                                  much of the currency in the base
 //
-// The currency being shown is never listed against itself, and a currency that is the base (or the home
-// currency when there is no base) is the same as none. The rates are fetched for the one currency the
-// others are stated against, so one call serves a card.
+// The currency being shown is never listed against itself; one that is the base is the same as a base
+// alone. Naming the home currency keeps it the subject like any other currency, against the rest of the
+// board. The rates are fetched for the one currency the others are stated against, so one call serves
+// a card.
 func (s *Service) fxHomePlan(lex *currency.Lexicon, locale string, in map[string]any, amount float64) (fxPlan, bool) {
 	home := lex.Home(fxHomeTag(locale, in))
 	if text, _ := fxText(in, "home"); text != "" {
@@ -289,7 +290,7 @@ func (s *Service) fxHomePlan(lex *currency.Lexicon, locale string, in map[string
 		}
 		return plan, true
 	}
-	if base == "" && other != "" && other != home {
+	if base == "" && other != "" {
 		// one currency against the home currency and the others, the home currency first
 		plan := fxPlan{base: other, strict: other, shared: true}
 		for _, c := range append([]string{home}, board...) {

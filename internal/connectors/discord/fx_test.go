@@ -158,7 +158,7 @@ func TestFXCardsStateRatesInReadableUnits(t *testing.T) {
 		want         []string
 	}{
 		{"ko board in won", "ko", nil, []string{"1달러 ≈ 1,350원", "100엔 ≈ 912.2원", "1유로 ≈ 1,500원", "1위안 ≈ 200원", "1파운드 ≈ 1,800원"}},
-		{"ko the home currency is the board", "ko", map[string]string{"currency": "원"}, []string{"1달러 ≈ 1,350원", "100엔 ≈ 912.2원", "1유로 ≈ 1,500원", "1위안 ≈ 200원", "1파운드 ≈ 1,800원"}},
+		{"ko the home currency is the subject like any other", "ko", map[string]string{"currency": "원"}, []string{"1,000원 ≈ 0.7407달러", "1,000원 ≈ 109.6엔", "1,000원 ≈ 0.6667유로", "1,000원 ≈ 5위안", "1,000원 ≈ 0.5556파운드"}},
 		{"ko one currency against the home currency first, then the board", "ko", map[string]string{"currency": "엔화"}, []string{"100엔 ≈ 912.2원", "100엔 ≈ 0.6757달러", "100엔 ≈ 0.6081유로", "100엔 ≈ 4.561위안", "100엔 ≈ 0.5068파운드"}},
 		{"ko by code", "ko", map[string]string{"currency": "jpy"}, []string{"100엔 ≈ 912.2원", "100엔 ≈ 0.6757달러", "100엔 ≈ 0.6081유로", "100엔 ≈ 4.561위안", "100엔 ≈ 0.5068파운드"}},
 		{"ko dollar, one dollar in each", "ko", map[string]string{"currency": "달러"}, []string{"1달러 ≈ 1,350원", "1달러 ≈ 148엔", "1달러 ≈ 0.9유로", "1달러 ≈ 6.75위안", "1달러 ≈ 0.75파운드"}},

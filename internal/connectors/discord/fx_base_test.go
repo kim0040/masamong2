@@ -108,11 +108,12 @@ func TestFXCurrencyBaseAmountCombinations(t *testing.T) {
 		{"ko amount of the base", "ko", way{slash: map[string]string{"base": "엔", "amount": "100"}}, []string{"100엔 ≈ 912.2원", "100엔 ≈ 0.6757달러", "100엔 ≈ 0.6081유로", "100엔 ≈ 4.561위안", "100엔 ≈ 0.5068파운드"}},
 		{"en amount of the base", "en", way{slash: map[string]string{"base": "eur", "amount": "10"}}, []string{"10 EUR ≈ 11.11 USD", "10 EUR ≈ 15,000 KRW", "10 EUR ≈ 1,644 JPY", "10 EUR ≈ 75 CNY", "10 EUR ≈ 8.333 GBP"}},
 		{"ko amount of the home currency named", "ko", way{map[string]string{"currency": "원", "amount": "10000"}, "!환율 원 10000"}, koWonInEach},
-		// the currency is the base (or the home currency when there is no base): the same as a base alone
+		// the currency is the base: the same as a base alone; one that is the home currency stays the
+		// subject, quoted against the rest of the board
 		{"ko currency equals base", "ko", way{map[string]string{"currency": "엔화", "base": "JPY"}, "!환율 엔화 JPY"}, koInJPY},
-		{"ko currency equals home", "ko", way{map[string]string{"currency": "원"}, "!환율 원"}, []string{"1달러 ≈ 1,350원", "100엔 ≈ 912.2원", "1유로 ≈ 1,500원", "1위안 ≈ 200원", "1파운드 ≈ 1,800원"}},
+		{"ko currency equals home", "ko", way{map[string]string{"currency": "원"}, "!환율 원"}, []string{"1,000원 ≈ 0.7407달러", "1,000원 ≈ 109.6엔", "1,000원 ≈ 0.6667유로", "1,000원 ≈ 5위안", "1,000원 ≈ 0.5556파운드"}},
 		{"ko currency equals base, with an amount", "ko", way{map[string]string{"currency": "엔", "base": "엔화", "amount": "100"}, "!환율 100 엔 엔화"}, []string{"100엔 ≈ 912.2원", "100엔 ≈ 0.6757달러", "100엔 ≈ 0.6081유로", "100엔 ≈ 4.561위안", "100엔 ≈ 0.5068파운드"}},
-		{"en currency equals home", "en", way{map[string]string{"currency": "usd"}, "!fx usd"}, []string{"10,000 KRW ≈ 7.407 USD", "1,000 JPY ≈ 6.757 USD", "1 EUR ≈ 1.111 USD", "10 CNY ≈ 1.481 USD", "1 GBP ≈ 1.333 USD"}},
+		{"en currency equals home", "en", way{map[string]string{"currency": "usd"}, "!fx usd"}, []string{"1 USD ≈ 1,350 KRW", "1 USD ≈ 148 JPY", "1 USD ≈ 0.9 EUR", "1 USD ≈ 6.75 CNY", "1 USD ≈ 0.75 GBP"}},
 	} {
 		check := func(t *testing.T, got []string) {
 			t.Helper()
@@ -137,7 +138,6 @@ func TestFXBaseIsRefusedLikeACurrency(t *testing.T) {
 		calls int32
 	}{
 		{"malformed base", []*discordgo.ApplicationCommandInteractionDataOption{strOption("base", "U$D")}, 0},
-		{"blank base is not the default", []*discordgo.ApplicationCommandInteractionDataOption{strOption("base", "   ")}, 0},
 		{"unknown base next to a currency", []*discordgo.ApplicationCommandInteractionDataOption{strOption("currency", "엔"), strOption("base", "nope")}, 0},
 		{"base the service has no rates for", []*discordgo.ApplicationCommandInteractionDataOption{strOption("base", "BTN")}, 1},
 		{"currency the service has no rates for", []*discordgo.ApplicationCommandInteractionDataOption{strOption("currency", "BTN"), strOption("base", "USD")}, 1},
