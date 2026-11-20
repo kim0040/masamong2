@@ -36,7 +36,7 @@ const (
 )
 
 // turnRoomMemory gathers the room memory of one chat turn; nil when there is none or reading is off.
-func (s *Service) turnRoomMemory(ctx context.Context, in ChatInput, pol config.ChannelPolicy, voice chat.Voice, history []chat.Turn, recent []corpus.Message) *chat.RoomMemory {
+func (s *Service) turnRoomMemory(ctx context.Context, in ChatInput, pol config.ChannelPolicy, voice chat.Voice, history []chat.Turn, recent []corpus.Message, planner []string) *chat.RoomMemory {
 	doc := s.Doc()
 	if pol.MemoryUse == "off" || in.ChannelID == "" || s.Store == nil {
 		return nil
