@@ -2590,9 +2590,9 @@ add("", {
 
 add("pm", {
     "title": ("서버 안의 기억", "Memory in a server"),
-    "desc": ("봇이 한 서버에서 이 사람에 대해 가진 기억입니다. 서버마다 따로 보관합니다.", "What the bot keeps about this person in one server. Each server keeps its own."),
+    "desc": ("이 사람이 대화한 서버별로 봇이 무엇을 기억하는지 볼 수 있습니다.", "See what the bot remembers in each server where this person has spoken."),
     "server": ("서버", "Server"),
-    "no_servers": ("봇이 들어간 서버가 아직 없습니다.", "The bot is not in any server yet."),
+    "no_servers": ("이 사람의 메시지가 저장된 서버가 없습니다.", "No server has saved messages from this person."),
     "told": ("기억해 달라고 한 것", "Asked to remember"),
     "card": ("인물 카드", "Person card"),
     "items": ("대화에서 이 사람이 나온 항목", "Items that name this person"),

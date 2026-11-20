@@ -87,10 +87,12 @@
 
   // the person dialog
   let openId = $state('')
+  let preferredGuild = $state('')
   let detailOpen = $state(false)
   const cur = $derived(((users.data?.users ?? []) as any[]).find((u) => u.user_id === openId))
-  function open(u: any) {
+  function open(u: any, guild = '') {
     openId = u.user_id
+    preferredGuild = guild
     detailOpen = true
   }
   let serverPersonOpen = $state(false)
@@ -106,7 +108,7 @@
   async function openServerPerson(p: any) {
     if (p.has_user && !users.data) await users.refresh()
     const u = ((users.data?.users ?? []) as any[]).find((x) => x.user_id === p.user_id)
-    if (p.has_user && u) return open(u)
+    if (p.has_user && u) return open(u, p.guild_id)
     serverPersonKey = `${p.guild_id}:${p.user_id}`
     serverPersonOpen = true
   }
@@ -376,7 +378,9 @@
       <section>
         <h3 class="small h">{t('pm.title')}</h3>
         <p class="xs muted">{t('pm.desc')}</p>
-        <PersonMemory userId={cur.user_id} />
+        {#if detailOpen}
+          {#key cur.user_id}<PersonMemory userId={cur.user_id} {preferredGuild} />{/key}
+        {/if}
       </section>
       <section>
         <h3 class="small h">{t('people.prefs.title')}</h3>

@@ -11,18 +11,24 @@
   import Button from './Button.svelte'
   import Confirm from './Confirm.svelte'
   import Skeleton from './Skeleton.svelte'
+  import LoadState from './LoadState.svelte'
   import * as I from '../lib/icons'
 
   // What the bot keeps about one person in one server (memory.mine.show), and forgetting it: a preview
   // first, then a confirmation with the preview's token (memory.mine.forget). Each server keeps its own,
   // so the operator picks the server. The person is named by the dialog this sits in; the ID is not shown.
-  let { userId }: { userId: string } = $props()
+  let { userId, preferredGuild = '' }: { userId: string; preferredGuild?: string } = $props()
 
-  const channels = resource<any>('channels.list', () => ({}), { live: ['config', 'discord'] })
-  const servers = $derived(((channels.data?.guilds ?? []) as any[]).map((g) => ({ value: g.id as string, label: (g.name || g.id) as string })))
+  // Search by account first: people.servers otherwise caps each group at its 200 most recent speakers.
+  type Group = { guild_id: string; name: string; people: { user_id: string; last_seen: string }[] }
+  const membership = resource<{ servers: Group[] }>('people.servers', () => ({ q: userId }), { live: ['config', 'audit', 'memory', 'discord'] })
+  const servers = $derived((membership.data?.servers ?? []).flatMap((g) => {
+    const person = g.people.find((p) => p.user_id === userId)
+    return person ? [{ value: g.guild_id, label: g.name || g.guild_id, last: person.last_seen }] : []
+  }).sort((a, b) => b.last.localeCompare(a.last)))
   let guild = $state('')
   $effect(() => {
-    if ((!guild || !servers.some((s) => s.value === guild)) && servers.length) guild = servers[0].value
+    if (!servers.some((s) => s.value === guild)) guild = servers.find((s) => s.value === preferredGuild)?.value ?? servers[0]?.value ?? ''
   })
 
   let view = $state<{ loading: boolean; error: string; data: any } | null>(null)
@@ -30,7 +36,7 @@
   async function load() {
     const my = ++seq
     if (!guild || !userId) return void (view = null)
-    view = { loading: true, error: '', data: view?.data ?? null }
+    view = { loading: true, error: '', data: null }
     const r = await call('memory.mine.show', { guild_id: guild, user_id: userId })
     if (my !== seq) return
     view = r.ok ? { loading: false, error: '', data: r.output } : { loading: false, error: r.error?.message ?? t('common.failed'), data: null }
@@ -71,7 +77,9 @@
 </script>
 
 <div class="pm">
-  {#if channels.data && servers.length === 0}
+  {#if !membership.data}
+    <LoadState res={membership}><Skeleton lines={3} /></LoadState>
+  {:else if servers.length === 0}
     <p class="small muted">{t('pm.no_servers')}</p>
   {:else}
     <Field id="pm-server" label={t('pm.server')}>
