@@ -767,24 +767,21 @@ func localesIndex() string {
 		all := prefixAll[p]
 		var missing []string
 		for _, loc := range names {
-			n := 0
 			for k := range all {
 				if _, ok := bundles[loc][k]; !ok {
-					n++
+					missing = append(missing, loc)
+					break
 				}
-			}
-			if n > 0 {
-				missing = append(missing, fmt.Sprintf("%s(-%d)", loc, n))
 			}
 		}
 		rows = append(rows, []string{
-			cell(p), strconv.Itoa(len(all)), orDash(strings.Join(missing, ", ")),
+			cell(p), orDash(strings.Join(missing, ", ")),
 		})
 	}
 	var b strings.Builder
-	b.WriteString("# 로케일 색인\n\n메시지 카탈로그 키 접두사(첫 마디): 전체 키 수와 그 접두사의 키가 일부 없는 로케일.\n\n" + generatedHeader + "\n\n원본: `locales/*.json` (내장 메시지 카탈로그)\n\n")
+	b.WriteString("# 로케일 색인\n\n메시지 카탈로그 키 접두사(첫 마디)와 그 접두사의 키가 일부 없는 로케일.\n\n" + generatedHeader + "\n\n원본: `locales/*.json` (내장 메시지 카탈로그)\n\n")
 	b.WriteString(table(
-		[]string{"접두사", "키 수", "누락 로케일"},
+		[]string{"접두사", "누락 로케일"},
 		rows))
 	return b.String()
 }
