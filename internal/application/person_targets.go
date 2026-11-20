@@ -109,9 +109,15 @@ const sentenceEnds = ".!?。！？…．｡؟\n"
 const maxSelfSentence = 512
 
 // selfIntent reports whether the message's last sentence asks about its
-// speaker. The bot's own mention and the names it is called by (with a call
+// speaker. A message that quotes anything (a line starting with ">") never
+// does: the quoted words may be the request's subject, so it fails closed. The bot's own mention and the names it is called by (with a call
 // ending, withoutBotNames) are not part of the request.
 func selfIntent(message, bot string, names []string) bool {
+	for _, line := range strings.Split(message, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), ">") {
+			return false // a Discord quote: the request may be about the quoted words, not the speaker
+		}
+	}
 	if bot != "" {
 		message = strings.NewReplacer("<@"+bot+">", " ", "<@!"+bot+">", " ").Replace(message)
 	}
