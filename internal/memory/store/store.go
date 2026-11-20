@@ -1005,7 +1005,7 @@ func (s *Store) insertObservations(ctx context.Context, obs []corpus.Observation
 			if n, _ := r.RowsAffected(); n > 0 {
 				res.Inserted++
 				if !s.tidb() && o.Platform == "discord" {
-					if err := savePersonAlias(tx, o.SourceRoom, m.ActorAccount, m.ActorLabel, o.ParsedTime); err != nil {
+					if err := savePersonAlias(tx, o.ObservationID, o.SourceRoom, m.ActorAccount, m.ActorLabel, o.ParsedTime); err != nil {
 						slog.Warn("could not record display name; keeping captured observation")
 					}
 				}

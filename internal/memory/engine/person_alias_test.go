@@ -18,7 +18,7 @@ func TestAliasFillDoesNotReprocessHistory(t *testing.T) {
 	want := tableRows(t, db, "person_alias", "")
 	before := snapshotHistory(t, db)
 	// An interrupted fill can replay the same history without moving the seen dates.
-	for _, q := range []string{`DELETE FROM person_alias WHERE label='민수'`, `UPDATE person_alias_fill SET cursor=1`} {
+	for _, q := range []string{`DELETE FROM person_alias_source WHERE label='민수' AND observation IN (SELECT observation_id FROM memory_observations WHERE rowid>1)`, `UPDATE person_alias_fill SET cursor=1`} {
 		if _, err := db.DB.Exec(q); err != nil {
 			t.Fatal(err)
 		}

@@ -30,6 +30,7 @@ var selfRequest = regexp.MustCompile(`(?i)(?:^|[^\pL\pN])(?:(?:나|저)(?:에\s*
 
 type turnNames struct {
 	current map[string]string
+	sources map[string]string
 	aliases map[string][]string
 	denied  map[string]bool
 }
@@ -55,19 +56,22 @@ func (s *Service) deniedPeople(tx *sql.Tx, guild string) (map[string]bool, error
 
 func (s *Service) readPersonNames(tx *sql.Tx, guild string, rooms map[string]bool) (turnNames, error) {
 	denied, err := s.deniedPeople(tx, guild)
-	n := turnNames{map[string]string{}, map[string][]string{}, denied}
+	n := turnNames{map[string]string{}, map[string]string{}, map[string][]string{}, denied}
 	if err != nil {
 		return n, err
 	}
 	raw, _ := json.Marshal(rooms)
-	rows, err := tx.Query(`SELECT person_ref,label FROM person_alias WHERE guild_id=? AND room IN (SELECT key FROM json_each(?)) ORDER BY last_seen DESC,label`, guild, string(raw))
+	rows, err := tx.Query(`SELECT a.person_ref,a.label,a.last_source FROM person_alias a JOIN memory_observations o ON o.observation_id=a.last_source
+		WHERE a.guild_id=? AND a.room IN (SELECT key FROM json_each(?)) AND o.deleted_at='' AND o.edited_at=''
+		AND NOT EXISTS(SELECT 1 FROM privacy_tombstones p WHERE (p.kind='message' AND p.source_id=o.native_message_id) OR (p.kind='account' AND p.source_id=o.actor_account))
+		ORDER BY a.last_seen DESC,a.label`, guild, string(raw))
 	if err != nil {
 		return n, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var ref, label string
-		if err := rows.Scan(&ref, &label); err != nil {
+		var ref, label, source string
+		if err := rows.Scan(&ref, &label, &source); err != nil {
 			return n, err
 		}
 		if ref == "" || strings.TrimSpace(label) == "" {
@@ -75,6 +79,7 @@ func (s *Service) readPersonNames(tx *sql.Tx, guild string, rooms map[string]boo
 		}
 		if n.current[ref] == "" {
 			n.current[ref] = label
+			n.sources[ref] = source
 		}
 		key := strings.ToLower(label)
 		if !slices.Contains(n.aliases[key], ref) {

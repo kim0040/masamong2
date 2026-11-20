@@ -476,6 +476,9 @@ func (s *Service) invalidateCards(ctx context.Context, db *storage.Store, jobs [
 			}
 			if (op == "withdraw" || op == "withdraw_batch") && j.Ref != "" {
 				if tableExists(tx, "person_alias") {
+					if _, err := tx.Exec(`DELETE FROM person_alias_source WHERE person_ref=?`, j.Ref); err != nil {
+						return err
+					}
 					if _, err := tx.Exec(`DELETE FROM person_alias WHERE person_ref=?`, j.Ref); err != nil {
 						return err
 					}
@@ -705,7 +708,13 @@ func personFact(tx *sql.Tx, it itemRow, episodeRoom, saved, target string, names
 	if !self {
 		fact = "[" + strings.Join(speakers, ", ") + "] " + fact
 	}
-	return fact, append(refs, it.evidence...)
+	sources := slices.Clone(it.evidence)
+	for _, ref := range refs {
+		if id := names.sources[ref]; id != "" {
+			sources = append(sources, id)
+		}
+	}
+	return fact, append(refs, sources...)
 }
 
 // relationKey is the stored pair, in a fixed order.

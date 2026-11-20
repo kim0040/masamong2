@@ -71,6 +71,37 @@ func (f reviewPerson) attach(t *testing.T, guild, channel string) {
 
 func TestReviewPersonPrivacy(t *testing.T) {
 	tests := map[string]func(*testing.T, reviewPerson){
+		"DeletedAlias": func(t *testing.T, f reviewPerson) {
+			for i := range 3 {
+				f.source(t, "g", "c", "rename"+strconv.Itoa(i), "101", "삭제된별명", f.at.Add(time.Duration(i+1)*time.Minute))
+			}
+			check := func(want string, n int) {
+				t.Helper()
+				got := block(f.ask(t, "<@101> 어떤 사람이야?"), cardOpen, cardClose)
+				if !strings.Contains(got, want+" public") {
+					t.Fatal(got)
+				}
+				var rows int
+				if err := f.Store.Reader().QueryRow(`SELECT count(*) FROM person_alias_source WHERE person_ref=? AND label='삭제된별명'`, store.PersonRef("101")).Scan(&rows); err != nil || rows != n {
+					t.Fatalf("sources=%d want %d: %v", rows, n, err)
+				}
+			}
+			if n, err := f.engine.Delete([]string{"rename2"}, time.Now()); err != nil || n != 1 {
+				t.Fatalf("delete %d: %v", n, err)
+			}
+			check("삭제된별명", 2)
+			if ok, err := f.engine.Edit("rename1", "edited words", time.Now()); err != nil || !ok {
+				t.Fatalf("edit %t: %v", ok, err)
+			}
+			check("삭제된별명", 1)
+			if n, err := f.engine.Delete([]string{"rename0"}, time.Now()); err != nil || n != 1 {
+				t.Fatalf("delete %d: %v", n, err)
+			}
+			check("민수", 0)
+			if got := block(f.ask(t, "삭제된별명 어떤 사람이야?"), cardOpen, cardClose); got != "" {
+				t.Fatal(got)
+			}
+		},
 		"BlockedTarget": func(t *testing.T, f reviewPerson) {
 			applyDoc(t, f.Service, func(d *config.Document) { d.Access.BlockedUsers = []string{"101"} })
 			if got := block(f.ask(t, "<@101> 어떤 사람이야?"), cardOpen, cardClose); got != "" {
