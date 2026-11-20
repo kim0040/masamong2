@@ -1099,6 +1099,19 @@ type ChatSettings struct {
 	// deleted before the answer: "deep" (the default: at once for a deep search or a second round of
 	// searches), "slow" (those, and also a search turn still unanswered after a few seconds) or "off".
 	Progress string `yaml:"progress,omitempty" json:"progress,omitempty"`
+	// TranscriptChars is the rune budget of the conversation transcript the answer prompt is built on
+	// (0 = 5000, 1000–20000): the newest lines that fit come in, cut with hysteresis so the prompt's
+	// cached prefix stays put. Cheap once the provider's prompt cache hits; the minimum line count is
+	// not configurable.
+	TranscriptChars int `yaml:"transcript_chars,omitempty" json:"transcript_chars,omitempty"`
+}
+
+// TranscriptBudget is the effective chat.transcript_chars.
+func (c ChatSettings) TranscriptBudget() int {
+	if c.TranscriptChars <= 0 {
+		return 5000
+	}
+	return c.TranscriptChars
 }
 
 // ProgressModes are the values chat.progress accepts besides empty (deep).
@@ -1441,6 +1454,9 @@ func parse(raw []byte, problems *[]Problem) (Document, error) {
 	}
 	if d.Chat.Progress != "" && !slices.Contains(ProgressModes, d.Chat.Progress) {
 		return Document{}, fmt.Errorf("chat.progress must be one of %v", ProgressModes)
+	}
+	if n := d.Chat.TranscriptChars; n != 0 && (n < 1000 || n > 20000) {
+		return Document{}, fmt.Errorf("chat.transcript_chars must be 1000–20000 (or 0 for the default 5000)")
 	}
 	// pages a search reads: a request that reads dozens of pages would only slow every search and spend the
 	// daily page quota

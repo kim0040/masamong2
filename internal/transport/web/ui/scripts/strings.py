@@ -227,7 +227,7 @@ add("setup", {
     "model.host_note.openrouter": ("추천: 여러 회사 모델을 키 하나로 쓰고, 기억 검색의 재정렬까지 지원합니다.", "Recommended: many vendors' models with one key, including reranking for memory search."),
     "model.host_note.gemini": ("Google Gemini: 대화·임베딩·이미지를 한 키로 씁니다. 재정렬은 없어 기억 검색이 재정렬 없이 순위를 매깁니다.", "Google Gemini: chat, embeddings and images with one key. No reranking, so memory search ranks without it."),
     "model.host_note.openai": ("OpenAI: 대화·임베딩·이미지를 한 키로 씁니다. 재정렬은 없어 기억 검색이 재정렬 없이 순위를 매깁니다.", "OpenAI: chat, embeddings and images with one key. No reranking, so memory search ranks without it."),
-    "model.host_note.anthropic": ("Anthropic: Claude 모델을 Messages API로 직접 사용합니다. 임베딩·재정렬·이미지 생성은 지원하지 않으므로 해당 역할에는 다른 공급자를 지정하세요. 프롬프트 캐시는 아직 지원하지 않습니다.", "Anthropic: Claude models directly through the Messages API. No embeddings, reranking or image generation, so fill those roles from another provider. Prompt caching is not used yet."),
+    "model.host_note.anthropic": ("Anthropic: Claude 모델을 Messages API로 직접 사용합니다. 임베딩·재정렬·이미지 생성은 지원하지 않으므로 해당 역할에는 다른 공급자를 지정하세요. 답변 호출에 프롬프트 캐시를 씁니다.", "Anthropic: Claude models directly through the Messages API. No embeddings, reranking or image generation, so fill those roles from another provider. Prompt caching is used on the answer call."),
     "model.host_note.cometapi": ("CometAPI: 여러 회사 모델을 키 하나로 씁니다(공식가의 약 80%). 가격표를 주지 않아 같은 모델의 OpenRouter 가격을 참고 단가로 씁니다. 재정렬은 없습니다.", "CometAPI: many vendors' models with one key (about 80% of official prices). It lists no prices, so the same model's OpenRouter price is used as a reference. No reranking."),
     "model.host_note.nanogpt": ("NanoGPT: 여러 회사 모델을 키 하나로 쓰고, 가격표를 함께 줍니다. 그림은 이미지 전용 주소로 그립니다. 재정렬은 없습니다.", "NanoGPT: many vendors' models with one key, prices listed. Pictures go through its image endpoint. No reranking."),
     "model.host_note.opengateway": ("OpenGateway: 여러 회사 모델을 키 하나로 씁니다(서울 Sionic AI). 가격표와 비용을 응답에 주지 않으니 예비 모델로 쓸 때 가격을 직접 넣으세요. 재정렬은 없습니다.", "OpenGateway: many vendors' models with one key (Sionic AI, Seoul). Its replies carry no price or cost, so enter prices when you use it as a fallback. No reranking."),
@@ -2350,6 +2350,8 @@ add("cfg", {
     "chat.vision": ("이미지 이해", "Image understanding"),
     "chat.vision.v.auto": ("자동 (기본)", "Auto (default)"), "chat.vision.v.off": ("끔", "Off"),
     "chat.vision.hint": ("봇을 부를 때 첨부한 사진만 읽습니다. 도구 화면에서도 바꿀 수 있습니다.", "Only pictures attached when someone calls the bot are read. Also on the Tools page."),
+    "chat.transcript_chars": ("답이 읽는 대화 분량", "Talk a reply reads"),
+    "chat.transcript_chars.hint": ("답할 때 읽어 오는 최근 대화의 글자 수(1000–20000, 기본 5000)입니다. 도구 화면에서도 바꿀 수 있습니다.", "How many characters of recent talk a reply reads back (1000–20000, default 5000). Also on the Tools page."),
 })
 # image understanding (chat.vision): the Tools page switch, the call ledger role and the turn detail
 add("tools", {
@@ -2369,6 +2371,13 @@ add("tools", {
     "progress.hint.deep": ("깊은 검색이나 두 번째 검색 단계에서만 안내 한 줄을 올리고 답이 나가기 전에 지웁니다.", "Only a deep search or a second round of searching puts up the line; it is deleted before the answer."),
     "progress.hint.off": ("안내 없이 답만 보냅니다.", "No line; only the answer is sent."),
     "progress.saved": ("안내 설정을 바꿨습니다", "The “still looking” setting changed"),
+})
+# how much of the room's talk a reply reads (chat.transcript_chars) on the Tools page
+add("tools", {
+    "transcript.title": ("답이 읽는 대화 분량", "Talk a reply reads"),
+    "transcript.hint": ("답할 때 읽어 오는 최근 대화의 글자 수입니다(1000–20000, 기본 5000). 아주 최근 줄 몇 개는 항상 읽습니다. 비워 두면 기본값입니다.",
+                        "How many characters of recent talk a reply reads back (1000–20000, default 5000). The few latest lines are always read. Empty keeps the default."),
+    "transcript.saved": ("대화 분량을 바꿨습니다", "Context size changed"),
 })
 add("tool", {
     "pages_title": ("페이지 본문 읽기", "Reading the pages"),

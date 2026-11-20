@@ -169,6 +169,7 @@ func implied() map[string]any {
 		"chat.loop_final":       ChatSettings{}.LoopFinalMode(),
 		"chat.vision":           ChatSettings{}.VisionMode(),
 		"chat.progress":         ChatSettings{}.ProgressMode(),
+		"chat.transcript_chars": ChatSettings{}.TranscriptBudget(),
 		"web_search.read_pages": WebSearch{}.Pages(""), "web_search.deep_pages": WebSearch{}.Pages("deep"),
 		"web_search.fetch_daily_limit": WebSearch{}.FetchDailyPages(),
 		"memory.derived_budget_usd":    "3.00", "memory.day_boundary": "05:00",
@@ -207,6 +208,7 @@ var (
 		"participation.min_score": bound(0, 1),
 		"dm.per_user_per_day":     bound(-1, 10000), "dm.per_day": bound(-1, 100000),
 		"web_search.read_pages": bound(0, 10), "web_search.deep_pages": bound(0, 10), "web_search.fetch_daily_limit": bound(0, 5000),
+		"chat.transcript_chars": bound(1000, 20000),
 	}
 	// readOnly fields describe the installation; changing them from a form would break it.
 	readOnly = map[string]bool{"instance.data_dir": true, "instance.profile": true, "limits.profile": true}
