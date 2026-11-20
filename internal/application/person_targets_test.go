@@ -4,11 +4,13 @@ import (
 	"database/sql"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"masamong/internal/action"
 	"masamong/internal/config"
+	"masamong/internal/lang"
 	"masamong/internal/memory/engine"
 	"masamong/internal/memory/store"
 )
@@ -287,27 +289,66 @@ func TestPersonTargets(t *testing.T) {
 }
 
 func TestSelfIntent(t *testing.T) {
-	for _, msg := range []string{
-		"날 기억해?", "나를 기억하니", "저를 기억하세요?", "<@1> 날 기억하고 있어?", "나 기억해?", "저 기억하시나요?",
-		"나에 대해 뭐 알아?", "저에 대해서 알려줘", "내 정보 보여줘", "제 정보",
-		"내가 누구야?", "난 누구게?", "내가 누구인지 알아?", "나는 어떤 사람이야?", "저는 어떤 사람인가요?",
-		"나는 뭘 좋아해?", "내가 뭘 좋아하지?", "나 뭐 좋아해?", "내 취향 알아?", "내 별명이 뭐야?", "나한테 어울리는 거 추천해줘",
-		"나 소개해줘", "날 그려줘!", "날 기억해 ㅋㅋ",
-		"what do I like?", "Do you remember me?", "who am I", "what do you know about me", "Tell me about myself", "describe me",
-		"what are my hobbies?", "¿Quién soy?", "qué me gusta", "私のこと覚えてる？", "私はどんな人？", "我是谁", "你还记得我吗",
+	names := []string{"masamong", "마사몽"}
+	for tag, msgs := range map[string][]string{
+		"ko": {"날 기억해?", "나를 기억하니", "저를 기억하세요?", "<@1> 날 기억하고 있어?", "나 기억해?", "저 기억하시나요?", "날 기억해요 ㅋㅋ",
+			"나에 대해 뭐 알아?", "저에 대해서 알려줘", "내 정보 보여줘", "제 정보", "내가 누구야?", "난 누구게?", "내가 누구인지 알아?",
+			"나는 어떤 사람이야?", "저는 어떤 사람인가요?", "나는 뭘 좋아해?", "내가 뭘 좋아하지?", "나 뭐 좋아해?", "내 취향 알아?",
+			"내 별명이 뭐야?", "나한테 어울리는 거 추천해줘", "나 소개해줘", "날 그려줘!", "마사몽 날 기억해?", "마사몽아, 날 기억해?",
+			"안녕! 오랜만이야. 날 기억해?", "날 기억해? 마사몽", "혹시 날 기억해?", "날기억해?", "날 기억해? 🙂"},
+		"en": {"Remember me?", "Do you remember me?", "Hey, do you remember me?", "who am I", "What do you know about me?",
+			"Tell me about myself", "describe me", "what do I like?", "what are my hobbies?", "What's my nickname?", "masamong, who am I?",
+			"Do you remember me? :)"},
+		"es":      {"¿Quién soy?", "Quien soy yo", "¿Me recuerdas?", "¿Qué sabes de mí?", "Oye, ¿te acuerdas de mí?", "¿qué me gusta?"},
+		"ja":      {"私のこと覚えてる？", "私はどんな人？", "私は誰ですか", "ねえ、私のこと覚えてる？", "私について教えて"},
+		"zh-Hans": {"我是谁", "我是谁？", "你还记得我吗", "请介绍一下我", "你好！你还记得我吗？"},
 	} {
-		if !selfIntent(msg) {
-			t.Errorf("%q: no self intent", msg)
+		for _, msg := range msgs {
+			if !selfIntent(msg, "1", names) {
+				t.Errorf("%s %q: no self intent", tag, msg)
+			}
 		}
 	}
-	for _, msg := range []string{
-		"나는 기억력이 좋아. 오늘 서울 날씨 알려줘.", "제가 기억하기로는 민수가 먼저 왔어", "내가 민수가 궁금해", "내가 좋아하는 노래 틀어줘",
-		"내가 누구랑 갔는지 알아?", "나는 기억해, 그날 일", "그 날 기억해?", "그 절 기억해?", "날씨 어때?", "내 취미는 등산이야",
-		"나 소개해 줄 사람 있어?", "나한테 어울리는 옷이 없어", "don't worry about me", "remember me to your mom", "lo que me gusta es el té",
-		"私について来て", "你知道我昨天去哪了吗", "오늘날 기억할 만한 일",
+	for tag, msgs := range map[string][]string{
+		"ko": {"내 정보통신 과제 마감 언제야?", "나는 기억력이 좋아. 오늘 서울 날씨 알려줘.", "제가 기억하기로는 오늘 비 온대요. 맞아?",
+			"제가 기억하기로는 민수가 먼저 왔어", "내가 민수가 궁금해", "내가 좋아하는 노래 틀어줘", "내가 누구랑 갔는지 알아?",
+			"나는 기억해, 그날 일", "그 날 기억해?", "그 절 기억해?", "날씨 어때?", "내 취미는 등산이야", "나 소개해 줄 사람 있어?",
+			"나한테 어울리는 옷이 없어", "오늘날 기억할 만한 일", "나 기억해.", "날 기억해? 라고 걔가 물었어", "영희야, 날 기억해?",
+			"<@202> 날 기억해?", "날 기억해? 오늘 날씨 알려줘", "나 아니야?"},
+		"en": {"What is the weather today?", "Remember me.", "remember me to your mom", "don't worry about me", "Who am I to judge?",
+			"\"Do you remember me?\" he asked.", "He asked if you remember me", "You remind me of my sister. What's the weather today?"},
+		"es": {"Tú me recuerdas a mi hermana. ¿Qué tiempo hace hoy?", "Me recuerdas a mi hermana", "Me recuerdas.",
+			"lo que me gusta es el té", "¡Qué me gusta!"},
+		"ja": {"私のことを覚えてる人に聞いた。今日の天気を教えて。", "私について来て", "私のこと覚えてる？って聞かれた",
+			"私のこと覚えてる。", "私は誰かに聞いた"},
+		"zh-Hans": {"他问你还记得我吗，我没回答。今天天气怎么样？", "你知道我昨天去哪了吗", "你还记得我吗？他问。", "我是谁的朋友"},
 	} {
-		if selfIntent(msg) {
-			t.Errorf("%q: incidental first person counted as self intent", msg)
+		for _, msg := range msgs {
+			if selfIntent(msg, "1", names) {
+				t.Errorf("%s %q: incidental first person counted as self intent", tag, msg)
+			}
+		}
+	}
+}
+
+// Every pack has whole self requests; none of them is empty after trimming.
+func TestSelfRequestPacks(t *testing.T) {
+	table := selfRequests()
+	for _, tag := range lang.Available() {
+		p, _ := lang.Get(tag)
+		if len(p.Memory.SelfRequests) == 0 {
+			t.Errorf("%s: no memory.self_requests", tag)
+		}
+		for _, entry := range p.Memory.SelfRequests {
+			phrases, err := lang.Expand(entry)
+			if err != nil {
+				t.Fatal(tag, entry, err)
+			}
+			for _, phrase := range phrases {
+				if table.key(strings.TrimSuffix(phrase, "?")) == "" {
+					t.Errorf("%s %q: nothing left after trimming", tag, phrase)
+				}
+			}
 		}
 	}
 }

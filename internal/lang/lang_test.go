@@ -206,3 +206,19 @@ func TestMergeSearchUnions(t *testing.T) {
 		t.Fatal("empty list must fall back to the default pack")
 	}
 }
+
+func TestExpand(t *testing.T) {
+	got, err := Expand("{날|나를} {아직 |}기억해")
+	want := []string{"날 아직 기억해", "날 기억해", "나를 아직 기억해", "나를 기억해"}
+	if err != nil || strings.Join(got, "/") != strings.Join(want, "/") {
+		t.Fatalf("got %q, %v", got, err)
+	}
+	if got, err := Expand("who am i"); err != nil || len(got) != 1 || got[0] != "who am i" {
+		t.Fatalf("plain entry: %q, %v", got, err)
+	}
+	for _, bad := range []string{"{a|b", "a|b", "a}", "{a|{b}}", "{a|b|c|d}{a|b|c|d}{a|b|c|d}{a|b|c|d}{a|b|c|d}{a|b}"} {
+		if _, err := Expand(bad); err == nil {
+			t.Errorf("%q: expanded", bad)
+		}
+	}
+}
