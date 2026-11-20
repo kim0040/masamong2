@@ -66,7 +66,7 @@
     "default_speaker": "사용자",
     "answer_template": "Discord 채널 메시지. 말한 사람: {who}\n질문유형힌트: {hint}\n<최근채팅 참고용>\n{recent}\n</최근채팅>\n<세션요약 참고용>\n{session}\n</세션요약>\n<도구결과>\n{tools}\n</도구결과>\n<기억 요약 참고용>\n{summaries}\n</기억 요약>\n<기억>\n{memory}\n</기억>\n\n{who}: {message}",
     "answer_now": "지금 시각: {time} {weekday} ({tz}). 시간 계산에만 쓰고, 묻지 않으면 시각을 말하지 마라.",
-    "ages": {"minutes": "{n}분 전", "hours": "{n}시간 전", "days": "{n}일 전"},
+    "line_time": "{time}", "line_time_dated": "{date} {time}",
     "reply_language_rule": "사용자의 현재 메시지 언어로 답하세요. 페르소나는 말투와 성격을 정할 뿐, 답변 언어를 바꾸지 않습니다. 메시지 언어가 분명하지 않을 때만 방의 기본 언어를 사용하세요.",
     "continue_answer": "앞선 답변이 끊긴 지점부터 이어서 답하세요. 반복하지 말고 미처 끝내지 못한 생각을 마무리하세요.",
     "incomplete_answer": "… (원하시면 계속 이어서 답할게요.)",

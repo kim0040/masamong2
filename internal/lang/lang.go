@@ -276,18 +276,14 @@ type Chat struct {
 	DefaultSpeaker string `json:"default_speaker"`
 	AnswerTemplate string `json:"answer_template"` // {who} {hint} {recent} {session} {tools} {summaries} {memory} {message}
 	// AnswerNow heads the answer's user message with the current time ({time} {weekday} {tz}), so the
-	// answer can place "yesterday" and the conversation's ages. Optional; "" adds nothing.
+	// answer can place "yesterday" and the conversation's times. Optional; "" adds nothing.
 	AnswerNow string `json:"answer_now,omitempty"`
-	// Ages mark how long ago a conversation line was said, for lines older than a few minutes.
-	// Optional; an empty form adds nothing.
-	Ages Ages `json:"ages,omitempty"`
-}
-
-// Ages are the words for a line's age: {n} is the count.
-type Ages struct {
-	Minutes string `json:"minutes,omitempty"`
-	Hours   string `json:"hours,omitempty"`
-	Days    string `json:"days,omitempty"`
+	// LineTime marks a conversation line with its own clock time ({time}), LineTimeDated ({date} {time})
+	// when the line is not of the answer's day. A line's own time never changes once written — unlike
+	// an age relative to now — so the history part of the prompt stays the same between turns and the
+	// provider's prompt cache can reuse it. Optional; an empty form adds nothing.
+	LineTime      string `json:"line_time,omitempty"`
+	LineTimeDated string `json:"line_time_dated,omitempty"`
 }
 
 // Delimiters mark data blocks in the planner prompt. User text containing them is neutralized.

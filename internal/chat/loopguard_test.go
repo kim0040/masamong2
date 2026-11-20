@@ -47,14 +47,17 @@ func TestAnswerCarriesTheTimeAndLineAges(t *testing.T) {
 		{Role: "user", Speaker: "영희", Content: "방금 왔어", At: now.Add(-time.Minute)},
 	}}
 	msgs := BuildAnswerMessages(v, in)
-	if got := msgs[1].Content; got != "철수 (1일 전): 어제 영화 봤어" {
-		t.Fatalf("a day-old line: %q", got)
+	if got := msgs[1].Content; got != "철수 (2026-10-30 13:04): 어제 영화 봤어" {
+		t.Fatalf("the first line, a day old, carries its date and time: %q", got)
 	}
-	if got := msgs[2].Content; got != "민수 (25분 전): 나는 아까 밥 먹음" {
-		t.Fatalf("a 25-minute-old line: %q", got)
+	if got := msgs[2].Content; got != "민수 (14:39): 나는 아까 밥 먹음" {
+		t.Fatalf("a line opening a new stretch of talk carries its clock time: %q", got)
 	}
-	if msgs[3].Content != "맛있었겠다" || msgs[4].Content != "영희: 방금 왔어" {
-		t.Fatalf("the bot's own lines and recent lines carry no age: %q %q", msgs[3].Content, msgs[4].Content)
+	if msgs[3].Content != "맛있었겠다" {
+		t.Fatalf("the bot's own lines carry no time: %q", msgs[3].Content)
+	}
+	if got := msgs[4].Content; got != "영희 (15:03): 방금 왔어" {
+		t.Fatalf("a line after a silence carries its clock time: %q", got)
 	}
 	last := msgs[len(msgs)-1].Content
 	if !strings.HasPrefix(last, "지금 시각: 2026-10-31 15:04 ") || !strings.Contains(strings.SplitN(last, "\n", 2)[0], "KST") {
@@ -62,7 +65,7 @@ func TestAnswerCarriesTheTimeAndLineAges(t *testing.T) {
 	}
 	in.Now = time.Time{}
 	plain := BuildAnswerMessages(v, in)
-	if strings.Contains(plain[len(plain)-1].Content, "지금 시각") || strings.Contains(plain[1].Content, "전)") {
+	if strings.Contains(plain[len(plain)-1].Content, "지금 시각") || plain[1].Content != "철수: 어제 영화 봤어" {
 		t.Fatal("no time leaves the prompt as evaluated")
 	}
 }
