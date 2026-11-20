@@ -44,7 +44,7 @@
 `disasters.query`는 물어볼 때만 답한다. 구 봇처럼 **먼저 알리는** 기능은 스케줄러가 맡는다(`internal/application/disaster_alerts.go`).
 
 - 지진: 1분마다 기상청 `getEqkMsg`. 국내 규모 4.0·해외 7.0 이상(설정), "국내영향없음" 통보 제외. 72시간·150 km 안의 후속 지진은 같은 사건으로 묶어 **처음 올린 메시지를 고친다**(채널이 도배되지 않게).
-- 특보: 5분마다 `wrn_now_data.php`. 경보는 육상 전국, 주의보는 `warning_regions`에 든 지역만, 바다(S로 시작하는 구역)는 `marine: true`일 때만. 새로 나온 것과 해제된 것을 종류·단계별로 묶어 한 번에.
+- 특보: 5분마다 `wrn_now_data.php`. 경보·폭염중대경보는 육상 전국, 주의보는 `warning_regions`에 든 지역만, 바다(S로 시작하는 구역)는 `marine: true`일 때만 알린다. 같은 구역의 같은 특보가 상향되면 이전 단계와 새 단계를 격상 알림 한 건으로 보낸다. 이전 주의보가 지역 설정 때문에 조용했던 곳도 경보로 격상되면 알린다.
 - 처음 켤 때는 기준점만 잡고 지난 소식을 한꺼번에 올리지 않는다. 연습 모드·Discord 미연결·기상청 키 없음이면 쉰다(`disasters.alerts`가 이유를 돌려준다).
 - 켜고 끄기: 콘솔 **도구 → 특보·지진 → 운영** 탭(전체·특보·바다·규모·지역), 채널마다 **방 → 답장** 탭의 재난 알림 스위치(`channels.configure disaster_alerts=off`). config는 `disaster_alerts:`(`enabled`, `earthquake_min_domestic`, `earthquake_min_overseas`, `warnings`, `warning_regions`, `marine`)와 채널 `disaster_alerts: off`.
 - 보내는 곳: 설정된 채널 중 승인된 서버, 답장이 꺼지지 않았고 재난 알림을 끄지 않은 채널.

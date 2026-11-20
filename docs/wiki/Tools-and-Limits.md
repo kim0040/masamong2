@@ -61,7 +61,7 @@ The model picks a **depth** for each `search.web` call: `quick` only when one cu
 Like the previous bot, it posts earthquakes and weather warnings **on its own**. It covers Korea only and needs a KMA key and a Discord connection. A new instance set up outside Korea starts with `disasters` and `notices` off (see [Configuration Reference](https://github.com/kim0040/masamong2/wiki/Configuration-Reference#features)).
 
 - **Earthquakes**: checked every minute. By default magnitude 4.0+ in Korea and 7.0+ abroad, and "no impact in Korea" notices are not posted. Quakes within 72 hours and 150 km count as one event; the first post is edited to update it.
-- **Warnings**: checked every 5 minutes. Land warnings nationwide, advisories only for chosen regions, marine warnings only when switched on; lifted warnings are announced too.
+- **Warnings** are checked every 5 minutes. The bot announces land warnings and extreme heat emergency warnings nationwide, advisories in selected regions, and marine alerts when enabled. If the same hazard rises in severity in the same area, one alert shows the previous and new levels. The bot also announces when a warning ends.
 - When first turned on, that moment is the starting point; old news is not posted in a burst.
 - **Switching**: in the console under **Tools → Disaster alerts → Operations** (all, warnings, marine, magnitude thresholds, advisory regions); per room with the "Disaster alerts" switch on the room's **Replies** tab. The status (`disasters.alerts`) shows why it is idle (off, no KMA key, Discord not connected, no room to post in).
 
