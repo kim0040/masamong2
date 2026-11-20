@@ -478,10 +478,18 @@ func BuildAnswerMessages(v Voice, in AnswerInput) []Msg {
 		c := strings.TrimSpace(t.Content)
 		if (t.Role == "user" || t.Role == "assistant") && c != "" {
 			r := []rune(c)
-			if t.Role == "user" && t.Speaker != "" {
-				c = t.Speaker + lineTime(v, in.Now, t.At, marked[off+j]) + ": " + string(r[:min(1500, len(r))])
-			} else {
-				c = string(r[:min(1500, len(r))])
+			text := string(r[:min(1500, len(r))])
+			mark := lineTime(v, in.Now, t.At, marked[off+j])
+			switch {
+			case t.Role == "user" && t.Speaker != "":
+				if mark != "" {
+					mark = " " + mark
+				}
+				c = t.Speaker + mark + ": " + text
+			case mark != "":
+				c = mark + " " + text
+			default:
+				c = text
 			}
 			msgs = append(msgs, Msg{Role: t.Role, Content: c})
 		}
@@ -508,20 +516,29 @@ func answerNow(v Voice, now time.Time) string {
 	return lang.Fill(v.pack().Chat.AnswerNow, "time", now.Format("2006-01-02 15:04"), "weekday", weekday, "tz", now.Location().String())
 }
 
-// lineAgeAfter is how long after the line before it a line must come to carry its clock time on the
-// prompt: a stretch of talk reads as one, so only the line that opens it is marked.
+// lineAgeAfter is how long after the line before it a line must come to carry its date and time on
+// the prompt: a stretch of talk reads as one, so only the line that opens it is marked — plus the
+// first answer a user gives a marked bot line.
 const lineAgeAfter = 5 * time.Minute
 
-// lineTimes marks the lines shown with their clock time: the first line of the history and every line
-// that comes lineAgeAfter or more after the line before it. It is a property of the line and its
-// predecessor, so the mark never changes later — unlike the ages shown before, which moved with every
-// turn's now and broke the cached prefix (the current time itself heads the final user message, so the
-// model can still tell how old a line is).
+// lineTimes marks the lines shown with their date and clock time: the first line of the history,
+// every line that comes lineAgeAfter or more after the line before it, and the first user line after
+// a bot line so marked — that line is someone's answer to what the bot said, and the time ties it to
+// the turn. It is a property of the line and its predecessor over the whole history, so the mark
+// never changes later — unlike the ages shown before, which moved with every turn's now and broke
+// the cached prefix (the current time itself heads the final user message, so the model can still
+// tell how old a line is).
 func lineTimes(in AnswerInput) []bool {
 	marked := make([]bool, len(in.History))
 	var prev time.Time
 	for i, t := range in.History {
-		if !in.Now.IsZero() && !t.At.IsZero() && (i == 0 || (!prev.IsZero() && t.At.Sub(prev) >= lineAgeAfter)) {
+		switch {
+		case in.Now.IsZero() || t.At.IsZero():
+		case i == 0:
+			marked[i] = true
+		case !prev.IsZero() && t.At.Sub(prev) >= lineAgeAfter:
+			marked[i] = true
+		case t.Role == "user" && in.History[i-1].Role == "assistant" && marked[i-1]:
 			marked[i] = true
 		}
 		prev = t.At
@@ -529,21 +546,19 @@ func lineTimes(in AnswerInput) []bool {
 	return marked
 }
 
-// lineTime is " (14:05)" for a marked line — the line's own clock time in the channel's zone, with the
-// date when the line is not of the answer's day (the pack's line_time / line_time_dated).
+// lineTime is "(11-20 23:40)" for a marked line — the line's own date and clock time in the channel's
+// zone, in the pack's short form (chat.line_time). The date is always part of it, so nothing in the
+// rendered line depends on the answer's day and no timestamp rewrites at midnight.
 func lineTime(v Voice, now, at time.Time, show bool) string {
 	if !show || now.IsZero() || at.IsZero() {
 		return ""
 	}
-	lt := at.In(now.Location())
 	tpl := v.pack().Chat.LineTime
-	if d := lt.Format("2006-01-02"); d != now.Format("2006-01-02") {
-		tpl = v.pack().Chat.LineTimeDated
-	}
 	if strings.TrimSpace(tpl) == "" {
 		return ""
 	}
-	return " (" + lang.Fill(tpl, "date", lt.Format("2006-01-02"), "time", lt.Format("15:04")) + ")"
+	lt := at.In(now.Location())
+	return "(" + lang.Fill(tpl, "date", lt.Format("01-02"), "time", lt.Format("15:04")) + ")"
 }
 
 // assumedValues reports whether a tool result carries a value the tool assumed (an assumed_* key).

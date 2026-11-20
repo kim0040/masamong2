@@ -66,7 +66,7 @@
     "default_speaker": "usuario",
     "answer_template": "Mensaje de canal de Discord. De: {who}\nPista del tipo de pregunta: {hint}\n<chat_reciente de referencia>\n{recent}\n</chat_reciente>\n<resumen_sesion de referencia>\n{session}\n</resumen_sesion>\n<resultados_herramientas>\n{tools}\n</resultados_herramientas>\n<resumenes_memoria de referencia>\n{summaries}\n</resumenes_memoria>\n<memoria>\n{memory}\n</memoria>\n\n{who}: {message}",
     "answer_now": "Hora actual: {time} {weekday} ({tz}). Úsala solo para calcular tiempos; no menciones la hora salvo que te la pidan.",
-    "line_time": "{time}", "line_time_dated": "{date} {time}",
+    "line_time": "{date} {time}",
     "reply_language_rule": "Responde en el idioma del último mensaje de la persona. La personalidad define el tono y el carácter, no el idioma de la respuesta. Usa el idioma predeterminado de la sala solo cuando no esté claro el idioma del mensaje.",
     "continue_answer": "Continúa justo donde se cortó la respuesta anterior. No la repitas y termina la idea que quedó a medias.",
     "incomplete_answer": "… (Pregunta si quieres que continúe.)",

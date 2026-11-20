@@ -278,12 +278,12 @@ type Chat struct {
 	// AnswerNow heads the answer's user message with the current time ({time} {weekday} {tz}), so the
 	// answer can place "yesterday" and the conversation's times. Optional; "" adds nothing.
 	AnswerNow string `json:"answer_now,omitempty"`
-	// LineTime marks a conversation line with its own clock time ({time}), LineTimeDated ({date} {time})
-	// when the line is not of the answer's day. A line's own time never changes once written — unlike
-	// an age relative to now — so the history part of the prompt stays the same between turns and the
-	// provider's prompt cache can reuse it. Optional; an empty form adds nothing.
-	LineTime      string `json:"line_time,omitempty"`
-	LineTimeDated string `json:"line_time_dated,omitempty"`
+	// LineTime marks a conversation line with its own date and clock time ({date} {time}) in a short
+	// form — "11-20 23:40". A line's own stamp never changes once written — unlike an age relative to
+	// now, and unlike a same-day form that would gain a date at midnight — so the history part of the
+	// prompt stays the same between turns and the provider's prompt cache can reuse it. Optional; an
+	// empty form adds nothing.
+	LineTime string `json:"line_time,omitempty"`
 }
 
 // Delimiters mark data blocks in the planner prompt. User text containing them is neutralized.

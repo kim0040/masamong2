@@ -66,7 +66,7 @@
     "default_speaker": "ユーザー",
     "answer_template": "Discordチャンネルのメッセージ。発言者: {who}\n質問タイプのヒント: {hint}\n<最近のチャット 参照用>\n{recent}\n</最近のチャット>\n<セッション要約 参照用>\n{session}\n</セッション要約>\n<ツール結果>\n{tools}\n</ツール結果>\n<記憶の要約 参照用>\n{summaries}\n</記憶の要約>\n<記憶>\n{memory}\n</記憶>\n\n{who}: {message}",
     "answer_now": "現在時刻: {time} {weekday}（{tz}）。時間の計算にだけ使い、聞かれない限り時刻を口にしない。",
-    "line_time": "{time}", "line_time_dated": "{date} {time}",
+    "line_time": "{date} {time}",
     "reply_language_rule": "メンバーの最新メッセージと同じ言語で回答してください。ペルソナは口調や性格を決めるもので、回答言語は決めません。メッセージの言語が明確でない場合にだけ、チャンネルの既定言語を使ってください。",
     "continue_answer": "前の回答が途切れたところから続けてください。繰り返さず、未完了の内容を最後まで仕上げてください。",
     "incomplete_answer": "……（続きが必要ならお知らせください。）",

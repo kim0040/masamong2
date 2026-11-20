@@ -66,7 +66,7 @@
     "default_speaker": "用户",
     "answer_template": "Discord 频道消息。发言者：{who}\n问题类型提示：{hint}\n<recent_chat 仅供参考>\n{recent}\n</recent_chat>\n<session_summary 仅供参考>\n{session}\n</session_summary>\n<tool_results>\n{tools}\n</tool_results>\n<memory_summaries 仅供参考>\n{summaries}\n</memory_summaries>\n<memory>\n{memory}\n</memory>\n\n{who}: {message}",
     "answer_now": "当前时间：{time} {weekday}（{tz}）。只用于推算时间，除非被问到，不要提及时间。",
-    "line_time": "{time}", "line_time_dated": "{date} {time}",
+    "line_time": "{date} {time}",
     "reply_language_rule": "请使用成员最新消息的语言回答。角色设定决定语气和个性，不决定回复语言。只有在无法确定消息语言时，才使用频道默认语言。",
     "continue_answer": "从上一条回答中断的位置继续。不要重复内容，并完成被截断的想法。",
     "incomplete_answer": "……（如需继续，请告诉我。）",
