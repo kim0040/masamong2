@@ -24,9 +24,57 @@ type turnPerson struct {
 	caller     bool
 }
 
-// Match requests about the caller, not incidental first-person subjects
-// ("I wonder what Minsoo likes"). Exact self mentions also work.
-var selfRequest = regexp.MustCompile(`(?i)(?:^|[^\pL\pN])(?:(?:나|저)(?:에\s*(?:대해|관해)|한테\s*어울)|(?:나[는도가를]?|저[는도가를]?|내가|제가|난|전|날|절)\s*(?:(?:뭘|뭐를|무엇을|뭐|어떤\s*걸)\s*)?(?:어떤\s*사람|누구|좋아|싫어|소개|그려|기억)|(?:나의|저의|내|제)\s*(?:취향|성격|별명|소개|특징|근황|취미)|(?:about me|describe me|draw me|remember me|who am i|what do i like|my (?:hobbies|interests|nickname|personality))\b|(?:sobre mí|descríbeme|quién soy|qué me gusta)\b|(?:私|僕|わたし)(?:について|の趣味|はどんな人)|(?:我是谁|我的爱好|介绍我|关于我))`)
+// Match whole requests about the caller with bounded predicates ("날 기억해?",
+// "나에 대해 뭐 알아?"), not first-person asides ("나는 기억력이 좋아") or other
+// people's names ("내가 민수가 궁금해"). Exact self mentions and replies also work.
+const selfEnd = `\s*[ㅋㅎㅠㅜ]*\s*(?:[?？!！.。~…\n]|$)`
+
+const selfRecall = `기억(?:해|해요|하니|하냐|하나|하나요|하지|하죠|하세요|하시나요|하고\s*있어|하고\s*있니|하고\s*있어요|나|나요)`
+
+var selfRequest = regexp.MustCompile(`(?i)(?:(?:^|[^\pL\pN])(?:` + strings.Join([]string{
+	`(?:날|나를|저를|절)\s*(?:아직\s*|혹시\s*)?` + selfRecall + selfEnd,
+	`(?:나|저)\s*(?:아직\s*|혹시\s*)?` + selfRecall + `\s*[ㅋㅎㅠㅜ]*\s*[?？]`,
+	`(?:나|저)에\s*(?:대해서?|관해서?|대한)\s*(?:뭐|뭘|무엇|어떤|아는|알고|알아|알려|기억|말해|얘기|이야기|설명|정리|요약|어떻게|소개)`,
+	`(?:내|제|나의|저의)\s*정보`,
+	`(?:내가|제가|난|나는|저는|전)\s*누구(?:야|게|냐|니|지|일까|일까요|인가|인가요|예요|에요|죠|였지|였더라|인지\s*알아|인지\s*알아요)?` + selfEnd,
+	`(?:나|저|난|전|나는|저는|내가|제가)\s*어떤\s*사람(?:이야|이에요|이예요|인가|인가요|인지|같아|같니|같아요|일까|일까요|이니|이냐|이지|이었어|이었지|인지\s*알아)` + selfEnd,
+	`(?:나|저|난|전|나는|저는|내가|제가)\s*(?:뭘|뭐를|무엇을|뭐|어떤\s*걸|어떤\s*것을)\s*(?:좋아|싫어)(?:해|해요|하지|하죠|하니|하냐|하나|하나요|할까|할까요|했지|했더라|하더라|하는지\s*알아)?` + selfEnd,
+	`(?:내|제|나의|저의)\s*(?:취향|성격|별명|특징|근황|취미|관심사)(?:이|가|은|는|을|를)?\s*(?:뭐|뭘|뭔지|무엇|어때|어떤|알아|아니|알고|기억|말해|알려|맞혀|맞춰)`,
+	`(?:나|저)한테\s*(?:뭐가\s*|어떤\s*게\s*)?어울(?:려|릴까|릴까요|리는\s*(?:거|게|걸|건|것))`,
+	`(?:날|나를|저를|절|나|저|내|제)\s*소개\s*(?:좀\s*)?(?:해\s*줘|해\s*주세요|해\s*봐|해\s*줄래|해\s*줄\s*수\s*있어|해)` + selfEnd,
+	`(?:날|나를|저를|절|나|저)\s*(?:좀\s*)?그려\s*(?:줘|주세요|봐|줄래|줄\s*수\s*있어)` + selfEnd,
+	`(?:what|anything)\s+(?:do|did)\s+you\s+(?:know|remember|recall)\s+about\s+me\b`,
+	`tell\s+me\s+about\s+(?:me|myself)\b`,
+	`(?:describe|draw)\s+me\b`,
+	`(?:do|did)\s+you\s+remember\s+me\b`,
+	`who\s+am\s+i\b`,
+	`what\s+kind\s+of\s+person\s+am\s+i\b`,
+	`what\s+do\s+i\s+(?:like|enjoy|love|hate)\b`,
+	`what(?:'s|\s+is|\s+are|\s+was|\s+were)\s+my\s+(?:hobby|hobbies|interests|nickname|personality)\b`,
+	`(?:qué\s+sabes|qué\s+recuerdas|háblame)\s+(?:de|sobre)\s+mí`,
+	`descríbeme`,
+	`quién\s+soy`,
+	`qué\s+me\s+gusta`,
+	`me\s+recuerdas`,
+}, "|") + `)|(?:私|僕|わたし|俺|あたし)(?:について(?:何|なに|知って|覚えて|教えて|どう)|のこと(?:を)?(?:覚えて|知って|どう思)|を覚えて|の趣味(?:は|って)(?:何|なに)|はどんな人|は誰)|我是谁|我是什么样的人|我的爱好是什么|我喜欢什么|介绍一下我|关于我(?:你知道|你记得|的事)|你(?:还)?记得我吗)`)
+
+// "그 날 기억해?" asks about a day (날/절 are also nouns), not about the caller.
+var selfNounBefore = map[string]bool{"그": true, "이": true, "저": true, "그런": true, "이런": true, "저런": true, "어느": true, "첫": true,
+	"마지막": true, "어떤": true, "옛": true, "지난": true, "다음": true, "그다음": true, "좋은": true, "그때": true}
+
+func selfIntent(message string) bool {
+	for _, m := range selfRequest.FindAllStringIndex(message, -1) {
+		match := strings.TrimLeftFunc(message[m[0]:m[1]], func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
+		if strings.HasPrefix(match, "날") || strings.HasPrefix(match, "절") {
+			before := strings.Fields(message[:m[1]-len(match)])
+			if len(before) > 0 && selfNounBefore[before[len(before)-1]] {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
 
 type turnNames struct {
 	current      map[string]string
@@ -252,7 +300,7 @@ func (s *Service) resolvePeople(tx *sql.Tx, in ChatInput, rooms map[string]bool)
 			add(ref, false)
 		}
 	}
-	if selfRequest.MatchString(in.Message) {
+	if selfIntent(in.Message) {
 		add(caller, true)
 	}
 	limit := chat.MaxOtherCards

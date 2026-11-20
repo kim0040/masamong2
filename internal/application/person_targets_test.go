@@ -285,3 +285,29 @@ func TestPersonTargets(t *testing.T) {
 		}
 	}
 }
+
+func TestSelfIntent(t *testing.T) {
+	for _, msg := range []string{
+		"날 기억해?", "나를 기억하니", "저를 기억하세요?", "<@1> 날 기억하고 있어?", "나 기억해?", "저 기억하시나요?",
+		"나에 대해 뭐 알아?", "저에 대해서 알려줘", "내 정보 보여줘", "제 정보",
+		"내가 누구야?", "난 누구게?", "내가 누구인지 알아?", "나는 어떤 사람이야?", "저는 어떤 사람인가요?",
+		"나는 뭘 좋아해?", "내가 뭘 좋아하지?", "나 뭐 좋아해?", "내 취향 알아?", "내 별명이 뭐야?", "나한테 어울리는 거 추천해줘",
+		"나 소개해줘", "날 그려줘!", "날 기억해 ㅋㅋ",
+		"what do I like?", "Do you remember me?", "who am I", "what do you know about me", "Tell me about myself", "describe me",
+		"what are my hobbies?", "¿Quién soy?", "qué me gusta", "私のこと覚えてる？", "私はどんな人？", "我是谁", "你还记得我吗",
+	} {
+		if !selfIntent(msg) {
+			t.Errorf("%q: no self intent", msg)
+		}
+	}
+	for _, msg := range []string{
+		"나는 기억력이 좋아. 오늘 서울 날씨 알려줘.", "제가 기억하기로는 민수가 먼저 왔어", "내가 민수가 궁금해", "내가 좋아하는 노래 틀어줘",
+		"내가 누구랑 갔는지 알아?", "나는 기억해, 그날 일", "그 날 기억해?", "그 절 기억해?", "날씨 어때?", "내 취미는 등산이야",
+		"나 소개해 줄 사람 있어?", "나한테 어울리는 옷이 없어", "don't worry about me", "remember me to your mom", "lo que me gusta es el té",
+		"私について来て", "你知道我昨天去哪了吗", "오늘날 기억할 만한 일",
+	} {
+		if selfIntent(msg) {
+			t.Errorf("%q: incidental first person counted as self intent", msg)
+		}
+	}
+}
