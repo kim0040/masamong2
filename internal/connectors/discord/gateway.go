@@ -650,6 +650,9 @@ func (g *Gateway) PersonMemoryChannels(guildID string) map[string]bool {
 		if ch.Type != discordgo.ChannelTypeGuildText && ch.Type != discordgo.ChannelTypeGuildNews {
 			continue
 		}
+		if !known || ch.PermissionOverwrites == nil {
+			continue // a missing field is not evidence of an empty overwrite list
+		}
 		perms, restricted := everyone, false
 		for _, o := range ch.PermissionOverwrites {
 			if o.ID == guildID && o.Type == discordgo.PermissionOverwriteTypeRole {
@@ -658,7 +661,7 @@ func (g *Gateway) PersonMemoryChannels(guildID string) map[string]bool {
 				restricted = true
 			}
 		}
-		rooms[ch.ID] = known && !restricted && perms&visible == visible
+		rooms[ch.ID] = !restricted && perms&visible == visible
 	}
 	for _, th := range gu.Threads {
 		if th.Type == discordgo.ChannelTypeGuildPrivateThread {
