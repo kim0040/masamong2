@@ -58,6 +58,7 @@ func (s *Service) peopleServers(req action.Request) action.Result {
 	}
 	in := inputMap(req)
 	guildFilter := strings.TrimSpace(strVal(in, "guild_id", ""))
+	accountFilter := strings.TrimSpace(strVal(in, "user_id", ""))
 	query := strings.ToLower(strings.TrimSpace(strVal(in, "q", "")))
 
 	prefix := "discord:"
@@ -78,7 +79,7 @@ func (s *Service) peopleServers(req action.Request) action.Result {
 	peopleByRef := map[string]*serverPerson{}
 	for _, sc := range scanned {
 		room, id, label, firstRaw, lastRaw, count := sc.room, sc.id, sc.label, sc.first, sc.last, sc.count
-		if withdrawn[id] {
+		if withdrawn[id] || accountFilter != "" && id != accountFilter {
 			continue
 		}
 		guildID := discordGuildFromRoom(room)
@@ -193,6 +194,9 @@ func (s *Service) peopleServers(req action.Request) action.Result {
 				continue
 			}
 			people = append(people, person)
+		}
+		if accountFilter != "" && len(people) == 0 {
+			continue
 		}
 		sort.Slice(people, func(i, j int) bool {
 			if !people[i].lastSeen.Equal(people[j].lastSeen) {

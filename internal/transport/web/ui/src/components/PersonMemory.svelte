@@ -19,9 +19,9 @@
   // so the operator picks the server. The person is named by the dialog this sits in; the ID is not shown.
   let { userId, preferredGuild = '' }: { userId: string; preferredGuild?: string } = $props()
 
-  // Search by account first: people.servers otherwise caps each group at its 200 most recent speakers.
+  // Exact membership is filtered before the per-server list cap.
   type Group = { guild_id: string; name: string; people: { user_id: string; last_seen: string }[] }
-  const membership = resource<{ servers: Group[] }>('people.servers', () => ({ q: userId }), { live: ['config', 'audit', 'memory', 'discord'] })
+  const membership = resource<{ servers: Group[] }>('people.servers', () => ({ user_id: userId }), { live: ['config', 'audit', 'memory', 'discord'] })
   const servers = $derived((membership.data?.servers ?? []).flatMap((g) => {
     const person = g.people.find((p) => p.user_id === userId)
     return person ? [{ value: g.guild_id, label: g.name || g.guild_id, last: person.last_seen }] : []

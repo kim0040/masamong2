@@ -32,6 +32,24 @@ type reviewPerson struct {
 	at     time.Time
 }
 
+func TestReviewExactAccountMembership(t *testing.T) {
+	s, _, _ := memorySvc(t)
+	seedServerPerson(t, s, "old-member", "discord:g:c", "101", "Old member", "2026-01-01T00:00:00Z")
+	for i := range 200 {
+		id := "new-" + strconv.Itoa(i)
+		seedServerPerson(t, s, id, "discord:g:c", id, "101 admirer", "2026-06-01T00:00:00Z")
+	}
+	r := exec(s, "people.servers", map[string]any{"user_id": "101"})
+	var out peopleServersTestResponse
+	raw, err := json.Marshal(r.Output)
+	if err != nil || !r.OK || json.Unmarshal(raw, &out) != nil || len(out.Servers) != 1 || len(out.Servers[0].People) != 1 || out.Servers[0].People[0].UserID != "101" || out.Servers[0].GuildID != "g" {
+		t.Fatalf("exact membership: %s, %v", raw, err)
+	}
+	if r := exec(s, "memory.mine.show", map[string]any{"guild_id": out.Servers[0].GuildID, "user_id": "101"}); !r.OK {
+		t.Fatal(r.Error)
+	}
+}
+
 func (f reviewPerson) source(t *testing.T, guild, room, id, account, label string, at time.Time) string {
 	t.Helper()
 	ok, err := f.engine.Capture(engine.LiveMessage{GuildID: guild, ChannelID: room, MessageID: id, AuthorID: account, AuthorName: label, At: at, Content: id + " evidence"})
