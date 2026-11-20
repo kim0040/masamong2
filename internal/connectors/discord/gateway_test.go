@@ -199,7 +199,7 @@ func TestCommandNamesAreDiscordSafe(t *testing.T) {
 			}
 		}
 	}
-	if got := CommandsHash(); got != "f8173c434eb8d24c" {
+	if got := CommandsHash(); got != "2e88fb82616b8442" {
 		t.Fatalf("command registration hash = %q", got)
 	}
 }
@@ -487,7 +487,10 @@ func TestFailedTurnsGetAShortNoticeOnlyWhenNothingWasSaid(t *testing.T) {
 	SetCatalog(svc.I18n)
 	g := &Gateway{svc: svc, log: slog.New(slog.NewTextHandler(io.Discard, nil)), notices: map[string]time.Time{}}
 	var bodies []string
-	send := func(_ context.Context, msg *discordgo.MessageSend) error { bodies = append(bodies, msg.Content); return nil }
+	send := func(_ context.Context, msg *discordgo.MessageSend) error {
+		bodies = append(bodies, msg.Content)
+		return nil
+	}
 	m := &discordgo.MessageCreate{Message: &discordgo.Message{ID: "m1", ChannelID: "c1", GuildID: "g1", Author: &discordgo.User{ID: "u1"}}}
 	g.sendChatNoticeWith(context.Background(), m, chatFailureKey(timeout, false), true, send)
 	g.sendChatNoticeWith(context.Background(), m, chatFailureKey(timeout, false), true, send)

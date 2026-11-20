@@ -1,6 +1,8 @@
 // Package fx adapts ExchangeRate-API. Two endpoints, two field names:
-//   keyed  https://v6.exchangerate-api.com/v6/latest/{base} → "conversion_rates", Authorization: Bearer
-//   open   https://open.er-api.com/v6/latest/{base}         → "rates", no key
+//
+//	keyed  https://v6.exchangerate-api.com/v6/latest/{base} → "conversion_rates", Authorization: Bearer
+//	open   https://open.er-api.com/v6/latest/{base}         → "rates", no key
+//
 // Both share {"result":"success"|"error","error-type":...}. We accept either field so a plan change
 // on the provider side does not break the feature.
 package fx

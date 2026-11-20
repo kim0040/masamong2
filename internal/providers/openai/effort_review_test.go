@@ -99,7 +99,7 @@ func TestThinkingBlocksStayWithTheirModel(t *testing.T) {
 	_ = json.Unmarshal(res.Message, &plain)
 	delete(plain, originField)
 	legacy, _ := json.Marshal(plain)
-	_, turns, err := anthropicMessages([]Message{{Role: "user", Content: "q"}, {Role: "assistant", Raw: legacy}}, "claude-b@x")
+	_, _, turns, err := anthropicMessages([]Message{{Role: "user", Content: "q"}, {Role: "assistant", Raw: legacy}}, "claude-b@x", false)
 	if err != nil || blockType(turns[1].Content[0]) != "thinking" {
 		t.Fatalf("no origin recorded, nothing removed: %v %v", turns, err)
 	}

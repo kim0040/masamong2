@@ -66,7 +66,7 @@
     "default_speaker": "user",
     "answer_template": "Discord channel message. From: {who}\nQuestion type hint: {hint}\n<recent_chat for reference>\n{recent}\n</recent_chat>\n<session_summary for reference>\n{session}\n</session_summary>\n<tool_results>\n{tools}\n</tool_results>\n<memory_summaries for reference>\n{summaries}\n</memory_summaries>\n<memory>\n{memory}\n</memory>\n\n{who}: {message}",
     "answer_now": "Current time: {time} {weekday} ({tz}). Use it only to work out times; don't mention the time unless asked.",
-    "ages": {"minutes": "{n} min ago", "hours": "{n} h ago", "days": "{n} d ago"},
+    "line_time": "{date} {time}",
     "reply_language_rule": "Answer in the language of the user's latest message. The persona sets the tone and personality, not the reply language. Use the room's default language only when the message language is unclear.",
     "continue_answer": "Continue exactly where the previous answer stopped. Do not repeat it; finish the thought that was cut off.",
     "incomplete_answer": "… (Ask if you would like me to continue.)",

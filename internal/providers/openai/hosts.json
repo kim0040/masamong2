@@ -8,6 +8,9 @@
       "base_url": "https://openrouter.ai/api/v1",
       "key_env": "MASAMONG_OPENROUTER_KEY",
       "key_url": "https://openrouter.ai/settings/keys",
+      "_about_cache_breakpoints": "Prompt caching doc (read 2026-11-20): explicit cache_control breakpoints are taken for Anthropic and Gemini models; other families cache implicitly, so only anthropic/* and google/gemini-* models get one (openai.go cachePointOK). Gemini cache writes are billed at the plain input price — no write markup — so cache_write_factor is 1.",
+      "cache_breakpoints": true,
+      "cache_write_factor": 1,
       "batch": {"style": "inline", "kinds": ["chat", "embed"], "max_items": 10000, "discount": 0.5}
     },
     {
@@ -40,6 +43,9 @@
       "base_url": "https://api.anthropic.com/v1",
       "key_env": "MASAMONG_ANTHROPIC_KEY",
       "key_url": "https://platform.claude.com/settings/keys",
+      "_about_cache_write_factor": "Anthropic's prompt-caching doc (read 2026-11-20): a five-minute cache write bills at 1.25x the input price. The breakpoints written here are five-minute ephemeral ones.",
+      "cache_breakpoints": true,
+      "cache_write_factor": 1.25,
       "batch": {"style": "anthropic", "kinds": ["chat"], "max_items": 100000, "discount": 0.5}
     },
     {
@@ -99,7 +105,7 @@
     "anthropic": {
       "checked": "2026-10-31",
       "source": "https://platform.claude.com/docs/en/about-claude/pricing",
-      "_about": "Third column: a prompt-cache read, 0.1x the input price. A cache write costs 1.25x the input price (cacheWriteFactor in openai.go); masamong sends no cache_control yet, so neither appears today. Haiku 5.5 bills a prompt over 100k tokens at $0.50/$2.50; masamong's prompts stay far below that.",
+      "_about": "Third column: a prompt-cache read, 0.1x the input price. A cache write costs 1.25x the input price (cacheWriteFactor in openai.go); the answer call sends one breakpoint at the end of its stable prefix, so both appear on it. Haiku 5.5 bills a prompt over 100k tokens at $0.50/$2.50; masamong's prompts stay far below that.",
       "models": {
         "claude-fable-5-1": [10.0, 50.0, 1],
         "claude-fable-5": [10.0, 50.0, 1],

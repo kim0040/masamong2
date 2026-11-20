@@ -274,6 +274,10 @@ type Msg struct {
 	// Images are pictures sent with this message (only the answer's last user message carries them,
 	// when the member called the bot with pictures and the answer model takes them). Never logged.
 	Images []Image `json:"-"`
+	// CachePoint marks the end of the answer prompt's stable prefix: a host that takes an explicit
+	// prompt-cache breakpoint is asked to cache everything through this message. Never sent to a host
+	// that takes none, and never set on the prompts of other roles.
+	CachePoint bool `json:"-"`
 }
 
 // Image is a prepared picture: media type and bytes.

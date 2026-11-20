@@ -19,15 +19,15 @@ const (
 )
 
 type Poll struct {
-	ID          string
-	ScopeKey    string
-	Question    string
-	Options     []Option
-	MaxSelect   int
-	ClosesAt    *time.Time
-	Status      Status
-	Revision    int
-	Votes       map[string][]string // participant -> option IDs
+	ID        string
+	ScopeKey  string
+	Question  string
+	Options   []Option
+	MaxSelect int
+	ClosesAt  *time.Time
+	Status    Status
+	Revision  int
+	Votes     map[string][]string // participant -> option IDs
 }
 
 type Option struct {

@@ -1157,7 +1157,7 @@ func (c chatLLM) ask(ctx context.Context, r chatRoute, role string, msgs []chat.
 	}
 	om := make([]openai.Message, len(msgs))
 	for i, m := range msgs {
-		om[i] = openai.Message{Role: m.Role, Content: m.Content, Images: imageParts(m.Images)}
+		om[i] = openai.Message{Role: m.Role, Content: m.Content, Images: imageParts(m.Images), CachePoint: m.CachePoint}
 	}
 	t := temperature
 	effort, quick := r.callEffort(), quickAnswer(ctx)
@@ -1599,7 +1599,7 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	if attributed {
 		// the caller's conversation replaces the channel's plain history and recent lines: the other
 		// conversations of the room are not shown to the planner or the answer at all
-		history, recent, maxHistory = conv.history, nil, 24
+		history, recent, maxHistory = conv.history, nil, 80
 		if in.sourceRefs != nil {
 			*in.sourceRefs = append(append(*in.sourceRefs, windowLinks...), conv.sources...)
 		}

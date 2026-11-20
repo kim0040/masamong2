@@ -454,18 +454,35 @@ func BuildAnswerMessages(v Voice, in AnswerInput) []Msg {
 		who = c.DefaultSpeaker
 	}
 	msgs := []Msg{{Role: "system", Content: in.System}}
+	// Marks are decided over the whole history before it is cut to MaxHistory: a line's mark is a
+	// property of it and the line before it, so a line the cut puts first keeps the mark its own
+	// predecessor gave it.
+	marked := lineTimes(in)
 	hist := in.History
+	off := 0
 	if in.MaxHistory > 0 && len(hist) > in.MaxHistory {
-		hist = hist[len(hist)-in.MaxHistory:]
+		off = len(hist) - in.MaxHistory // the newest MaxHistory rows
+		hist = hist[off:]
 	}
-	for _, t := range hist {
+	if len(hist) > 0 {
+		marked[off] = true // the first line shown is always marked
+	}
+	for j, t := range hist {
 		c := strings.TrimSpace(t.Content)
 		if (t.Role == "user" || t.Role == "assistant") && c != "" {
 			r := []rune(c)
-			if t.Role == "user" && t.Speaker != "" {
-				c = t.Speaker + lineAge(v, in.Now, t.At) + ": " + string(r[:min(1500, len(r))])
-			} else {
-				c = string(r[:min(1500, len(r))])
+			text := string(r[:min(1500, len(r))])
+			mark := lineTime(v, in.Now, t.At, marked[off+j])
+			switch {
+			case t.Role == "user" && t.Speaker != "":
+				if mark != "" {
+					mark = " " + mark
+				}
+				c = t.Speaker + mark + ": " + text
+			case mark != "":
+				c = mark + " " + text
+			default:
+				c = text
 			}
 			msgs = append(msgs, Msg{Role: t.Role, Content: c})
 		}
@@ -476,6 +493,10 @@ func BuildAnswerMessages(v Voice, in AnswerInput) []Msg {
 		user = answerNow(v, in.Now) + "\n" + user
 	}
 	msgs = append(msgs, Msg{Role: "user", Content: user})
+	// one cache breakpoint ends the stable prefix: the last history message before the final user
+	// message, or the system message when there is no history (providers/openai sends it to the hosts
+	// flagged for it in hosts.json; everywhere else the flag stays a no-op)
+	msgs[len(msgs)-2].CachePoint = true
 	return msgs
 }
 
@@ -488,28 +509,49 @@ func answerNow(v Voice, now time.Time) string {
 	return lang.Fill(v.pack().Chat.AnswerNow, "time", now.Format("2006-01-02 15:04"), "weekday", weekday, "tz", now.Location().String())
 }
 
-// lineAgeAfter is how old a line must be before its age is shown: the last few minutes read as now.
+// lineAgeAfter is how long after the line before it a line must come to carry its date and time on
+// the prompt: a stretch of talk reads as one, so only the line that opens it is marked — plus the
+// first answer a user gives a marked bot line.
 const lineAgeAfter = 5 * time.Minute
 
-// lineAge is " (25분 전)" for a line said a while before now, "" for a recent one or an unknown time.
-func lineAge(v Voice, now, at time.Time) string {
-	if now.IsZero() || at.IsZero() {
+// lineTimes marks the lines shown with their date and clock time: the first line of the history,
+// every line that comes lineAgeAfter or more after the line before it, and the first user line after
+// a bot line so marked — that line is someone's answer to what the bot said, and the time ties it to
+// the turn. It is a property of the line and its predecessor over the whole history, so the mark
+// never changes later — unlike the ages shown before, which moved with every turn's now and broke
+// the cached prefix (the current time itself heads the final user message, so the model can still
+// tell how old a line is).
+func lineTimes(in AnswerInput) []bool {
+	marked := make([]bool, len(in.History))
+	var prev time.Time
+	for i, t := range in.History {
+		switch {
+		case in.Now.IsZero() || t.At.IsZero():
+		case i == 0:
+			marked[i] = true
+		case !prev.IsZero() && t.At.Sub(prev) >= lineAgeAfter:
+			marked[i] = true
+		case t.Role == "user" && in.History[i-1].Role == "assistant" && marked[i-1]:
+			marked[i] = true
+		}
+		prev = t.At
+	}
+	return marked
+}
+
+// lineTime is "(11-20 23:40)" for a marked line — the line's own date and clock time in the channel's
+// zone, in the pack's short form (chat.line_time). The date is always part of it, so nothing in the
+// rendered line depends on the answer's day and no timestamp rewrites at midnight.
+func lineTime(v Voice, now, at time.Time, show bool) string {
+	if !show || now.IsZero() || at.IsZero() {
 		return ""
 	}
-	a, age := v.pack().Chat.Ages, now.Sub(at)
-	form, n := a.Minutes, int(age/time.Minute)
-	switch {
-	case age < lineAgeAfter:
-		return ""
-	case age >= 24*time.Hour:
-		form, n = a.Days, int(age/(24*time.Hour))
-	case age >= time.Hour:
-		form, n = a.Hours, int(age/time.Hour)
-	}
-	if strings.TrimSpace(form) == "" {
+	tpl := v.pack().Chat.LineTime
+	if strings.TrimSpace(tpl) == "" {
 		return ""
 	}
-	return " (" + lang.Fill(form, "n", strconv.Itoa(n)) + ")"
+	lt := at.In(now.Location())
+	return "(" + lang.Fill(tpl, "date", lt.Format("01-02"), "time", lt.Format("15:04")) + ")"
 }
 
 // assumedValues reports whether a tool result carries a value the tool assumed (an assumed_* key).

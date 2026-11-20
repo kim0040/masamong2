@@ -81,6 +81,10 @@ type InvokeContext struct {
 	Private   bool // only the invoker sees the answer (a DM, or an ephemeral slash reply)
 	UserName  string
 	Typed     bool // the options are words of a message (a prefix command), not values Discord already typed
+	// Tag is the locale Discord reports (en-GB, es-419): the interaction's, or for a message the server's
+	// preferred one. It keeps the region that Locale (the language the answer is written in, possibly a saved
+	// preference) may have lost. Only the fx home currency reads it.
+	Tag string
 }
 
 func option(t discordgo.ApplicationCommandOptionType, name, desc string, required bool) *discordgo.ApplicationCommandOption {
@@ -168,15 +172,24 @@ func Commands() []Command {
 		{
 			Name: "fx", Desc: "Exchange rates", Action: "finance.fx",
 			Options: []*discordgo.ApplicationCommandOption{
-				option(str, "currency", "Currency code or name, e.g. USD or dollar", false),
+				option(str, "currency", "Currency code or name (USD, yen): its value in your currency and the main ones", false),
+				option(str, "base", "Currency to show values in, e.g. USD or JPY (default: your region's currency)", false),
 				option(discordgo.ApplicationCommandOptionNumber, "amount", "Amount to convert", false),
 			},
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
 				// what was typed goes to the action as it is: a given option, even a blank one, is checked there.
 				// The blank home is the home currency of the request's language, which the action knows.
-				in := map[string]any{"home": ""}
+				// The base is sent even when nothing was typed: set, a configured tool default cannot be
+				// merged in as if the person had asked for it, and blank is the home default anyway.
+				in := map[string]any{"home": "", "base": ""}
+				if c.Tag != "" {
+					in["locale_tag"] = c.Tag
+				}
 				if v, given := o["currency"]; given {
 					in["currency"] = v
+				}
+				if v, given := o["base"]; given {
+					in["base"] = v
 				}
 				if v, given := o["amount"]; given {
 					// a number option is already a number; a word of a message is the person's text, read
@@ -872,8 +885,10 @@ func (t PrefixTable) Parse(prefix, content string) (Command, map[string]string, 
 	return cmd, opts, true
 }
 
-// fxPrefixOptions reads "!환율 50000 엔화" and "!환율 엔화 50000": the number is the amount, the rest the
-// currency (a code or a name that may hold spaces).
+// fxPrefixOptions reads "!환율 50000 엔화", "!환율 엔화 50000" and "!환율 달러 유로": the first number is the
+// amount; the rest is a currency (a code or a name that may hold spaces), or two of them, the currency and
+// the base to value it in. Words are split into two names only when both resolve, so "미국 달러" stays one
+// name; when nothing resolves they stay one currency, which the action refuses as it would any other.
 func fxPrefixOptions(tail string, opts map[string]string) {
 	var words []string
 	for _, w := range strings.Fields(tail) {
@@ -883,8 +898,32 @@ func fxPrefixOptions(tail string, opts map[string]string) {
 		}
 		words = append(words, w)
 	}
-	if len(words) > 0 {
-		opts["currency"] = strings.Join(words, " ")
+	if len(words) == 0 {
+		return
+	}
+	opts["currency"] = strings.Join(words, " ")
+	lex := currency.New(messages)
+	if _, ok := lex.Resolve(opts["currency"]); ok {
+		return
+	}
+	// a side longer than the longest admissible name cannot resolve, so only the splits inside it are
+	// tried (a long unknown input stays one currency without scanning them all)
+	bound := lex.MaxNameWords()
+	lo, hi := len(words)-bound, bound
+	if lo < 1 {
+		lo = 1
+	}
+	if hi > len(words)-1 {
+		hi = len(words) - 1
+	}
+	for i := lo; i <= hi; i++ {
+		first, second := strings.Join(words[:i], " "), strings.Join(words[i:], " ")
+		_, ok1 := lex.Resolve(first)
+		_, ok2 := lex.Resolve(second)
+		if ok1 && ok2 {
+			opts["currency"], opts["base"] = first, second
+			return
+		}
 	}
 }
 

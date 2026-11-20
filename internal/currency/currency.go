@@ -5,15 +5,18 @@
 //
 //	fx.currency.<CODE>  the names of one currency, comma separated; the first is the display name
 //	fx.unit.<CODE>      the smallest unit a locale quotes the currency in (ko: 100 for JPY)
-//	fx.home             the currency a locale's members think in (ko: KRW)
+//	(the home currency is not catalog data: it is the currency of the region the locale tag names, Home)
 //	fx.amount.named     how a number and a display name read together
 //	fx.amount.coded     the same for a currency without a name in that locale
 package currency
 
 import (
 	"math"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"unicode/utf8"
 
 	xcur "golang.org/x/text/currency"
 	"golang.org/x/text/language"
@@ -36,8 +39,21 @@ const (
 	significant = 4
 )
 
-// Board is the currencies the bare command compares with the home currency.
-var Board = []string{"USD", "JPY", "EUR", "CNY", "GBP", "KRW"}
+// Board is the six managed currencies every comparison offers in every locale; the board never loses
+// one of them.
+var Board = []string{"USD", "KRW", "JPY", "EUR", "CNY", "GBP"}
+
+// BoardFor is the currencies a card compares: the home currency first, then the managed six it is not
+// among (all six when home is none of them).
+func BoardFor(home string) []string {
+	out := []string{home}
+	for _, c := range Board {
+		if c != home {
+			out = append(out, c)
+		}
+	}
+	return out
+}
 
 // Lexicon is the currency data of a message catalog.
 type Lexicon struct{ cat *i18n.Catalog }
@@ -45,19 +61,94 @@ type Lexicon struct{ cat *i18n.Catalog }
 // New reads currency data from cat.
 func New(cat *i18n.Catalog) *Lexicon { return &Lexicon{cat: cat} }
 
-// ValidCode reports whether code is an ISO 4217 currency code, without asking any service.
+// nameIndex is a catalog's folded name -> code map for every name every locale lists, with the folded
+// length of the longest name. It is built once per catalog (they can be swapped for a bundle) and is
+// read-only after.
+type nameIndex struct {
+	byName  map[string]string
+	maxName int // runes in the longest folded name: more typed words than this cannot be one name
+}
+
+var nameIndexes sync.Map // *i18n.Catalog -> *nameIndex
+
+func (l *Lexicon) index() *nameIndex {
+	if v, ok := nameIndexes.Load(l.cat); ok {
+		return v.(*nameIndex)
+	}
+	idx := &nameIndex{byName: map[string]string{}, maxName: 3}
+	for _, loc := range l.cat.Locales() {
+		pre := l.cat.Prefixed(loc, namePrefix)
+		codes := make([]string, 0, len(pre))
+		for code := range pre {
+			codes = append(codes, code)
+		}
+		sort.Strings(codes)
+		for _, code := range codes {
+			if !ValidCode(code) {
+				continue
+			}
+			for _, n := range names(pre[code]) {
+				key := fold(n)
+				if key == "" {
+					continue
+				}
+				if _, taken := idx.byName[key]; !taken {
+					idx.byName[key] = strings.ToUpper(code)
+				}
+				if w := utf8.RuneCountInString(key); w > idx.maxName {
+					idx.maxName = w
+				}
+			}
+		}
+	}
+	actual, _ := nameIndexes.LoadOrStore(l.cat, idx)
+	return actual.(*nameIndex)
+}
+
+// MaxNameWords bounds how many typed words one currency name is read as: a side of a split longer
+// than the longest admissible name is never asked of Resolve, so a long unknown input stays one name.
+func (l *Lexicon) MaxNameWords() int { return l.index().maxName }
+
+// providerCodes is every currency code ExchangeRate-API publishes it serves rates for
+// (https://www.exchangerate-api.com/docs/supported-currencies, checked 2026-11-20). Nine of them —
+// FOK, GGP, IMP, JEP, KID, MRU, SLE, TVD and VES — are not ISO 4217 codes and are accepted anyway.
+var providerCodes = func() map[string]bool {
+	out := map[string]bool{}
+	for _, c := range strings.Fields(providerCodeList) {
+		out[c] = true
+	}
+	return out
+}()
+
+const providerCodeList = `AED AFN ALL AMD ANG AOA ARS AUD AWG AZN BAM BBD BDT BGN BHD BIF BMD BND BOB
+BRL BSD BTN BWP BYN BZD CAD CDF CHF CLF CLP CNH CNY COP CRC CUP CVE CZK DJF DKK DOP DZD EGP ERN ETB
+EUR FJD FKP FOK GBP GEL GGP GHS GIP GMD GNF GTQ GYD HKD HNL HRK HTG HUF IDR ILS IMP INR IQD IRR ISK
+JEP JMD JOD JPY KES KGS KHR KID KMF KRW KWD KYD KZT LAK LBP LKR LRD LSL LYD MAD MDL MGA MKD MMK MNT
+MOP MRU MUR MVR MWK MXN MYR MZN NAD NGN NIO NOK NPR NZD OMR PAB PEN PGK PHP PKR PLN PYG QAR RON RSD
+RUB RWF SAR SBD SCR SDG SEK SGD SHP SLE SOS SRD SSP STN SYP SZL THB TJS TMT TND TOP TRY TTD TVD TWD
+TZS UAH UGX USD UYU UZS VES VND VUV WST XAF XCD XDR XOF XPF YER ZAR ZMW ZWL`
+
+// obsoleteCodes are currency codes CLDR still gives a region that the rate provider lists under a
+// newer code (Mauritania's and Sierra Leone's redenominations, Venezuela's). A region whose code has
+// no provider replacement, like North Korea's KPW, falls back to USD instead.
+var obsoleteCodes = map[string]string{"MRO": "MRU", "SLL": "SLE", "VEF": "VES"}
+
+// ValidCode reports whether code is a currency code a rate request may ask for: an ISO 4217 code, or
+// one the rate provider lists that is not ISO, without asking any service.
 func ValidCode(code string) bool {
-	code = strings.TrimSpace(code)
+	code = strings.ToUpper(strings.TrimSpace(code))
 	if len(code) != 3 {
 		return false
 	}
 	for _, c := range code {
-		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z') {
+		if !(c >= 'A' && c <= 'Z') {
 			return false
 		}
 	}
-	_, err := xcur.ParseISO(strings.ToUpper(code))
-	return err == nil
+	if _, err := xcur.ParseISO(code); err == nil {
+		return true
+	}
+	return providerCodes[code]
 }
 
 // fold is how names are compared: case and spaces do not matter ("미국 달러" is "미국달러").
@@ -91,20 +182,8 @@ func (l *Lexicon) Resolve(text string) (string, bool) {
 	if len(t) == 3 && ValidCode(t) {
 		return strings.ToUpper(t), true
 	}
-	key := fold(t)
-	for _, loc := range l.cat.Locales() {
-		for code, list := range l.cat.Prefixed(loc, namePrefix) {
-			if !ValidCode(code) {
-				continue
-			}
-			for _, n := range names(list) {
-				if fold(n) == key {
-					return strings.ToUpper(code), true
-				}
-			}
-		}
-	}
-	return "", false
+	code, ok := l.index().byName[fold(t)]
+	return code, ok
 }
 
 // Name is the display name of code in locale ("" when the locale has none: show the code).
@@ -116,12 +195,32 @@ func (l *Lexicon) Name(locale, code string) string {
 	return ""
 }
 
-// Home is the currency a locale's members think in: the one its catalog names, else USD.
+// Home is the currency of the region a locale tag names: its explicit region (ko-KR, en-GB, pt-BR), else
+// the likely region of its language (ko: KR, ja: JP, es: ES). The code CLDR gives may predate a
+// redenomination (MRO, SLL, VEF) and is read as the code the rate provider lists. A region that is not a
+// country (es-419), one with no single currency, or one whose currency the provider does not serve
+// (KPW) gives USD.
 func (l *Lexicon) Home(locale string) string {
-	if v, ok := l.cat.Lookup(locale, "fx.home"); ok && ValidCode(v) {
-		return strings.ToUpper(strings.TrimSpace(v))
+	if code, ok := l.HomeOf(locale); ok {
+		return code
 	}
 	return "USD"
+}
+
+// HomeOf is Home without the USD fallback: ok is false when the tag's region is not a country with a
+// single currency the provider serves, so a caller can try its next tag.
+func (l *Lexicon) HomeOf(locale string) (string, bool) {
+	region, _ := language.Make(strings.ReplaceAll(strings.TrimSpace(locale), "_", "-")).Region()
+	if unit, ok := xcur.FromRegion(region); ok {
+		code := unit.String()
+		if replacement, ok := obsoleteCodes[code]; ok {
+			code = replacement
+		}
+		if providerCodes[code] {
+			return code, true
+		}
+	}
+	return "", false
 }
 
 // convention is the smallest unit locale quotes code in (1 unless its catalog says otherwise).
@@ -141,6 +240,23 @@ type Quote struct {
 	To    string  `json:"to"`
 	Value float64 `json:"value"`
 	Text  string  `json:"text"`
+}
+
+// SharedUnit is the one unit of from that states every rate (units of a currency per one of from) in a
+// list: the locale's convention for from, made ten times larger while even the largest value would still
+// be under 1 ("1 USD ≈ 0.92 EUR / 150 JPY" keeps 1, 1 KRW becomes 10 or 1,000 when its yen are few).
+func (l *Lexicon) SharedUnit(locale, from string, rates []float64) float64 {
+	best := 0.0
+	for _, r := range rates {
+		if r > best && !math.IsInf(r, 0) {
+			best = r
+		}
+	}
+	unit := l.convention(locale, from)
+	for best > 0 && unit*best < 1-1e-12 && unit < maxUnit {
+		unit *= 10
+	}
+	return unit
 }
 
 // Quote states what unit of from is worth in to, given rate (units of to per one of from). With amount

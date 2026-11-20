@@ -20,11 +20,11 @@ func TestFXSlashAmountOption(t *testing.T) {
 	if !ok {
 		t.Fatalf("no card: %+v", d.fake.calls)
 	}
-	if !strings.Contains(edit.body, "50,000엔 ≈ 465,100원") {
+	if !strings.Contains(edit.body, "50,000엔 ≈ 50,000원") {
 		t.Errorf("card = %s", edit.body)
 	}
-	if got := d.calls.Load(); got != 1 || d.paths[0] != "/latest/KRW" {
-		t.Errorf("provider calls %d %v, want one for the home currency", got, d.paths)
+	if got := d.calls.Load(); got != 1 || d.paths[0] != "/latest/JPY" {
+		t.Errorf("provider calls %d %v, want one for the currency asked about", got, d.paths)
 	}
 }
 

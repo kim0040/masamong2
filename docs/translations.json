@@ -2,19 +2,19 @@
   "note": "Translation record checked by tools/doccheck. When a file of a group changes, bring the other languages along, then run: go run ./tools/doccheck -write",
   "groups": {
     "README": {
-      "README.es.md": "041245ec958e47bd",
-      "README.ja.md": "c0187d3dc5e44cfc",
-      "README.ko.md": "9515666746f3053e",
-      "README.md": "86705893e67bb3a5",
-      "README.zh-Hans.md": "1b70df5cb8a328a9"
+      "README.es.md": "77220bbcb607a10e",
+      "README.ja.md": "cdb9d0f2b30f8f22",
+      "README.ko.md": "ac7b67abdad3af0f",
+      "README.md": "4e2624c1ebb38b95",
+      "README.zh-Hans.md": "49362eeac60098b6"
     },
     "wiki/CLI-명령어": {
       "docs/wiki/CLI-Commands.md": "cb6e440750dc6a01",
       "docs/wiki/CLI-명령어.md": "9916046cc64ee583"
     },
     "wiki/Discord-연결": {
-      "docs/wiki/Connecting-Discord.md": "f28a318318235d3f",
-      "docs/wiki/Discord-연결.md": "f5734bb443766037"
+      "docs/wiki/Connecting-Discord.md": "551e10e8e085234c",
+      "docs/wiki/Discord-연결.md": "681a01a0a49c3f08"
     },
     "wiki/Home": {
       "docs/wiki/English.md": "357a9307b7f1f507",
@@ -65,8 +65,8 @@
       "docs/wiki/빠른-시작.md": "8f97bbe7ac9959e6"
     },
     "wiki/설정-레퍼런스": {
-      "docs/wiki/Configuration-Reference.md": "7b6dba1be6ff54b6",
-      "docs/wiki/설정-레퍼런스.md": "c60efe22e5b55d53"
+      "docs/wiki/Configuration-Reference.md": "c79431dfee3bbd0b",
+      "docs/wiki/설정-레퍼런스.md": "c88ee56d3a987418"
     },
     "wiki/설치": {
       "docs/wiki/Installation.md": "0fadd96bae14101a",

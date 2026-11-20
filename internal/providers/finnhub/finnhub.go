@@ -32,13 +32,13 @@ func New(client *providers.Client, baseURL string, cred providers.Credential) *A
 func (a *Adapter) Configured() bool { return a.Cred.Present() }
 
 type Quote struct {
-	Symbol        string
-	Current       float64
-	Change        float64
-	ChangePercent float64
-	High, Low     float64
+	Symbol          string
+	Current         float64
+	Change          float64
+	ChangePercent   float64
+	High, Low       float64
 	Open, PrevClose float64
-	At            time.Time
+	At              time.Time
 }
 
 var (

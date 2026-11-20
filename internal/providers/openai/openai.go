@@ -107,9 +107,21 @@ func (a *Adapter) estimateCachedAt(cost **float64, estimated *bool, model string
 	a.estimateWrittenAt(cost, estimated, model, in, cached, 0, out, at)
 }
 
-// cacheWriteFactor is the price of an input token written to the prompt cache as a share of the input
-// price (Anthropic's five-minute cache write: 1.25×). Only Anthropic reports such tokens.
-const cacheWriteFactor = 1.25
+// cacheWriteFactor is the host's prompt-cache write price as a share of the input price
+// (hosts.json cache_write_factor): Anthropic's five-minute write is 1.25 by default on an Anthropic
+// route, the plain input price elsewhere.
+func (a *Adapter) cacheWriteFactor(model string) float64 {
+	if strings.HasPrefix(strings.ToLower(model), "anthropic/") {
+		return 1.25 // a Claude model on a router still bills Anthropic's five-minute write
+	}
+	if h, ok := HostByURL(a.BaseURL); ok && h.CacheWriteFactor > 0 {
+		return h.CacheWriteFactor
+	}
+	if a.API == APIAnthropic {
+		return 1.25
+	}
+	return 1
+}
 
 // estimateWrittenAt is estimateCachedAt with written of the in tokens written to the prompt cache.
 func (a *Adapter) estimateWrittenAt(cost **float64, estimated *bool, model string, in, cached, written, out int, at time.Time) {
@@ -139,7 +151,7 @@ func (a *Adapter) estimateWrittenAt(cost **float64, estimated *bool, model strin
 	}
 	cached = min(max(cached, 0), in)
 	written = min(max(written, 0), in-cached)
-	v := float64(in-cached-written)*pin + float64(cached)*pc + float64(written)*pin*cacheWriteFactor + float64(out)*pout
+	v := float64(in-cached-written)*pin + float64(cached)*pc + float64(written)*pin*a.cacheWriteFactor(model) + float64(out)*pout
 	*cost, *estimated = &v, true
 }
 
@@ -806,6 +818,14 @@ func (a *Adapter) chat(ctx context.Context, req ChatRequest) (ChatResult, error)
 		return ChatResult{}, fmt.Errorf("%w: %s", ErrVisionUnsupported, req.Model)
 	}
 	req = a.resolveQuick(req)
+	if !a.cachePointOK(req.Model) {
+		// a host that takes no breakpoint never sees the field — on this attempt's own copy of the
+		// messages, so the caller's (and a fallback attempt's) keep the mark
+		req.Messages = slices.Clone(req.Messages)
+		for i := range req.Messages {
+			req.Messages[i].CachePoint = false
+		}
+	}
 	out, err := a.chatOnce(ctx, req, true)
 	if err != nil || !thoughtAway(out) || req.MaxTokens == 1 { // a 1-token probe (ProbeChat) wants no answer
 		return out, err
@@ -861,6 +881,21 @@ func (a *Adapter) resolveQuick(req ChatRequest) ChatRequest {
 	}
 	req.thinkRoom = !thinkingOff(req.Effort) && req.MaxTokens > 0
 	return req
+}
+
+// cachePointOK reports whether this host may receive an explicit prompt-cache breakpoint: only a host
+// flagged in hosts.json (a compatible host that would refuse the field is never flagged), and on
+// OpenRouter only the models its prompt-caching doc names for explicit breakpoints — anthropic/* and
+// google/gemini-*; gemma and the other families cache implicitly and take none.
+func (a *Adapter) cachePointOK(model string) bool {
+	h, ok := HostByURL(a.BaseURL)
+	if !ok || !h.CacheBreakpoints {
+		return false
+	}
+	if a.API == APIOpenRouter {
+		return strings.HasPrefix(model, "anthropic/") || strings.HasPrefix(model, "google/gemini-")
+	}
+	return true
 }
 
 // addUsage is next with out's tokens, time and cost added: both calls are charged.
@@ -976,6 +1011,7 @@ func ParseChat(contentType string, body []byte) (ChatResult, error) {
 				out.CompletionTokens = int(n)
 			}
 			out.CachedTokens = cachedTokens(usage)
+			out.CacheWriteTokens = cacheWriteTokens(usage)
 			out.CostUSD = usageCost(usage)
 		}
 	}
@@ -1008,6 +1044,19 @@ func cachedTokens(usage map[string]json.RawMessage) int {
 	}
 	if n, ok := decode.Number(usage["prompt_cache_hit_tokens"]); ok && n > 0 {
 		return int(n)
+	}
+	return 0
+}
+
+// cacheWriteTokens reads the prompt-cache writes: OpenRouter reports
+// prompt_tokens_details.cache_write_tokens (the Anthropic route reports cache_creation_input_tokens,
+// anthropic.go).
+func cacheWriteTokens(usage map[string]json.RawMessage) int {
+	var details map[string]json.RawMessage
+	if json.Unmarshal(usage["prompt_tokens_details"], &details) == nil {
+		if n, ok := decode.Number(details["cache_write_tokens"]); ok && n > 0 {
+			return int(n)
+		}
 	}
 	return 0
 }

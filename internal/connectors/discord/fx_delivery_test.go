@@ -7,7 +7,9 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -100,6 +102,146 @@ func (d *fxDelivery) deferredFlags(t *testing.T) int {
 }
 
 const ephemeral = int(discordgo.MessageFlagsEphemeral)
+
+// The server's preferred locale is read while DiscordGo's state lock is held, so a guild update on the
+// event loop cannot replace the guild mid-read. Run with -race.
+func TestFXGuildTagReadsUnderTheStateLock(t *testing.T) {
+	s := &discordgo.Session{State: discordgo.NewState()}
+	update := func() {
+		if err := s.State.GuildAdd(&discordgo.Guild{ID: "guild", PreferredLocale: "en-GB"}); err != nil {
+			t.Error(err)
+		}
+	}
+	update()
+	var group sync.WaitGroup
+	group.Go(func() {
+		for range 1000 {
+			update()
+		}
+	})
+	group.Go(func() {
+		for range 1000 {
+			_ = guildTag(s, "guild")
+		}
+	})
+	group.Wait()
+}
+
+// The region a card's home currency is read from, in order: the region the person's saved language
+// names itself, else the region Discord's tag names (the interaction's for a slash command, the
+// server's for a message), else the likely region of the saved language, else USD.
+func TestFXHomeFollowsTheFirstRegionThatNamesOne(t *testing.T) {
+	saved := func(t *testing.T, d *fxDelivery, locale string) {
+		t.Helper()
+		res := d.g.svc.Execute(context.Background(), action.Request{Action: "preferences.set",
+			Input:   mustJSON(map[string]any{"locale": locale}),
+			Invoker: &action.Invoker{Via: "command", GuildID: "g", ChannelID: "c", UserID: "u"}})
+		if !res.OK {
+			t.Fatalf("saved locale: %+v", res.Error)
+		}
+	}
+	t.Run("saved English, a slash command in pt-BR: Brazil's home, the card in English", func(t *testing.T) {
+		d := newFXDelivery(t, nil)
+		saved(t, d, "en")
+		i := &discordgo.InteractionCreate{Interaction: &discordgo.Interaction{ID: "i", AppID: "app", Token: "tok",
+			Type: discordgo.InteractionApplicationCommand, ChannelID: "c", GuildID: "g",
+			Locale: discordgo.Locale("pt-BR"), Member: &discordgo.Member{User: &discordgo.User{ID: "u", Username: "tester"}},
+			Data: discordgo.ApplicationCommandInteractionData{Name: "fx"}}}
+		d.g.handleCommand(d.g.sess, i)
+		if !d.g.Wait(5 * time.Second) {
+			t.Fatal("gateway did not settle")
+		}
+		if len(d.paths) != 1 || d.paths[0] != "/latest/BRL" {
+			t.Fatalf("provider paths %v, want /latest/BRL", d.paths)
+		}
+		edit, ok := d.fake.find(http.MethodPatch, "/messages/@original")
+		if !ok || !strings.Contains(edit.body, "Exchange rates") {
+			t.Errorf("the card is not in the saved language: %v", edit.body)
+		}
+	})
+	for _, tc := range []struct {
+		saved, want string
+	}{
+		{"en", "/latest/GBP"},    // no region of its own: the guild's
+		{"en-US", "/latest/USD"}, // its own region wins over the guild's
+		{"es", "/latest/GBP"},    // the guild's region beats the language's likely one
+	} {
+		t.Run("guild en-GB, saved "+tc.saved, func(t *testing.T) {
+			d := newFXDelivery(t, nil)
+			saved(t, d, tc.saved)
+			if err := d.g.sess.State.GuildAdd(&discordgo.Guild{ID: "g", PreferredLocale: "en-GB"}); err != nil {
+				t.Fatal(err)
+			}
+			d.prefix(t, "!fx")
+			if len(d.paths) != 1 || d.paths[0] != tc.want {
+				t.Errorf("provider paths %v, want %s", d.paths, tc.want)
+			}
+		})
+	}
+}
+
+// A base the operator configured as the raw tool's default is for raw callers (chat, the CLI): a bare
+// or single-currency command still means the home currency's default, not a filled-in pair.
+func TestFXConfiguredDefaultBaseIsForRawCallersOnly(t *testing.T) {
+	d := newFXDelivery(t, func(g *Gateway) {
+		res := g.svc.Execute(context.Background(), action.Request{Action: "tools.configure",
+			Input: mustJSON(map[string]any{"id": "finance.fx", "defaults": `{"base":"CHF"}`})})
+		if !res.OK {
+			t.Fatalf("tool configuration failed: %+v", res.Error)
+		}
+	})
+	d.slash(t)
+	if len(d.paths) != 1 || d.paths[0] != "/latest/KRW" {
+		t.Errorf("a configured default won over the home currency: provider=%v, want /latest/KRW", d.paths)
+	}
+	d2 := newFXDelivery(t, func(g *Gateway) {
+		res := g.svc.Execute(context.Background(), action.Request{Action: "tools.configure",
+			Input: mustJSON(map[string]any{"id": "finance.fx", "defaults": `{"base":"CHF"}`})})
+		if !res.OK {
+			t.Fatalf("tool configuration failed: %+v", res.Error)
+		}
+	})
+	d2.slash(t, strOption("currency", "yen"))
+	if len(d2.paths) != 1 || d2.paths[0] != "/latest/JPY" {
+		t.Errorf("a configured default made a currency-only command a pair: provider=%v, want /latest/JPY", d2.paths)
+	}
+}
+
+// A rate a card's row needs that the provider's answer lacks is a provider failure: nothing that looks
+// like a complete card may be posted short a row.
+func TestFXMissingRowRateIsAProviderFailure(t *testing.T) {
+	d := newFXDelivery(t, nil)
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"result":"success","base_code":"USD","rates":{"USD":1,"JPY":148,"EUR":0.9,"GBP":0.75}}`)
+	}))
+	defer provider.Close()
+	config := d.g.svc.Registry().FX
+	config.OpenBase, config.KeyedBase = provider.URL, provider.URL
+	d.slash(t, strOption("currency", "USD"))
+	p, ok := d.fake.find(http.MethodPatch, "/messages/@original")
+	if !ok {
+		t.Fatalf("the provider failure produced no reply: %+v", d.fake.calls)
+	}
+	if strings.Contains(p.body, "≈") {
+		t.Errorf("a quote card was published although a row had no rate: %s", p.body)
+	}
+}
+
+// A base option left blank keeps its old meaning — the home currency's board — and a code the rate
+// service documents that is not ISO 4217 is a base like any other. Both reach the provider; only
+// something unreadable is refused.
+func TestFXSlashBaseKeepsLegacyAndProviderCodes(t *testing.T) {
+	for _, base := range []string{"", " \t ", "FOK", "GGP", "IMP", "JEP", "KID", "MRU", "SLE", "TVD", "VES"} {
+		t.Run("base="+strconv.Quote(base), func(t *testing.T) {
+			d := newFXDelivery(t, nil)
+			d.slash(t, strOption("base", base))
+			if _, ok := d.fake.find(http.MethodPatch, "/messages/@original"); !ok {
+				t.Errorf("base %q produced no public result (provider=%v)", base, d.paths)
+			}
+		})
+	}
+}
 
 // A currency that cannot be read, or that the rate service lacks, is told to the member alone, with how
 // to write one. Nothing is rewritten into another command, and a malformed one costs no provider call.
@@ -360,7 +502,7 @@ func TestFXInvalidAmountMessageStatesTheCap(t *testing.T) {
 	}
 }
 
-// One language for the whole request: a saved language preference decides the home currency, the way the
+// One language for the whole request: a saved language preference decides the home currency (its likely region), the way the
 // quotes are written and the card's own words, whatever language Discord reported for the interaction.
 func TestFXOneLocalePerRequest(t *testing.T) {
 	setLocale := func(d *fxDelivery) {
@@ -379,15 +521,15 @@ func TestFXOneLocalePerRequest(t *testing.T) {
 			t.Fatalf("malformed answer: %v %s", err, body)
 		}
 		got := payload.Embeds[0]
-		// Spanish: home USD, codes, decimal comma, Spanish title; nothing Korean
-		if !strings.Contains(got.Title, "Tipos de cambio · USD") || !strings.Contains(got.Description, "1 JPY ≈ ") || !strings.Contains(got.Description, ",") {
+		// Spanish: the home currency of Spain first (euro), codes, decimal comma, Spanish title; nothing Korean
+		if !strings.Contains(got.Title, "Tipos de cambio · JPY") || !strings.HasPrefix(got.Description, "1 JPY ≈ ") || !strings.Contains(strings.Split(got.Description, "\n")[0], " EUR") || !strings.Contains(got.Description, ",") {
 			t.Errorf("card is not entirely Spanish: %+v", got)
 		}
 		if strings.Contains(got.Title, "환율") || strings.Contains(got.Description, "원") || strings.Contains(got.Description, "엔") {
 			t.Errorf("a Korean piece in a Spanish card: %+v", got)
 		}
-		if d.paths[0] != "/latest/USD" {
-			t.Errorf("rates asked for %v: the home currency should be the Spanish one (USD)", d.paths)
+		if d.paths[0] != "/latest/JPY" {
+			t.Errorf("rates asked for %v, want the currency asked about", d.paths)
 		}
 	}
 	t.Run("slash", func(t *testing.T) {

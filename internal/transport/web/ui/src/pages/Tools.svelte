@@ -85,6 +85,17 @@
   async function setProgress(v: Progress) {
     await patchConfig([v === 'deep' ? { path: ['chat', 'progress'], op: 'unset' } : { path: ['chat', 'progress'], value: v }], { success: t('tools.progress.saved') })
   }
+  // how much of the room's talk a reply reads (config chat.transcript_chars, in characters); 5000 is
+  // the default and is stored as unset
+  async function setTranscript(raw: string) {
+    const path = ['chat', 'transcript_chars']
+    const n = Math.round(Number(raw))
+    if (!raw.trim() || !Number.isFinite(n)) {
+      if (cfg.doc?.chat?.transcript_chars == null) return
+      return patchConfig([{ path, op: 'unset' }], { success: t('tools.transcript.saved') })
+    }
+    await patchConfig([{ path, value: Math.min(20000, Math.max(1000, n)) }], { success: t('tools.transcript.saved') })
+  }
 </script>
 
 <PageHeader title={t('tools.title')} description={t('tools.desc')}>
@@ -133,6 +144,13 @@
       </div>
       <div class="model-select"><Select aria-labelledby="tool-progress-title" value={progress} onchange={(e) => setProgress(e.currentTarget.value as Progress)} options={[
         { value: 'deep', label: t('tools.progress.v.deep') }, { value: 'slow', label: t('tools.progress.v.slow') }, { value: 'off', label: t('tools.progress.v.off') }]} /></div>
+    </div>
+    <div class="model">
+      <div class="mode-text">
+        <h3 id="tool-transcript-title" class="gt">{t('tools.transcript.title')}</h3>
+        <p class="xs muted">{t('tools.transcript.hint')}</p>
+      </div>
+      <div class="model-select"><Input aria-labelledby="tool-transcript-title" type="number" inputmode="numeric" min="1000" max="20000" step="1" placeholder="5000" value={cfg.doc?.chat?.transcript_chars ?? ''} onchange={(e) => setTranscript(e.currentTarget.value)} /></div>
     </div>
   </section>
 {/if}

@@ -25,10 +25,10 @@ import (
 // answers to this person, their bursts — plus the lines a small classifier finds the call pointing at.
 // Everything else in the room stays out of the prompt.
 
-// L0 budget: the newest lines that fit, never fewer than the eight before the call (the context of a short
-// call usually sits in the two to seven lines before it).
+// transcriptMinLines is the least context a turn keeps: the lines just before the call, which the
+// context of a short call usually sits in (the two to seven lines before it). The rune budget is
+// chat.transcript_chars, read from the document on every turn.
 const (
-	transcriptChars    = 2400
 	transcriptMinLines = 8
 	referTimeout       = 8 * time.Second
 )
@@ -140,7 +140,7 @@ func (s *Service) callerConversation(ctx context.Context, in ChatInput, eng *eng
 			context = append(context, l)
 		}
 	}
-	context, omitted := conversation.Select(context, transcriptChars, transcriptMinLines)
+	context, omitted := conversation.Select(context, s.Doc().Chat.TranscriptBudget(), transcriptMinLines)
 	if omitted > 0 {
 		out.ledger["omitted"] = omitted
 	}

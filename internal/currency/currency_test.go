@@ -3,7 +3,10 @@ package currency
 import (
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
+
+	xcur "golang.org/x/text/currency"
 
 	"masamong/internal/i18n"
 )
@@ -41,6 +44,27 @@ func TestValidCodeIsISO(t *testing.T) {
 	}
 }
 
+// The pinned provider list is the published one: every code it names is accepted, including the nine
+// that are not ISO 4217, and the list holds the full 163.
+func TestProviderCodesAreAccepted(t *testing.T) {
+	if len(providerCodes) != 163 {
+		t.Errorf("%d provider codes pinned, want 163", len(providerCodes))
+	}
+	for code := range providerCodes {
+		if !ValidCode(code) {
+			t.Errorf("provider-listed %s rejected", code)
+		}
+	}
+	for _, code := range []string{"FOK", "GGP", "IMP", "JEP", "KID", "MRU", "SLE", "TVD", "VES"} {
+		if _, err := xcur.ParseISO(code); err == nil {
+			t.Errorf("%s is ISO after all: the list may be stale", code)
+		}
+		if !ValidCode(code) {
+			t.Errorf("non-ISO provider code %s rejected", code)
+		}
+	}
+}
+
 // Every name is one currency's: a name two currencies share would make a typed word ambiguous.
 func TestNamesBelongToOneCurrency(t *testing.T) {
 	cat := i18n.New()
@@ -60,7 +84,7 @@ func TestNamesBelongToOneCurrency(t *testing.T) {
 		}
 	}
 	for _, loc := range []string{"ko", "ja", "zh-Hans"} {
-		for _, code := range Board {
+		for _, code := range BoardFor(New(cat).Home(loc)) {
 			if New(cat).Name(loc, code) == "" {
 				t.Errorf("%s has no display name for board currency %s", loc, code)
 			}
@@ -68,11 +92,58 @@ func TestNamesBelongToOneCurrency(t *testing.T) {
 	}
 }
 
+// The home currency is the currency of the region the tag names: its own region when it has one, else the
+// likely region of its language; no catalog entry says it.
 func TestHome(t *testing.T) {
 	l := New(i18n.New())
-	for locale, want := range map[string]string{"ko": "KRW", "ko-KR": "KRW", "en": "USD", "en-US": "USD", "ja": "USD", "fr": "USD", "": "USD"} {
+	for locale, want := range map[string]string{
+		"ko": "KRW", "ko-KR": "KRW", "ko_KR": "KRW", "ja": "JPY", "ja-JP": "JPY",
+		"en": "USD", "en-US": "USD", "en-GB": "GBP", "es": "EUR", "es-ES": "EUR", "es-419": "USD", "es-MX": "MXN",
+		"zh-Hans": "CNY", "zh-CN": "CNY", "pt-BR": "BRL", "fr": "EUR", "de-CH": "CHF",
+		// CLDR's code predates a redenomination: read as the code the provider lists
+		"ar-MR": "MRU", "en-SL": "SLE", "es-VE": "VES",
+		// a region whose currency the provider does not serve falls back to USD
+		"ko-KP": "USD", "en-KP": "USD",
+		"": "USD", "xx": "USD", "en-001": "USD",
+	} {
 		if got := l.Home(locale); got != want {
 			t.Errorf("Home(%q) = %s, want %s", locale, got, want)
+		}
+	}
+}
+
+// The board is the six managed currencies in every locale, the home currency first and never lost:
+// one of the six as home keeps them all, a seventh joins them.
+func TestBoardFor(t *testing.T) {
+	for home, want := range map[string]string{
+		"KRW": "KRW USD JPY EUR CNY GBP", "USD": "USD KRW JPY EUR CNY GBP", "JPY": "JPY USD KRW EUR CNY GBP", "BRL": "BRL USD KRW JPY EUR CNY GBP",
+	} {
+		if got := strings.Join(BoardFor(home), " "); got != want {
+			t.Errorf("BoardFor(%s) = %s, want %s", home, got, want)
+		}
+	}
+	if len(Board) != 6 {
+		t.Errorf("the managed currencies were changed by BoardFor: %v", Board)
+	}
+}
+
+// One currency against several is stated in one unit: the locale's, made larger only while even the
+// largest value would stay under 1.
+func TestSharedUnit(t *testing.T) {
+	l := New(i18n.New())
+	for _, tc := range []struct {
+		name, locale, from string
+		rates              []float64
+		want               float64
+	}{
+		{"a dollar in won and euros", "ko", "USD", []float64{1400, 0.92}, 1},
+		{"every rate under 1", "en", "KRW", []float64{0.00074, 0.11}, 10},
+		{"won in dollars only", "en", "KRW", []float64{0.00074}, 10000},
+		{"the locale's unit for yen", "ko", "JPY", []float64{9.3, 0.0067}, 100},
+		{"no rates", "en", "USD", nil, 1},
+	} {
+		if got := l.SharedUnit(tc.locale, tc.from, tc.rates); got != tc.want {
+			t.Errorf("%s: unit %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

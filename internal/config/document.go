@@ -1123,6 +1123,38 @@ type ChatSettings struct {
 	// deleted before the answer: "deep" (the default: at once for a deep search or a second round of
 	// searches), "slow" (those, and also a search turn still unanswered after a few seconds) or "off".
 	Progress string `yaml:"progress,omitempty" json:"progress,omitempty"`
+	// TranscriptChars is the rune budget of the conversation transcript the answer prompt is built on
+	// (unset = 5000; set, an integer 1000–20000): the newest lines that fit come in, cut with hysteresis
+	// so the prompt's cached prefix stays put. Cheap once the provider's prompt cache hits; the minimum
+	// line count is not configurable.
+	TranscriptChars TranscriptChars `yaml:"transcript_chars,omitempty" json:"transcript_chars,omitempty"`
+}
+
+// TranscriptChars is a present-only value: when the key is written it must be an integer 1000–20000.
+// Absence — never a value of 0 — means the default.
+type TranscriptChars int
+
+// UnmarshalYAML refuses a transcript_chars that is not an integer 1000–20000. It runs only when the
+// key is present, so the default stays unset while an explicit 0, a fraction or a number outside the
+// range comes back as an error naming the key.
+func (t *TranscriptChars) UnmarshalYAML(n *yaml.Node) error {
+	var v int
+	if n.Kind != yaml.ScalarNode || n.Tag != "!!int" {
+		return fmt.Errorf("chat.transcript_chars must be an integer 1000–20000 (unset means the default 5000)")
+	}
+	if err := n.Decode(&v); err != nil || v < 1000 || v > 20000 {
+		return fmt.Errorf("chat.transcript_chars must be an integer 1000–20000 (unset means the default 5000)")
+	}
+	*t = TranscriptChars(v)
+	return nil
+}
+
+// TranscriptBudget is the effective chat.transcript_chars.
+func (c ChatSettings) TranscriptBudget() int {
+	if c.TranscriptChars <= 0 {
+		return 5000
+	}
+	return int(c.TranscriptChars)
 }
 
 // ProgressModes are the values chat.progress accepts besides empty (deep).
@@ -1466,6 +1498,8 @@ func parse(raw []byte, problems *[]Problem) (Document, error) {
 	if d.Chat.Progress != "" && !slices.Contains(ProgressModes, d.Chat.Progress) {
 		return Document{}, fmt.Errorf("chat.progress must be one of %v", ProgressModes)
 	}
+	// chat.transcript_chars needs no check here: its decoder accepts only a present integer
+	// 1000–20000 and never runs for an unset key (TranscriptChars.UnmarshalYAML)
 	// pages a search reads: a request that reads dozens of pages would only slow every search and spend the
 	// daily page quota
 	if n := d.WebSearch.ReadPages; n != nil && (*n < 0 || *n > 10) {
