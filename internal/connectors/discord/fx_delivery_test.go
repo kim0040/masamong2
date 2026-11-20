@@ -380,14 +380,14 @@ func TestFXOneLocalePerRequest(t *testing.T) {
 		}
 		got := payload.Embeds[0]
 		// Spanish: the home currency of Spain first (euro), codes, decimal comma, Spanish title; nothing Korean
-		if !strings.Contains(got.Title, "Tipos de cambio · JPY") || !strings.HasPrefix(got.Description, "1.000 JPY ≈ ") || !strings.Contains(strings.Split(got.Description, "\n")[0], " EUR") || !strings.Contains(got.Description, ",") {
+		if !strings.Contains(got.Title, "Tipos de cambio · JPY") || !strings.HasPrefix(got.Description, "1 JPY ≈ ") || !strings.Contains(strings.Split(got.Description, "\n")[0], " EUR") || !strings.Contains(got.Description, ",") {
 			t.Errorf("card is not entirely Spanish: %+v", got)
 		}
 		if strings.Contains(got.Title, "환율") || strings.Contains(got.Description, "원") || strings.Contains(got.Description, "엔") {
 			t.Errorf("a Korean piece in a Spanish card: %+v", got)
 		}
-		if d.paths[0] != "/latest/JPY" || strings.Contains(got.Description, "KRW") {
-			t.Errorf("rates asked for %v: the currency asked about, and no Korean home currency", d.paths)
+		if d.paths[0] != "/latest/JPY" {
+			t.Errorf("rates asked for %v, want the currency asked about", d.paths)
 		}
 	}
 	t.Run("slash", func(t *testing.T) {

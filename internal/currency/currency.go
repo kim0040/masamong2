@@ -12,7 +12,6 @@ package currency
 
 import (
 	"math"
-	"slices"
 	"strconv"
 	"strings"
 
@@ -37,14 +36,18 @@ const (
 	significant = 4
 )
 
-// Board is the major currencies every comparison offers; the home currency joins them when it is not one.
-var Board = []string{"USD", "JPY", "EUR", "CNY", "GBP"}
+// Board is the six managed currencies every comparison offers in every locale; the board never loses
+// one of them.
+var Board = []string{"USD", "KRW", "JPY", "EUR", "CNY", "GBP"}
 
-// BoardFor is the currencies a card compares: the major ones, then home when it is not among them.
+// BoardFor is the currencies a card compares: the home currency first, then the managed six it is not
+// among (all six when home is none of them).
 func BoardFor(home string) []string {
-	out := slices.Clone(Board)
-	if !slices.Contains(out, home) {
-		out = append(out, home)
+	out := []string{home}
+	for _, c := range Board {
+		if c != home {
+			out = append(out, c)
+		}
 	}
 	return out
 }

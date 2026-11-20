@@ -165,10 +165,10 @@ func TestFXCardsStateRatesInReadableUnits(t *testing.T) {
 		{"ko an amount of a currency in each", "ko", map[string]string{"currency": "엔", "amount": "50000"}, []string{"50,000엔 ≈ 456,100원", "50,000엔 ≈ 337.8달러", "50,000엔 ≈ 304.1유로", "50,000엔 ≈ 2,280위안", "50,000엔 ≈ 253.4파운드"}},
 		{"ko an amount of won in every board currency", "ko", map[string]string{"amount": "10000"}, []string{"10,000원 ≈ 7.407달러", "10,000원 ≈ 1,096엔", "10,000원 ≈ 6.667유로", "10,000원 ≈ 50위안", "10,000원 ≈ 5.556파운드"}},
 		{"ko the home currency with an amount", "ko", map[string]string{"currency": "원", "amount": "10000"}, []string{"10,000원 ≈ 7.407달러", "10,000원 ≈ 1,096엔", "10,000원 ≈ 6.667유로", "10,000원 ≈ 50위안", "10,000원 ≈ 5.556파운드"}},
-		{"en board in dollars, no won", "en", nil, []string{"1,000 JPY ≈ 6.757 USD", "1 EUR ≈ 1.111 USD", "10 CNY ≈ 1.481 USD", "1 GBP ≈ 1.333 USD"}},
-		{"en by name", "en", map[string]string{"currency": "Japanese Yen"}, []string{"100 JPY ≈ 0.6757 USD", "100 JPY ≈ 0.6081 EUR", "100 JPY ≈ 4.561 CNY", "100 JPY ≈ 0.5068 GBP"}},
-		{"en won is shown only when asked for", "en", map[string]string{"currency": "krw"}, []string{"10 KRW ≈ 0.007407 USD", "10 KRW ≈ 1.096 JPY", "10 KRW ≈ 0.006667 EUR", "10 KRW ≈ 0.05 CNY", "10 KRW ≈ 0.005556 GBP"}},
-		{"ja reads names in other languages; yen is home", "ja", map[string]string{"currency": "엔화", "amount": "100"}, []string{"100円 ≈ 0.6757ドル", "100円 ≈ 0.6081ユーロ", "100円 ≈ 4.561人民元", "100円 ≈ 0.5068ポンド"}},
+		{"en board in dollars, won included", "en", nil, []string{"10,000 KRW ≈ 7.407 USD", "1,000 JPY ≈ 6.757 USD", "1 EUR ≈ 1.111 USD", "10 CNY ≈ 1.481 USD", "1 GBP ≈ 1.333 USD"}},
+		{"en by name", "en", map[string]string{"currency": "Japanese Yen"}, []string{"1 JPY ≈ 0.006757 USD", "1 JPY ≈ 9.122 KRW", "1 JPY ≈ 0.006081 EUR", "1 JPY ≈ 0.04561 CNY", "1 JPY ≈ 0.005068 GBP"}},
+		{"en won against home first, then the board", "en", map[string]string{"currency": "krw"}, []string{"10 KRW ≈ 0.007407 USD", "10 KRW ≈ 1.096 JPY", "10 KRW ≈ 0.006667 EUR", "10 KRW ≈ 0.05 CNY", "10 KRW ≈ 0.005556 GBP"}},
+		{"ja reads names in other languages; yen is home", "ja", map[string]string{"currency": "엔화", "amount": "100"}, []string{"100円 ≈ 0.6757ドル", "100円 ≈ 912.2ウォン", "100円 ≈ 0.6081ユーロ", "100円 ≈ 4.561人民元", "100円 ≈ 0.5068ポンド"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := fxCard(t, tc.locale, tc.opts)

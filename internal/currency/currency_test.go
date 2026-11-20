@@ -85,16 +85,18 @@ func TestHome(t *testing.T) {
 	}
 }
 
+// The board is the six managed currencies in every locale, the home currency first and never lost:
+// one of the six as home keeps them all, a seventh joins them.
 func TestBoardFor(t *testing.T) {
 	for home, want := range map[string]string{
-		"KRW": "USD JPY EUR CNY GBP KRW", "USD": "USD JPY EUR CNY GBP", "JPY": "USD JPY EUR CNY GBP", "BRL": "USD JPY EUR CNY GBP BRL",
+		"KRW": "KRW USD JPY EUR CNY GBP", "USD": "USD KRW JPY EUR CNY GBP", "JPY": "JPY USD KRW EUR CNY GBP", "BRL": "BRL USD KRW JPY EUR CNY GBP",
 	} {
 		if got := strings.Join(BoardFor(home), " "); got != want {
 			t.Errorf("BoardFor(%s) = %s, want %s", home, got, want)
 		}
 	}
-	if len(Board) != 5 {
-		t.Errorf("the major currencies were changed by BoardFor: %v", Board)
+	if len(Board) != 6 {
+		t.Errorf("the managed currencies were changed by BoardFor: %v", Board)
 	}
 }
 
