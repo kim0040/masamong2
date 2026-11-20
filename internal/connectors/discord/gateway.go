@@ -621,6 +621,50 @@ func (g *Gateway) Channels(guildID string) []application.ChannelInfo {
 	return out
 }
 
+// PersonMemoryChannels reports known local rooms and which text/news rooms can
+// export a statement. Bot access alone says nothing about other members' access.
+func (g *Gateway) PersonMemoryChannels(guildID string) map[string]bool {
+	gu, err := g.sess.State.Guild(guildID)
+	if err != nil {
+		return nil
+	}
+	g.sess.State.RLock()
+	defer g.sess.State.RUnlock()
+	if gu.Unavailable {
+		return nil
+	}
+	visible := int64(discordgo.PermissionViewChannel | discordgo.PermissionReadMessageHistory)
+	var everyone int64
+	var known bool
+	for _, role := range gu.Roles {
+		if role.ID == guildID {
+			everyone, known = role.Permissions, true
+			break
+		}
+	}
+	rooms := map[string]bool{}
+	for _, ch := range gu.Channels {
+		if ch.Type != discordgo.ChannelTypeGuildText && ch.Type != discordgo.ChannelTypeGuildNews {
+			continue
+		}
+		perms, restricted := everyone, false
+		for _, o := range ch.PermissionOverwrites {
+			if o.ID == guildID && o.Type == discordgo.PermissionOverwriteTypeRole {
+				perms = perms&^o.Deny | o.Allow
+			} else if o.Deny&visible != 0 {
+				restricted = true
+			}
+		}
+		rooms[ch.ID] = known && !restricted && perms&visible == visible
+	}
+	for _, th := range gu.Threads {
+		if th.Type == discordgo.ChannelTypeGuildPrivateThread {
+			rooms[th.ID] = false
+		}
+	}
+	return rooms
+}
+
 // Permissions is the bot's effective permission bits in a channel (from the gateway's state cache).
 func (g *Gateway) Permissions(guildID, channelID string) (int64, bool) {
 	id, _ := g.BotUser()

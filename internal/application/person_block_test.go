@@ -9,6 +9,7 @@ import (
 
 	"masamong/internal/application"
 	"masamong/internal/config"
+	"masamong/internal/memory/blocks"
 	"masamong/internal/memory/corpus"
 	"masamong/internal/memory/engine"
 	"masamong/internal/memory/store"
@@ -19,10 +20,92 @@ type personGateway struct{ fakeGateway }
 func (*personGateway) Channels(guild string) []application.ChannelInfo {
 	return []application.ChannelInfo{{ID: "c", GuildID: guild, Type: "text"}, {ID: "other", GuildID: guild, Type: "text"}}
 }
+func (*personGateway) PersonMemoryChannels(string) map[string]bool {
+	return map[string]bool{"c": true, "c2": true, "c3": true, "other": true, "private": false}
+}
+
+type reviewPerson struct {
+	*application.Service
+	model  *turnModel
+	engine *engine.Engine
+	at     time.Time
+}
+
+func (f reviewPerson) source(t *testing.T, guild, room, id, account, label string, at time.Time) string {
+	t.Helper()
+	ok, err := f.engine.Capture(engine.LiveMessage{GuildID: guild, ChannelID: room, MessageID: id, AuthorID: account, AuthorName: label, At: at, Content: id + " evidence"})
+	if !ok || err != nil {
+		t.Fatalf("capture: %t %v", ok, err)
+	}
+	return corpus.DiscordLiveObservationID(engine.RoomKey(guild, room), id)
+}
+
+func (f reviewPerson) fact(t *testing.T, guild, channel, id, subject, speaker, ev string) {
+	t.Helper()
+	room := engine.RoomKey(guild, channel)
+	raw, _ := json.Marshal([]string{ev})
+	by, _ := json.Marshal([]string{store.PersonRef(speaker)})
+	if _, err := f.Store.DB.Exec(`INSERT INTO channel_episode(id,guild_id,channel_id,room,kind,title,status,source,first_seen,last_seen,updated_at)
+		VALUES(?,?,?,?,'event',?,'done','discord',?,?,?)`, id, guild, channel, room, id, f.at, f.at, f.at); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Store.DB.Exec(`INSERT INTO episode_item(id,episode_id,kind,text,evidence,by_refs,created_at) VALUES(?,?,'fact',?,?,?,?)`,
+		id, id, "{@"+store.PersonRef(subject)+"} "+id, string(raw), string(by), f.at.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (f reviewPerson) ask(t *testing.T, text string) string {
+	t.Helper()
+	turn(t, f.Service, "303", "지수", text, func(in *application.ChatInput) { in.Locale = "ko" })
+	return f.model.last("answer")
+}
+func (f reviewPerson) attach(t *testing.T, guild, channel string) {
+	id := blocks.BlockID("discord", engine.RoomKey(guild, channel), f.engine.Settings.Recipe.Version(), f.engine.EmbedSpace())
+	applyDoc(t, f.Service, func(d *config.Document) {
+		c := d.Guilds["g"].Channels["c"]
+		c.RAGView.Blocks = []string{id}
+		d.Guilds["g"].Channels["c"] = c
+	})
+}
+
+func TestReviewPersonPrivacy(t *testing.T) {
+	tests := map[string]func(*testing.T, reviewPerson){
+		"PrivateAlias": func(t *testing.T, f reviewPerson) {
+			f.source(t, "g", "unclassified", "rename", "101", "비공개별명", f.at.Add(time.Hour))
+			if got := block(f.ask(t, "비공개별명?"), cardOpen, cardClose); got != "" {
+				t.Fatalf("resolved private alias: %s", got)
+			}
+			got := block(f.ask(t, "<@101> 어떤 사람이야?"), cardOpen, cardClose)
+			if !strings.Contains(got, "민수 public") || strings.Contains(got, "비공개별명") {
+				t.Fatal(f.model.last("answer"))
+			}
+		},
+		"AttachedPrivateRoom": func(t *testing.T, f reviewPerson) {
+			ev := f.source(t, "g", "unclassified", "restricted-marker", "101", "민수", f.at)
+			f.fact(t, "g", "unclassified", "restricted", "101", "101", ev)
+			f.attach(t, "g", "unclassified")
+			got := block(f.ask(t, "<@101> 어떤 사람이야?"), cardOpen, cardClose)
+			if !strings.Contains(got, "민수 public") || strings.Contains(got, "restricted") {
+				t.Fatal(got)
+			}
+		},
+	}
+	for name, run := range tests {
+		t.Run(name, func(t *testing.T) {
+			s, m, e := memorySvc(t)
+			f := reviewPerson{s, m, e, time.Now().UTC().Add(-3 * time.Hour)}
+			ev := f.source(t, "g", "c", "public", "101", "민수", f.at)
+			f.fact(t, "g", "c", "public", "101", "101", ev)
+			run(t, f)
+		})
+	}
+}
 
 func TestEpisodePersonBlockScope(t *testing.T) {
 	s, m, e := memorySvc(t)
 	s.Discord = &personGateway{}
+	applyDoc(t, s, func(d *config.Document) { d.Guilds["g"].Channels["other"] = config.ChannelPolicy{Capture: true} })
 	s.NoteThread("g", "thread", "c", false)
 	ref := store.PersonRef("101")
 	at := time.Now().UTC().Add(-2 * time.Hour)
@@ -53,6 +136,9 @@ func TestEpisodePersonBlockScope(t *testing.T) {
 	put("thread", "202", "영희", "thread-note", "는 바둑을 둠")
 	put("private", "101", "민수", "private-note", "는 비밀 모임에 감")
 	put("other", "202", "영희", "other-note", "는 기타를 배움")
+	if _, err := e.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "other", AuthorID: "101", AuthorName: "민수", MessageID: "other-label", Content: "hello", At: at}); err != nil {
+		t.Fatal(err)
+	}
 	for i := range 14 {
 		if _, err := e.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", AuthorID: "404", AuthorName: "진우",
 			MessageID: "filler" + strconv.Itoa(i), Content: "hello", At: at.Add(time.Hour + time.Duration(i)*time.Second)}); err != nil {
@@ -92,7 +178,7 @@ func TestEpisodePersonBlockScope(t *testing.T) {
 	check(b, []string{"민수는 차를 좋아함", "[영희] 민수는 바둑을 둠"}, []string{"기타", "비밀"})
 	t.Log("fixture:\n" + b + cardClose)
 	check(get("other", false), []string{"차를 좋아함", "기타"}, []string{"바둑", "비밀"})
-	check(get("private", false), []string{"비밀", "차를 좋아함"}, []string{"기타", "바둑"})
+	check(get("private", false), []string{"비밀"}, []string{"차를 좋아함", "기타", "바둑"})
 	strict(t, s, config.GuildPrivacy{NoHearsay: true})
 	check(get("c", false), []string{"차를 좋아함"}, []string{"바둑", "기타", "비밀"})
 	strict(t, s, config.GuildPrivacy{CardChannelOnly: true})

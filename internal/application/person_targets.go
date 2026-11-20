@@ -2,6 +2,7 @@ package application
 
 import (
 	"database/sql"
+	"encoding/json"
 	"regexp"
 	"slices"
 	"sort"
@@ -33,7 +34,7 @@ type turnNames struct {
 	denied  map[string]bool
 }
 
-func readPersonNames(tx *sql.Tx, guild string) (turnNames, error) {
+func readPersonNames(tx *sql.Tx, guild string, rooms map[string]bool) (turnNames, error) {
 	n := turnNames{map[string]string{}, map[string][]string{}, map[string]bool{}}
 	denied, err := withdrawnTx(tx, privacy.Memory, privacy.Profile)
 	if err != nil {
@@ -42,7 +43,8 @@ func readPersonNames(tx *sql.Tx, guild string) (turnNames, error) {
 	for account := range denied {
 		n.denied[personRef(account)] = true
 	}
-	rows, err := tx.Query(`SELECT person_ref,label FROM person_alias WHERE guild_id=? ORDER BY last_seen DESC,label`, guild)
+	raw, _ := json.Marshal(rooms)
+	rows, err := tx.Query(`SELECT person_ref,label FROM person_alias WHERE guild_id=? AND room IN (SELECT key FROM json_each(?)) ORDER BY last_seen DESC,label`, guild, string(raw))
 	if err != nil {
 		return n, err
 	}
@@ -137,7 +139,7 @@ func (s *Service) targetPeople(db *storage.Store, in ChatInput, _ []string) []tu
 		return nil
 	}
 	defer tx.Rollback()
-	names, err := readPersonNames(tx, in.GuildID)
+	names, err := readPersonNames(tx, in.GuildID, s.personRooms(tx, in.GuildID, in.ChannelID, s.guildPrivacy(in.GuildID).CardChannelOnly))
 	if err != nil {
 		return nil
 	}

@@ -21,10 +21,10 @@ func savePersonAlias(tx *sql.Tx, room, account, label, at string) error {
 		return nil // not a dated observation
 	}
 	at = t.UTC().Format("2006-01-02T15:04:05.000000000Z")
-	_, err = tx.Exec(`INSERT INTO person_alias(guild_id,person_ref,label,first_seen,last_seen) VALUES(?,?,?,?,?)
-		ON CONFLICT(guild_id,person_ref,label) DO UPDATE SET
+	_, err = tx.Exec(`INSERT INTO person_alias(guild_id,person_ref,label,room,first_seen,last_seen) VALUES(?,?,?,?,?,?)
+		ON CONFLICT(guild_id,person_ref,label,room) DO UPDATE SET
 		first_seen=min(first_seen,excluded.first_seen),last_seen=max(last_seen,excluded.last_seen)`,
-		guild, PersonRef(account), label, at, at)
+		guild, PersonRef(account), label, room, at, at)
 	return err
 }
 
@@ -34,14 +34,28 @@ func migratePersonAliases(db *storage.Store) error {
 	if !db.IsSQLite() {
 		return nil
 	}
-	for _, ddl := range []string{
-		`CREATE TABLE IF NOT EXISTS person_alias(guild_id TEXT NOT NULL,person_ref TEXT NOT NULL,label TEXT NOT NULL,
-			first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,PRIMARY KEY(guild_id,person_ref,label)) WITHOUT ROWID`,
-		`CREATE TABLE IF NOT EXISTS person_alias_fill(id INTEGER PRIMARY KEY,cursor INTEGER NOT NULL)`,
-	} {
-		if _, err := db.DB.Exec(ddl); err != nil {
+	if err := db.WithWriter(func(tx *sql.Tx) error {
+		var old bool
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM pragma_table_info('person_alias')) AND NOT EXISTS(SELECT 1 FROM pragma_table_info('person_alias') WHERE name='room')`).Scan(&old); err != nil {
 			return err
 		}
+		if old { // A guild-only summary cannot prove that a label is public.
+			if _, err := tx.Exec(`DROP TABLE person_alias; DELETE FROM person_alias_fill`); err != nil {
+				return err
+			}
+		}
+		for _, ddl := range []string{
+			`CREATE TABLE IF NOT EXISTS person_alias(guild_id TEXT NOT NULL,person_ref TEXT NOT NULL,label TEXT NOT NULL,
+			room TEXT NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,PRIMARY KEY(guild_id,person_ref,label,room)) WITHOUT ROWID`,
+			`CREATE TABLE IF NOT EXISTS person_alias_fill(id INTEGER PRIMARY KEY,cursor INTEGER NOT NULL)`,
+		} {
+			if _, err := tx.Exec(ddl); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return err
 	}
 	const batch = 512
 	done := false

@@ -6,11 +6,28 @@ import (
 	"time"
 
 	"masamong/internal/action"
+	"masamong/internal/config"
 	"masamong/internal/memory/engine"
 )
 
-func TestReviewResolverIntent(t *testing.T) {
+type resolverGateway struct{ DiscordInfo }
+
+func (resolverGateway) BotUser() (string, string) { return "bot", "bot" }
+func (resolverGateway) PersonMemoryChannels(string) map[string]bool {
+	return map[string]bool{"c": true}
+}
+
+func resolverService(t *testing.T) *Service {
 	s := privacyService(t)
+	d := s.Doc()
+	d.Guilds = map[string]config.GuildSettings{"g": {Channels: map[string]config.ChannelPolicy{"c": {Capture: true}}}}
+	s.setDoc(d, s.Revision())
+	s.Discord = resolverGateway{}
+	return s
+}
+
+func TestReviewResolverIntent(t *testing.T) {
+	s := resolverService(t)
 	e, err := s.MemoryEngine()
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +77,7 @@ func TestReviewResolverIntent(t *testing.T) {
 }
 
 func TestPersonTargets(t *testing.T) {
-	s := privacyService(t)
+	s := resolverService(t)
 	e, err := s.MemoryEngine()
 	if err != nil {
 		t.Fatal(err)

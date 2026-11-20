@@ -90,6 +90,7 @@ func memorySvc(t *testing.T) (*application.Service, *turnModel, *engine.Engine) 
 	}))
 	t.Cleanup(srv.Close)
 	svc := routedSvc(t, srv.URL, srv.URL)
+	svc.Discord = &personGateway{}
 	serveAnyServer(t, svc)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Memory.Capture = true

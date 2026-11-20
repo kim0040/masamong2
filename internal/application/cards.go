@@ -528,38 +528,57 @@ var mentionPattern = regexp.MustCompile(`<@!?(\d+)>`)
 // Only the gateway's ordinary text channels and positively known public threads
 // can supply statements outside the current group. A private thread deliberately
 // has no parent record, so an unknown room is never assumed to be public.
-func (s *Service) personRooms(tx *sql.Tx, guild string, group []string, localOnly bool) map[string]bool {
+func (s *Service) personRooms(tx *sql.Tx, guild, channel string, localOnly bool) map[string]bool {
 	rooms := map[string]bool{} // value = local to this channel group
-	for _, room := range group {
-		if strings.HasPrefix(room, "discord:"+guild+":") {
-			rooms[room] = true
-		}
-	}
-	if localOnly {
+	gw, ok := s.Discord.(interface{ PersonMemoryChannels(string) map[string]bool })
+	if !ok || channel == "" {
 		return rooms
 	}
-	add := func(channel string) {
-		r := roomOf(guild, channel)
-		if !rooms[r] {
-			rooms[r] = false
+	var deleted bool
+	if tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM thread_tombstones WHERE thread_id=?)`, channel).Scan(&deleted) != nil || deleted {
+		return rooms
+	}
+	channels := gw.PersonMemoryChannels(guild)
+	parent := channel
+	threads := map[string]string{}
+	rows, err := tx.Query(`SELECT thread_id,parent_id FROM channel_threads WHERE guild_id=? AND `+threadVisibleSQL("channel_threads"), guild)
+	if err != nil {
+		return rooms
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, p string
+		if rows.Scan(&id, &p) != nil {
+			return rooms
+		}
+		threads[id] = p
+	}
+	if rows.Err() != nil {
+		return rooms
+	}
+	if p := threads[channel]; p != "" {
+		parent = p
+	}
+	if public, known := channels[parent]; !known || !public {
+		if known {
+			rooms[roomOf(guild, channel)] = true
+		}
+		return rooms // private/restricted rooms stay inside themselves
+	}
+	add := func(id, p string) {
+		capture := s.ownChannelPolicy(guild, p).Capture
+		if id != p && s.hasChannelPolicy(guild, id) {
+			capture = s.ownChannelPolicy(guild, id).Capture
+		}
+		if capture && channels[p] && (!localOnly || p == parent) {
+			rooms[roomOf(guild, id)] = p == parent
 		}
 	}
-	if s.Discord != nil {
-		for _, ch := range s.Discord.Channels(guild) {
-			if ch.GuildID == guild && ch.Type == "text" {
-				add(ch.ID)
-			}
-		}
+	for id := range channels {
+		add(id, id)
 	}
-	rows, err := tx.Query(`SELECT thread_id FROM channel_threads WHERE guild_id=? AND `+threadVisibleSQL("channel_threads"), guild)
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var id string
-			if rows.Scan(&id) == nil {
-				add(id)
-			}
-		}
+	for id, p := range threads {
+		add(id, p)
 	}
 	return rooms
 }
@@ -573,8 +592,8 @@ func (s *Service) turnCards(ctx context.Context, db *storage.Store, in ChatInput
 	}
 	defer tx.Rollback()
 	strict := s.guildPrivacy(in.GuildID)
-	rooms := s.personRooms(tx, in.GuildID, group, strict.CardChannelOnly)
-	names, err := readPersonNames(tx, in.GuildID)
+	rooms := s.personRooms(tx, in.GuildID, in.ChannelID, strict.CardChannelOnly)
+	names, err := readPersonNames(tx, in.GuildID, rooms)
 	if err != nil {
 		return nil
 	}
@@ -591,7 +610,7 @@ func (s *Service) turnCards(ctx context.Context, db *storage.Store, in ChatInput
 	var out []chat.RoomCard
 	distinguishNames(people, names.current)
 	for _, p := range people {
-		if names.denied[p.ref] || strict.OwnCardOnly && !p.caller {
+		if names.current[p.ref] == "" || names.denied[p.ref] || strict.OwnCardOnly && !p.caller {
 			continue
 		}
 		var facts []string
