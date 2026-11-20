@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -383,5 +384,68 @@ func TestDisasterAlertsIdleChecksWriteNothingButStatusStaysFresh(t *testing.T) {
 	want := now.UTC().Format(time.RFC3339)
 	if state["checked_at"] != want || state["warnings_checked_at"] != want {
 		t.Fatalf("console last-checked is stale: %v, want %s", state, want)
+	}
+}
+
+// A check reads the rooms' levels and the instance switches from one configuration revision: a
+// revision that turns marine on and drops the room's only sea area while KMA is answering must not
+// combine the old room level with the new switch.
+func TestDisasterTickReadsOneConfigRevision(t *testing.T) {
+	const area = "S1252020"
+	svc := setupSvc(t)
+	var calls atomic.Int32
+	fetching := make(chan struct{})
+	proceed := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "getEqkMsg") {
+			_, _ = w.Write([]byte(`{"response":{"header":{"resultCode":"03","resultMsg":"NO_DATA"}}}`))
+			return
+		}
+		if calls.Add(1) == 1 {
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		close(fetching)
+		select {
+		case <-proceed:
+			_, _ = w.Write([]byte("[" + warning(area, "제주도해상", "먼바다", "풍랑", "경보", "발표") + "]"))
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(srv.Close)
+	pointAt(t, svc, "kma", srv.URL, "KMA_TEST_KEY", "k")
+	if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "a", "respond": "mention", "watch_level": map[string]int{area: 4}}); !r.OK {
+		t.Fatal(r.Error)
+	}
+	gw := &postingGateway{}
+	svc.Discord = gw
+	now := time.Date(2026, 10, 1, 3, 10, 0, 0, time.UTC)
+	svc.Clock = clock.Fixed{T: now}
+	application.DisasterTickForTest(svc, context.Background())
+	svc.Clock = clock.Fixed{T: now.Add(5 * time.Minute)}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		application.DisasterTickForTest(svc, ctx)
+		close(done)
+	}()
+	select {
+	case <-fetching:
+	case <-ctx.Done():
+		t.Fatal("warning poll did not reach the test server")
+	}
+	applyDoc(t, svc, func(d *config.Document) {
+		d.DisasterAlerts.Marine = true
+		g := d.Guilds["g1"]
+		ch := g.Channels["a"]
+		ch.WatchLevel = nil
+		g.Channels["a"] = ch
+		d.Guilds["g1"] = g
+	})
+	close(proceed)
+	<-done
+	if len(gw.posts) != 0 {
+		t.Fatalf("no single config revision allows this card, got %q", gw.posts)
 	}
 }

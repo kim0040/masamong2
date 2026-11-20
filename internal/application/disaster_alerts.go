@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"masamong/internal/action"
+	"masamong/internal/config"
 	"masamong/internal/providers/kma"
 )
 
@@ -71,9 +72,8 @@ type disasterChannel struct {
 }
 
 // disasterChannels are the channels the bot answers in on approved servers, minus those that turned
-// announcements off.
-func (s *Service) disasterChannels() []disasterChannel {
-	doc := s.Doc()
+// announcements off. doc is the configuration snapshot the caller also reads its switches from.
+func (s *Service) disasterChannels(doc config.Document) []disasterChannel {
 	pause := s.pauseState()
 	if pause.All {
 		return nil
@@ -100,7 +100,11 @@ func (s *Service) disasterChannels() []disasterChannel {
 
 // disasterTick is one scheduler minute: earthquakes, and warnings when five minutes have passed.
 func (s *Service) disasterTick(ctx context.Context) {
-	if s.practice || s.Store == nil || !s.Doc().DisasterAlerts.On() {
+	// one configuration snapshot for the whole check: the rooms' levels and the instance switches
+	// (warnings, marine, magnitudes) always come from the same revision
+	doc := s.Doc()
+	cfg := doc.DisasterAlerts
+	if s.practice || s.Store == nil || !cfg.On() {
 		return
 	}
 	r := s.Registry()
@@ -111,7 +115,7 @@ func (s *Service) disasterTick(ctx context.Context) {
 	if !ok {
 		return
 	}
-	channels := s.disasterChannels()
+	channels := s.disasterChannels(doc)
 	if len(channels) == 0 {
 		return
 	}
@@ -127,7 +131,7 @@ func (s *Service) disasterTick(ctx context.Context) {
 		}
 		s.Log.Warn("disaster alerts: check failed", "err", err)
 	}
-	if n, err := s.earthquakeTick(ctx, poster, channels); err != nil {
+	if n, err := s.earthquakeTick(ctx, poster, channels, cfg); err != nil {
 		fail(err)
 	} else if n > 0 {
 		st.LastSentAt, st.LastSentKind, st.LastSentCount = checkedAt, "earthquake", n
@@ -136,13 +140,13 @@ func (s *Service) disasterTick(ctx context.Context) {
 	s.disaster.mu.Lock()
 	s.disaster.checkedAt = now.UTC()
 	last := s.disaster.warningsAt
-	due := s.Doc().DisasterAlerts.WarningsOn() && now.Sub(last) >= warningEvery-5*time.Second
+	due := cfg.WarningsOn() && now.Sub(last) >= warningEvery-5*time.Second
 	if due {
 		s.disaster.warningsAt = now.UTC()
 	}
 	s.disaster.mu.Unlock()
 	if due {
-		if n, err := s.warningTick(ctx, poster, channels); err != nil {
+		if n, err := s.warningTick(ctx, poster, channels, cfg); err != nil {
 			fail(err)
 		} else if n > 0 {
 			st.LastSentAt, st.LastSentKind, st.LastSentCount = checkedAt, "warning", n
@@ -160,7 +164,7 @@ func (s *Service) disasterTick(ctx context.Context) {
 // ---------------------------------------------------------------------------
 
 // earthquakeTick announces new earthquakes; it returns how many channel messages it sent or edited.
-func (s *Service) earthquakeTick(ctx context.Context, poster ChannelPoster, channels []disasterChannel) (int, error) {
+func (s *Service) earthquakeTick(ctx context.Context, poster ChannelPoster, channels []disasterChannel, cfg config.DisasterAlerts) (int, error) {
 	r := s.Registry()
 	if err := r.reserve(r.kmaID); err != nil {
 		return 0, err
@@ -170,7 +174,6 @@ func (s *Service) earthquakeTick(ctx context.Context, poster ChannelPoster, chan
 	if err != nil {
 		return 0, err
 	}
-	cfg := s.Doc().DisasterAlerts
 	var events []kma.Earthquake
 	for _, e := range all {
 		if e.NoDomesticImpact || e.EventTime.IsZero() || e.Magnitude == nil || *e.Magnitude < cfg.MinMagnitude(e.Domestic) {
@@ -399,7 +402,7 @@ func (snapshot warningSnapshot) record(w kma.Warning) {
 }
 
 // warningTick announces changes to the active level of each area's warning.
-func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channels []disasterChannel) (int, error) {
+func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channels []disasterChannel, cfg config.DisasterAlerts) (int, error) {
 	r := s.Registry()
 	if err := r.reserve(r.kmaID); err != nil {
 		return 0, err
@@ -409,7 +412,6 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 	if err != nil {
 		return 0, err
 	}
-	cfg := s.Doc().DisasterAlerts
 	current := warningSnapshot{}
 	cancelled := warningSnapshot{}
 	for _, w := range all {
@@ -559,7 +561,9 @@ func (s *Service) disasterAlertsStatus(req action.Request) action.Result {
 		st.WarningsAt = at.Format(time.RFC3339)
 	}
 	s.disaster.mu.Unlock()
-	cfg := s.Doc().DisasterAlerts
+	doc := s.Doc()
+	cfg := doc.DisasterAlerts
+	channels := len(s.disasterChannels(doc))
 	r := s.Registry()
 	reason := ""
 	switch {
@@ -569,7 +573,7 @@ func (s *Service) disasterAlertsStatus(req action.Request) action.Result {
 		reason = "no_kma_key"
 	case s.Discord == nil || !s.Discord.Connected():
 		reason = "discord_offline"
-	case len(s.disasterChannels()) == 0:
+	case channels == 0:
 		reason = "no_channels"
 	}
 	regions := cfg.WarningRegions
@@ -578,5 +582,5 @@ func (s *Service) disasterAlertsStatus(req action.Request) action.Result {
 	}
 	return action.OK(req, map[string]any{"enabled": cfg.On(), "warnings": cfg.WarningsOn(), "marine": cfg.Marine,
 		"earthquake_min_domestic": cfg.MinMagnitude(true), "earthquake_min_overseas": cfg.MinMagnitude(false),
-		"warning_regions": regions, "channels": len(s.disasterChannels()), "waiting": reason, "state": st})
+		"warning_regions": regions, "channels": channels, "waiting": reason, "state": st})
 }
