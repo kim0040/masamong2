@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -24,7 +25,7 @@ type turnPerson struct {
 
 // Match requests about the caller, not incidental first-person subjects
 // ("I wonder what Minsoo likes"). Exact self mentions also work.
-var selfRequest = regexp.MustCompile(`(?i)(?:^|[^\pL\pN])(?:(?:나|저)(?:에\s*대해|에\s*관해|는?\s*(?:어떤\s*사람|누구)|를?\s*(?:소개|그려|기억))|(?:난|전)\s*(?:어떤\s*사람|누구)|(?:내|제)(?:\s*(?:취향|성격|별명|소개|특징|근황)|가\s*좋아하)|(?:about me|describe me|draw me|who am i|my (?:hobbies|interests|nickname|personality))\b)`)
+var selfRequest = regexp.MustCompile(`(?i)(?:^|[^\pL\pN])(?:(?:나|저)(?:에\s*(?:대해|관해)|한테\s*어울)|(?:나[는도가를]?|저[는도가를]?|내가|제가|난|전|날|절)\s*(?:(?:뭘|뭐를|무엇을|뭐|어떤\s*걸)\s*)?(?:어떤\s*사람|누구|좋아|싫어|소개|그려|기억)|(?:나의|저의|내|제)\s*(?:취향|성격|별명|소개|특징|근황|취미)|(?:about me|describe me|draw me|remember me|who am i|what do i like|my (?:hobbies|interests|nickname|personality))\b|(?:sobre mí|descríbeme|quién soy|qué me gusta)\b|(?:私|僕|わたし)(?:について|の趣味|はどんな人)|(?:我是谁|我的爱好|介绍我|关于我))`)
 
 type turnNames struct {
 	current map[string]string
@@ -96,11 +97,6 @@ func (n turnNames) match(text string, matches func(string, string) bool) []strin
 			}
 			word := text[lo:hi]
 			ok := matches(word, label)
-			for _, suffix := range []string{"형", "누나", "님", "씨"} {
-				if strings.Contains(word, label+suffix) {
-					ok = ok || matches(strings.Replace(word, label+suffix, label, 1), label)
-				}
-			}
 			if ok {
 				k := span{lo, hi}
 				at[k] = uniqueStrings(append(at[k], refs...))
@@ -130,7 +126,7 @@ func (n turnNames) match(text string, matches func(string, string) bool) []strin
 	return out
 }
 
-func (s *Service) targetPeople(db *storage.Store, in ChatInput, planner []string) []turnPerson {
+func (s *Service) targetPeople(db *storage.Store, in ChatInput, _ []string) []turnPerson {
 	if in.GuildID == "" || in.GuildID == "0" || in.SpeakerID == "" || !s.MemoryAllowed(in.SpeakerID) {
 		return nil
 	}
@@ -150,9 +146,8 @@ func (s *Service) targetPeople(db *storage.Store, in ChatInput, planner []string
 	ownOnly := s.guildPrivacy(in.GuildID).OwnCardOnly
 	var out []turnPerson
 	seen := map[string]bool{}
-	others := 0
-	add := func(ref string) {
-		if names.current[ref] == "" || seen[ref] || names.denied[ref] || ref != caller && (ownOnly || others == chat.MaxOtherCards) {
+	add := func(ref string, explicit bool) {
+		if names.current[ref] == "" || seen[ref] || names.denied[ref] || ref != caller && ownOnly || ref == caller && !explicit {
 			return
 		}
 		p := turnPerson{ref, names.current[ref], ref == caller}
@@ -160,12 +155,11 @@ func (s *Service) targetPeople(db *storage.Store, in ChatInput, planner []string
 			out = append([]turnPerson{p}, out...)
 		} else {
 			out = append(out, p)
-			others++
 		}
 		seen[ref] = true
 	}
 	for _, m := range mentionPattern.FindAllStringSubmatch(in.Message, -1) {
-		add(personRef(m[1]))
+		add(personRef(m[1]), true)
 	}
 	for _, l := range lines {
 		if l.ID == in.MessageID && l.ReplyTo != "" && !l.ReplyToBot {
@@ -177,23 +171,40 @@ func (s *Service) targetPeople(db *storage.Store, in ChatInput, planner []string
 				_ = tx.QueryRow(`SELECT actor_account FROM memory_observations WHERE platform='discord' AND room=?
 					AND native_message_id=? AND deleted_at='' AND record_kind=?`, roomOf(in.GuildID, in.ChannelID), l.ReplyTo, corpus.HumanText).Scan(&account)
 			}
-			add(personRef(account))
+			add(personRef(account), true)
 			break
 		}
 	}
 	// A Korean display name can be inflected even when the index language is English.
 	doc := s.Doc()
-	matches := search.NameMatcher(lang.MergeSearch(append(slices.Clone(doc.Memory.Languages), "ko"), doc.BotNames()))
-	for _, name := range planner {
-		for _, ref := range names.match(name, matches) {
-			add(ref)
-		}
-	}
+	matches := search.NameMatcher(lang.MergeSearch(append(slices.Clone(doc.Memory.Languages), "ko", "ja"), doc.BotNames()))
+	// Any valid planner target already has one of these exact signals. A guess
+	// cannot add an account, change the order, or displace an explicit target.
 	for _, ref := range names.match(mentionPattern.ReplaceAllString(in.Message, " "), matches) {
-		add(ref)
+		add(ref, false)
 	}
 	if selfRequest.MatchString(in.Message) {
-		add(caller)
+		add(caller, true)
 	}
-	return out
+	limit := chat.MaxOtherCards
+	if len(out) > 0 && out[0].caller {
+		limit++
+	}
+	return out[:min(len(out), limit)]
+}
+
+// Two explicitly addressed accounts may have the same current display name.
+// Keep their headers and subject tokens distinct without exposing account IDs.
+func distinguishNames(people []turnPerson, labels map[string]string) {
+	count, seen := map[string]int{}, map[string]int{}
+	for _, p := range people {
+		count[strings.ToLower(labels[p.ref])]++
+	}
+	for _, p := range people {
+		k := strings.ToLower(labels[p.ref])
+		if k != "" && count[k] > 1 {
+			seen[k]++
+			labels[p.ref] += " (" + strconv.Itoa(seen[k]) + ")"
+		}
+	}
 }

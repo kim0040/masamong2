@@ -589,6 +589,7 @@ func (s *Service) turnCards(ctx context.Context, db *storage.Store, in ChatInput
 	rawLocal, _ := json.Marshal(local)
 	cfg := s.Doc().Memory
 	var out []chat.RoomCard
+	distinguishNames(people, names.current)
 	for _, p := range people {
 		if names.denied[p.ref] || strict.OwnCardOnly && !p.caller {
 			continue
@@ -626,7 +627,7 @@ func (s *Service) turnCards(ctx context.Context, db *storage.Store, in ChatInput
 				ORDER BY e.last_seen DESC,i.created_at DESC,i.id LIMIT 100`, in.GuildID, string(rawRooms), "{@"+p.ref+"}", p.ref, string(rawLocal), p.ref))
 		}
 		if len(facts) > 0 {
-			out = append(out, chat.RoomCard{Name: p.label, Facts: facts, Caller: p.caller})
+			out = append(out, chat.RoomCard{Name: names.current[p.ref], Facts: facts, Caller: p.caller})
 		}
 	}
 	return out
