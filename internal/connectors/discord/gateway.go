@@ -775,12 +775,18 @@ func localeOf(i *discordgo.Interaction) string {
 }
 
 // guildTag is the locale a server prefers as Discord reports it ("" when the server is not known).
+// The field is read under the state read lock: GuildUpdate replaces the guild under the write lock,
+// so a pointer kept past State.Guild's own unlock races with it.
 func guildTag(s *discordgo.Session, guildID string) string {
 	if guildID == "" || s == nil || s.State == nil {
 		return ""
 	}
-	if gd, err := s.State.Guild(guildID); err == nil && gd != nil {
-		return gd.PreferredLocale
+	s.State.RLock()
+	defer s.State.RUnlock()
+	for _, gd := range s.State.Guilds {
+		if gd.ID == guildID {
+			return gd.PreferredLocale
+		}
 	}
 	return ""
 }
@@ -1971,7 +1977,10 @@ func (g *Gateway) shouldAnswer(m *discordgo.MessageCreate, pol config.ChannelPol
 
 func (g *Gateway) runCommand(s *discordgo.Session, m *discordgo.MessageCreate, cmd Command, opts map[string]string) {
 	ictx := InvokeContext{ChannelID: m.ChannelID, GuildID: m.GuildID, UserID: m.Author.ID, Locale: g.svc.LocaleFor(m.Author.ID, g.locale(m.GuildID)), Manager: g.messageManager(s, m),
-		Private: m.GuildID == "", UserName: displayName(m), Typed: true, Tag: guildTag(s, m.GuildID)}
+		Private: m.GuildID == "", UserName: displayName(m), Typed: true}
+	if cmd.Name == "fx" { // only the fx home currency reads the server's preferred locale
+		ictx.Tag = guildTag(s, m.GuildID)
+	}
 	ctx, cancel := context.WithTimeout(g.runCtx(), g.ActionTimeout)
 	defer cancel()
 	mark := g.svc.SettledMark() // before the command reads anything: its result may go on into a chat turn

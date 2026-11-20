@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -100,6 +101,30 @@ func (d *fxDelivery) deferredFlags(t *testing.T) int {
 }
 
 const ephemeral = int(discordgo.MessageFlagsEphemeral)
+
+// The server's preferred locale is read while DiscordGo's state lock is held, so a guild update on the
+// event loop cannot replace the guild mid-read. Run with -race.
+func TestFXGuildTagReadsUnderTheStateLock(t *testing.T) {
+	s := &discordgo.Session{State: discordgo.NewState()}
+	update := func() {
+		if err := s.State.GuildAdd(&discordgo.Guild{ID: "guild", PreferredLocale: "en-GB"}); err != nil {
+			t.Error(err)
+		}
+	}
+	update()
+	var group sync.WaitGroup
+	group.Go(func() {
+		for range 1000 {
+			update()
+		}
+	})
+	group.Go(func() {
+		for range 1000 {
+			_ = guildTag(s, "guild")
+		}
+	})
+	group.Wait()
+}
 
 // The region a card's home currency is read from, in order: the region the person's saved language
 // names itself, else the region Discord's tag names (the interaction's for a slash command, the
