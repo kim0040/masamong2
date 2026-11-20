@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -82,7 +83,48 @@ const aliasRangeSQL = `SELECT observation_id,source_room,actor_account,actor_lab
 const eligibleAliasSQL = `platform='discord' AND record_kind=? AND actor_account<>'' AND actor_label<>'' AND deleted_at='' AND edited_at=''
 				AND NOT EXISTS(SELECT 1 FROM privacy_tombstones p WHERE (p.kind='account' AND p.source_id=o.actor_account)
 					OR (p.kind='message' AND p.source_id=o.native_message_id))`
-const consentingAliasSQL = ` AND NOT EXISTS(SELECT 1 FROM consent_state c WHERE c.user_id=o.actor_account AND c.scope='memory' AND c.status='withdrawn')`
+const consentingAliasSQL = ` AND NOT EXISTS(SELECT 1 FROM consent_state c WHERE c.user_id=o.actor_account AND c.scope IN ('memory','profile') AND c.status='withdrawn')`
+
+func indexAliasRows(tx *sql.Tx, query string, args ...any) error {
+	var consent bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='consent_state')`).Scan(&consent); err != nil {
+		return err
+	}
+	query += eligibleAliasSQL
+	if consent {
+		query += consentingAliasSQL
+	}
+	rows, err := tx.Query(query, append(args, corpus.HumanText)...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var observation, room, id, label, at string
+		if err := rows.Scan(&observation, &room, &id, &label, &at); err != nil {
+			return err
+		}
+		if err := savePersonAlias(tx, observation, room, id, label, at); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+func indexCapturedAliases(ctx context.Context, db *storage.Store, ids []string) error {
+	for len(ids) > 0 {
+		n := min(len(ids), 64)
+		raw, _ := json.Marshal(ids[:n])
+		if err := db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+			return indexAliasRows(tx, `SELECT observation_id,source_room,actor_account,actor_label,parsed_time FROM memory_observations o
+				WHERE observation_id IN (SELECT value FROM json_each(?)) AND `, string(raw))
+		}); err != nil {
+			return err
+		}
+		ids = ids[n:]
+	}
+	return nil
+}
 
 func fillAliasBatch(ctx context.Context, db *storage.Store) (bool, error) {
 	done := false
@@ -96,14 +138,6 @@ func fillAliasBatch(ctx context.Context, db *storage.Store) (bool, error) {
 			done = true
 			return nil
 		}
-		var consent bool
-		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='consent_state')`).Scan(&consent); err != nil {
-			return err
-		}
-		where := eligibleAliasSQL
-		if consent {
-			where += consentingAliasSQL
-		}
 		var end sql.NullInt64
 		if err := tx.QueryRow(`SELECT max(rowid) FROM (SELECT rowid FROM memory_observations NOT INDEXED WHERE rowid>? ORDER BY rowid LIMIT 512)`, cursor).Scan(&end); err != nil {
 			return err
@@ -111,21 +145,7 @@ func fillAliasBatch(ctx context.Context, db *storage.Store) (bool, error) {
 		if !end.Valid {
 			done, cursor = true, -1
 		} else {
-			rows, err := tx.Query(aliasRangeSQL+where, cursor, end.Int64, corpus.HumanText)
-			if err != nil {
-				return err
-			}
-			defer rows.Close()
-			for rows.Next() {
-				var observation, room, id, label, at string
-				if err := rows.Scan(&observation, &room, &id, &label, &at); err != nil {
-					return err
-				}
-				if err := savePersonAlias(tx, observation, room, id, label, at); err != nil {
-					return err
-				}
-			}
-			if err := rows.Err(); err != nil {
+			if err := indexAliasRows(tx, aliasRangeSQL, cursor, end.Int64); err != nil {
 				return err
 			}
 			cursor = end.Int64

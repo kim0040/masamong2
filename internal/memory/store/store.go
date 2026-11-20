@@ -911,6 +911,7 @@ const insertBatch = 2000
 
 func (s *Store) insertObservations(ctx context.Context, obs []corpus.Observation, merge map[string]string) (InsertResult, error) {
 	var res InsertResult
+	var nameSources []string
 	err := s.DB.WithWriterContext(ctx, func(tx *sql.Tx) error {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -1004,10 +1005,8 @@ func (s *Store) insertObservations(ctx context.Context, obs []corpus.Observation
 			}
 			if n, _ := r.RowsAffected(); n > 0 {
 				res.Inserted++
-				if !s.tidb() && o.Platform == "discord" {
-					if err := savePersonAlias(tx, o.ObservationID, o.SourceRoom, m.ActorAccount, m.ActorLabel, o.ParsedTime); err != nil {
-						slog.Warn("could not record display name; keeping captured observation")
-					}
+				if !s.tidb() && o.Platform == "discord" && o.RecordKind == corpus.HumanText && m.ActorAccount != "" {
+					nameSources = append(nameSources, o.ObservationID)
 				}
 				a := appends[m.Room]
 				key := messageKey(m)
@@ -1049,7 +1048,10 @@ func (s *Store) insertObservations(ctx context.Context, obs []corpus.Observation
 	if err != nil {
 		return InsertResult{}, err
 	} // this batch rolled back
-	return res, err
+	if err := indexCapturedAliases(ctx, s.DB, nameSources); err != nil {
+		slog.Warn("could not record display name; captured observation already committed")
+	}
+	return res, nil
 }
 
 // Messages returns every stored message of the rooms, room-ordered (corpus.OrderByRoom order).

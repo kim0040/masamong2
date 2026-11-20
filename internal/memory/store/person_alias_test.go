@@ -8,6 +8,40 @@ import (
 	"masamong/internal/memory/corpus"
 )
 
+func TestReviewAliasWriteRollback(t *testing.T) {
+	s := openStore(t)
+	o := mk(0, time.Now())
+	o.ActorAccount = "101"
+	if _, err := s.DB.DB.Exec(`CREATE TRIGGER fixture_failure BEFORE INSERT ON person_alias BEGIN SELECT RAISE(ROLLBACK,'fixture'); END`); err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.InsertObservations([]corpus.Observation{o}, nil)
+	if err != nil || res.Inserted != 1 {
+		t.Fatalf("capture %+v: %v", res, err)
+	}
+	var count int
+	if err := s.DB.Reader().QueryRow(`SELECT count(*) FROM memory_observations WHERE observation_id=? AND actor_account=?`, o.ObservationID, o.ActorAccount).Scan(&count); err != nil || count != 1 {
+		t.Fatalf("sources %d: %v", count, err)
+	}
+	if _, err := s.DB.DB.Exec(`DROP TRIGGER fixture_failure; CREATE TABLE IF NOT EXISTS consent_state(user_id TEXT,scope TEXT,status TEXT); INSERT INTO consent_state(user_id,scope,status) VALUES('101','memory','withdrawn')`); err != nil {
+		t.Fatal(err)
+	}
+	check := func() {
+		t.Helper()
+		if err := indexCapturedAliases(t.Context(), s.DB, []string{o.ObservationID}); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.DB.Reader().QueryRow(`SELECT count(*) FROM person_alias WHERE person_ref=?`, PersonRef(o.ActorAccount)).Scan(&count); err != nil || count != 0 {
+			t.Fatalf("alias resurrected %d: %v", count, err)
+		}
+	}
+	check()
+	if _, err := s.DB.DB.Exec(`DELETE FROM consent_state; DELETE FROM memory_observations`); err != nil {
+		t.Fatal(err)
+	}
+	check()
+}
+
 func TestReviewAliasMigration550k(t *testing.T) {
 	db := openStore(t).DB
 	rows, err := db.Reader().Query(`EXPLAIN QUERY PLAN `+aliasRangeSQL+eligibleAliasSQL, 512, 1024, corpus.HumanText)
