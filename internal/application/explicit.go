@@ -212,7 +212,7 @@ func (s *Service) explicitMemoryTurn(ctx context.Context, in ChatInput, voice ch
 		}
 		prev := s.forgetPreview(db, in.GuildID, ref, ids)
 		_ = s.kvSet(forgetPendingKey(in.GuildID, ref), forgetPending{Items: ids, At: s.Clock.Now().UTC().Format(time.RFC3339)})
-		res.Data["preview_items"] = len(prev.items)
+		res.Data["preview_items"] = prev.count
 		res.Data["applied"] = false
 		res.Data["confirm_with"] = "/" + s.I18n.T(in.Locale, "discord.command.forgetme.name")
 		var shown []string
@@ -694,10 +694,99 @@ func forgetPendingKey(guild, ref string) string { return "memory:forget:pending:
 
 type forgetPlan struct {
 	items    []myItem
+	count    int
+	err      error
 	episodes []string // episodes the person is a participant of
 	cards    int
 	all      bool
 	token    string
+}
+
+const forgetBatch = 256
+
+// A single read snapshot (or the confirming writer) visits every matching
+// item, including hidden rows. Never keep the full set of bodies in memory.
+func walkForgetItems(tx *sql.Tx, guild, ref string, visit func([]myItem) error) error {
+	var cursor int64
+	for {
+		rows, err := tx.Query(`SELECT i.rowid,i.id,i.episode_id,i.text,i.state,i.by_refs,i.evidence FROM episode_item i JOIN channel_episode e ON e.id=i.episode_id
+			WHERE i.rowid>? AND e.guild_id=? AND (instr(i.text,?)>0 OR EXISTS(SELECT 1 FROM json_each(i.by_refs) WHERE value=?)) ORDER BY i.rowid LIMIT ?`, cursor, guild, "{@"+ref+"}", ref, forgetBatch)
+		if err != nil {
+			return err
+		}
+		var batch []myItem
+		for rows.Next() {
+			var it myItem
+			var state, by, ev string
+			if err := rows.Scan(&cursor, &it.ID, &it.Episode, &it.Text, &state, &by, &ev); err != nil {
+				rows.Close()
+				return err
+			}
+			it.Evidence = []string{state, by, ev}
+			batch = append(batch, it)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		if len(batch) == 0 {
+			return nil
+		}
+		if err := visit(batch); err != nil {
+			return err
+		}
+		if len(batch) < forgetBatch {
+			return nil
+		}
+	}
+}
+
+func allForgetPlan(tx *sql.Tx, guild, ref string) forgetPlan {
+	p := forgetPlan{all: true}
+	h := sha256.New()
+	enc := json.NewEncoder(h)
+	_ = enc.Encode([]string{"all", guild, ref})
+	p.err = walkForgetItems(tx, guild, ref, func(batch []myItem) error {
+		for _, it := range batch {
+			_ = enc.Encode(it)
+			if len(p.items) < 3 {
+				p.items = append(p.items, it)
+			}
+			p.count++
+		}
+		return nil
+	})
+	if p.err != nil {
+		return p
+	}
+	rows, err := tx.Query(`SELECT 'episode',e.id,e.participants FROM channel_episode e WHERE e.guild_id=?1 AND EXISTS(SELECT 1 FROM json_each(e.participants) WHERE value=?2)
+		UNION ALL SELECT 'card',id,json_array(state,text,evidence,updated_at) FROM person_card_item WHERE guild_id=?1 AND person_ref=?2
+		UNION ALL SELECT 'explicit',episode_id,key FROM memory_explicit WHERE guild_id=?1 AND person_ref=?2
+		UNION ALL SELECT 'relation',json_array(a_ref,b_ref),json_array(replies,mentions) FROM person_relation WHERE guild_id=?1 AND (a_ref=?2 OR b_ref=?2)
+		UNION ALL SELECT 'state',holder_id,'' FROM evidence_refs WHERE holder_kind=?3 AND source_id=?2 AND instr(holder_id,'state:'||?1||':')=1
+		ORDER BY 1,2`, guild, ref, store.HolderChannelState)
+	if err != nil {
+		p.err = err
+		return p
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind, id, body string
+		if p.err = rows.Scan(&kind, &id, &body); p.err != nil {
+			return p
+		}
+		_ = enc.Encode([]string{kind, id, body})
+		switch kind {
+		case "episode":
+			p.episodes = append(p.episodes, id)
+		case "card":
+			p.cards++
+		}
+	}
+	p.err = rows.Err()
+	p.token = hex.EncodeToString(h.Sum(nil)[:6])
+	return p
 }
 
 // forgetPreview is what forgetting would delete: the person's items (all, or the given ones), their
@@ -706,21 +795,16 @@ type forgetPlan struct {
 func (s *Service) forgetPreview(db *storage.Store, guild, ref string, ids []string) forgetPlan {
 	p := forgetPlan{all: len(ids) == 0}
 	if p.all {
-		p.items = s.myItems(db, guild, ref, nil, 1000)
-		rows, err := db.Reader().Query(`SELECT DISTINCT e.id FROM channel_episode e, json_each(e.participants) x WHERE e.guild_id=? AND x.value=?`, guild, ref)
-		if err == nil {
-			for rows.Next() {
-				var id string
-				if rows.Scan(&id) == nil {
-					p.episodes = append(p.episodes, id)
-				}
-			}
-			rows.Close()
+		tx, err := db.Reader().Begin()
+		if err != nil {
+			p.err = err
+			return p
 		}
-		_ = db.Reader().QueryRow(`SELECT COUNT(*) FROM person_card_item WHERE guild_id=? AND person_ref=? AND state='active'`, guild, ref).Scan(&p.cards)
-	} else {
-		p.items = s.myItems(db, guild, ref, ids, len(ids))
+		defer tx.Rollback()
+		return allForgetPlan(tx, guild, ref)
 	}
+	p.items = s.myItems(db, guild, ref, ids, len(ids))
+	p.count = len(p.items)
 	var keys []string
 	for _, it := range p.items {
 		keys = append(keys, "i:"+it.ID)
@@ -735,24 +819,54 @@ func (s *Service) forgetPreview(db *storage.Store, guild, ref string, ids []stri
 }
 
 // applyForget deletes what the plan shows.
+var errForgetChanged = errors.New("forget preview changed")
+
 func (s *Service) applyForget(ctx context.Context, db *storage.Store, guild, ref string, p forgetPlan) (int, error) {
 	deleted := 0
 	err := db.WithWriterContext(ctx, func(tx *sql.Tx) error {
 		touched := map[string]bool{}
 		var evidence []string
-		for _, it := range p.items {
-			if _, err := tx.Exec(`DELETE FROM evidence_refs WHERE holder_kind=? AND holder_id=?`, store.HolderEpisodeItem, it.ID); err != nil {
+		if p.all {
+			current := allForgetPlan(tx, guild, ref)
+			if current.err != nil {
+				return current.err
+			}
+			if current.token != p.token {
+				return errForgetChanged
+			}
+			if err := walkForgetItems(tx, guild, ref, func(batch []myItem) error {
+				ids := make([]string, 0, len(batch))
+				for _, it := range batch {
+					ids = append(ids, it.ID)
+					touched[it.Episode] = true
+				}
+				raw, _ := json.Marshal(ids)
+				if _, err := tx.Exec(`DELETE FROM evidence_refs WHERE holder_kind=? AND holder_id IN (SELECT value FROM json_each(?))`, store.HolderEpisodeItem, string(raw)); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(`DELETE FROM episode_item WHERE id IN (SELECT value FROM json_each(?))`, string(raw)); err != nil {
+					return err
+				}
+				deleted += len(batch)
+				return nil
+			}); err != nil {
 				return err
 			}
-			res, err := tx.Exec(`DELETE FROM episode_item WHERE id=?`, it.ID)
-			if err != nil {
-				return err
+		} else {
+			for _, it := range p.items {
+				if _, err := tx.Exec(`DELETE FROM evidence_refs WHERE holder_kind=? AND holder_id=?`, store.HolderEpisodeItem, it.ID); err != nil {
+					return err
+				}
+				res, err := tx.Exec(`DELETE FROM episode_item WHERE id=?`, it.ID)
+				if err != nil {
+					return err
+				}
+				if c, _ := res.RowsAffected(); c > 0 {
+					deleted++
+				}
+				touched[it.Episode] = true
+				evidence = append(evidence, it.Evidence...)
 			}
-			if c, _ := res.RowsAffected(); c > 0 {
-				deleted++
-			}
-			touched[it.Episode] = true
-			evidence = append(evidence, it.Evidence...)
 		}
 		for _, e := range p.episodes {
 			if err := dropParticipant(tx, e, ref); err != nil && !errors.Is(err, sql.ErrNoRows) {
@@ -905,9 +1019,12 @@ func (s *Service) mineAction(ctx context.Context, req action.Request) action.Res
 			scope = "all"
 		}
 		plan := s.forgetPreview(db, guild, ref, ids)
-		preview := map[string]any{"applied": false, "scope": scope, "items": len(plan.items), "episodes": len(plan.episodes), "cards": plan.cards, "token": plan.token}
 		confirm := strVal(in, "confirm", "")
-		if confirm == "" || confirm != plan.token {
+		showPreview := func(plan forgetPlan) action.Result {
+			if plan.err != nil {
+				return action.Fail(req, errcode.IO, "generic.error", plan.err.Error(), nil)
+			}
+			preview := map[string]any{"applied": false, "scope": scope, "items": plan.count, "episodes": len(plan.episodes), "cards": plan.cards, "token": plan.token}
 			if confirm != "" {
 				preview["stale"] = true // what it would delete changed since the preview
 			}
@@ -917,7 +1034,13 @@ func (s *Service) mineAction(ctx context.Context, req action.Request) action.Res
 			}
 			return res
 		}
+		if confirm == "" || confirm != plan.token || plan.err != nil {
+			return showPreview(plan)
+		}
 		n, err := s.applyForget(ctx, db, guild, ref, plan)
+		if errors.Is(err, errForgetChanged) {
+			return showPreview(s.forgetPreview(db, guild, ref, ids))
+		}
 		if err != nil {
 			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
 		}
@@ -979,11 +1102,11 @@ func (s *Service) mineCard(req action.Request, items []map[string]any, eps int, 
 
 func (s *Service) forgetCard(req action.Request, p forgetPlan, scope string, stale bool) action.Card {
 	c := action.Card{Title: s.msg(req, "memory.forget.title"), Ephemeral: true, Tone: "warn"}
-	if len(p.items) == 0 && len(p.episodes) == 0 && p.cards == 0 {
+	if p.count == 0 && len(p.episodes) == 0 && p.cards == 0 {
 		c.Text, c.Tone = s.msg(req, "memory.forget.nothing"), "neutral"
 		return c
 	}
-	text := s.msg(req, "memory.forget.preview", "items", len(p.items), "episodes", len(p.episodes), "cards", p.cards)
+	text := s.msg(req, "memory.forget.preview", "items", p.count, "episodes", len(p.episodes), "cards", p.cards)
 	if stale {
 		text = s.msg(req, "memory.forget.stale") + "\n" + text
 	}

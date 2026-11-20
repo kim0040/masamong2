@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"masamong/internal/action"
 	"masamong/internal/application"
 	"masamong/internal/config"
 	"masamong/internal/memory/blocks"
@@ -71,6 +72,40 @@ func (f reviewPerson) attach(t *testing.T, guild, channel string) {
 
 func TestReviewPersonPrivacy(t *testing.T) {
 	tests := map[string]func(*testing.T, reviewPerson){
+		"ForgetAll": func(t *testing.T, f reviewPerson) {
+			by, _ := json.Marshal([]string{store.PersonRef("101")})
+			if _, err := f.Store.DB.Exec(`WITH RECURSIVE nums(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM nums WHERE i<1000)
+				INSERT INTO episode_item(id,episode_id,kind,text,evidence,by_refs,created_at)
+				SELECT 'new-'||i,'public','fact',text,evidence,?,? FROM nums,episode_item WHERE id='public'`, string(by), f.at.Add(time.Hour).Format(time.RFC3339Nano)); err != nil {
+				t.Fatal(err)
+			}
+			req := action.Request{Action: "memory.mine.forget"}
+			do := func(token any) action.Result {
+				req.Input, _ = json.Marshal(map[string]any{"guild_id": "g", "user_id": "101", "scope": "all", "confirm": token})
+				return f.Execute(t.Context(), req)
+			}
+			p := do("")
+			if !p.OK || p.Output["items"] != 1001 {
+				t.Fatalf("preview: %+v", p)
+			}
+			if _, err := f.Store.DB.Exec(`UPDATE episode_item SET text=? WHERE id='public'`, "{@"+store.PersonRef("101")+"} changed oldest"); err != nil {
+				t.Fatal(err)
+			}
+			stale := do(p.Output["token"])
+			if !stale.OK || stale.Output["stale"] != true || stale.Output["applied"] != false {
+				t.Fatalf("oldest item not fingerprinted: %+v", stale)
+			}
+			if r := do(stale.Output["token"]); !r.OK || r.Output["applied"] != true || r.Output["deleted"] != 1001 {
+				t.Fatalf("apply: %+v", r)
+			}
+			if got := block(f.ask(t, "<@101> 어떤 사람이야?"), cardOpen, cardClose); got != "" {
+				t.Fatal(got)
+			}
+			var n int
+			if err := f.Store.Reader().QueryRow(`SELECT count(*) FROM episode_item,json_each(by_refs) WHERE value=?`, store.PersonRef("101")).Scan(&n); err != nil || n != 0 {
+				t.Fatalf("surviving facts %d: %v", n, err)
+			}
+		},
 		"DeletedAlias": func(t *testing.T, f reviewPerson) {
 			for i := range 3 {
 				f.source(t, "g", "c", "rename"+strconv.Itoa(i), "101", "삭제된별명", f.at.Add(time.Duration(i+1)*time.Minute))
