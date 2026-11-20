@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -158,5 +159,93 @@ func TestAnthropicCachePointEndsThePrefix(t *testing.T) {
 	sys, ok := body["system"].([]any)
 	if !ok || len(sys) != 1 || sys[0].(map[string]any)["cache_control"] == nil {
 		t.Fatalf("the system block carries the breakpoint: %v", body["system"])
+	}
+}
+
+// A marked message keeps its breakpoint through the Anthropic format's merging: adjacent user
+// messages join one turn, but the marker stays on the marked message's own text block inside the
+// turn — never on the image, the dynamic ask, or the generated partial answer a continuation
+// appends after it. A marked line a cut leaves out (a text-only assistant head) moves its marker to
+// the system prompt, not to the next turn.
+func TestAnthropicCachePointStaysOnTheMarkedBlock(t *testing.T) {
+	h := &anthropicHost{chat: func(w http.ResponseWriter, body map[string]any) { _, _ = w.Write([]byte(nativeText)) }}
+	srv := httptest.NewServer(http.HandlerFunc(h.serve))
+	t.Cleanup(srv.Close)
+	flaggedHost(t, "anthropic", srv.URL+"/v1", true)
+	c := providers.NewClient(5*time.Second, nil)
+	c.MaxRetries = 0
+	a := New(c, srv.URL+"/v1", providers.Offline())
+	a.API = APIAnthropic
+
+	marks := func(body map[string]any) (blocks []string) {
+		for _, m := range body["messages"].([]any) {
+			for _, b := range m.(map[string]any)["content"].([]any) {
+				bl := b.(map[string]any)
+				if bl["cache_control"] != nil {
+					blocks = append(blocks, fmt.Sprint(bl["text"]))
+				}
+			}
+		}
+		return
+	}
+
+	req := ChatRequest{Model: "claude-haiku-5-5", MaxTokens: 50, Messages: []Message{
+		{Role: "system", Content: "S"},
+		{Role: "user", Content: "fixed history", CachePoint: true},
+		{Role: "user", Content: "dynamic ask", Images: []ImagePart{{MIME: "image/png", Data: []byte("fixture")}}},
+	}}
+	if _, err := a.Chat(context.Background(), req); err != nil {
+		t.Fatalf("chat: %v", err)
+	}
+	body := h.bodies[len(h.bodies)-1]
+	msgs := body["messages"].([]any)
+	if len(msgs) != 1 {
+		t.Fatalf("the two user messages merge into one turn: %v", msgs)
+	}
+	blocks := msgs[0].(map[string]any)["content"].([]any)
+	first := blocks[0].(map[string]any)
+	if first["text"] != "fixed history" || first["cache_control"] == nil {
+		t.Fatalf("the marked message's own block carries the breakpoint inside the merged turn: %v", blocks)
+	}
+	if got := marks(body); len(got) != 1 || got[0] != "fixed history" {
+		t.Fatalf("exactly one breakpoint, on the marked message: %v", got)
+	}
+	if body["system"] != "S" {
+		t.Fatalf("an unmarked system stays plain text: %v", body["system"])
+	}
+
+	// a continuation appends the partial answer and the ask to continue: the marker must not move
+	req.Messages = append(req.Messages,
+		Message{Role: "assistant", Content: "dynamic partial answer"},
+		Message{Role: "user", Content: "continue"})
+	if _, err := a.Chat(context.Background(), req); err != nil {
+		t.Fatalf("continuation: %v", err)
+	}
+	body = h.bodies[len(h.bodies)-1]
+	if got := marks(body); len(got) != 1 || got[0] != "fixed history" {
+		t.Fatalf("the breakpoint still ends the stable prefix, not the generated answer: %v", got)
+	}
+	msgs = body["messages"].([]any)
+	if len(msgs) != 3 {
+		t.Fatalf("user (merged history), assistant (partial), user (continue): %v", msgs)
+	}
+
+	// a history cut can start on a marked assistant line: left out of the turns, its marker moves to
+	// the system prompt instead of onto the next turn
+	req.Messages = []Message{
+		{Role: "system", Content: "S"},
+		{Role: "assistant", Content: "context head", CachePoint: true},
+		{Role: "user", Content: "ask"},
+	}
+	if _, err := a.Chat(context.Background(), req); err != nil {
+		t.Fatalf("cut history: %v", err)
+	}
+	body = h.bodies[len(h.bodies)-1]
+	sys, ok := body["system"].([]any)
+	if !ok || len(sys) != 1 || sys[0].(map[string]any)["cache_control"] == nil || sys[0].(map[string]any)["text"] != "S" {
+		t.Fatalf("the dropped line's marker lands on the system block: %v", body["system"])
+	}
+	if got := marks(body); len(got) != 0 {
+		t.Fatalf("no marker stays in the turns: %v", got)
 	}
 }

@@ -231,8 +231,8 @@ func TestAnthropicMessagesConversion(t *testing.T) {
 		t.Fatalf("broken arguments become an empty object: %v", broken)
 	}
 	// a user text after the tool answers stays after them in the merged turn
-	_, turns, _ := anthropicMessages([]Message{{Role: "user", Content: "q"}, {Role: "assistant", ToolCalls: []ToolCall{{ID: "a", Function: ToolCallFunction{Name: "f"}}}},
-		{Role: "user", Content: "also this"}, {Role: "tool", ToolCallID: "a", Content: "x"}}, "")
+	_, _, turns, _ := anthropicMessages([]Message{{Role: "user", Content: "q"}, {Role: "assistant", ToolCalls: []ToolCall{{ID: "a", Function: ToolCallFunction{Name: "f"}}}},
+		{Role: "user", Content: "also this"}, {Role: "tool", ToolCallID: "a", Content: "x"}}, "", false)
 	if blockType(turns[2].Content[0]) != "tool_result" || blockType(turns[2].Content[1]) != "text" {
 		t.Fatalf("tool_result first: %s", turns[2].Content)
 	}

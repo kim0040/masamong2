@@ -240,7 +240,7 @@ func (a *Adapter) anthropicPayload(req ChatRequest, sh shape, caps Caps) (anthro
 	if p.MaxTokens <= 0 {
 		p.MaxTokens = anthropicDefaultMaxTokens
 	}
-	system, turns, err := anthropicMessages(req.Messages, a.thinkingOrigin(req.Model))
+	system, systemMarked, turns, err := anthropicMessages(req.Messages, a.thinkingOrigin(req.Model), a.cachePointOK(req.Model))
 	if err != nil {
 		return p, err
 	}
@@ -248,27 +248,25 @@ func (a *Adapter) anthropicPayload(req ChatRequest, sh shape, caps Caps) (anthro
 	// and a chat history cut to its last turns may start with the bot's own line: that context-only text
 	// is left out, so the window starts one turn later. An assistant turn with anything else (a tool call
 	// the next turn answers) cannot be left out, and a request with no turn at all says nothing: such a
-	// request is refused here, as the host would.
+	// request is refused here, as the host would. When the line left out carried the breakpoint the
+	// system prompt takes it instead, so the stable prefix still ends with a marker.
+	markedLost := false
 	for len(turns) > 0 && turns[0].Role == "assistant" && textOnly(turns[0].Content) {
+		markedLost = markedLost || hasCachePoint(turns[0].Content)
 		turns = turns[1:]
 	}
 	if len(turns) == 0 || turns[0].Role != "user" {
 		return p, classedError{msg: "openai: an Anthropic request must start with a user message", class: errclass.BadRequest}
 	}
 	if system != "" {
-		p.System = system
-	}
-	p.Messages = turns
-	if a.cachePointOK(req.Model) && slices.ContainsFunc(req.Messages, func(m Message) bool { return m.CachePoint }) {
-		// the request's breakpoint ends the stable prefix: on the last turn before the final user turn
-		// (the merged history tail), or on the system prompt when there is none — Anthropic takes
-		// cache_control on the last content block of either
-		if n := len(p.Messages); n >= 2 {
-			p.Messages[n-2].Content = cachePointBlocks(p.Messages[n-2].Content)
-		} else if p.System != nil {
+		if systemMarked || markedLost {
+			// Anthropic takes cache_control on a content block, so a marked system prompt goes as blocks
 			p.System = []map[string]any{{"type": "text", "text": system, "cache_control": cacheControlEphemeral}}
+		} else {
+			p.System = system
 		}
 	}
+	p.Messages = turns
 	req.bareToolTurn = a.bareToolTurn(req)
 	thinking, level, thinks := anthropicThinking(req, caps, sh)
 	p.Thinking = thinking
@@ -381,12 +379,21 @@ func (a *Adapter) BindsThinking() bool {
 // sent back keeps its blocks as they came, except that the thinking and redacted_thinking blocks of an
 // answer another model or host wrote (origin differs, after a failover) are left out: the model reading
 // them cannot use them, and the API reads that answer's text and tool calls without them.
-func anthropicMessages(msgs []Message, origin string) (string, []anthropicTurn, error) {
+//
+// When the host takes a cache breakpoint (cacheOK) a message's CachePoint travels with its own blocks:
+// the last block it adds carries cache_control, inside the merged turn when its role joins the turn
+// before it, so the marker ends the stable prefix — never the partial answer or continuation a caller
+// appends after it. It returns the system text and whether a marked message joined it.
+func anthropicMessages(msgs []Message, origin string, cacheOK bool) (string, bool, []anthropicTurn, error) {
 	var system []string
+	systemMarked := false
 	var turns []anthropicTurn
-	add := func(role string, blocks []json.RawMessage) {
+	add := func(role string, blocks []json.RawMessage, marked bool) {
 		if len(blocks) == 0 {
 			return
+		}
+		if marked {
+			blocks = cachePointBlocks(blocks)
 		}
 		if n := len(turns); n > 0 && turns[n-1].Role == role {
 			turns[n-1].Content = append(turns[n-1].Content, blocks...)
@@ -395,17 +402,18 @@ func anthropicMessages(msgs []Message, origin string) (string, []anthropicTurn, 
 		turns = append(turns, anthropicTurn{Role: role, Content: blocks})
 	}
 	for i, m := range msgs {
+		marked := m.CachePoint && cacheOK
 		if len(m.Raw) > 0 {
 			raw, err := rawMessage(m.Raw)
 			if err != nil {
-				return "", nil, fmt.Errorf("openai: message %d: %w", i, err)
+				return "", false, nil, fmt.Errorf("openai: message %d: %w", i, err)
 			}
 			if raw.native != nil {
 				blocks := raw.native
 				if raw.origin != "" && raw.origin != origin {
 					blocks = withoutThinking(blocks)
 				}
-				add(anthropicRole(raw.msg.Role), blocks)
+				add(anthropicRole(raw.msg.Role), blocks, marked)
 				continue
 			}
 			m = raw.msg
@@ -414,6 +422,7 @@ func anthropicMessages(msgs []Message, origin string) (string, []anthropicTurn, 
 		case "system", "developer":
 			if strings.TrimSpace(m.Content) != "" {
 				system = append(system, m.Content)
+				systemMarked = systemMarked || marked
 			}
 		case "assistant":
 			var blocks []json.RawMessage
@@ -423,19 +432,19 @@ func anthropicMessages(msgs []Message, origin string) (string, []anthropicTurn, 
 			for _, c := range m.ToolCalls {
 				blocks = append(blocks, toolUseBlock(c))
 			}
-			add("assistant", blocks)
+			add("assistant", blocks, marked)
 		case "tool":
 			block := map[string]any{"type": "tool_result", "tool_use_id": m.ToolCallID}
 			if m.Content != "" {
 				block["content"] = m.Content
 			}
 			b, _ := json.Marshal(block)
-			add("user", []json.RawMessage{b})
+			add("user", []json.RawMessage{b}, marked)
 		default: // user
 			var blocks []json.RawMessage
 			for _, img := range m.Images {
 				if img.MIME == "" || len(img.Data) == 0 {
-					return "", nil, fmt.Errorf("openai: image part without data")
+					return "", false, nil, fmt.Errorf("openai: image part without data")
 				}
 				b, _ := json.Marshal(map[string]any{"type": "image", "source": map[string]any{"type": "base64", "media_type": img.MIME, "data": img.base64()}})
 				blocks = append(blocks, b)
@@ -443,10 +452,10 @@ func anthropicMessages(msgs []Message, origin string) (string, []anthropicTurn, 
 			if strings.TrimSpace(m.Content) != "" {
 				blocks = append(blocks, textBlock(m.Content))
 			}
-			add("user", blocks)
+			add("user", blocks, marked)
 		}
 	}
-	// a tool_result must come first in its user turn
+	// a tool_result must come first in its user turn; its marker, when it has one, travels with the block
 	for i := range turns {
 		if turns[i].Role == "user" {
 			slices.SortStableFunc(turns[i].Content, func(x, y json.RawMessage) int {
@@ -454,7 +463,7 @@ func anthropicMessages(msgs []Message, origin string) (string, []anthropicTurn, 
 			})
 		}
 	}
-	return strings.Join(system, "\n\n"), turns, nil
+	return strings.Join(system, "\n\n"), systemMarked, turns, nil
 }
 
 // textOnly reports blocks that are all text.
@@ -495,6 +504,17 @@ func anthropicRole(role string) string {
 func textBlock(s string) json.RawMessage {
 	b, _ := json.Marshal(map[string]string{"type": "text", "text": s})
 	return b
+}
+
+// hasCachePoint reports whether any of the blocks carries the prompt-cache breakpoint.
+func hasCachePoint(blocks []json.RawMessage) bool {
+	for _, b := range blocks {
+		var m map[string]any
+		if json.Unmarshal(b, &m) == nil && m["cache_control"] != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // cachePointBlocks is blocks with its last one carrying the prompt-cache breakpoint.
