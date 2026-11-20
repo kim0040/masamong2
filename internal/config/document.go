@@ -1115,6 +1115,9 @@ type TranscriptChars int
 // range comes back as an error naming the key.
 func (t *TranscriptChars) UnmarshalYAML(n *yaml.Node) error {
 	var v int
+	if n.Kind != yaml.ScalarNode || n.Tag != "!!int" {
+		return fmt.Errorf("chat.transcript_chars must be an integer 1000–20000 (unset means the default 5000)")
+	}
 	if err := n.Decode(&v); err != nil || v < 1000 || v > 20000 {
 		return fmt.Errorf("chat.transcript_chars must be an integer 1000–20000 (unset means the default 5000)")
 	}

@@ -39,7 +39,7 @@ func TestTranscriptCharsValidation(t *testing.T) {
 	}
 	// a key written at all must be an integer in range: an explicit 0, a fraction or a word is an
 	// error naming the key; only an absent key means the default
-	for _, v := range []string{"0", "4.5", "0.0", `"5000"`, "lots"} {
+	for _, v := range []string{"0", "4.5", "0.0", "1000.75", "20000.75", "1e3", `"5000"`, "lots"} {
 		raw := "schema_version: 1\ninstance:\n  id: x\nchat:\n  transcript_chars: " + v + "\n"
 		if _, err := Parse([]byte(raw)); err == nil {
 			t.Fatalf("transcript_chars %s accepted", v)
