@@ -882,16 +882,15 @@ func (a *Adapter) resolveQuick(req ChatRequest) ChatRequest {
 
 // cachePointOK reports whether this host may receive an explicit prompt-cache breakpoint: only a host
 // flagged in hosts.json (a compatible host that would refuse the field is never flagged), and on
-// OpenRouter only the model families its prompt-caching doc names for explicit breakpoints —
-// anthropic/* and google/*; the other families cache implicitly and take none.
+// OpenRouter only the models its prompt-caching doc names for explicit breakpoints — anthropic/* and
+// google/gemini-*; gemma and the other families cache implicitly and take none.
 func (a *Adapter) cachePointOK(model string) bool {
 	h, ok := HostByURL(a.BaseURL)
 	if !ok || !h.CacheBreakpoints {
 		return false
 	}
 	if a.API == APIOpenRouter {
-		fam, _, _ := strings.Cut(model, "/")
-		return fam == "anthropic" || fam == "google"
+		return strings.HasPrefix(model, "anthropic/") || strings.HasPrefix(model, "google/gemini-")
 	}
 	return true
 }

@@ -95,6 +95,7 @@ func TestCachePointFollowsTheHostFlag(t *testing.T) {
 	for _, tc := range []struct{ name, base, model string }{
 		{"unflagged host", url + "/other/v1", "google/gemini-3.8-flash"},
 		{"implicit family", url + "/api/v1", "openai/gpt-6.2"},
+		{"gemma is not gemini", url + "/api/v1", "google/gemma-4-31b-it"},
 	} {
 		body = nil
 		if tc.name == "unflagged host" {
