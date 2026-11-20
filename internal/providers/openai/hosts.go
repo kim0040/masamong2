@@ -33,6 +33,10 @@ type Host struct {
 	// ({"cache_control":{"type":"ephemeral"}} on a content block). Only hosts documented to take one are
 	// flagged — a host that would refuse the unknown field never sees it (openai.go cachePointOK).
 	CacheBreakpoints bool `json:"cache_breakpoints,omitempty"`
+	// CacheWriteFactor is the price of a prompt-cache write as a share of the input price, used only to
+	// estimate cost when the host reports written tokens but no cost (openai.go estimateWrittenAt):
+	// Anthropic's five-minute write is 1.25, OpenRouter's Gemini writes bill at the plain input price.
+	CacheWriteFactor float64 `json:"cache_write_factor,omitempty"`
 	// RerankMaxDocs is the most documents one /rerank call takes (0: no limit of its own); more are
 	// reranked in parts
 	RerankMaxDocs int `json:"rerank_max_docs,omitempty"`

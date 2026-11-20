@@ -107,9 +107,18 @@ func (a *Adapter) estimateCachedAt(cost **float64, estimated *bool, model string
 	a.estimateWrittenAt(cost, estimated, model, in, cached, 0, out, at)
 }
 
-// cacheWriteFactor is the price of an input token written to the prompt cache as a share of the input
-// price (Anthropic's five-minute cache write: 1.25×). Only Anthropic reports such tokens.
-const cacheWriteFactor = 1.25
+// cacheWriteFactor is the host's prompt-cache write price as a share of the input price
+// (hosts.json cache_write_factor): Anthropic's five-minute write is 1.25 by default on an Anthropic
+// route, the plain input price elsewhere.
+func (a *Adapter) cacheWriteFactor() float64 {
+	if h, ok := HostByURL(a.BaseURL); ok && h.CacheWriteFactor > 0 {
+		return h.CacheWriteFactor
+	}
+	if a.API == APIAnthropic {
+		return 1.25
+	}
+	return 1
+}
 
 // estimateWrittenAt is estimateCachedAt with written of the in tokens written to the prompt cache.
 func (a *Adapter) estimateWrittenAt(cost **float64, estimated *bool, model string, in, cached, written, out int, at time.Time) {
@@ -139,7 +148,7 @@ func (a *Adapter) estimateWrittenAt(cost **float64, estimated *bool, model strin
 	}
 	cached = min(max(cached, 0), in)
 	written = min(max(written, 0), in-cached)
-	v := float64(in-cached-written)*pin + float64(cached)*pc + float64(written)*pin*cacheWriteFactor + float64(out)*pout
+	v := float64(in-cached-written)*pin + float64(cached)*pc + float64(written)*pin*a.cacheWriteFactor() + float64(out)*pout
 	*cost, *estimated = &v, true
 }
 

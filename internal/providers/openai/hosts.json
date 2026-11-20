@@ -8,8 +8,9 @@
       "base_url": "https://openrouter.ai/api/v1",
       "key_env": "MASAMONG_OPENROUTER_KEY",
       "key_url": "https://openrouter.ai/settings/keys",
-      "_about_cache_breakpoints": "Prompt caching doc (read 2026-11-20): explicit cache_control breakpoints are taken for Anthropic and Gemini models; other families cache implicitly, so only anthropic/* and google/* models get one (openai.go cachePointOK).",
+      "_about_cache_breakpoints": "Prompt caching doc (read 2026-11-20): explicit cache_control breakpoints are taken for Anthropic and Gemini models; other families cache implicitly, so only anthropic/* and google/gemini-* models get one (openai.go cachePointOK). Gemini cache writes are billed at the plain input price — no write markup — so cache_write_factor is 1.",
       "cache_breakpoints": true,
+      "cache_write_factor": 1,
       "batch": {"style": "inline", "kinds": ["chat", "embed"], "max_items": 10000, "discount": 0.5}
     },
     {
@@ -42,7 +43,9 @@
       "base_url": "https://api.anthropic.com/v1",
       "key_env": "MASAMONG_ANTHROPIC_KEY",
       "key_url": "https://platform.claude.com/settings/keys",
+      "_about_cache_write_factor": "Anthropic's prompt-caching doc (read 2026-11-20): a five-minute cache write bills at 1.25x the input price. The breakpoints written here are five-minute ephemeral ones.",
       "cache_breakpoints": true,
+      "cache_write_factor": 1.25,
       "batch": {"style": "anthropic", "kinds": ["chat"], "max_items": 100000, "discount": 0.5}
     },
     {

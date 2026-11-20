@@ -86,8 +86,9 @@ func TestCachePointFollowsTheHostFlag(t *testing.T) {
 	if res.CachedTokens != 8 || res.CacheWriteTokens != 2 {
 		t.Fatalf("cached and written tokens read: %+v", res)
 	}
-	// cost = 0 plain inputs + 8 cached at 0.1 + 2 written at 1.25x + 2 out: 0.8 + 2.5 + 4 = 7.3
-	if res.CostUSD == nil || !res.CostEstimated || *res.CostUSD != 7.3 {
+	// cost = 0 plain inputs + 8 cached at 0.1 + 2 written at the input price (OpenRouter's Gemini write
+	// factor is 1, not Anthropic's 1.25) + 2 out: 0.8 + 2 + 4 = 6.8
+	if res.CostUSD == nil || !res.CostEstimated || *res.CostUSD != 6.8 {
 		t.Fatalf("cache reads and writes priced: %+v", res)
 	}
 
