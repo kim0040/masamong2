@@ -27,6 +27,9 @@ func TestAliasFillDoesNotReprocessHistory(t *testing.T) {
 		if _, err := store.Open(db); err != nil {
 			t.Fatal(err)
 		}
+		if err := store.FillPersonAliases(t.Context(), db); err != nil {
+			t.Fatal(err)
+		}
 		if got := tableRows(t, db, "person_alias", ""); !slices.Equal(want, got) {
 			t.Fatalf("alias fill: %v != %v", got, want)
 		}

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"strings"
 	"time"
@@ -26,13 +27,12 @@ func savePersonAlias(tx *sql.Tx, observation, room, account, label, at string) e
 	return err
 }
 
-// Backfill only observation metadata, one committed rowid range at a time. New
-// captures maintain the index themselves; -1 means no future startup scan.
+// Startup creates metadata only. A fresh, empty store needs no historical fill.
 func migratePersonAliases(db *storage.Store) error {
 	if !db.IsSQLite() {
 		return nil
 	}
-	if err := db.WithWriter(func(tx *sql.Tx) error {
+	return db.WithWriter(func(tx *sql.Tx) error {
 		var old bool
 		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM pragma_table_info('person_alias')) AND NOT EXISTS(SELECT 1 FROM pragma_table_info('person_alias') WHERE name='last_source')`).Scan(&old); err != nil {
 			return err
@@ -73,66 +73,84 @@ func migratePersonAliases(db *storage.Store) error {
 				return err
 			}
 		}
-		return nil
-	}); err != nil {
+		_, err := tx.Exec(`INSERT OR IGNORE INTO person_alias_fill SELECT 1,CASE WHEN EXISTS(SELECT 1 FROM memory_observations) THEN 0 ELSE -1 END`)
 		return err
-	}
-	const batch = 512
-	done := false
-	for !done {
-		err := db.WithWriter(func(tx *sql.Tx) error {
-			var cursor int64
-			err := tx.QueryRow(`SELECT cursor FROM person_alias_fill WHERE id=1`).Scan(&cursor)
-			if err != nil && err != sql.ErrNoRows {
-				return err
-			}
-			if cursor < 0 {
-				done = true
-				return nil
-			}
-			var consent bool
-			if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='consent_state')`).Scan(&consent); err != nil {
-				return err
-			}
-			where := `platform='discord' AND record_kind=? AND actor_account<>'' AND actor_label<>'' AND deleted_at='' AND edited_at=''
+	})
+}
+
+const aliasRangeSQL = `SELECT observation_id,source_room,actor_account,actor_label,parsed_time FROM memory_observations o NOT INDEXED WHERE rowid>? AND rowid<=? AND `
+const eligibleAliasSQL = `platform='discord' AND record_kind=? AND actor_account<>'' AND actor_label<>'' AND deleted_at='' AND edited_at=''
 				AND NOT EXISTS(SELECT 1 FROM privacy_tombstones p WHERE (p.kind='account' AND p.source_id=o.actor_account)
 					OR (p.kind='message' AND p.source_id=o.native_message_id))`
-			if consent {
-				where += ` AND NOT EXISTS(SELECT 1 FROM consent_state c WHERE c.user_id=o.actor_account AND c.scope='memory' AND c.status='withdrawn')`
-			}
-			var end sql.NullInt64
-			if err := tx.QueryRow(`SELECT max(rowid) FROM (SELECT rowid FROM memory_observations WHERE rowid>? ORDER BY rowid LIMIT ?)`, cursor, batch).Scan(&end); err != nil {
-				return err
-			}
-			if !end.Valid {
-				done, cursor = true, -1
-			} else {
-				rows, err := tx.Query(`SELECT observation_id,source_room,actor_account,actor_label,parsed_time FROM memory_observations o
-					WHERE rowid>? AND rowid<=? AND `+where, cursor, end.Int64, corpus.HumanText)
-				if err != nil {
-					return err
-				}
-				defer rows.Close()
-				for rows.Next() {
-					var observation, room, id, label, at string
-					if err := rows.Scan(&observation, &room, &id, &label, &at); err != nil {
-						return err
-					}
-					if err := savePersonAlias(tx, observation, room, id, label, at); err != nil {
-						return err
-					}
-				}
-				if err := rows.Err(); err != nil {
-					return err
-				}
-				cursor = end.Int64
-			}
-			_, err = tx.Exec(`INSERT INTO person_alias_fill VALUES(1,?) ON CONFLICT(id) DO UPDATE SET cursor=excluded.cursor`, cursor)
-			return err
-		})
-		if err != nil {
+const consentingAliasSQL = ` AND NOT EXISTS(SELECT 1 FROM consent_state c WHERE c.user_id=o.actor_account AND c.scope='memory' AND c.status='withdrawn')`
+
+func fillAliasBatch(ctx context.Context, db *storage.Store) (bool, error) {
+	done := false
+	err := db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+		var cursor int64
+		err := tx.QueryRow(`SELECT cursor FROM person_alias_fill WHERE id=1`).Scan(&cursor)
+		if err != nil && err != sql.ErrNoRows {
 			return err
 		}
+		if cursor < 0 {
+			done = true
+			return nil
+		}
+		var consent bool
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='consent_state')`).Scan(&consent); err != nil {
+			return err
+		}
+		where := eligibleAliasSQL
+		if consent {
+			where += consentingAliasSQL
+		}
+		var end sql.NullInt64
+		if err := tx.QueryRow(`SELECT max(rowid) FROM (SELECT rowid FROM memory_observations NOT INDEXED WHERE rowid>? ORDER BY rowid LIMIT 512)`, cursor).Scan(&end); err != nil {
+			return err
+		}
+		if !end.Valid {
+			done, cursor = true, -1
+		} else {
+			rows, err := tx.Query(aliasRangeSQL+where, cursor, end.Int64, corpus.HumanText)
+			if err != nil {
+				return err
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var observation, room, id, label, at string
+				if err := rows.Scan(&observation, &room, &id, &label, &at); err != nil {
+					return err
+				}
+				if err := savePersonAlias(tx, observation, room, id, label, at); err != nil {
+					return err
+				}
+			}
+			if err := rows.Err(); err != nil {
+				return err
+			}
+			cursor = end.Int64
+		}
+		_, err = tx.Exec(`INSERT INTO person_alias_fill VALUES(1,?) ON CONFLICT(id) DO UPDATE SET cursor=excluded.cursor`, cursor)
+		return err
+	})
+	return done, err
+}
+
+// FillPersonAliases runs outside startup. Each batch releases the writer and
+// gives competing captures time to acquire it; cancellation preserves the cursor.
+func FillPersonAliases(ctx context.Context, db *storage.Store) error {
+	if !db.IsSQLite() {
+		return nil
 	}
-	return nil
+	for {
+		done, err := fillAliasBatch(ctx, db)
+		if done || err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(2 * time.Millisecond):
+		}
+	}
 }

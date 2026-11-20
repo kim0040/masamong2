@@ -203,8 +203,11 @@ func (s *Service) targetPeople(db *storage.Store, in ChatInput, _ []string) []tu
 	matches := search.NameMatcher(lang.MergeSearch(append(slices.Clone(doc.Memory.Languages), "ko", "ja"), doc.BotNames()))
 	// Any valid planner target already has one of these exact signals. A guess
 	// cannot add an account, change the order, or displace an explicit target.
-	for _, ref := range names.match(mentionPattern.ReplaceAllString(in.Message, " "), matches) {
-		add(ref, false)
+	var complete bool
+	if tx.QueryRow(`SELECT cursor=-1 FROM person_alias_fill WHERE id=1`).Scan(&complete) == nil && complete {
+		for _, ref := range names.match(mentionPattern.ReplaceAllString(in.Message, " "), matches) {
+			add(ref, false)
+		}
 	}
 	if selfRequest.MatchString(in.Message) {
 		add(caller, true)
