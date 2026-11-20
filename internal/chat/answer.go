@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"masamong/internal/conversation"
 	"masamong/internal/lang"
 	"masamong/internal/memory/corpus"
 	"masamong/internal/memory/search"
@@ -461,8 +462,17 @@ func BuildAnswerMessages(v Voice, in AnswerInput) []Msg {
 	hist := in.History
 	off := 0
 	if in.MaxHistory > 0 && len(hist) > in.MaxHistory {
-		off = len(hist) - in.MaxHistory
+		// the line cap cuts like the transcript's rune budget (conversation.Select): the earliest
+		// start snapped forward to a boundary, so the first line is the same on consecutive turns
+		// until the cap forces the next boundary
+		off = conversation.SnapCut(len(hist) - in.MaxHistory)
+		if off >= len(hist) {
+			off = len(hist) - in.MaxHistory
+		}
 		hist = hist[off:]
+	}
+	if len(hist) > 0 {
+		marked[off] = true // the first line shown is always marked
 	}
 	for j, t := range hist {
 		c := strings.TrimSpace(t.Content)

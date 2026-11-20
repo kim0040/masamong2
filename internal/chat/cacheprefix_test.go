@@ -2,6 +2,8 @@ package chat
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -49,4 +51,35 @@ func TestAnswerPrefixIsStableAcrossTurns(t *testing.T) {
 		total += len(sent(m))
 	}
 	t.Logf("stable prefix: %d of %d bytes (%.0f%%)", prefix, total, 100*float64(prefix)/float64(total))
+}
+
+// The answer's line cap cuts at the same snap boundary the transcript's rune budget uses
+// (conversation.SnapCut), so the first shown line is the same on consecutive turns until the cap's
+// earliest fit passes the next boundary. One hundred short rows under a cap of eighty show from the
+// boundary at 32 — and still do when another row arrives — until the earliest fit passes it.
+func TestAnswerLineCapSnapsLikeTheTranscriptBudget(t *testing.T) {
+	now := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	rows := make([]Turn, 130)
+	for i := range rows {
+		rows[i] = Turn{Role: "user", Speaker: "A", Content: fmt.Sprintf("line-%03d", i), At: now.Add(time.Duration(i) * time.Minute)}
+	}
+	first := func(n, max int) string {
+		msgs := BuildAnswerMessages(koVoice(), AnswerInput{System: "S", Message: "next", History: rows[:n], MaxHistory: max, Now: now})
+		return msgs[1].Content // the system message, then the first history line shown
+	}
+	for _, n := range []int{100, 101, 112} {
+		if got := first(n, 80); !strings.Contains(got, "line-032") {
+			t.Fatalf("%d rows under a cap of 80: first shown %q, want line-032", n, got)
+		}
+	}
+	if got := first(113, 80); !strings.Contains(got, "line-048") {
+		t.Fatalf("the next boundary: first shown %q, want line-048", got)
+	}
+	// the cap itself only bounds how many rows are kept: the attributed conversation's 80 rows keep
+	// the character budget (conversation's Select) as the limit that actually decides what is shown
+	for _, n := range []int{25, 26} {
+		if got := first(n, 24); !strings.Contains(got, "line-016") {
+			t.Fatalf("%d rows under the old cap of 24 snap the same way: first shown %q", n, got)
+		}
+	}
 }
