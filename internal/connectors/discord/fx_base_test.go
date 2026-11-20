@@ -223,11 +223,12 @@ func TestFXHomeCurrencyFollowsTheRegion(t *testing.T) {
 		{"saved ko, Discord en-GB", "ko", "en-GB", "GBP", 5},
 		{"saved ko, Discord ko", "ko", "ko", "KRW", 5},
 		// a tag that names no region (ko) falls back to the saved language's likely region; one that
-		// names a region without one currency (es-419) is still the tag used, and gives USD
+		// names a region without one currency (es-419) is skipped for the reply language's likely region
 		{"saved es, Discord ko", "es", "ko", "EUR", 5},
-		{"saved es, Discord es-419", "es", "es-419", "USD", 5},
-		// a region the saved language names itself wins over Discord's
-		{"en-US, Discord en-GB", "en-US", "en-GB", "USD", 5},
+		{"saved es, Discord es-419", "es", "es-419", "EUR", 5},
+		// a reply language nobody saved does not outrank Discord's region (a saved en-US does: see
+		// application's TestFXHomePrecedence)
+		{"en-US, Discord en-GB", "en-US", "en-GB", "GBP", 5},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			embed, out := fxRun(t, InvokeContext{Locale: tc.locale, Tag: tc.tag, UserID: "tester"}, nil)

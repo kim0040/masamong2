@@ -201,6 +201,15 @@ func (l *Lexicon) Name(locale, code string) string {
 // country (es-419), one with no single currency, or one whose currency the provider does not serve
 // (KPW) gives USD.
 func (l *Lexicon) Home(locale string) string {
+	if code, ok := l.HomeOf(locale); ok {
+		return code
+	}
+	return "USD"
+}
+
+// HomeOf is Home without the USD fallback: ok is false when the tag's region is not a country with a
+// single currency the provider serves, so a caller can try its next tag.
+func (l *Lexicon) HomeOf(locale string) (string, bool) {
 	region, _ := language.Make(strings.ReplaceAll(strings.TrimSpace(locale), "_", "-")).Region()
 	if unit, ok := xcur.FromRegion(region); ok {
 		code := unit.String()
@@ -208,10 +217,10 @@ func (l *Lexicon) Home(locale string) string {
 			code = replacement
 		}
 		if providerCodes[code] {
-			return code
+			return code, true
 		}
 	}
-	return "USD"
+	return "", false
 }
 
 // convention is the smallest unit locale quotes code in (1 unless its catalog says otherwise).
