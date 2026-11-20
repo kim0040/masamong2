@@ -197,6 +197,12 @@ func TestFXCardsStateRatesInReadableUnits(t *testing.T) {
 		{"en by name", "en", map[string]string{"currency": "Japanese Yen"}, []string{"1 JPY ≈ 0.006757 USD", "1 JPY ≈ 9.122 KRW", "1 JPY ≈ 0.006081 EUR", "1 JPY ≈ 0.04561 CNY", "1 JPY ≈ 0.005068 GBP"}},
 		{"en won against home first, then the board", "en", map[string]string{"currency": "krw"}, []string{"10 KRW ≈ 0.007407 USD", "10 KRW ≈ 1.096 JPY", "10 KRW ≈ 0.006667 EUR", "10 KRW ≈ 0.05 CNY", "10 KRW ≈ 0.005556 GBP"}},
 		{"ja reads names in other languages; yen is home", "ja", map[string]string{"currency": "엔화", "amount": "100"}, []string{"100円 ≈ 0.6757ドル", "100円 ≈ 912.2ウォン", "100円 ≈ 0.6081ユーロ", "100円 ≈ 4.561人民元", "100円 ≈ 0.5068ポンド"}},
+		// a pair sizes each direction like that currency's own board: the forward line reads as it does
+		// in the single view, and an amount drops nothing — the reverse keeps its one-unit line
+		{"ko a pair both ways in each one's own unit", "ko", map[string]string{"currency": "달러", "base": "유로"}, []string{"1달러 ≈ 0.9유로", "1유로 ≈ 1.111달러"}},
+		{"ko a pair with an amount: the amount forward, one unit back", "ko", map[string]string{"currency": "달러", "base": "유로", "amount": "100"}, []string{"100달러 ≈ 90유로", "1유로 ≈ 1.111달러"}},
+		{"ko dollars and won, each in its own unit", "ko", map[string]string{"currency": "달러", "base": "원"}, []string{"1달러 ≈ 1,350원", "1,000원 ≈ 0.7407달러"}},
+		{"en dollars and won", "en", map[string]string{"currency": "USD", "base": "KRW"}, []string{"1 USD ≈ 1,350 KRW", "10 KRW ≈ 0.007407 USD"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := fxCard(t, tc.locale, tc.opts)

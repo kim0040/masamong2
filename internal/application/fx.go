@@ -51,7 +51,8 @@ type fxPlan struct {
 	symbols  []string // the rates reported
 	pairs    []fxPair // the quotes stated
 	strict   string   // a currency that must have a rate (the one the person named), else ""
-	shared   bool     // the pairs without an amount share one unit of the same "from" (one currency against several)
+	shared   bool     // a pair without an amount is stated in its "from"'s unit, sized over board
+	board    []string // the currencies a "from"'s shared unit is sized against (the single board's)
 	required bool     // every pair's rates must be in the provider's answer (a command's card), else a failure
 }
 
@@ -178,7 +179,7 @@ func (s *Service) financeFX(ctx context.Context, req action.Request, in map[stri
 	if !rates.NextUpdate.IsZero() {
 		out["next_update_at"] = rates.NextUpdate.Format(time.RFC3339)
 	}
-	quotes := fxQuotes(lex, req.Locale, rates, plan.pairs, plan.shared)
+	quotes := fxQuotes(lex, req.Locale, rates, plan)
 	out["quotes"] = quotes
 	if len(quotes) > 0 {
 		// the model that words the answer sees this result, not the tool's description
@@ -295,10 +296,11 @@ func (s *Service) fxHomePlan(lex *currency.Lexicon, locale string, in map[string
 	}
 	board := currency.BoardFor(home)
 	if other != "" && base != "" && other != base {
-		// the pair, both directions
-		plan := fxPlan{base: base, symbols: []string{other}, strict: other, required: true}
+		// the pair, both directions: the amount forward plus the one-unit reverse line when an
+		// amount is given, else one unit of each in the other, sized like each one's own board
+		plan := fxPlan{base: base, symbols: []string{other}, strict: other, shared: true, board: board, required: true}
 		if amount > 0 {
-			plan.pairs = []fxPair{{from: other, to: base, amount: amount}}
+			plan.pairs = []fxPair{{from: other, to: base, amount: amount}, {from: base, to: other}}
 		} else {
 			plan.pairs = []fxPair{{from: other, to: base}, {from: base, to: other}}
 		}
@@ -306,7 +308,7 @@ func (s *Service) fxHomePlan(lex *currency.Lexicon, locale string, in map[string
 	}
 	if base == "" && other != "" {
 		// one currency against the home currency and the others, the home currency first
-		plan := fxPlan{base: other, strict: other, shared: true, required: true}
+		plan := fxPlan{base: other, strict: other, shared: true, board: board, required: true}
 		for _, c := range append([]string{home}, board...) {
 			if c != other && !slices.Contains(plan.symbols, c) {
 				plan.symbols = append(plan.symbols, c)
@@ -348,30 +350,41 @@ func fxRateOf(rates fx.Rates, code string) (float64, bool) {
 	return v, ok && v > 0
 }
 
-// fxQuotes states each pair from the fetched rates (units of a currency per one of the base).
-func fxQuotes(lex *currency.Lexicon, locale string, rates fx.Rates, pairs []fxPair, shared bool) []map[string]any {
+// fxQuotes states each pair from the fetched rates (units of a currency per one of the base). A shared
+// plan states each "from" in its own unit, sized over the board's rates like the single-currency card:
+// the same line for the same direction wherever it appears.
+func fxQuotes(lex *currency.Lexicon, locale string, rates fx.Rates, plan fxPlan) []map[string]any {
 	per := func(code string) (float64, bool) { return fxRateOf(rates, code) }
 	out := []map[string]any{}
-	unit := 0.0 // shared: one unit of the one currency for every line, the largest value at least 1
-	if shared && len(pairs) > 0 && pairs[0].amount == 0 {
-		var all []float64
-		for _, p := range pairs {
-			if from, ok1 := per(p.from); ok1 {
-				if to, ok2 := per(p.to); ok2 {
-					all = append(all, to/from)
+	var units map[string]float64 // a shared "from"'s unit, the largest of its board's values at least 1
+	if plan.shared {
+		units = map[string]float64{}
+		for _, p := range plan.pairs {
+			if p.amount > 0 {
+				continue // the amount is the unit for that direction
+			}
+			if _, done := units[p.from]; done {
+				continue
+			}
+			var all []float64
+			if from, ok := per(p.from); ok {
+				for _, c := range plan.board {
+					if to, ok2 := per(c); c != p.from && ok2 {
+						all = append(all, to/from)
+					}
 				}
 			}
+			units[p.from] = lex.SharedUnit(locale, p.from, all)
 		}
-		unit = lex.SharedUnit(locale, pairs[0].from, all)
 	}
-	for _, p := range pairs {
+	for _, p := range plan.pairs {
 		from, ok1 := per(p.from)
 		to, ok2 := per(p.to)
 		if !ok1 || !ok2 {
 			continue
 		}
 		amount := p.amount
-		if unit > 0 {
+		if unit, ok := units[p.from]; amount <= 0 && ok {
 			amount = unit
 		}
 		if q, ok := lex.Quote(locale, p.from, p.to, to/from, amount); ok {
