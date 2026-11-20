@@ -55,28 +55,17 @@ func TestAnswerLineTimeMarksSurviveMidnight(t *testing.T) {
 	}
 }
 
-// A line the cut puts first is marked only because it is first — and where the cut lands is the snap
-// boundary of conversation.Select, so the mark is as stable as the boundary. Marks are decided over
-// the whole history before the cut, so a line keeps the mark its own predecessor gave it wherever it
-// ends up.
-func TestAnswerLineTimeFirstAfterCutIsMarkedOnce(t *testing.T) {
+// A line the cut puts first is marked because it is first, with its own date and time.
+func TestAnswerLineTimeFirstAfterCutIsMarked(t *testing.T) {
 	kst := time.FixedZone("KST", 9*3600)
 	now := time.Date(2026, 11, 20, 12, 0, 0, 0, kst)
 	rows := make([]Turn, 20)
 	for i := range rows {
 		rows[i] = Turn{Role: "user", Speaker: "A", Content: "row", At: now.Add(time.Duration(i) * time.Minute)}
 	}
-	// the cap of ten puts the earliest fit at ten, which snaps to boundary sixteen: the first shown
-	// line is row 16 and it is marked with its own time
+	// the cap of ten shows rows 10-19: the first shown line is marked with its own date and time
 	msgs := BuildAnswerMessages(koVoice(), AnswerInput{System: "S", History: rows, Message: "next", MaxHistory: 10, Now: now})
 	if got := msgs[1].Content; !strings.Contains(got, "(11-20 ") {
 		t.Fatalf("the first shown line carries its own date and time: %q", got)
-	}
-	grown := append(append([]Turn(nil), rows...),
-		Turn{Role: "user", Speaker: "A", Content: "row", At: now.Add(20 * time.Minute)},
-		Turn{Role: "user", Speaker: "A", Content: "row", At: now.Add(21 * time.Minute)})
-	again := BuildAnswerMessages(koVoice(), AnswerInput{System: "S", History: grown, Message: "next", MaxHistory: 10, Now: now})
-	if msgs[1].Content != again[1].Content {
-		t.Fatalf("the boundary held: first shown %q -> %q", msgs[1].Content, again[1].Content)
 	}
 }
