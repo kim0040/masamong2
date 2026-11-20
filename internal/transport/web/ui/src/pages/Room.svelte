@@ -71,15 +71,23 @@
       base = s
     }
   })
-  const dirty = $derived(base ? Object.entries(form).filter(([k, v]) => JSON.stringify((JSON.parse(base) as any)[k]) !== JSON.stringify(v)).length : 0)
+  // the area levels are edited only while alerts reach this room; a hidden draft is dropped, never saved
+  const watchShown = $derived(form.disaster_alerts === 'on' && form.respond !== 'off')
+  const dirty = $derived(base ? Object.entries(form).filter(([k, v]) => (k !== 'watch_level' || watchShown) && JSON.stringify((JSON.parse(base) as any)[k]) !== JSON.stringify(v)).length : 0)
   async function save() {
-    const entries = form.watch_level.map(({ region, level }) => [region.trim(), Number(level)] as const)
-    if (entries.some(([region]) => !region) || new Set(entries.map(([region]) => region)).size !== entries.length) {
-      toast('error', t('room.watch_region_invalid'))
-      return
+    const { watch_level, ...rest } = form
+    const input: Record<string, unknown> = { guild_id: g, channel_id: c, ...rest, capture: form.capture ? 'true' : 'false' }
+    // sent only when edited here, so saving another field never replaces levels saved meanwhile
+    if (watchShown && base && JSON.stringify(watch_level) !== JSON.stringify(JSON.parse(base).watch_level)) {
+      const entries = watch_level.map(({ region, level }) => [region.trim(), Number(level)] as const)
+      if (entries.some(([region]) => !region) || new Set(entries.map(([region]) => region)).size !== entries.length) {
+        toast('error', t('room.watch_region_invalid'))
+        return
+      }
+      input.watch_level = Object.fromEntries(entries)
     }
     saving = true
-    const r = await call('channels.configure', { guild_id: g, channel_id: c, ...form, watch_level: Object.fromEntries(entries), capture: form.capture ? 'true' : 'false' })
+    const r = await call('channels.configure', input)
     saving = false
     if (r.ok) {
       toast('ok', t('rooms.saved'))
