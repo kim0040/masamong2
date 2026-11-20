@@ -29,6 +29,10 @@ func TestPersonTargets(t *testing.T) {
 		s.noteLive(ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: id, AuthorID: id, At: time.Now(), Content: "recent speaker"})
 	}
 	s.noteLive(ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: "reply", ReplyTo: "2", AuthorID: "4", At: time.Now()})
+	uncaptured := ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: "reply-old", ReplyTo: "uncaptured", ReplyAuthorID: "1", AuthorID: "4", At: time.Now()}
+	s.noteLive(uncaptured)
+	uncaptured.ReplyAuthorID, uncaptured.ReplyTo = "", "" // a partial update has no reference
+	s.noteLive(uncaptured)
 	for _, tc := range []struct {
 		text, messageID string
 		planner, want   []string
@@ -41,6 +45,7 @@ func TestPersonTargets(t *testing.T) {
 		{"<@7> 로봇 <@9> 비공개", "", nil, nil},
 		{"떠난이는?", "", nil, []string{"떠난이"}},
 		{"어때?", "reply", nil, []string{"영희"}},
+		{"어때?", "reply-old", nil, []string{"민수"}},
 		{"어때?", "", []string{"민수"}, []string{"민수"}},
 		{"내가 민수가 궁금해", "", nil, []string{"민수"}},
 		{"나에 대해 뭐 알아?", "", nil, []string{"철수"}},

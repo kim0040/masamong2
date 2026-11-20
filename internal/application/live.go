@@ -85,7 +85,7 @@ func (s *Service) noteLive(m ObservedMessage) {
 	}
 	// a mention of the bot or a reply to it is said to it; a call by its name only once the turn takes it (liveToBot)
 	bot := s.botAccount(nil)
-	l := conversation.Line{ID: m.MessageID, AuthorID: m.AuthorID, Author: m.AuthorName, Bot: m.FromBot, ReplyTo: m.ReplyTo,
+	l := conversation.Line{ID: m.MessageID, AuthorID: m.AuthorID, Author: m.AuthorName, Bot: m.FromBot, ReplyTo: m.ReplyTo, ReplyAuthorID: m.ReplyAuthorID,
 		Mentions: append([]string(nil), m.Mentions...), MentionsOthers: m.MentionsOthers, ToBot: !m.FromBot && m.BotCall == "mention",
 		At: m.At, Text: clip(text, liveTextRunes)}
 	key := liveKey(m.GuildID, m.ChannelID)
@@ -113,6 +113,9 @@ func (s *Service) noteLive(m ObservedMessage) {
 			}
 			if old.ReplyTo != "" {
 				l.ReplyTo = old.ReplyTo
+				if old.ReplyAuthorID != "" {
+					l.ReplyAuthorID = old.ReplyAuthorID
+				}
 				l.ReplyToBot = l.ReplyToBot || old.ReplyToBot
 				l.ToBot = l.ToBot || (!l.Bot && l.ReplyToBot)
 			}

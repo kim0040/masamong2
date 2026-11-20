@@ -24,7 +24,7 @@ type turnPerson struct {
 
 // Match requests about the caller, not incidental first-person subjects
 // ("I wonder what Minsoo likes"). Exact self mentions also work.
-var selfRequest = regexp.MustCompile(`(?i)(?:^|[^\pL\pN])(?:(?:나|저)(?:에\s*대해|에\s*관해|는?\s*어떤\s*사람|를?\s*(?:소개|그려|기억))|(?:내|제)\s*(?:취향|성격|별명|소개|특징|근황)|(?:about me|describe me|draw me|my (?:hobbies|interests|nickname|personality))\b)`)
+var selfRequest = regexp.MustCompile(`(?i)(?:^|[^\pL\pN])(?:(?:나|저)(?:에\s*대해|에\s*관해|는?\s*(?:어떤\s*사람|누구)|를?\s*(?:소개|그려|기억))|(?:난|전)\s*(?:어떤\s*사람|누구)|(?:내|제)(?:\s*(?:취향|성격|별명|소개|특징|근황)|가\s*좋아하)|(?:about me|describe me|draw me|who am i|my (?:hobbies|interests|nickname|personality))\b)`)
 
 type turnNames struct {
 	current map[string]string
@@ -50,6 +50,9 @@ func readPersonNames(tx *sql.Tx, guild string) (turnNames, error) {
 		var ref, label string
 		if err := rows.Scan(&ref, &label); err != nil {
 			return n, err
+		}
+		if ref == "" || strings.TrimSpace(label) == "" {
+			continue
 		}
 		if n.current[ref] == "" {
 			n.current[ref] = label
@@ -166,7 +169,10 @@ func (s *Service) targetPeople(db *storage.Store, in ChatInput, planner []string
 	}
 	for _, l := range lines {
 		if l.ID == in.MessageID && l.ReplyTo != "" && !l.ReplyToBot {
-			account := authorOfLine(lines, l.ReplyTo)
+			account := l.ReplyAuthorID
+			if account == "" {
+				account = authorOfLine(lines, l.ReplyTo)
+			}
 			if account == "" {
 				_ = tx.QueryRow(`SELECT actor_account FROM memory_observations WHERE platform='discord' AND room=?
 					AND native_message_id=? AND deleted_at='' AND record_kind=?`, roomOf(in.GuildID, in.ChannelID), l.ReplyTo, corpus.HumanText).Scan(&account)
