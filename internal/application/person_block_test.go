@@ -89,6 +89,27 @@ func TestReviewPersonPrivacy(t *testing.T) {
 			if !strings.Contains(got, "민수 public") || strings.Contains(got, "restricted") {
 				t.Fatal(got)
 			}
+			if strings.Contains(f.model.last("answer"), "restricted-marker") {
+				t.Fatal("person bonus used attached-only room")
+			}
+		},
+		"CrossGuildBonus": func(t *testing.T, f reviewPerson) {
+			ev := f.source(t, "g2", "c2", "restricted-marker", "101", "민수", f.at)
+			f.fact(t, "g2", "c2", "butterfly", "101", "101", ev)
+			f.attach(t, "g2", "c2")
+			for _, q := range []string{"날씨?", "<@101> 어떤 사람이야?"} {
+				if strings.Contains(f.ask(t, q), "restricted-marker") {
+					t.Fatalf("cross-guild bonus for %q", q)
+				}
+			}
+		},
+		"LegacyAttachmentRanking": func(t *testing.T, f reviewPerson) {
+			ev := f.source(t, "g2", "c2", "linked-marker", "101", "민수", f.at)
+			f.fact(t, "g2", "c2", "butterfly", "101", "101", ev)
+			f.attach(t, "g2", "c2")
+			if !strings.Contains(f.ask(t, "butterfly 관련된 거 있어?"), "linked-marker") {
+				t.Fatal("legacy lexical match no longer available")
+			}
 		},
 	}
 	for name, run := range tests {
