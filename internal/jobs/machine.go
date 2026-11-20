@@ -13,14 +13,14 @@ import (
 type Status string
 
 const (
-	Pending    Status = "pending"
-	Leased     Status = "leased"
-	Running    Status = "running"
-	Paused     Status = "paused"
-	RetryWait  Status = "retry_wait"
-	Succeeded  Status = "succeeded"
-	Failed     Status = "failed"
-	Cancelled  Status = "cancelled"
+	Pending   Status = "pending"
+	Leased    Status = "leased"
+	Running   Status = "running"
+	Paused    Status = "paused"
+	RetryWait Status = "retry_wait"
+	Succeeded Status = "succeeded"
+	Failed    Status = "failed"
+	Cancelled Status = "cancelled"
 )
 
 type Job struct {

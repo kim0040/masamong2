@@ -60,8 +60,8 @@ func Sniff(contentType string, body []byte) Format {
 //   - flat:     {"item":[...]} (API Hub V2 without the public-data envelope)
 //   - error:    {"result": ..., "message": ...} or an HTML/text error page
 type KMAEnvelope struct {
-	Variant    string           // openapi | flat
-	ResultCode string           // "00" on success; "03" NO_DATA; others are errors
+	Variant    string // openapi | flat
+	ResultCode string // "00" on success; "03" NO_DATA; others are errors
 	ResultMsg  string
 	Items      []map[string]any // always a list, single objects are wrapped
 	TotalCount int

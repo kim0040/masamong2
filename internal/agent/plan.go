@@ -35,12 +35,12 @@ type Plan struct {
 }
 
 type Execution struct {
-	Result   string         `json:"result"` // answer|partial|silent|clarification|proposal|error
-	Nodes    []Node         `json:"nodes"`
+	Result   string           `json:"result"` // answer|partial|silent|clarification|proposal|error
+	Nodes    []Node           `json:"nodes"`
 	Evidence []map[string]any `json:"evidence"`
-	TraceID  string         `json:"trace_id"`
-	Rejected bool           `json:"rejected,omitempty"`
-	Reason   string         `json:"reason,omitempty"`
+	TraceID  string           `json:"trace_id"`
+	Rejected bool             `json:"rejected,omitempty"`
+	Reason   string           `json:"reason,omitempty"`
 }
 
 func Validate(p Plan) error {
@@ -133,10 +133,10 @@ func Execute(p Plan, fixture string) (Execution, error) {
 			}
 		}
 		return Execution{
-			Result: "partial",
-			Nodes:  nodes,
+			Result:   "partial",
+			Nodes:    nodes,
 			Evidence: []map[string]any{{"id": "ev_quote", "kind": "quote", "status": "ok"}},
-			Reason: "quote_without_fx",
+			Reason:   "quote_without_fx",
 		}, nil
 	default:
 		for i := range nodes {
@@ -144,8 +144,8 @@ func Execute(p Plan, fixture string) (Execution, error) {
 			nodes[i].Output = map[string]any{"fixture": true}
 		}
 		return Execution{
-			Result: "answer",
-			Nodes:  nodes,
+			Result:   "answer",
+			Nodes:    nodes,
 			Evidence: []map[string]any{{"id": "ev_fake", "kind": "tool", "status": "ok"}},
 		}, nil
 	}

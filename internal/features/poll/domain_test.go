@@ -10,7 +10,7 @@ import (
 func TestMultiSelectHandComputed(t *testing.T) {
 	p, err := Create(CreateCmd{
 		ID: "p1", ScopeKey: "room-a", Question: "lunch",
-		Options: []Option{{"a", "A"}, {"b", "B"}, {"c", "C"}},
+		Options:   []Option{{"a", "A"}, {"b", "B"}, {"c", "C"}},
 		MaxSelect: 2,
 	})
 	if err != nil {
