@@ -455,7 +455,9 @@ func TestDisasterTickReadsOneConfigRevision(t *testing.T) {
 
 // The first check after an upgrade from a build that stored a bare, filtered map announces nothing,
 // whatever the rooms are set to: the old set left out advisories that may have been in force for
-// hours. The set is then stored with its version, and a restart repeats nothing.
+// hours. The set is then stored with its version, and a restart repeats nothing. A warning the older
+// build stored (and so announced) still gets its lift in the rooms that watch it; one it never stored
+// does not.
 func TestDisasterOlderWarningStateIsAStartingPoint(t *testing.T) {
 	for name, legacy := range map[string]string{
 		"empty":       `{}`,
@@ -508,11 +510,120 @@ func TestDisasterOlderWarningStateIsAStartingPoint(t *testing.T) {
 			if len(gw.posts) != 0 {
 				t.Fatalf("repeated after a restart: %q", gw.posts)
 			}
-			feed.warnings = append(feed.warnings, warning("L1", "경상북도", "경산시", "대설", "주의", "발표"))
+			feed.warnings = append(feed.warnings[1:], warning("L1", "경상북도", "경산시", "대설", "주의", "발표"))
 			reopened.Clock = clock.Fixed{T: now.Add(10 * time.Minute)}
 			application.DisasterTickForTest(reopened, context.Background())
-			if len(gw.posts) != 1 || !strings.HasPrefix(gw.posts[0], "c1|⚠️ 대설주의보 발표|경산시") {
-				t.Fatalf("a change after the starting point is news: %q", gw.posts)
+			got := strings.Join(gw.posts, "\n")
+			wantLift := name == "warning"
+			if len(gw.posts) != map[bool]int{false: 1, true: 2}[wantLift] || !strings.Contains(got, "c1|⚠️ 대설주의보 발표|경산시") || strings.Contains(got, "c1|✅ 호우경보 해제|경산시") != wantLift {
+				t.Fatalf("a change after the starting point is news, a lift only where the older build announced it: %q", gw.posts)
+			}
+		})
+	}
+}
+
+// failingGateway is a Discord whose posts to one channel fail.
+type failingGateway struct {
+	postingGateway
+	failing string
+}
+
+func (g *failingGateway) PostChannel(ctx context.Context, channelID, a, b string, card *action.Card) (string, error) {
+	if channelID == g.failing {
+		return "", fmt.Errorf("discord unavailable")
+	}
+	return g.postingGateway.PostChannel(ctx, channelID, a, b, card)
+}
+
+// A lift goes only to the rooms that were told the level is in force: not to a room that raised its
+// level or got marine during the warning, not for a warning recorded silently as the starting point,
+// not where the issue failed to post, and a room that watches only 경보 hears nothing when the
+// advisory it never got ends.
+func TestDisasterLiftsGoWhereTheIssueWent(t *testing.T) {
+	const area, sea = "L1052100", "S1252020"
+	rain := warning(area, "광주·전라남도", "목포시", "호우", "경보", "발표")
+	rainAdvisory := warning(area, "광주·전라남도", "목포시", "호우", "주의", "대치")
+	seaWarning := warning(sea, "제주도해상", "먼바다", "풍랑", "경보", "발표")
+	setRoom := func(id string, levels map[string]int) func(*config.Document) {
+		return func(d *config.Document) {
+			g := d.Guilds["g1"]
+			ch := g.Channels[id]
+			ch.WatchLevel = levels
+			g.Channels[id] = ch
+			d.Guilds["g1"] = g
+		}
+	}
+	for _, tc := range []struct {
+		name   string
+		rooms  map[string]map[string]int
+		ticks  [][]string
+		change func(*config.Document)
+		fail   string
+		want   [][]string // posts per tick after the first, as channel|title prefixes
+	}{
+		{name: "room raised during the warning", rooms: map[string]map[string]int{"a": {area: 3}, "b": {area: 2}},
+			ticks: [][]string{nil, {rain}, nil}, change: setRoom("b", map[string]int{area: 3}),
+			want: [][]string{{"a|⚠️ 호우경보 발표"}, {"a|✅ 호우경보 해제"}}},
+		{name: "marine turned on during the warning", rooms: map[string]map[string]int{"a": {sea: 4}},
+			ticks: [][]string{nil, {seaWarning}, nil}, change: func(d *config.Document) { d.DisasterAlerts.Marine = true },
+			want: [][]string{{}, {}}},
+		{name: "starting point", rooms: map[string]map[string]int{"a": {area: 3}},
+			ticks: [][]string{{rain}, nil}, want: [][]string{{}}},
+		{name: "issue failed to post", rooms: map[string]map[string]int{"a": {area: 3}, "b": {area: 3}},
+			ticks: [][]string{nil, {rain}, nil}, fail: "b",
+			want: [][]string{{"a|⚠️ 호우경보 발표"}, {"a|✅ 호우경보 해제"}}},
+		{name: "warning drops to an advisory", rooms: map[string]map[string]int{"a": {area: 3}, "b": {area: 5}},
+			ticks: [][]string{nil, {rain}, {rainAdvisory}, nil},
+			want:  [][]string{{"a|⚠️ 호우경보 발표", "b|⚠️ 호우경보 발표"}, {"a|✅ 호우경보 해제", "b|✅ 호우경보 해제", "b|⚠️ 호우주의보 발표"}, {"b|✅ 호우주의보 해제"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc := setupSvc(t)
+			feed := &kmaFeed{}
+			pointAt(t, svc, "kma", feed.server(t).URL, "KMA_TEST_KEY", "k")
+			for id, levels := range tc.rooms {
+				if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": id, "respond": "mention", "watch_level": levels}); !r.OK {
+					t.Fatal(r.Error)
+				}
+			}
+			applyDoc(t, svc, func(d *config.Document) {
+				g := d.Guilds["g1"]
+				g.Locale = "ko"
+				d.Guilds["g1"] = g
+			})
+			gw := &failingGateway{failing: tc.fail}
+			svc.Discord = gw
+			now := time.Date(2026, 10, 1, 3, 10, 0, 0, time.UTC)
+			for i, rows := range tc.ticks {
+				if i == len(tc.ticks)-1 && tc.change != nil {
+					applyDoc(t, svc, tc.change)
+				}
+				feed.mu.Lock()
+				feed.warnings = rows
+				feed.mu.Unlock()
+				before := len(gw.posts)
+				svc.Clock = clock.Fixed{T: now}
+				now = now.Add(5 * time.Minute)
+				application.DisasterTickForTest(svc, context.Background())
+				if i == 0 {
+					if len(gw.posts) != 0 {
+						t.Fatalf("the first check announced %q", gw.posts)
+					}
+					continue
+				}
+				got := gw.posts[before:]
+				want := tc.want[i-1]
+				if len(got) != len(want) {
+					t.Fatalf("check %d: got %q, want %q", i, got, want)
+				}
+				for _, prefix := range want {
+					if !strings.Contains(strings.Join(got, "\n"), prefix+"|") {
+						t.Fatalf("check %d: missing %q in %q", i, prefix, got)
+					}
+				}
+			}
+			var left int
+			if err := svc.Store.DB.QueryRow(`SELECT count(*) FROM admin_state WHERE k='disaster:wrn_active' AND json_extract(v,'$.sent') IS NOT NULL`).Scan(&left); err != nil || left != 0 {
+				t.Fatalf("delivery records outlived their warnings: %d %v", left, err)
 			}
 		})
 	}

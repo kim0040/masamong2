@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"masamong/internal/errclass"
 	"math"
 	"reflect"
@@ -351,6 +352,45 @@ const warningStateVersion = 2
 type warningState struct {
 	Version int             `json:"version"`
 	Active  warningSnapshot `json:"active"`
+	// Sent is, for each area and kind in Active, the level each room (by channel ID) was last told is
+	// in force. A lift goes only to the rooms told about that level, and an entry ends with its warning.
+	Sent map[string]map[string]string `json:"sent,omitempty"`
+}
+
+// warningKey is the area and kind a warning's level belongs to.
+func warningKey(w kma.Warning) string { return w.RegionCode + "|" + w.Kind }
+
+// legacySent is the delivery migration rule: an older build announced what it stored to every room,
+// so a warning it stored that is still in force at the same level counts as told to the rooms that
+// watch it now. Nothing else counts as told.
+func legacySent(raw []byte, current warningSnapshot, channels []disasterChannel, marine bool) map[string]map[string]string {
+	var old map[string]kma.Warning
+	if json.Unmarshal(raw, &old) != nil {
+		return nil
+	}
+	sent := map[string]map[string]string{}
+	for _, w := range old {
+		if w.Kind == "해일" { // older JSON snapshots used the API's short name
+			w.Kind = "O"
+		}
+		k := warningKey(w)
+		cur, ok := current[k]
+		if !ok || cur.Level != w.Level || (!marine && strings.HasPrefix(cur.RegionCode, "S")) {
+			continue
+		}
+		for _, ch := range channels {
+			if ch.watches(cur) {
+				if sent[k] == nil {
+					sent[k] = map[string]string{}
+				}
+				sent[k][ch.Channel] = cur.Level
+			}
+		}
+	}
+	if len(sent) == 0 {
+		return nil
+	}
+	return sent
 }
 
 // Lower levels are cumulative. Other advisories and warnings require level 5.
@@ -404,7 +444,7 @@ func warningCancelled(command string) bool {
 }
 
 func (snapshot warningSnapshot) record(w kma.Warning) {
-	key := w.RegionCode + "|" + w.Kind
+	key := warningKey(w)
 	old := snapshot[key]
 	if w.Effective < old.Effective || (w.Effective == old.Effective && w.Announced < old.Announced) {
 		return
@@ -448,15 +488,27 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 	if seen && (json.Unmarshal(raw, &stored) != nil || stored.Version != warningStateVersion) {
 		// an older build's set: what it left out may have been in force for hours, so nothing is news yet
 		s.Log.Info("disaster alerts: older warning state replaced; what is in force now is the starting point", "active", len(current))
-		return 0, s.kvSet("disaster:wrn_active", warningState{Version: warningStateVersion, Active: current})
+		return 0, s.kvSet("disaster:wrn_active", warningState{Version: warningStateVersion, Active: current, Sent: legacySent(raw, current, channels, cfg.Marine)})
 	}
 	before := stored.Active
 	if before == nil {
 		before = warningSnapshot{}
 	}
-	// the set is stored only when it changed (or on the first check): most checks find the same warnings
-	if !seen || !reflect.DeepEqual(before, current) {
-		if err := s.kvSet("disaster:wrn_active", warningState{Version: warningStateVersion, Active: current}); err != nil {
+	// what each room was told is kept only for what is still in force; lifts read the stored copy
+	told := stored.Sent
+	next := warningState{Version: warningStateVersion, Active: current}
+	for k, rooms := range told {
+		if _, ok := current[k]; ok && len(rooms) > 0 {
+			if next.Sent == nil {
+				next.Sent = map[string]map[string]string{}
+			}
+			next.Sent[k] = maps.Clone(rooms)
+		}
+	}
+	// the set is stored only when it changed (or on the first check): most checks find the same warnings.
+	// It is stored before anything is sent, so a crash or a failed channel never repeats a card.
+	if !seen || !reflect.DeepEqual(before, current) || !reflect.DeepEqual(told, next.Sent) {
+		if err := s.kvSet("disaster:wrn_active", next); err != nil {
 			return 0, err
 		}
 	}
@@ -512,12 +564,17 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 	}
 	sort.Strings(keys)
 	sent := 0
+	recorded := false
 	for _, k := range keys {
 		g := groups[k]
 		for _, ch := range channels {
+			var shown []kma.Warning
 			var regions []string
 			for _, w := range g.warnings {
-				if ch.watches(w) {
+				// a lift goes to the rooms that were told this level is in force, an issue or an
+				// upgrade to the rooms whose levels include it
+				if g.change == "lifted" && told[warningKey(w)][ch.Channel] == w.Level || g.change != "lifted" && ch.watches(w) {
+					shown = append(shown, w)
 					regions = append(regions, w.Region)
 				}
 			}
@@ -542,6 +599,34 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 				continue
 			}
 			sent++
+			for _, w := range shown {
+				wk := warningKey(w)
+				switch {
+				case g.change != "lifted":
+					if next.Sent == nil {
+						next.Sent = map[string]map[string]string{}
+					}
+					if next.Sent[wk] == nil {
+						next.Sent[wk] = map[string]string{}
+					}
+					next.Sent[wk][ch.Channel] = w.Level
+					recorded = true
+				case next.Sent[wk][ch.Channel] == w.Level: // a lower level is still in force here
+					delete(next.Sent[wk], ch.Channel)
+					if len(next.Sent[wk]) == 0 {
+						delete(next.Sent, wk)
+					}
+					recorded = true
+				}
+			}
+		}
+	}
+	if recorded {
+		if len(next.Sent) == 0 {
+			next.Sent = nil
+		}
+		if err := s.kvSet("disaster:wrn_active", next); err != nil {
+			s.Log.Warn("disaster alerts: could not record where warnings were announced", "err", err)
 		}
 	}
 	return sent, nil
