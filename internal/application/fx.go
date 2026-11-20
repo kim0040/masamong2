@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"masamong/internal/action"
 	"masamong/internal/currency"
 	"masamong/internal/errcode"
+	"masamong/internal/providers/decode"
 	"masamong/internal/providers/fx"
 )
 
@@ -45,11 +47,12 @@ type fxPair struct {
 
 // fxPlan is what a request asks for, read and checked before any rate is fetched.
 type fxPlan struct {
-	base    string   // the currency the rates are fetched for
-	symbols []string // the rates reported
-	pairs   []fxPair // the quotes stated
-	strict  string   // a currency that must have a rate (the one the person named), else ""
-	shared  bool     // the pairs without an amount share one unit of the same "from" (one currency against several)
+	base     string   // the currency the rates are fetched for
+	symbols  []string // the rates reported
+	pairs    []fxPair // the quotes stated
+	strict   string   // a currency that must have a rate (the one the person named), else ""
+	shared   bool     // the pairs without an amount share one unit of the same "from" (one currency against several)
+	required bool     // every pair's rates must be in the provider's answer (a command's card), else a failure
 }
 
 // fxText is a text field of the input: absent is ok=false, present may be blank.
@@ -150,6 +153,17 @@ func (s *Service) financeFX(ctx context.Context, req action.Request, in map[stri
 	}
 	if _, has := rates.Rates[plan.strict]; plan.strict != "" && plan.strict != rates.Base && !has {
 		return s.fxInvalid(req, "fx.unsupported_currency") // a real code the service has no rate for
+	}
+	if plan.required {
+		for _, p := range plan.pairs {
+			for _, c := range [2]string{p.from, p.to} {
+				if _, ok := fxRateOf(rates, c); !ok {
+					// a row the card must show has no rate: publish the provider's failure, not a
+					// shorter card that looks complete
+					return s.providerFail(req, s.Registry().fxID, fmt.Errorf("%w: no rate for %s", decode.ErrUnexpected, c))
+				}
+			}
+		}
 	}
 	sel := map[string]any{}
 	for _, c := range plan.symbols {
@@ -282,7 +296,7 @@ func (s *Service) fxHomePlan(lex *currency.Lexicon, locale string, in map[string
 	board := currency.BoardFor(home)
 	if other != "" && base != "" && other != base {
 		// the pair, both directions
-		plan := fxPlan{base: base, symbols: []string{other}, strict: other}
+		plan := fxPlan{base: base, symbols: []string{other}, strict: other, required: true}
 		if amount > 0 {
 			plan.pairs = []fxPair{{from: other, to: base, amount: amount}}
 		} else {
@@ -292,7 +306,7 @@ func (s *Service) fxHomePlan(lex *currency.Lexicon, locale string, in map[string
 	}
 	if base == "" && other != "" {
 		// one currency against the home currency and the others, the home currency first
-		plan := fxPlan{base: other, strict: other, shared: true}
+		plan := fxPlan{base: other, strict: other, shared: true, required: true}
 		for _, c := range append([]string{home}, board...) {
 			if c != other && !slices.Contains(plan.symbols, c) {
 				plan.symbols = append(plan.symbols, c)
@@ -308,7 +322,7 @@ func (s *Service) fxHomePlan(lex *currency.Lexicon, locale string, in map[string
 	if base != "" {
 		valued = base
 	}
-	plan := fxPlan{base: valued}
+	plan := fxPlan{base: valued, required: true}
 	for _, c := range board {
 		if c != valued {
 			plan.symbols = append(plan.symbols, c)
@@ -324,15 +338,19 @@ func (s *Service) fxHomePlan(lex *currency.Lexicon, locale string, in map[string
 	return plan, true
 }
 
+// fxRateOf is the rate of code in the fetched map (units per one of the base), false when absent or
+// not positive.
+func fxRateOf(rates fx.Rates, code string) (float64, bool) {
+	if code == rates.Base {
+		return 1, true
+	}
+	v, ok := rates.Rates[code]
+	return v, ok && v > 0
+}
+
 // fxQuotes states each pair from the fetched rates (units of a currency per one of the base).
 func fxQuotes(lex *currency.Lexicon, locale string, rates fx.Rates, pairs []fxPair, shared bool) []map[string]any {
-	per := func(code string) (float64, bool) {
-		if code == rates.Base {
-			return 1, true
-		}
-		v, ok := rates.Rates[code]
-		return v, ok && v > 0
-	}
+	per := func(code string) (float64, bool) { return fxRateOf(rates, code) }
 	out := []map[string]any{}
 	unit := 0.0 // shared: one unit of the one currency for every line, the largest value at least 1
 	if shared && len(pairs) > 0 && pairs[0].amount == 0 {

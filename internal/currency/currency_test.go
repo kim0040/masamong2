@@ -100,6 +100,10 @@ func TestHome(t *testing.T) {
 		"ko": "KRW", "ko-KR": "KRW", "ko_KR": "KRW", "ja": "JPY", "ja-JP": "JPY",
 		"en": "USD", "en-US": "USD", "en-GB": "GBP", "es": "EUR", "es-ES": "EUR", "es-419": "USD", "es-MX": "MXN",
 		"zh-Hans": "CNY", "zh-CN": "CNY", "pt-BR": "BRL", "fr": "EUR", "de-CH": "CHF",
+		// CLDR's code predates a redenomination: read as the code the provider lists
+		"ar-MR": "MRU", "en-SL": "SLE", "es-VE": "VES",
+		// a region whose currency the provider does not serve falls back to USD
+		"ko-KP": "USD", "en-KP": "USD",
 		"": "USD", "xx": "USD", "en-001": "USD",
 	} {
 		if got := l.Home(locale); got != want {

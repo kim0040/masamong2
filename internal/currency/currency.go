@@ -157,12 +157,20 @@ func (l *Lexicon) Name(locale, code string) string {
 }
 
 // Home is the currency of the region a locale tag names: its explicit region (ko-KR, en-GB, pt-BR), else
-// the likely region of its language (ko: KR, ja: JP, es: ES). A region that is not a country (es-419), or
-// one with no single currency, gives USD.
+// the likely region of its language (ko: KR, ja: JP, es: ES). The code CLDR gives may predate a
+// redenomination (MRO, SLL, VEF) and is read as the code the rate provider lists. A region that is not a
+// country (es-419), one with no single currency, or one whose currency the provider does not serve
+// (KPW) gives USD.
 func (l *Lexicon) Home(locale string) string {
 	region, _ := language.Make(strings.ReplaceAll(strings.TrimSpace(locale), "_", "-")).Region()
-	if unit, ok := xcur.FromRegion(region); ok && ValidCode(unit.String()) {
-		return unit.String()
+	if unit, ok := xcur.FromRegion(region); ok {
+		code := unit.String()
+		if replacement, ok := obsoleteCodes[code]; ok {
+			code = replacement
+		}
+		if providerCodes[code] {
+			return code
+		}
 	}
 	return "USD"
 }

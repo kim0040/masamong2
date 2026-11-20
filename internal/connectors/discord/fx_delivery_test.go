@@ -207,6 +207,27 @@ func TestFXConfiguredDefaultBaseIsForRawCallersOnly(t *testing.T) {
 	}
 }
 
+// A rate a card's row needs that the provider's answer lacks is a provider failure: nothing that looks
+// like a complete card may be posted short a row.
+func TestFXMissingRowRateIsAProviderFailure(t *testing.T) {
+	d := newFXDelivery(t, nil)
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"result":"success","base_code":"USD","rates":{"USD":1,"JPY":148,"EUR":0.9,"GBP":0.75}}`)
+	}))
+	defer provider.Close()
+	config := d.g.svc.Registry().FX
+	config.OpenBase, config.KeyedBase = provider.URL, provider.URL
+	d.slash(t, strOption("currency", "USD"))
+	p, ok := d.fake.find(http.MethodPatch, "/messages/@original")
+	if !ok {
+		t.Fatalf("the provider failure produced no reply: %+v", d.fake.calls)
+	}
+	if strings.Contains(p.body, "≈") {
+		t.Errorf("a quote card was published although a row had no rate: %s", p.body)
+	}
+}
+
 // A base option left blank keeps its old meaning — the home currency's board — and a code the rate
 // service documents that is not ISO 4217 is a base like any other. Both reach the provider; only
 // something unreadable is refused.
