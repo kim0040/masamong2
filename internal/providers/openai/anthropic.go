@@ -61,9 +61,10 @@ func (a *Adapter) anthropicHeaders() map[string]string {
 
 // anthropicRequest is one Messages request (also a batch item's params).
 type anthropicRequest struct {
-	Model        string          `json:"model"`
-	MaxTokens    int             `json:"max_tokens"`
-	System       string          `json:"system,omitempty"`
+	Model     string `json:"model"`
+	MaxTokens int    `json:"max_tokens"`
+	// System is the system prompt text, or its content blocks when a cache breakpoint marks it.
+	System       any             `json:"system,omitempty"`
 	Messages     []anthropicTurn `json:"messages"`
 	Tools        []anthropicTool `json:"tools,omitempty"`
 	ToolChoice   map[string]any  `json:"tool_choice,omitempty"`
@@ -254,7 +255,20 @@ func (a *Adapter) anthropicPayload(req ChatRequest, sh shape, caps Caps) (anthro
 	if len(turns) == 0 || turns[0].Role != "user" {
 		return p, classedError{msg: "openai: an Anthropic request must start with a user message", class: errclass.BadRequest}
 	}
-	p.System, p.Messages = system, turns
+	if system != "" {
+		p.System = system
+	}
+	p.Messages = turns
+	if a.cachePointOK(req.Model) && slices.ContainsFunc(req.Messages, func(m Message) bool { return m.CachePoint }) {
+		// the request's breakpoint ends the stable prefix: on the last turn before the final user turn
+		// (the merged history tail), or on the system prompt when there is none — Anthropic takes
+		// cache_control on the last content block of either
+		if n := len(p.Messages); n >= 2 {
+			p.Messages[n-2].Content = cachePointBlocks(p.Messages[n-2].Content)
+		} else if p.System != nil {
+			p.System = []map[string]any{{"type": "text", "text": system, "cache_control": cacheControlEphemeral}}
+		}
+	}
 	req.bareToolTurn = a.bareToolTurn(req)
 	thinking, level, thinks := anthropicThinking(req, caps, sh)
 	p.Thinking = thinking
@@ -481,6 +495,22 @@ func anthropicRole(role string) string {
 func textBlock(s string) json.RawMessage {
 	b, _ := json.Marshal(map[string]string{"type": "text", "text": s})
 	return b
+}
+
+// cachePointBlocks is blocks with its last one carrying the prompt-cache breakpoint.
+func cachePointBlocks(blocks []json.RawMessage) []json.RawMessage {
+	if len(blocks) == 0 {
+		return blocks
+	}
+	out := append([]json.RawMessage(nil), blocks...)
+	var b map[string]any
+	if json.Unmarshal(out[len(out)-1], &b) == nil && b != nil {
+		b["cache_control"] = cacheControlEphemeral
+		if raw, err := json.Marshal(b); err == nil {
+			out[len(out)-1] = raw
+		}
+	}
+	return out
 }
 
 func toolUseBlock(c ToolCall) json.RawMessage {

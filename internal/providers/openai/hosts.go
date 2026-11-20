@@ -29,6 +29,10 @@ type Host struct {
 	// NoChatTools are the host's models that take tools only on another API than /chat/completions
 	// (OpenAI's GPT-6 Astra and 6.1 Sol/Terra need the Responses API): the tool loop is skipped for them.
 	NoChatTools []string `json:"no_chat_tools,omitempty"`
+	// CacheBreakpoints: the host takes an explicit prompt-cache breakpoint
+	// ({"cache_control":{"type":"ephemeral"}} on a content block). Only hosts documented to take one are
+	// flagged — a host that would refuse the unknown field never sees it (openai.go cachePointOK).
+	CacheBreakpoints bool `json:"cache_breakpoints,omitempty"`
 	// RerankMaxDocs is the most documents one /rerank call takes (0: no limit of its own); more are
 	// reranked in parts
 	RerankMaxDocs int `json:"rerank_max_docs,omitempty"`

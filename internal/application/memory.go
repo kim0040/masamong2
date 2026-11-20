@@ -1157,7 +1157,7 @@ func (c chatLLM) ask(ctx context.Context, r chatRoute, role string, msgs []chat.
 	}
 	om := make([]openai.Message, len(msgs))
 	for i, m := range msgs {
-		om[i] = openai.Message{Role: m.Role, Content: m.Content, Images: imageParts(m.Images)}
+		om[i] = openai.Message{Role: m.Role, Content: m.Content, Images: imageParts(m.Images), CachePoint: m.CachePoint}
 	}
 	t := temperature
 	effort, quick := r.callEffort(), quickAnswer(ctx)

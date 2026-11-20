@@ -80,7 +80,15 @@ type Message struct {
 	// Images are pictures sent with a user message (vision.go): the content becomes a list of parts,
 	// the text first. A message without images is written exactly as before.
 	Images []ImagePart
+	// CachePoint marks the end of the prompt's stable prefix: on a host flagged for cache breakpoints
+	// (hosts.json) the message is written as content parts whose last part carries
+	// {"cache_control":{"type":"ephemeral"}}; on every other host the flag is stripped before the
+	// request is written, so a host that would refuse the field never sees it.
+	CachePoint bool `json:"-"`
 }
+
+// cacheControlEphemeral is the prompt-cache breakpoint OpenRouter and Anthropic take on a content block.
+var cacheControlEphemeral = map[string]string{"type": "ephemeral"}
 
 // wireMessage is the plain shape. For a message without tool fields it marshals to the same bytes the
 // two-field struct did before tools existed.
@@ -106,6 +114,16 @@ func (m Message) MarshalJSON() ([]byte, error) {
 	}
 	if len(m.Images) > 0 {
 		return marshalWithImages(m)
+	}
+	if m.CachePoint {
+		// the breakpoint the flagged hosts take (OpenRouter's google/* and anthropic/* models; the
+		// Anthropic route writes it itself, anthropic.go): content parts whose text block is marked
+		return json.Marshal(map[string]any{
+			"role": m.Role,
+			"content": []map[string]any{
+				{"type": "text", "text": m.Content, "cache_control": cacheControlEphemeral},
+			},
+		})
 	}
 	w := wireMessage{Role: m.Role, ToolCallID: m.ToolCallID, Name: m.Name}
 	if m.Content != "" || len(m.ToolCalls) == 0 {

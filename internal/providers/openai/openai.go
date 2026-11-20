@@ -806,6 +806,11 @@ func (a *Adapter) chat(ctx context.Context, req ChatRequest) (ChatResult, error)
 		return ChatResult{}, fmt.Errorf("%w: %s", ErrVisionUnsupported, req.Model)
 	}
 	req = a.resolveQuick(req)
+	if !a.cachePointOK(req.Model) {
+		for i := range req.Messages {
+			req.Messages[i].CachePoint = false // a host that takes no breakpoint never sees the field
+		}
+	}
 	out, err := a.chatOnce(ctx, req, true)
 	if err != nil || !thoughtAway(out) || req.MaxTokens == 1 { // a 1-token probe (ProbeChat) wants no answer
 		return out, err
@@ -861,6 +866,22 @@ func (a *Adapter) resolveQuick(req ChatRequest) ChatRequest {
 	}
 	req.thinkRoom = !thinkingOff(req.Effort) && req.MaxTokens > 0
 	return req
+}
+
+// cachePointOK reports whether this host may receive an explicit prompt-cache breakpoint: only a host
+// flagged in hosts.json (a compatible host that would refuse the field is never flagged), and on
+// OpenRouter only the model families its prompt-caching doc names for explicit breakpoints —
+// anthropic/* and google/*; the other families cache implicitly and take none.
+func (a *Adapter) cachePointOK(model string) bool {
+	h, ok := HostByURL(a.BaseURL)
+	if !ok || !h.CacheBreakpoints {
+		return false
+	}
+	if a.API == APIOpenRouter {
+		fam, _, _ := strings.Cut(model, "/")
+		return fam == "anthropic" || fam == "google"
+	}
+	return true
 }
 
 // addUsage is next with out's tokens, time and cost added: both calls are charged.
@@ -976,6 +997,7 @@ func ParseChat(contentType string, body []byte) (ChatResult, error) {
 				out.CompletionTokens = int(n)
 			}
 			out.CachedTokens = cachedTokens(usage)
+			out.CacheWriteTokens = cacheWriteTokens(usage)
 			out.CostUSD = usageCost(usage)
 		}
 	}
@@ -1008,6 +1030,19 @@ func cachedTokens(usage map[string]json.RawMessage) int {
 	}
 	if n, ok := decode.Number(usage["prompt_cache_hit_tokens"]); ok && n > 0 {
 		return int(n)
+	}
+	return 0
+}
+
+// cacheWriteTokens reads the prompt-cache writes: OpenRouter reports
+// prompt_tokens_details.cache_write_tokens (the Anthropic route reports cache_creation_input_tokens,
+// anthropic.go).
+func cacheWriteTokens(usage map[string]json.RawMessage) int {
+	var details map[string]json.RawMessage
+	if json.Unmarshal(usage["prompt_tokens_details"], &details) == nil {
+		if n, ok := decode.Number(details["cache_write_tokens"]); ok && n > 0 {
+			return int(n)
+		}
 	}
 	return 0
 }

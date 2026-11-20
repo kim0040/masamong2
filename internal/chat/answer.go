@@ -482,6 +482,10 @@ func BuildAnswerMessages(v Voice, in AnswerInput) []Msg {
 		user = answerNow(v, in.Now) + "\n" + user
 	}
 	msgs = append(msgs, Msg{Role: "user", Content: user})
+	// one cache breakpoint ends the stable prefix: the last history message before the final user
+	// message, or the system message when there is no history (providers/openai sends it to the hosts
+	// flagged for it in hosts.json; everywhere else the flag stays a no-op)
+	msgs[len(msgs)-2].CachePoint = true
 	return msgs
 }
 
