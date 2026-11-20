@@ -93,3 +93,47 @@ func personNameIndexed(t testing.TB, db interface{ Reader() *sql.DB }) bool {
 	}
 	return ok
 }
+
+// An index built over every row (before it was limited to live rows) is
+// dropped and rebuilt by the background fill; no observation is written.
+func TestPersonNameIndexRebuiltForLiveRows(t *testing.T) {
+	s := openStore(t)
+	o := mk(0, time.Now())
+	o.SourceRoom, o.ActorAccount, o.ActorLabel = "discord:1:2", "a", "민수"
+	if _, err := s.InsertObservations([]corpus.Observation{o}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.DB.Exec(`DROP INDEX IF EXISTS idx_memory_obs_person_name;
+		CREATE INDEX idx_memory_obs_person_name ON memory_observations(` + personNameExpr + ` COLLATE NOCASE,actor_account,source_room);
+		CREATE TRIGGER no_insert BEFORE INSERT ON memory_observations BEGIN SELECT RAISE(ABORT,'observation insert'); END;
+		CREATE TRIGGER no_update BEFORE UPDATE ON memory_observations BEGIN SELECT RAISE(ABORT,'observation update'); END;
+		CREATE TRIGGER no_delete BEFORE DELETE ON memory_observations BEGIN SELECT RAISE(ABORT,'observation delete'); END;`); err != nil {
+		t.Fatal(err)
+	}
+	partial := func() (p bool) {
+		t.Helper()
+		if err := s.DB.Reader().QueryRow(`SELECT partial FROM pragma_index_list('memory_observations') WHERE name='idx_memory_obs_person_name'`).Scan(&p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	if partial() {
+		t.Fatal("fixture index is already partial")
+	}
+	for range 2 { // the second run keeps the rebuilt index
+		if err := FillPersonAliases(t.Context(), s.DB); err != nil {
+			t.Fatal(err)
+		}
+		if !partial() {
+			t.Fatal("the name index still holds every row")
+		}
+	}
+	tx, err := s.DB.Reader().Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if taken, err := OtherPersonNamed(tx, []string{"민수"}, "z", `{"discord:1:2":true}`); !taken || err != nil {
+		t.Fatalf("rebuilt index: %t %v", taken, err)
+	}
+}

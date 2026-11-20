@@ -94,9 +94,14 @@ func migratePersonAliases(db *storage.Store) error {
 // compared NOCASE and other case variants are enumerated by nameVariants.
 const personNameExpr = `trim(actor_label,char(9,10,11,12,13,32,133,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288))`
 
+// personLiveSQL is what the name check counts: live Discord human messages.
+// Literal, not bound, so both seeks can use the partial index below and skip
+// deleted history (a withdrawn account's deleted rows keep their labels).
+const personLiveSQL = `deleted_at='' AND platform='discord' AND record_kind='` + corpus.HumanText + `'`
+
 // The name check reads every captured label, so it also sees accounts the
 // alias index leaves out. Additive; built off the startup path for a stored history.
-const personNameIndexSQL = `CREATE INDEX IF NOT EXISTS idx_memory_obs_person_name ON memory_observations(` + personNameExpr + ` COLLATE NOCASE,actor_account,source_room)`
+const personNameIndexSQL = `CREATE INDEX IF NOT EXISTS idx_memory_obs_person_name ON memory_observations(` + personNameExpr + ` COLLATE NOCASE,actor_account,source_room) WHERE ` + personLiveSQL
 
 // lowerFrom maps a lowercase rune to the other runes unicode.ToLower maps to it.
 var lowerFrom = sync.OnceValue(func() map[rune][]rune {
@@ -166,14 +171,14 @@ func OtherPersonNamed(tx *sql.Tx, labels []string, account, rooms string) (bool,
 		return false, nil
 	}
 	next, err := tx.Prepare(`SELECT actor_account FROM memory_observations INDEXED BY idx_memory_obs_person_name
-		WHERE ` + personNameExpr + `=? COLLATE NOCASE AND actor_account>? ORDER BY actor_account LIMIT 1`)
+		WHERE ` + personNameExpr + `=? COLLATE NOCASE AND actor_account>? AND ` + personLiveSQL + ` ORDER BY actor_account LIMIT 1`)
 	if err != nil {
 		return true, err
 	}
 	defer next.Close()
 	here, err := tx.Prepare(`SELECT EXISTS(SELECT 1 FROM memory_observations INDEXED BY idx_memory_obs_person_name
 		WHERE ` + personNameExpr + `=? COLLATE NOCASE AND actor_account=? AND source_room IN (SELECT key FROM json_each(?))
-		AND platform='discord' AND record_kind=? AND deleted_at='')`)
+		AND ` + personLiveSQL + `)`)
 	if err != nil {
 		return true, err
 	}
@@ -195,7 +200,7 @@ func OtherPersonNamed(tx *sql.Tx, labels []string, account, rooms string) (bool,
 				continue
 			}
 			var found bool
-			if err := here.QueryRow(v, other, rooms, corpus.HumanText).Scan(&found); err != nil || found {
+			if err := here.QueryRow(v, other, rooms).Scan(&found); err != nil || found {
 				return true, err
 			}
 		}
@@ -297,8 +302,19 @@ func FillPersonAliases(ctx context.Context, db *storage.Store) error {
 	if !db.IsSQLite() {
 		return nil
 	}
-	// One writer transaction: captures wait for it (about 0.5 s and 70 bytes a row at 200,000 rows).
+	// One writer transaction: captures wait for it (about 0.5 s and 70 bytes a
+	// live row at 200,000 rows). An earlier build over every row is dropped and
+	// rebuilt over live rows only; no row changes.
 	if err := db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+		var partial bool
+		switch err := tx.QueryRowContext(ctx, `SELECT partial FROM pragma_index_list('memory_observations') WHERE name='idx_memory_obs_person_name'`).Scan(&partial); {
+		case err == nil && !partial:
+			if _, err := tx.ExecContext(ctx, `DROP INDEX idx_memory_obs_person_name`); err != nil {
+				return err
+			}
+		case err != nil && err != sql.ErrNoRows:
+			return err
+		}
 		_, err := tx.ExecContext(ctx, personNameIndexSQL)
 		return err
 	}); err != nil {
