@@ -76,7 +76,7 @@ func warning(regID, parent, region, kind, level, cmd string) string {
 // The bot watches KMA on its own: the first check only sets a starting point, a new earthquake is
 // posted to every answering channel (not one that turned announcements off, not an overseas quake
 // below 7.0, never a 국내영향없음 notice), an aftershock edits the incident's message, nothing repeats,
-// and weather warnings are announced as issued and lifted (경보 anywhere, 주의보 only in chosen regions).
+// and weather warnings are announced as issued and lifted according to each channel’s watch levels.
 func TestDisasterAlertsWatchKMAAndAnnounce(t *testing.T) {
 	feed := &kmaFeed{}
 	srv := feed.server(t)
@@ -94,8 +94,10 @@ func TestDisasterAlertsWatchKMAAndAnnounce(t *testing.T) {
 		c := g.Channels["c2"]
 		c.DisasterAlerts = "off"
 		g.Channels["c2"] = c
+		room := g.Channels["c1"]
+		room.WatchLevel = map[string]int{"L1100100": 4, "L1200100": 3, "L1300100": 4, "S1132210": 5}
+		g.Channels["c1"] = room
 		d.Guilds["g1"] = g
-		d.DisasterAlerts.WarningRegions = []string{"서울"}
 	})
 	gw := &postingGateway{}
 	svc.Discord = gw
@@ -160,7 +162,7 @@ func TestDisasterAlertsWatchKMAAndAnnounce(t *testing.T) {
 	tick(5 * time.Minute)
 	got := strings.Join(gw.posts[before:], "\n")
 	if len(gw.posts)-before != 2 || !strings.Contains(got, "c1|⚠️ 폭염주의보 발표|서울동남권") || !strings.Contains(got, "c1|⚠️ 호우경보 발표|부산") {
-		t.Fatalf("경보 anywhere on land, 주의보 only in the chosen region, no sea area: %s", got)
+		t.Fatalf("expected only the alerts covered by this room's levels and the marine switch: %s", got)
 	}
 	tick(time.Minute)
 	if len(gw.posts)-before != 2 {
@@ -175,6 +177,15 @@ func TestDisasterAlertsWatchKMAAndAnnounce(t *testing.T) {
 	if st["channels"].(float64) != 1 || st["waiting"] != "" || st["state"].(map[string]any)["last_sent_kind"] != "warning" {
 		t.Fatalf("status: %v", st)
 	}
+	// Changing the sea-area delivery switch is not a KMA issue or cancellation.
+	count := len(gw.posts)
+	for _, marine := range []bool{true, false} {
+		applyDoc(t, svc, func(d *config.Document) { d.DisasterAlerts.Marine = marine })
+		tick(5 * time.Minute)
+		if len(gw.posts) != count {
+			t.Fatalf("switching marine to %v generated a weather event: %v", marine, gw.posts[count:])
+		}
+	}
 	// switched off: nothing is checked or sent
 	applyDoc(t, svc, func(d *config.Document) { off := false; d.DisasterAlerts.Enabled = &off })
 	feed.warnings = append(feed.warnings, warning("L1400100", "광주·전라남도", "광주", "태풍", "경보", "발표"))
@@ -183,6 +194,143 @@ func TestDisasterAlertsWatchKMAAndAnnounce(t *testing.T) {
 	if len(gw.posts) != n || out(t, svc, "disasters.alerts", nil)["waiting"] != "off" {
 		t.Fatalf("off means off: %v", gw.posts[n:])
 	}
+}
+
+func TestDisasterRoomWatchLevels(t *testing.T) {
+	svc := setupSvc(t)
+	feed := &kmaFeed{}
+	pointAt(t, svc, "kma", feed.server(t).URL, "KMA_TEST_KEY", "k")
+	for ch, levels := range map[string]map[string]int{
+		"quakes": {}, "mainland": {"광주·전라남도": 3, "L1052500": 1}, "islands": {"L1052500": 2},
+	} {
+		if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": ch, "respond": "mention", "watch_level": levels}); !r.OK {
+			t.Fatal(r.Error)
+		}
+	}
+	applyDoc(t, svc, func(d *config.Document) {
+		g := d.Guilds["g1"]
+		g.Locale = "ko"
+		d.Guilds["g1"] = g
+	})
+	gw := &postingGateway{}
+	svc.Discord = gw
+	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	tick := func() {
+		now = now.Add(5 * time.Minute)
+		svc.Clock = clock.Fixed{T: now}
+		application.DisasterTickForTest(svc, context.Background())
+	}
+	tick()
+	feed.quakes = []string{quake("202610010906", "일본 동쪽 해역", 35, 145, 7.1, "")}
+	for id, name := range map[string]string{"L1052100": "목포시", "L1052500": "흑산도·홍도"} {
+		feed.warnings = append(feed.warnings, warning(id, "광주·전라남도", name, "해일  ", "경보    ", "발표"), warning(id, "광주·전라남도", name, "지진해일", "주의", "발표"))
+	}
+	tick()
+	got := strings.Join(gw.posts, "\n")
+	if len(gw.posts) != 6 {
+		t.Fatalf("expected three earthquake and three regional alerts, got %v", gw.posts)
+	}
+	for _, ch := range []string{"quakes", "mainland", "islands"} {
+		if !strings.Contains(got, ch+"|🌏 국외 지진 발생|") {
+			t.Errorf("missing overseas earthquake in %s: %s", ch, got)
+		}
+	}
+	for _, line := range []string{"mainland|⚠️ 폭풍해일경보 발표|목포시\n", "mainland|⚠️ 지진해일주의보 발표|목포시\n", "islands|⚠️ 지진해일주의보 발표|흑산도·홍도\n"} {
+		if !strings.Contains(got, line) {
+			t.Errorf("expected %q in %s", line, got)
+		}
+	}
+	feed.warnings = nil
+	tick()
+	if len(gw.posts) != 9 || !strings.Contains(strings.Join(gw.posts[6:], "\n"), "islands|✅ 지진해일주의보 해제|흑산도·홍도") {
+		t.Fatalf("lifts should reach the same three subscribers: %v", gw.posts[6:])
+	}
+	tick()
+	if len(gw.posts) != 9 {
+		t.Fatal("repeated an unchanged observation")
+	}
+}
+
+func TestDisasterConfigureWatchLevels(t *testing.T) {
+	svc := setupSvc(t)
+	set := func(levels any) action.Result {
+		return exec(svc, "channels.configure", map[string]any{"guild_id": "g", "id": "c", "watch_level": levels})
+	}
+	if r := set(map[string]int{"목포시": 3}); !r.OK {
+		t.Fatal(r.Error)
+	}
+	for _, bad := range []any{map[string]int{"서울": 0}, map[string]int{"서울": 6}, map[string]int{" ": 2}, map[string]float64{"서울": 1.5}, nil, []string{"서울"}} {
+		if set(bad).OK {
+			t.Errorf("accepted invalid watch levels %v", bad)
+		}
+	}
+	if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g", "id": "c", "disaster_alerts": "off"}); !r.OK || svc.Doc().Guilds["g"].Channels["c"].WatchLevel["목포시"] != 3 {
+		t.Fatalf("room lost saved levels: %+v", r)
+	}
+	if r := set(map[string]int{}); !r.OK || len(svc.Doc().Guilds["g"].Channels["c"].WatchLevel) != 0 {
+		t.Fatalf("could not clear room levels: %+v", r)
+	}
+}
+
+func TestDisasterWarningUpgrades(t *testing.T) {
+	svc := setupSvc(t)
+	feed := &kmaFeed{}
+	pointAt(t, svc, "kma", feed.server(t).URL, "KMA_TEST_KEY", "k")
+	if r := exec(svc, "channels.configure", map[string]any{"id": "c1", "guild_id": "g1", "respond": "mention"}); !r.OK {
+		t.Fatal(r.Error)
+	}
+	applyDoc(t, svc, func(d *config.Document) {
+		g := d.Guilds["g1"]
+		g.Locale = "ko"
+		room := g.Channels["c1"]
+		room.WatchLevel = map[string]int{"L1": 4, "L2": 3}
+		g.Channels["c1"] = room
+		d.Guilds["g1"] = g
+	})
+	gw := &postingGateway{}
+	svc.Discord = gw
+	now := time.Date(2026, 7, 12, 0, 0, 0, 0, time.UTC)
+	check := func(rows []string, want ...string) {
+		t.Helper()
+		feed.warnings = rows
+		before := len(gw.posts)
+		now = now.Add(5 * time.Minute)
+		svc.Clock = clock.Fixed{T: now}
+		application.DisasterTickForTest(svc, context.Background())
+		got := gw.posts[before:]
+		if len(got) != len(want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+		for _, prefix := range want {
+			if !strings.Contains(strings.Join(got, "\n"), "c1|"+prefix) {
+				t.Errorf("missing %q in %v", prefix, got)
+			}
+		}
+	}
+	// Simulate an installation upgrading with an existing visible heat advisory.
+	legacy := `{"L1|H|2":{"RegionCode":"L1","Region":"경산시","Kind":"H","KindName":"폭염","Level":"2","LevelName":"주의보"}}`
+	if _, err := svc.Store.DB.Exec(`INSERT INTO admin_state(k,v,updated_at) VALUES(?,?,?)`, "disaster:wrn_active", legacy, now.Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	heatWarning := warning("L1", "경상북도", "경산시", "폭염  ", "경보    ", "변경")
+	rainAdvisory := warning("L2", "경상북도", "포항시", "호우", "주의", "발표")
+	check([]string{heatWarning, rainAdvisory}, "⚠️ 폭염 주의보 → 경보 격상|경산시")
+	check([]string{heatWarning, rainAdvisory})
+
+	heatEmergency := warning("L1", "경상북도", "경산시", "폭염  ", "중대경보", "변경")
+	rainWarning := warning("L2", "경상북도", "포항시", "호우", "경보", "대치")
+	// The silent rain advisory upgrades too. An explicit release row for heat is not a second post.
+	rows := []string{heatEmergency, warning("L1", "경상북도", "경산시", "폭염", "경보", "해제"), rainWarning}
+	check(rows, "⚠️ 폭염 경보 → 중대경보 격상|경산시", "⚠️ 호우 주의보 → 경보 격상|포항시")
+	check(rows)
+	// A warning for the same phenomenon in another area is a new issue.
+	otherHeat := warning("L2", "경상북도", "포항시", "폭염", "중대경보", "발표")
+	check([]string{otherHeat, rainWarning}, "✅ 폭염중대경보 해제|경산시", "⚠️ 폭염중대경보 발표|포항시")
+	// If both commands arrived between checks, their shared effective time identifies the upgrade.
+	wind := warning("L1", "경상북도", "경산시", "강풍", "경보", "대치")
+	rows = []string{otherHeat, rainWarning, warning("L1", "경상북도", "경산시", "강풍", "주의", "대치해제"), wind}
+	check(rows, "⚠️ 강풍 주의보 → 경보 격상|경산시")
+	check(rows)
 }
 
 // The watcher writes only what changed: with warnings on and the same ones still in force, a check

@@ -777,6 +777,7 @@ func cloneGuilds(in map[string]config.GuildSettings) map[string]config.GuildSett
 			ng.Channels = make(map[string]config.ChannelPolicy, len(g.Channels))
 			for cid, ch := range g.Channels {
 				cp := ch
+				cp.WatchLevel = maps.Clone(ch.WatchLevel)
 				if ch.RAGAttachments != nil {
 					cp.RAGAttachments = append([]config.RAGAttachmentRef{}, ch.RAGAttachments...)
 				}

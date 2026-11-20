@@ -102,9 +102,9 @@ type DisasterAlerts struct {
 	// and 7.0, the previous bot's). Notices KMA marks 국내영향없음 are never announced.
 	EarthquakeMinDomestic float64 `yaml:"earthquake_min_domestic,omitempty" json:"earthquake_min_domestic,omitempty"`
 	EarthquakeMinOverseas float64 `yaml:"earthquake_min_overseas,omitempty" json:"earthquake_min_overseas,omitempty"`
-	// Warnings turns weather warnings on or off (unset = on). 경보 is announced for every land region;
-	// 주의보 only for regions whose name contains one of WarningRegions (e.g. 서울, 경기).
-	Warnings       *bool    `yaml:"warnings,omitempty" json:"warnings,omitempty"`
+	// Warnings turns weather warnings on or off (unset = on).
+	Warnings *bool `yaml:"warnings,omitempty" json:"warnings,omitempty"`
+	// Readable for older configurations. Rooms now select their own regions in watch_level.
 	WarningRegions []string `yaml:"warning_regions,omitempty" json:"warning_regions,omitempty"`
 	// Marine adds sea-area warnings (풍랑 on 먼바다 …), left out by default.
 	Marine bool `yaml:"marine,omitempty" json:"marine,omitempty"`
@@ -318,6 +318,27 @@ type GuildPrivacy struct {
 	CardChannelOnly bool `yaml:"card_channel_only,omitempty" json:"card_channel_only,omitempty"`
 }
 
+// WatchLevels maps KMA areas to their cumulative notification levels.
+type WatchLevels map[string]int
+
+func (levels *WatchLevels) UnmarshalYAML(node *yaml.Node) error {
+	// Decoding directly into map[string]int would silently truncate a fractional YAML value.
+	var values map[string]any
+	if err := node.Decode(&values); err != nil {
+		return err
+	}
+	result := make(WatchLevels, len(values))
+	for region, raw := range values {
+		level, ok := raw.(int)
+		if !ok {
+			return fmt.Errorf("watch_level for %q must be an integer from 1 to 5", region)
+		}
+		result[region] = level
+	}
+	*levels = result
+	return nil
+}
+
 // ChannelPolicy is isolated to one source channel. Capture stores this channel's messages as memory;
 // MemoryUse lets replies search memory (the channel's own room plus attached blocks only).
 type ChannelPolicy struct {
@@ -341,6 +362,9 @@ type ChannelPolicy struct {
 	// DisasterAlerts "off" keeps earthquake and weather-warning announcements out of this channel
 	// (unset = on wherever the bot answers).
 	DisasterAlerts string `yaml:"disaster_alerts,omitempty" json:"disaster_alerts,omitempty"`
+	// WatchLevel sets the cumulative alert level by exact KMA region code or name.
+	// An unconfigured region is level 1 (earthquake notices only).
+	WatchLevel WatchLevels `yaml:"watch_level,omitempty" json:"watch_level,omitempty"`
 	// NameCall is what a message that only says the bot's name (no mention, no reply to it) means:
 	// addressed = a small classifier tells "talking to the bot" from "talking about the bot" (default);
 	// always = every message with the name is a call (the old behaviour); off = the name alone never calls.
@@ -1520,6 +1544,11 @@ func parse(raw []byte, problems *[]Problem) (Document, error) {
 		for cid, c := range g.Channels {
 			if c.DisasterAlerts != "" && c.DisasterAlerts != "on" && c.DisasterAlerts != "off" {
 				return Document{}, fmt.Errorf("guilds.%s.channels.%s.disaster_alerts must be on or off", gid, cid)
+			}
+			for region, level := range c.WatchLevel {
+				if region == "" || strings.TrimSpace(region) != region || level < 1 || level > 5 {
+					return Document{}, fmt.Errorf("guilds.%s.channels.%s.watch_level requires a region code or name and level 1–5, got %q=%d", gid, cid, region, level)
+				}
 			}
 		}
 	}

@@ -375,7 +375,7 @@ type Warning struct {
 	Region     string
 	ParentCode string
 	Parent     string
-	Kind       string // W R C D O N V T S Y H F K
+	Kind       string // W R C D O N V T S Y H K
 	KindName   string
 	Level      string // 1 예비 2 주의보 3 경보
 	LevelName  string
@@ -386,7 +386,7 @@ type Warning struct {
 
 var warningColumns = []string{"REG_UP", "REG_UP_KO", "REG_ID", "REG_KO", "TM_FC", "TM_EF", "WRN", "LVL", "CMD"}
 
-var kindNames = map[string]string{"W": "강풍", "R": "호우", "C": "한파", "D": "건조", "O": "폭풍해일", "N": "지진해일", "V": "풍랑", "T": "태풍", "S": "대설", "Y": "황사", "H": "폭염", "F": "안개", "K": "열대야"}
+var kindNames = map[string]string{"W": "강풍", "R": "호우", "C": "한파", "D": "건조", "O": "폭풍해일", "N": "지진해일", "V": "풍랑", "T": "태풍", "S": "대설", "Y": "황사", "H": "폭염", "K": "열대야"}
 var levelNames = map[string]string{"1": "예비", "2": "주의보", "3": "경보"}
 
 func (a *Adapter) ActiveWarnings(ctx context.Context) ([]Warning, error) {
@@ -421,7 +421,7 @@ func ParseWarnings(body []byte) ([]Warning, error) {
 	var out []Warning
 	for _, r := range t.Rows {
 		kind := r["WRN"]
-		if kind == "" {
+		if kind == "" || kind == "F" || kind == "안개" {
 			continue
 		}
 		w := Warning{
@@ -445,6 +445,7 @@ var kindCodes = func() map[string]string {
 	for code, name := range kindNames {
 		m[name] = code
 	}
+	m["해일"] = "O" // wrn_now_data uses this short name for 폭풍해일
 	return m
 }()
 
@@ -461,7 +462,7 @@ func parseWarningsJSON(body []byte) ([]Warning, error) {
 	for _, r := range rows {
 		f := func(k string) string { return decode.FieldStr(r, k) }
 		name := f("WRN")
-		if name == "" {
+		if name == "" || name == "안개" || name == "F" {
 			continue
 		}
 		w := Warning{
@@ -470,7 +471,7 @@ func parseWarningsJSON(body []byte) ([]Warning, error) {
 			Command: f("CMD"), Announced: f("TM_FC"), Effective: f("TM_EF"),
 		}
 		if code, ok := kindCodes[name]; ok {
-			w.Kind = code
+			w.Kind, w.KindName = code, kindNames[code]
 		} else if n, ok := kindNames[name]; ok { // already a code
 			w.KindName = n
 		}

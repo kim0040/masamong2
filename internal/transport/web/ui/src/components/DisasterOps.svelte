@@ -17,7 +17,6 @@
   // Earthquakes and weather warnings the bot announces on its own (disaster_alerts): the switches,
   // what is announced, and what the last check found. A room turns them off on its own page.
   const st = resource<any>('disasters.alerts', () => ({}), { live: ['config'] })
-  let regions = $state('')
   let minDom = $state('')
   let minOver = $state('')
   let busy = $state(false)
@@ -25,10 +24,9 @@
   $effect(() => {
     const d = st.data
     if (!d) return
-    const k = JSON.stringify([d.warning_regions, d.earthquake_min_domestic, d.earthquake_min_overseas])
+    const k = JSON.stringify([d.earthquake_min_domestic, d.earthquake_min_overseas])
     if (k === seen) return
     seen = k
-    regions = (d.warning_regions ?? []).join(', ')
     minDom = String(d.earthquake_min_domestic)
     minOver = String(d.earthquake_min_overseas)
   })
@@ -42,13 +40,11 @@
     const dom = Number(minDom)
     const over = Number(minOver)
     if (!(dom > 0 && dom <= 10 && over > 0 && over <= 10)) return
-    const list = regions.split(',').map((r) => r.trim()).filter(Boolean)
     busy = true
     await patchConfig(
       [
         { path: ['disaster_alerts', 'earthquake_min_domestic'], value: dom },
         { path: ['disaster_alerts', 'earthquake_min_overseas'], value: over },
-        list.length ? { path: ['disaster_alerts', 'warning_regions'], value: list } : { path: ['disaster_alerts', 'warning_regions'], op: 'unset' },
       ],
       { success: t('disaster.saved') },
     )
@@ -77,7 +73,6 @@
         <Field id="dmin" label={t('disaster.min_domestic')}>{#snippet children({ id })}<Input {id} bind:value={minDom} type="number" min="1" max="10" step="0.1" inputmode="decimal" />{/snippet}</Field>
         <Field id="omin" label={t('disaster.min_overseas')}>{#snippet children({ id })}<Input {id} bind:value={minOver} type="number" min="1" max="10" step="0.1" inputmode="decimal" />{/snippet}</Field>
       </div>
-      <Field id="dreg" label={t('disaster.regions')} hint={t('disaster.regions_hint')}>{#snippet children({ id, describedby })}<Input {id} aria-describedby={describedby} bind:value={regions} placeholder={t('disaster.regions_ph')} />{/snippet}</Field>
       <div class="row"><Button size="sm" icon={I.Save} loading={busy} onclick={saveDetails}>{t('common.save')}</Button></div>
       <KeyValue items={[
         { k: t('disaster.last_check'), v: d.state?.checked_at ? relative(d.state.checked_at) : t('disaster.never') },
