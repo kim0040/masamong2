@@ -25,17 +25,19 @@ func TestFXBuildHandsOverWhatWasTyped(t *testing.T) {
 		opts   map[string]string
 		want   map[string]any
 	}{
-		{"ko", false, nil, map[string]any{"home": ""}},
-		{"ko-KR", false, nil, map[string]any{"home": ""}},
-		{"en-US", false, nil, map[string]any{"home": ""}},
-		{"ja", false, nil, map[string]any{"home": ""}},
+		// the command always sends its own base (blank when none was typed): a configured tool default
+		// is merged only into a key that is absent, so it cannot become the command's base
+		{"ko", false, nil, map[string]any{"home": "", "base": ""}},
+		{"ko-KR", false, nil, map[string]any{"home": "", "base": ""}},
+		{"en-US", false, nil, map[string]any{"home": "", "base": ""}},
+		{"ja", false, nil, map[string]any{"home": "", "base": ""}},
 		// a Discord number option reaches the action as a number, the words of a message as the text typed
-		{"ko", false, map[string]string{"currency": "엔화", "amount": "50000"}, map[string]any{"home": "", "currency": "엔화", "amount": 50000.0}},
-		{"es", false, map[string]string{"amount": "1.5"}, map[string]any{"home": "", "amount": 1.5}},
-		{"es", true, map[string]string{"amount": "1,5"}, map[string]any{"home": "", "amount": "1,5"}},
-		{"es", true, map[string]string{"amount": "1.5"}, map[string]any{"home": "", "amount": "1.5"}},
-		{"en", false, map[string]string{"currency": "U$D"}, map[string]any{"home": "", "currency": "U$D"}},
-		{"ko", false, map[string]string{"currency": "   "}, map[string]any{"home": "", "currency": "   "}}, // given but blank: not the default
+		{"ko", false, map[string]string{"currency": "엔화", "amount": "50000"}, map[string]any{"home": "", "base": "", "currency": "엔화", "amount": 50000.0}},
+		{"es", false, map[string]string{"amount": "1.5"}, map[string]any{"home": "", "base": "", "amount": 1.5}},
+		{"es", true, map[string]string{"amount": "1,5"}, map[string]any{"home": "", "base": "", "amount": "1,5"}},
+		{"es", true, map[string]string{"amount": "1.5"}, map[string]any{"home": "", "base": "", "amount": "1.5"}},
+		{"en", false, map[string]string{"currency": "U$D"}, map[string]any{"home": "", "base": "", "currency": "U$D"}},
+		{"ko", false, map[string]string{"currency": "   "}, map[string]any{"home": "", "base": "", "currency": "   "}}, // given but blank: not the default
 		{"ko", false, map[string]string{"base": "jpy"}, map[string]any{"home": "", "base": "jpy"}},
 		{"ko", false, map[string]string{"currency": "달러", "base": "유로", "amount": "5"}, map[string]any{"home": "", "currency": "달러", "base": "유로", "amount": 5.0}},
 		{"en", false, map[string]string{"base": ""}, map[string]any{"home": "", "base": ""}}, // given but blank: not the default
