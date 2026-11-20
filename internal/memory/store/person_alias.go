@@ -297,7 +297,7 @@ func FillPersonAliases(ctx context.Context, db *storage.Store) error {
 	if !db.IsSQLite() {
 		return nil
 	}
-	// One writer transaction: captures wait for it (about a second per 200,000 rows).
+	// One writer transaction: captures wait for it (about 0.5 s and 70 bytes a row at 200,000 rows).
 	if err := db.WithWriterContext(ctx, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, personNameIndexSQL)
 		return err
