@@ -8,13 +8,13 @@ import (
 func TestTranscriptCharsValidation(t *testing.T) {
 	for _, n := range []int{0, 1000, 5000, 20000} {
 		d := Default("a", "/tmp/x")
-		d.Chat.TranscriptChars = n
+		d.Chat.TranscriptChars = TranscriptChars(n)
 		b, err := Marshal(d)
 		if err != nil {
 			t.Fatal(err)
 		}
 		got, err := Parse(b)
-		if err != nil || got.Chat.TranscriptChars != n {
+		if err != nil || int(got.Chat.TranscriptChars) != n {
 			t.Fatalf("%d: %v %d", n, err, got.Chat.TranscriptChars)
 		}
 		if n == 0 && strings.Contains(string(b), "transcript_chars") {
@@ -26,7 +26,7 @@ func TestTranscriptCharsValidation(t *testing.T) {
 	}
 	for _, n := range []int{-1, 1, 999, 20001} {
 		d := Default("a", "/tmp/x")
-		d.Chat.TranscriptChars = n
+		d.Chat.TranscriptChars = TranscriptChars(n)
 		b, err := Marshal(d)
 		if err != nil {
 			t.Fatal(err)
@@ -36,6 +36,19 @@ func TestTranscriptCharsValidation(t *testing.T) {
 		} else if !strings.Contains(err.Error(), "chat.transcript_chars") {
 			t.Fatalf("%d: the error must name the key: %v", n, err)
 		}
+	}
+	// a key written at all must be an integer in range: an explicit 0, a fraction or a word is an
+	// error naming the key; only an absent key means the default
+	for _, v := range []string{"0", "4.5", "0.0", `"5000"`, "lots"} {
+		raw := "schema_version: 1\ninstance:\n  id: x\nchat:\n  transcript_chars: " + v + "\n"
+		if _, err := Parse([]byte(raw)); err == nil {
+			t.Fatalf("transcript_chars %s accepted", v)
+		} else if !strings.Contains(err.Error(), "chat.transcript_chars") {
+			t.Fatalf("%s: the error must name the key: %v", v, err)
+		}
+	}
+	if got, err := Parse([]byte("schema_version: 1\ninstance:\n  id: x\nchat:\n  progress: off\n")); err != nil || got.Chat.TranscriptBudget() != 5000 {
+		t.Fatalf("an absent transcript_chars keeps the default: %v %d", err, got.Chat.TranscriptBudget())
 	}
 }
 

@@ -150,7 +150,7 @@
         <h3 id="tool-transcript-title" class="gt">{t('tools.transcript.title')}</h3>
         <p class="xs muted">{t('tools.transcript.hint')}</p>
       </div>
-      <div class="model-select"><Input aria-labelledby="tool-transcript-title" type="number" inputmode="numeric" min="1000" max="20000" step="100" placeholder="5000" value={cfg.doc?.chat?.transcript_chars ?? ''} onchange={(e) => setTranscript(e.currentTarget.value)} /></div>
+      <div class="model-select"><Input aria-labelledby="tool-transcript-title" type="number" inputmode="numeric" min="1000" max="20000" step="1" placeholder="5000" value={cfg.doc?.chat?.transcript_chars ?? ''} onchange={(e) => setTranscript(e.currentTarget.value)} /></div>
     </div>
   </section>
 {/if}
