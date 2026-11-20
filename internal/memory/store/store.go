@@ -286,6 +286,9 @@ func Open(db *storage.Store) (*Store, error) {
 	if err := migrateBatchPlans(db); err != nil {
 		return nil, fmt.Errorf("memory migration: batch plans: %w", err)
 	}
+	if err := migratePersonAliases(db); err != nil {
+		return nil, fmt.Errorf("memory migration: person aliases: %w", err)
+	}
 	return st, nil
 }
 
@@ -1001,6 +1004,11 @@ func (s *Store) insertObservations(ctx context.Context, obs []corpus.Observation
 			}
 			if n, _ := r.RowsAffected(); n > 0 {
 				res.Inserted++
+				if !s.tidb() && o.Platform == "discord" {
+					if err := savePersonAlias(tx, o.SourceRoom, m.ActorAccount, m.ActorLabel, o.ParsedTime); err != nil {
+						slog.Warn("could not record display name; keeping captured observation")
+					}
+				}
 				a := appends[m.Room]
 				key := messageKey(m)
 				if a.n == 0 || key.before(a.first) {

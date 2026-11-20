@@ -475,6 +475,11 @@ func (s *Service) invalidateCards(ctx context.Context, db *storage.Store, jobs [
 				op = "withdraw"
 			}
 			if (op == "withdraw" || op == "withdraw_batch") && j.Ref != "" {
+				if tableExists(tx, "person_alias") {
+					if _, err := tx.Exec(`DELETE FROM person_alias WHERE person_ref=?`, j.Ref); err != nil {
+						return err
+					}
+				}
 				if _, err := deleteCardsOf(tx, "", j.Ref); err != nil {
 					return err
 				}
