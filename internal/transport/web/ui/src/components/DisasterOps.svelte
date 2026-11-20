@@ -69,6 +69,9 @@
       <Switch checked={d.enabled} disabled={busy} onchange={(v) => set(['enabled'], v)} label={t('disaster.enabled')} hint={t('disaster.enabled_hint')} />
       <Switch checked={d.warnings} disabled={busy || !d.enabled} onchange={(v) => set(['warnings'], v)} label={t('disaster.warnings')} hint={t('disaster.warnings_hint')} />
       <Switch checked={d.marine} disabled={busy || !d.enabled || !d.warnings} onchange={(v) => set(['marine'], v)} label={t('disaster.marine')} hint={t('disaster.marine_hint')} />
+      {#if (d.warning_regions ?? []).length}
+        <div class="callout warn"><span class="ic"><I.TriangleAlert size={16} /></span><span>{t('disaster.legacy_regions', { regions: d.warning_regions.join(', ') })}</span><Button size="sm" variant="ghost" disabled={busy} onclick={() => patchConfig([{ path: ['disaster_alerts', 'warning_regions'], op: 'unset' }], { success: t('disaster.saved') })}>{t('disaster.legacy_regions_clear')}</Button></div>
+      {/if}
       <div class="form-grid">
         <Field id="dmin" label={t('disaster.min_domestic')}>{#snippet children({ id })}<Input {id} bind:value={minDom} type="number" min="1" max="10" step="0.1" inputmode="decimal" />{/snippet}</Field>
         <Field id="omin" label={t('disaster.min_overseas')}>{#snippet children({ id })}<Input {id} bind:value={minOver} type="number" min="1" max="10" step="0.1" inputmode="decimal" />{/snippet}</Field>

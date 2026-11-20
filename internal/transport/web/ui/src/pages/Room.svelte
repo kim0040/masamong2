@@ -191,7 +191,7 @@
 
   // copy this room's saved settings to other rooms
   let copyOpen = $state(false)
-  let copyWhat = $state<Record<string, boolean>>({ reply: true, memory: false, logging: false, tools: false })
+  let copyWhat = $state<Record<string, boolean>>({ reply: true, alerts: false, memory: false, logging: false, tools: false })
   let copyTo = $state<Set<string>>(new Set())
   let copying = $state(false)
   const others = $derived(((list.data?.channels ?? []) as any[]).filter((x) => !(x.id === c && x.guild_id === g)))
@@ -206,6 +206,7 @@
     const src = savedForm
     const input: Record<string, unknown> = {}
     if (copyWhat.reply) Object.assign(input, { respond: src.respond, persona_ref: src.persona_ref, rules: src.rules ?? '' })
+    if (copyWhat.alerts) Object.assign(input, { disaster_alerts: src.disaster_alerts, watch_level: Object.fromEntries((src.watch_level ?? []).map((w: { region: string; level: string }) => [w.region, Number(w.level)])) })
     if (copyWhat.memory) Object.assign(input, { memory_use: src.memory_use, capture: src.capture ? 'true' : 'false' })
     if (copyWhat.logging) input.logging_level = src.logging_level
     const tools = { ...(pol.tools ?? {}) }
@@ -287,10 +288,11 @@
                 {@const key = row.region.trim()}
                 {@const checked = !!ch.watch_areas?.checked && Object.hasOwn(ch.watch_level ?? {}, key)}
                 {@const area = checked ? ch.watch_areas.matched?.[key] : undefined}
+                {@const name = key || t('room.watch_row', { n: i + 1 })}
                 <div class="watch-row">
                   <Input aria-label={t('room.watch_region')} placeholder={t('room.watch_region')} bind:value={row.region} aria-describedby={checked ? `watch-area-${i}` : undefined} />
-                  <Select aria-label={t('room.watch_levels')} bind:value={row.level} options={['1','2','3','4','5'].map(value => ({ value, label: value }))} />
-                  <Button size="sm" onclick={() => form.watch_level.splice(i, 1)}>{t('room.watch_remove')}</Button>
+                  <Select aria-label={t('room.watch_level_of', { area: name })} bind:value={row.level} options={['1','2','3','4','5'].map(value => ({ value, label: value }))} />
+                  <Button size="sm" aria-label={t('room.watch_remove_of', { area: name })} onclick={() => form.watch_level.splice(i, 1)}>{t('room.watch_remove')}</Button>
                   {#if checked}
                     {#if area}<p id="watch-area-{i}" class="watch-area xs muted">{t('room.watch_matched', { area })}</p>
                     {:else}<p id="watch-area-{i}" class="watch-area xs warn-text"><I.TriangleAlert size={12} aria-hidden="true" />{t('room.watch_unknown')}</p>{/if}
@@ -529,7 +531,7 @@
     {#if dirty}<div class="callout warn"><span class="ic"><I.TriangleAlert size={16} /></span><span>{t('room.copy_unsaved')}</span></div>{/if}
     <fieldset>
       <legend class="small">{t('room.copy_what')}</legend>
-      {#each ['reply', 'memory', 'logging', 'tools'] as k}
+      {#each ['reply', 'alerts', 'memory', 'logging', 'tools'] as k}
         <label class="check"><input type="checkbox" bind:checked={copyWhat[k]} />{t(`room.copy.${k}`)}</label>
       {/each}
     </fieldset>
