@@ -308,13 +308,16 @@ func TestDisasterWarningUpgrades(t *testing.T) {
 			}
 		}
 	}
-	// Simulate an installation upgrading with an existing visible heat advisory.
+	// Simulate an installation upgrading with an existing visible heat advisory. The older build's set
+	// never held the rain advisory, so the first check only records what is in force.
 	legacy := `{"L1|H|2":{"RegionCode":"L1","Region":"경산시","Kind":"H","KindName":"폭염","Level":"2","LevelName":"주의보"}}`
 	if _, err := svc.Store.DB.Exec(`INSERT INTO admin_state(k,v,updated_at) VALUES(?,?,?)`, "disaster:wrn_active", legacy, now.Format(time.RFC3339)); err != nil {
 		t.Fatal(err)
 	}
+	heatAdvisory := warning("L1", "경상북도", "경산시", "폭염", "주의", "발표")
 	heatWarning := warning("L1", "경상북도", "경산시", "폭염  ", "경보    ", "변경")
 	rainAdvisory := warning("L2", "경상북도", "포항시", "호우", "주의", "발표")
+	check([]string{heatAdvisory, rainAdvisory})
 	check([]string{heatWarning, rainAdvisory}, "⚠️ 폭염 주의보 → 경보 격상|경산시")
 	check([]string{heatWarning, rainAdvisory})
 
@@ -447,5 +450,70 @@ func TestDisasterTickReadsOneConfigRevision(t *testing.T) {
 	<-done
 	if len(gw.posts) != 0 {
 		t.Fatalf("no single config revision allows this card, got %q", gw.posts)
+	}
+}
+
+// The first check after an upgrade from a build that stored a bare, filtered map announces nothing,
+// whatever the rooms are set to: the old set left out advisories that may have been in force for
+// hours. The set is then stored with its version, and a restart repeats nothing.
+func TestDisasterOlderWarningStateIsAStartingPoint(t *testing.T) {
+	for name, legacy := range map[string]string{
+		"empty":       `{}`,
+		"warning":     `{"L1|R|3":{"RegionCode":"L1","Region":"경산시","Kind":"R","KindName":"호우","Level":"3","LevelName":"경보"}}`,
+		"storm surge": `{"L2|해일|3":{"RegionCode":"L2","Region":"포항시","Kind":"해일","KindName":"해일","Level":"3","LevelName":"경보"}}`,
+		"no version":  `{"active":{}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc := setupSvc(t)
+			feed := &kmaFeed{}
+			pointAt(t, svc, "kma", feed.server(t).URL, "KMA_TEST_KEY", "k")
+			if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "c1", "respond": "mention", "watch_level": map[string]int{"L1": 5, "L2": 5}}); !r.OK {
+				t.Fatal(r.Error)
+			}
+			applyDoc(t, svc, func(d *config.Document) {
+				g := d.Guilds["g1"]
+				g.Locale = "ko"
+				d.Guilds["g1"] = g
+			})
+			now := time.Date(2026, 7, 12, 0, 0, 0, 0, time.UTC)
+			if _, err := svc.Store.DB.Exec(`INSERT INTO admin_state(k,v,updated_at) VALUES(?,?,?)`, "disaster:wrn_active", legacy, now.Format(time.RFC3339)); err != nil {
+				t.Fatal(err)
+			}
+			feed.warnings = []string{
+				warning("L1", "경상북도", "경산시", "호우", "경보", "발표"),
+				warning("L1", "경상북도", "경산시", "강풍", "주의", "발표"),
+				warning("L2", "경상북도", "포항시", "해일  ", "경보    ", "발표"),
+			}
+			gw := &postingGateway{}
+			svc.Discord = gw
+			svc.Clock = clock.Fixed{T: now}
+			application.DisasterTickForTest(svc, context.Background())
+			if len(gw.posts) != 0 {
+				t.Fatalf("the first check after the upgrade announced %q", gw.posts)
+			}
+			var n int
+			if err := svc.Store.DB.QueryRow(`SELECT count(*) FROM admin_state WHERE k='disaster:wrn_active' AND json_extract(v,'$.version')=2 AND json_extract(v,'$.active."L2|O".Kind')='O' AND json_extract(v,'$.active."L1|W".Level')='2'`).Scan(&n); err != nil || n != 1 {
+				t.Fatalf("the set in force was not stored with its version: %d %v", n, err)
+			}
+			if err := svc.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := application.Open(svc.DataRoot, clock.Fixed{T: now.Add(5 * time.Minute)}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = reopened.Close() })
+			reopened.Discord = gw
+			application.DisasterTickForTest(reopened, context.Background())
+			if len(gw.posts) != 0 {
+				t.Fatalf("repeated after a restart: %q", gw.posts)
+			}
+			feed.warnings = append(feed.warnings, warning("L1", "경상북도", "경산시", "대설", "주의", "발표"))
+			reopened.Clock = clock.Fixed{T: now.Add(10 * time.Minute)}
+			application.DisasterTickForTest(reopened, context.Background())
+			if len(gw.posts) != 1 || !strings.HasPrefix(gw.posts[0], "c1|⚠️ 대설주의보 발표|경산시") {
+				t.Fatalf("a change after the starting point is news: %q", gw.posts)
+			}
+		})
 	}
 }

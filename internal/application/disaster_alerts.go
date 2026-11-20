@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"masamong/internal/errclass"
 	"math"
@@ -31,7 +32,7 @@ import (
 //   - Weather warnings: each room selects its watch level by KMA area; sea areas also require
 //     disaster_alerts.marine. A warning that appears is announced as issued, one that
 //     disappears as lifted. A rise in level for the same area and kind is one upgrade. The first check only
-//     records what is active.
+//     records what is active, and so does the first check on a set an older build stored.
 //
 // disaster_alerts.enabled / .warnings switch them off for the instance, a channel's disaster_alerts:
 // off for that channel; the scheduler skips everything while the bot is paused.
@@ -339,6 +340,19 @@ func (s *Service) earthquakeCard(locale string, inc []kma.Earthquake) action.Car
 // All rooms compare the same KMA observations, including advisories below a room's watch level.
 type warningSnapshot map[string]kma.Warning
 
+// warningStateVersion marks what the warning check stores in disaster:wrn_active. Builds before room
+// watch levels stored a bare map that kept only what the global warning_regions and marine switches
+// let through, so it cannot say which advisories were already in force. The first check that finds
+// such a set (or any set without this version) records everything in force again and announces
+// nothing, whatever the rooms are set to.
+const warningStateVersion = 2
+
+// warningState is what one warning check leaves for the next.
+type warningState struct {
+	Version int             `json:"version"`
+	Active  warningSnapshot `json:"active"`
+}
+
 // Lower levels are cumulative. Other advisories and warnings require level 5.
 var warningWatchLevels = map[string]map[string]int{
 	"N": {"2": 2, "3": 2},            // 지진해일
@@ -425,25 +439,24 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 		}
 		current.record(w)
 	}
-	var stored warningSnapshot
-	seen, err := s.kvGet("disaster:wrn_active", &stored)
+	var raw json.RawMessage
+	seen, err := s.kvGet("disaster:wrn_active", &raw)
 	if err != nil {
 		return 0, err
 	}
-	// Rebuild from values so snapshots saved with region|kind|level also compare correctly.
-	before := warningSnapshot{}
-	for _, w := range stored {
-		if w.Kind == "해일" { // older JSON snapshots used the API's short name as their key
-			w.Kind, w.KindName = "O", "폭풍해일"
-		}
-		if w.Kind == "안개" || w.Kind == "F" {
-			continue
-		}
-		before.record(w)
+	var stored warningState
+	if seen && (json.Unmarshal(raw, &stored) != nil || stored.Version != warningStateVersion) {
+		// an older build's set: what it left out may have been in force for hours, so nothing is news yet
+		s.Log.Info("disaster alerts: older warning state replaced; what is in force now is the starting point", "active", len(current))
+		return 0, s.kvSet("disaster:wrn_active", warningState{Version: warningStateVersion, Active: current})
+	}
+	before := stored.Active
+	if before == nil {
+		before = warningSnapshot{}
 	}
 	// the set is stored only when it changed (or on the first check): most checks find the same warnings
 	if !seen || !reflect.DeepEqual(before, current) {
-		if err := s.kvSet("disaster:wrn_active", current); err != nil {
+		if err := s.kvSet("disaster:wrn_active", warningState{Version: warningStateVersion, Active: current}); err != nil {
 			return 0, err
 		}
 	}
