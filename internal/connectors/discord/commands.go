@@ -169,6 +169,7 @@ func Commands() []Command {
 			Name: "fx", Desc: "Exchange rates", Action: "finance.fx",
 			Options: []*discordgo.ApplicationCommandOption{
 				option(str, "currency", "Currency code or name, e.g. USD or dollar", false),
+				option(str, "base", "Currency to show values in, e.g. USD or JPY (default: your home currency)", false),
 				option(discordgo.ApplicationCommandOptionNumber, "amount", "Amount to convert", false),
 			},
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
@@ -177,6 +178,9 @@ func Commands() []Command {
 				in := map[string]any{"home": ""}
 				if v, given := o["currency"]; given {
 					in["currency"] = v
+				}
+				if v, given := o["base"]; given {
+					in["base"] = v
 				}
 				if v, given := o["amount"]; given {
 					// a number option is already a number; a word of a message is the person's text, read
@@ -872,8 +876,10 @@ func (t PrefixTable) Parse(prefix, content string) (Command, map[string]string, 
 	return cmd, opts, true
 }
 
-// fxPrefixOptions reads "!환율 50000 엔화" and "!환율 엔화 50000": the number is the amount, the rest the
-// currency (a code or a name that may hold spaces).
+// fxPrefixOptions reads "!환율 50000 엔화", "!환율 엔화 50000" and "!환율 달러 유로": the first number is the
+// amount; the rest is a currency (a code or a name that may hold spaces), or two of them, the currency and
+// the base to value it in. Words are split into two names only when both resolve, so "미국 달러" stays one
+// name; when nothing resolves they stay one currency, which the action refuses as it would any other.
 func fxPrefixOptions(tail string, opts map[string]string) {
 	var words []string
 	for _, w := range strings.Fields(tail) {
@@ -883,8 +889,22 @@ func fxPrefixOptions(tail string, opts map[string]string) {
 		}
 		words = append(words, w)
 	}
-	if len(words) > 0 {
-		opts["currency"] = strings.Join(words, " ")
+	if len(words) == 0 {
+		return
+	}
+	opts["currency"] = strings.Join(words, " ")
+	lex := currency.New(messages)
+	if _, ok := lex.Resolve(opts["currency"]); ok {
+		return
+	}
+	for i := 1; i < len(words); i++ {
+		first, second := strings.Join(words[:i], " "), strings.Join(words[i:], " ")
+		_, ok1 := lex.Resolve(first)
+		_, ok2 := lex.Resolve(second)
+		if ok1 && ok2 {
+			opts["currency"], opts["base"] = first, second
+			return
+		}
 	}
 }
 

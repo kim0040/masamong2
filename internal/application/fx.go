@@ -214,11 +214,14 @@ func (s *Service) fxRawPlan(lex *currency.Lexicon, in map[string]any, amount flo
 	return plan, true
 }
 
-// fxHomePlan is a request from a command: the person's home currency, and optionally a currency and an
-// amount. The rates are fetched for the home currency, so one call serves both directions.
+// fxHomePlan is a request from a command: the person's home currency, and optionally a currency, a base
+// and an amount. The rates are fetched for the base (the home currency when none is named), so one call
+// serves both directions.
 //
-//	no currency (or the home one)  every board currency in home; with an amount, that much home in each
-//	another currency               both directions; with an amount, that much of it in home
+//	no currency (or the base itself)  the board: every board currency in the base (the home one when no
+//	                                  base is named); with an amount, that much base in each of them
+//	another currency                  that currency against the base, both directions; with an amount,
+//	                                  that much of it in the base
 func (s *Service) fxHomePlan(lex *currency.Lexicon, locale string, in map[string]any, amount float64) (fxPlan, bool) {
 	home := lex.Home(locale)
 	if text, _ := fxText(in, "home"); text != "" {
@@ -226,7 +229,15 @@ func (s *Service) fxHomePlan(lex *currency.Lexicon, locale string, in map[string
 			home = code
 		}
 	}
-	plan := fxPlan{base: home}
+	base := home
+	if text, given := fxText(in, "base"); given {
+		code, ok := lex.Resolve(text)
+		if !ok {
+			return fxPlan{}, false
+		}
+		base = code
+	}
+	plan := fxPlan{base: base}
 	other := ""
 	if text, given := fxText(in, "currency"); given {
 		code, ok := lex.Resolve(text)
@@ -235,26 +246,26 @@ func (s *Service) fxHomePlan(lex *currency.Lexicon, locale string, in map[string
 		}
 		other = code
 	}
-	if other == "" || other == home {
+	if other == "" || other == base {
 		for _, c := range currency.Board {
-			if c != home {
+			if c != base {
 				plan.symbols = append(plan.symbols, c)
 			}
 		}
 		for _, c := range plan.symbols {
 			if amount > 0 {
-				plan.pairs = append(plan.pairs, fxPair{from: home, to: c, amount: amount})
+				plan.pairs = append(plan.pairs, fxPair{from: base, to: c, amount: amount})
 			} else {
-				plan.pairs = append(plan.pairs, fxPair{from: c, to: home})
+				plan.pairs = append(plan.pairs, fxPair{from: c, to: base})
 			}
 		}
 		return plan, true
 	}
 	plan.symbols, plan.strict = []string{other}, other
 	if amount > 0 {
-		plan.pairs = []fxPair{{from: other, to: home, amount: amount}}
+		plan.pairs = []fxPair{{from: other, to: base, amount: amount}}
 	} else {
-		plan.pairs = []fxPair{{from: other, to: home}, {from: home, to: other}}
+		plan.pairs = []fxPair{{from: other, to: base}, {from: base, to: other}}
 	}
 	return plan, true
 }

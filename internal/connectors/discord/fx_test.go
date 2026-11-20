@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/bwmarrin/discordgo"
+
 	"masamong/internal/application"
 )
 
@@ -34,6 +36,9 @@ func TestFXBuildHandsOverWhatWasTyped(t *testing.T) {
 		{"es", true, map[string]string{"amount": "1.5"}, map[string]any{"home": "", "amount": "1.5"}},
 		{"en", false, map[string]string{"currency": "U$D"}, map[string]any{"home": "", "currency": "U$D"}},
 		{"ko", false, map[string]string{"currency": "   "}, map[string]any{"home": "", "currency": "   "}}, // given but blank: not the default
+		{"ko", false, map[string]string{"base": "jpy"}, map[string]any{"home": "", "base": "jpy"}},
+		{"ko", false, map[string]string{"currency": "달러", "base": "유로", "amount": "5"}, map[string]any{"home": "", "currency": "달러", "base": "유로", "amount": 5.0}},
+		{"en", false, map[string]string{"base": ""}, map[string]any{"home": "", "base": ""}}, // given but blank: not the default
 	} {
 		act, input := cmd.Build(tc.opts, InvokeContext{Locale: tc.locale, Typed: tc.typed})
 		if act != "finance.fx" || len(input) != len(tc.want) {
@@ -49,32 +54,66 @@ func TestFXBuildHandsOverWhatWasTyped(t *testing.T) {
 }
 
 func TestFXPrefixParsing(t *testing.T) {
-	for _, tc := range []struct{ text, currency, amount string }{
-		{"!환율", "", ""},
-		{"!환율 엔화", "엔화", ""},
-		{"!환율 USD", "USD", ""},
-		{"!환율 50000 엔화", "엔화", "50000"},
-		{"!환율 엔화 50000", "엔화", "50000"},
-		{"!환율 50,000 엔화", "엔화", "50,000"},
-		{"!환율 미국 달러 100", "미국 달러", "100"},
-		{"!환율 100 미국 달러", "미국 달러", "100"},
-		{"!환율 50000", "", "50000"},
-		{"!환율 2 3 엔", "3 엔", "2"}, // one amount: what is left is read as the currency, and fails there
-		{"!fx yen 10", "yen", "10"},
+	for _, tc := range []struct{ text, currency, base, amount string }{
+		{"!환율", "", "", ""},
+		{"!환율 엔화", "엔화", "", ""},
+		{"!환율 USD", "USD", "", ""},
+		{"!환율 50000 엔화", "엔화", "", "50000"},
+		{"!환율 엔화 50000", "엔화", "", "50000"},
+		{"!환율 50,000 엔화", "엔화", "", "50,000"},
+		{"!환율 미국 달러 100", "미국 달러", "", "100"},
+		{"!환율 100 미국 달러", "미국 달러", "", "100"},
+		{"!환율 50000", "", "", "50000"},
+		{"!환율 2 3 엔", "3 엔", "", "2"}, // one amount: what is left is read as the currency, and fails there
+		{"!fx yen 10", "yen", "", "10"},
+		// two names: the first is the currency, the second the base to value it in
+		{"!환율 달러 유로", "달러", "유로", ""},
+		{"!환율 달러 유로 100", "달러", "유로", "100"},
+		{"!환율 100 달러 유로", "달러", "유로", "100"},
+		{"!환율 달러 100 유로", "달러", "유로", "100"},
+		{"!환율 USD EUR", "USD", "EUR", ""},
+		{"!fx usd eur 5", "usd", "eur", "5"},
+		// names with spaces on either side, or both
+		{"!환율 미국 달러 유로", "미국 달러", "유로", ""},
+		{"!환율 달러 미국 달러", "달러", "미국 달러", ""},
+		{"!환율 미국 달러 엔화 100", "미국 달러", "엔화", "100"},
+		// no split resolves both: everything is one currency name, and fails as such
+		{"!환율 달러 foo", "달러 foo", "", ""},
+		{"!환율 foo bar", "foo bar", "", ""},
 	} {
 		cmd, opts, ok := ParsePrefix("!", tc.text)
 		if !ok || cmd.Name != "fx" {
 			t.Errorf("%q: not parsed as fx (%v)", tc.text, ok)
 			continue
 		}
-		if opts["currency"] != tc.currency || opts["amount"] != tc.amount {
-			t.Errorf("%q: currency %q amount %q, want %q %q", tc.text, opts["currency"], opts["amount"], tc.currency, tc.amount)
+		if opts["currency"] != tc.currency || opts["base"] != tc.base || opts["amount"] != tc.amount {
+			t.Errorf("%q: currency %q base %q amount %q, want %q %q %q", tc.text, opts["currency"], opts["base"], opts["amount"], tc.currency, tc.base, tc.amount)
 		}
 	}
 }
 
 // fxCard runs /환율 against a local rate service whose dollar prices are fixed.
 func fxCard(t *testing.T, locale string, opts map[string]string) []string {
+	t.Helper()
+	return fxCardOf(t, locale, opts, false)
+}
+
+// fxPrefixCard runs the words of a prefix command ("!환율 달러 유로") the way the gateway does.
+func fxPrefixCard(t *testing.T, locale, text string) []string {
+	t.Helper()
+	_, opts, ok := ParsePrefix("!", text)
+	if !ok {
+		t.Fatalf("%q did not parse as a command", text)
+	}
+	return fxCardOf(t, locale, opts, true)
+}
+
+func fxCardOf(t *testing.T, locale string, opts map[string]string, typed bool) []string {
+	t.Helper()
+	return strings.Split(fxEmbed(t, locale, opts, typed).Description, "\n")
+}
+
+func fxEmbed(t *testing.T, locale string, opts map[string]string, typed bool) *discordgo.MessageEmbed {
 	t.Helper()
 	svc := svcForTest(t)
 	g := &Gateway{svc: svc}
@@ -94,7 +133,7 @@ func fxCard(t *testing.T, locale string, opts map[string]string) []string {
 	adapter.OpenBase, adapter.KeyedBase = server.URL, server.URL
 
 	cmd, _ := ByName("fx")
-	ictx := InvokeContext{Locale: locale, UserID: "tester"}
+	ictx := InvokeContext{Locale: locale, UserID: "tester", Typed: typed}
 	res := g.svc.Execute(context.Background(), requestFor(cmd, opts, ictx, ""))
 	if !res.OK {
 		t.Fatalf("%s %v: %+v", locale, opts, res.Error)
@@ -103,7 +142,7 @@ func fxCard(t *testing.T, locale string, opts map[string]string) []string {
 	if len(embed.Fields) != 1 || embed.Footer == nil {
 		t.Error("missing update time or source")
 	}
-	return strings.Split(embed.Description, "\n")
+	return embed
 }
 
 func TestFXCardsStateRatesInReadableUnits(t *testing.T) {
