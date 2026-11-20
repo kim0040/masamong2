@@ -51,8 +51,9 @@ func TestHandlerIndexIsLineIndependent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	shifted := strings.Replace(string(raw), "package application\n", "package application\n\n", 1)
-	if shifted == string(raw) {
+	src := strings.ReplaceAll(string(raw), "\r\n", "\n") // a Windows checkout has CRLF line ends
+	shifted := strings.Replace(src, "package application\n", "package application\n\n", 1)
+	if shifted == src {
 		t.Fatal("service.go: package clause not found")
 	}
 	moved, err := loadPackage(dir, map[string]string{"service.go": shifted})
