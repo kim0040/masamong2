@@ -28,7 +28,7 @@ func TestGeneratedFilesAreCurrent(t *testing.T) {
 			t.Errorf("%s: %v (regenerate: go run ./tools/codemap)", name, err)
 			continue
 		}
-		if string(got) != want {
+		if strings.ReplaceAll(string(got), "\r\n", "\n") != want {
 			t.Errorf("%s is stale (regenerate: go run ./tools/codemap)", name)
 		}
 	}

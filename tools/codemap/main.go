@@ -36,7 +36,7 @@ func main() {
 		var stale []string
 		for name, want := range files {
 			raw, err := os.ReadFile(filepath.Join(root, name))
-			if err != nil || string(raw) != want {
+			if err != nil || strings.ReplaceAll(string(raw), "\r\n", "\n") != want {
 				stale = append(stale, name)
 			}
 		}
