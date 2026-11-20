@@ -635,9 +635,14 @@ func appendUniqueRef(l []codeRef, r codeRef) []codeRef {
 // each slash command invokes and its options.
 func commandsIndex() string {
 	actionByName := map[string]string{}
+	var prefixOnly []string
 	for _, c := range discord.Commands() {
 		actionByName[c.Name] = c.Action
+		if c.PrefixOnly {
+			prefixOnly = append(prefixOnly, "`"+c.Name+"`")
+		}
 	}
+	sort.Strings(prefixOnly)
 	cmds := discord.ApplicationCommands()
 	sort.Slice(cmds, func(i, j int) bool { return cmds[i].Name < cmds[j].Name })
 	var rows [][]string
@@ -665,7 +670,7 @@ func commandsIndex() string {
 		})
 	}
 	var b strings.Builder
-	b.WriteString("# Discord 명령 색인\n\nDiscord에 등록하는 애플리케이션 명령: 한국어 이름, 호출하는 Action과 옵션.\n\n" + generatedHeader + "\n\n원본: `internal/connectors/discord`의 `ApplicationCommands()` (명령·옵션), `locales/*.json`의 `discord.command.*` (한국어 이름)\n\n")
+	b.WriteString("# Discord 명령 색인\n\nDiscord에 등록하는 애플리케이션 명령: 한국어 이름, 호출하는 Action과 옵션. 각 명령은 `!` 접두 별칭으로도 부를 수 있고, 등록하지 않는 접두 전용 명령 " + strings.Join(prefixOnly, "·") + "은(는) 이 표에 없습니다.\n\n" + generatedHeader + "\n\n원본: `internal/connectors/discord`의 `ApplicationCommands()` (명령·옵션), `locales/*.json`의 `discord.command.*` (한국어 이름)\n\n")
 	b.WriteString(table(
 		[]string{"명령", "한국어 이름", "종류", "Action", "옵션 (이름, 한국어, 타입, 필수)"},
 		rows))

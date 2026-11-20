@@ -1,6 +1,6 @@
 # Discord 명령 색인
 
-Discord에 등록하는 애플리케이션 명령: 한국어 이름, 호출하는 Action과 옵션.
+Discord에 등록하는 애플리케이션 명령: 한국어 이름, 호출하는 Action과 옵션. 각 명령은 `!` 접두 별칭으로도 부를 수 있고, 등록하지 않는 접두 전용 명령 `fortune-month`·`fortune-year`·`subscribe`은(는) 이 표에 없습니다.
 
 이 파일은 생성됩니다: go run ./tools/codemap (손으로 고치지 마세요)
 
