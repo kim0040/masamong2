@@ -4,6 +4,15 @@
 .vscode/
 .cursor/
 AGENTS.md
+# Local agent and tool state (instructions, scratch, worktrees): never part of the product
+/CLAUDE.md
+/CLAUDE.local.md
+/.claude/
+/.devin/
+/.codex/
+/.orca/
+*.orig
+*.rej
 *.swp
 *~
 
