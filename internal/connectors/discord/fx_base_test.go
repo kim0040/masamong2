@@ -24,8 +24,8 @@ func TestFXCardShowsOneForeignUnitInSelectedCurrency(t *testing.T) {
 		{"ko", "KRW", "", 5, "원", []string{"1달러 ≈ 1,350원", "100엔 ≈ 912.2원", "1위안 ≈ 200원"}},
 		{"ko", "JPY", "jpy", 5, "엔", []string{"1달러 ≈ 148엔", "1유로 ≈ 164.4엔", "1위안 ≈ 21.93엔", "1파운드 ≈ 197.3엔", "1,000원 ≈ 109.6엔"}},
 		{"ko", "JPY", "엔화", 5, "엔", []string{"1달러 ≈ 148엔"}},
-		{"en", "USD", "", 5, "USD", []string{"1,000 JPY ≈ 6.757 USD"}},
-		{"en", "CHF", "CHF", 6, "CHF", []string{"10 USD ≈ 8 CHF"}},
+		{"en", "USD", "", 4, "USD", []string{"1,000 JPY ≈ 6.757 USD"}},
+		{"en", "CHF", "CHF", 5, "CHF", []string{"10 USD ≈ 8 CHF"}},
 	} {
 		t.Run(tc.locale+"_"+tc.base, func(t *testing.T) {
 			opts := map[string]string{}
@@ -61,7 +61,9 @@ func TestFXCurrencyBaseAmountCombinations(t *testing.T) {
 	// the board in each base, one unit of each (the unit that reads naturally)
 	koInJPY := []string{"1달러 ≈ 148엔", "1유로 ≈ 164.4엔", "1위안 ≈ 21.93엔", "1파운드 ≈ 197.3엔", "1,000원 ≈ 109.6엔"}
 	koWonInEach := []string{"10,000원 ≈ 7.407달러", "10,000원 ≈ 1,096엔", "10,000원 ≈ 6.667유로", "10,000원 ≈ 50위안", "10,000원 ≈ 5.556파운드"}
-	enInEUR := []string{"10 USD ≈ 9 EUR", "1,000 JPY ≈ 6.081 EUR", "10 CNY ≈ 1.333 EUR", "1 GBP ≈ 1.2 EUR", "10,000 KRW ≈ 6.667 EUR"}
+	enInEUR := []string{"10 USD ≈ 9 EUR", "1,000 JPY ≈ 6.081 EUR", "10 CNY ≈ 1.333 EUR", "1 GBP ≈ 1.2 EUR"}
+	koYen := []string{"100엔 ≈ 912.2원", "100엔 ≈ 0.6757달러", "100엔 ≈ 0.6081유로", "100엔 ≈ 4.561위안", "100엔 ≈ 0.5068파운드"}
+	enYen := []string{"100 JPY ≈ 0.6757 USD", "100 JPY ≈ 0.6081 EUR", "100 JPY ≈ 4.561 CNY", "100 JPY ≈ 0.5068 GBP"}
 	type way struct {
 		slash  map[string]string // nil: not a slash command
 		prefix string            // "": not a prefix command
@@ -73,15 +75,18 @@ func TestFXCurrencyBaseAmountCombinations(t *testing.T) {
 	}{
 		// nothing: the board in the home currency
 		{"ko none", "ko", way{map[string]string{}, "!환율"}, []string{"1달러 ≈ 1,350원", "100엔 ≈ 912.2원", "1유로 ≈ 1,500원", "1위안 ≈ 200원", "1파운드 ≈ 1,800원"}},
-		{"en none", "en", way{map[string]string{}, "!fx"}, []string{"1,000 JPY ≈ 6.757 USD", "1 EUR ≈ 1.111 USD", "10 CNY ≈ 1.481 USD", "1 GBP ≈ 1.333 USD", "10,000 KRW ≈ 7.407 USD"}},
+		{"en none", "en", way{map[string]string{}, "!fx"}, []string{"1,000 JPY ≈ 6.757 USD", "1 EUR ≈ 1.111 USD", "10 CNY ≈ 1.481 USD", "1 GBP ≈ 1.333 USD"}},
 		// base only: the board valued in it (slash only: a bare word of a message is a currency)
 		{"ko base only", "ko", way{slash: map[string]string{"base": "엔화"}}, koInJPY},
 		{"ko base only by code", "ko", way{slash: map[string]string{"base": "JPY"}}, koInJPY},
 		{"en base only", "en", way{slash: map[string]string{"base": "euro"}}, enInEUR},
 		{"ko base only is the home currency", "ko", way{slash: map[string]string{"base": "원"}}, []string{"1달러 ≈ 1,350원", "100엔 ≈ 912.2원", "1유로 ≈ 1,500원", "1위안 ≈ 200원", "1파운드 ≈ 1,800원"}},
-		// currency only: against the home currency, both directions
-		{"ko currency only", "ko", way{map[string]string{"currency": "엔화"}, "!환율 엔화"}, []string{"100엔 ≈ 912.2원", "1,000원 ≈ 109.6엔"}},
-		{"en currency only", "en", way{map[string]string{"currency": "yen"}, "!fx yen"}, []string{"1,000 JPY ≈ 6.757 USD", "1 USD ≈ 148 JPY"}},
+		// currency only: one unit of it in the home currency first, then in each board currency
+		{"ko currency only", "ko", way{map[string]string{"currency": "엔화"}, "!환율 엔화"}, koYen},
+		{"ko one dollar in each", "ko", way{map[string]string{"currency": "달러"}, "!환율 달러"}, []string{"1달러 ≈ 1,350원", "1달러 ≈ 148엔", "1달러 ≈ 0.9유로", "1달러 ≈ 6.75위안", "1달러 ≈ 0.75파운드"}},
+		{"en currency only", "en", way{map[string]string{"currency": "yen"}, "!fx yen"}, enYen},
+		{"en dollars are home, so a euro is shown in dollars first", "en", way{map[string]string{"currency": "euro"}, "!fx euro"}, []string{"1 EUR ≈ 1.111 USD", "1 EUR ≈ 164.4 JPY", "1 EUR ≈ 7.5 CNY", "1 EUR ≈ 0.8333 GBP"}},
+		{"en won appears only when it is the currency", "en", way{map[string]string{"currency": "won"}, "!fx krw"}, []string{"10 KRW ≈ 0.007407 USD", "10 KRW ≈ 1.096 JPY", "10 KRW ≈ 0.006667 EUR", "10 KRW ≈ 0.05 CNY", "10 KRW ≈ 0.005556 GBP"}},
 		// currency + base: against the base, both directions
 		{"ko currency and base", "ko", way{map[string]string{"currency": "달러", "base": "유로"}, "!환율 달러 유로"}, []string{"10달러 ≈ 9유로", "1유로 ≈ 1.111달러"}},
 		{"ko currency and base, names with a space", "ko", way{map[string]string{"currency": "미국 달러", "base": "유로"}, "!환율 미국 달러 유로"}, []string{"10달러 ≈ 9유로", "1유로 ≈ 1.111달러"}},
@@ -91,20 +96,20 @@ func TestFXCurrencyBaseAmountCombinations(t *testing.T) {
 		{"en currency and base", "en", way{map[string]string{"currency": "usd", "base": "eur"}, "!fx usd eur"}, []string{"10 USD ≈ 9 EUR", "1 EUR ≈ 1.111 USD"}},
 		{"en currency and base by name", "en", way{map[string]string{"currency": "Japanese Yen", "base": "euro"}, "!fx japanese yen euro"}, []string{"1,000 JPY ≈ 6.081 EUR", "1 EUR ≈ 164.4 JPY"}},
 		// amount of the currency, in the base or the home currency
-		{"ko amount of a currency in home", "ko", way{map[string]string{"currency": "엔", "amount": "50000"}, "!환율 50000 엔"}, []string{"50,000엔 ≈ 456,100원"}},
+		{"ko amount of a currency in each", "ko", way{map[string]string{"currency": "엔", "amount": "50000"}, "!환율 50000 엔"}, []string{"50,000엔 ≈ 456,100원", "50,000엔 ≈ 337.8달러", "50,000엔 ≈ 304.1유로", "50,000엔 ≈ 2,280위안", "50,000엔 ≈ 253.4파운드"}},
 		{"ko amount of a currency in a base", "ko", way{map[string]string{"currency": "엔", "base": "달러", "amount": "5000"}, "!환율 엔 달러 5000"}, []string{"5,000엔 ≈ 33.78달러"}},
 		{"ko amount of a currency in a base, number first", "ko", way{map[string]string{"currency": "달러", "base": "유로", "amount": "100"}, "!환율 100 달러 유로"}, []string{"100달러 ≈ 90유로"}},
 		{"en amount of a currency in a base", "en", way{map[string]string{"currency": "gbp", "base": "eur", "amount": "100"}, "!fx 100 gbp eur"}, []string{"100 GBP ≈ 120 EUR"}},
 		// amount with no currency: that much of the base (or home) in each board currency
 		{"ko amount in home", "ko", way{map[string]string{"amount": "10000"}, "!환율 10000"}, koWonInEach},
 		{"ko amount of the base", "ko", way{slash: map[string]string{"base": "엔", "amount": "100"}}, []string{"100엔 ≈ 0.6757달러", "100엔 ≈ 0.6081유로", "100엔 ≈ 4.561위안", "100엔 ≈ 0.5068파운드", "100엔 ≈ 912.2원"}},
-		{"en amount of the base", "en", way{slash: map[string]string{"base": "eur", "amount": "10"}}, []string{"10 EUR ≈ 11.11 USD", "10 EUR ≈ 1,644 JPY", "10 EUR ≈ 75 CNY", "10 EUR ≈ 8.333 GBP", "10 EUR ≈ 15,000 KRW"}},
+		{"en amount of the base", "en", way{slash: map[string]string{"base": "eur", "amount": "10"}}, []string{"10 EUR ≈ 11.11 USD", "10 EUR ≈ 1,644 JPY", "10 EUR ≈ 75 CNY", "10 EUR ≈ 8.333 GBP"}},
 		{"ko amount of the home currency named", "ko", way{map[string]string{"currency": "원", "amount": "10000"}, "!환율 원 10000"}, koWonInEach},
 		// the currency is the base (or the home currency when there is no base): the same as a base alone
 		{"ko currency equals base", "ko", way{map[string]string{"currency": "엔화", "base": "JPY"}, "!환율 엔화 JPY"}, koInJPY},
 		{"ko currency equals home", "ko", way{map[string]string{"currency": "원"}, "!환율 원"}, []string{"1달러 ≈ 1,350원", "100엔 ≈ 912.2원", "1유로 ≈ 1,500원", "1위안 ≈ 200원", "1파운드 ≈ 1,800원"}},
 		{"ko currency equals base, with an amount", "ko", way{map[string]string{"currency": "엔", "base": "엔화", "amount": "100"}, "!환율 100 엔 엔화"}, []string{"100엔 ≈ 0.6757달러", "100엔 ≈ 0.6081유로", "100엔 ≈ 4.561위안", "100엔 ≈ 0.5068파운드", "100엔 ≈ 912.2원"}},
-		{"en currency equals home", "en", way{map[string]string{"currency": "usd"}, "!fx usd"}, []string{"1,000 JPY ≈ 6.757 USD", "1 EUR ≈ 1.111 USD", "10 CNY ≈ 1.481 USD", "1 GBP ≈ 1.333 USD", "10,000 KRW ≈ 7.407 USD"}},
+		{"en currency equals home", "en", way{map[string]string{"currency": "usd"}, "!fx usd"}, []string{"1,000 JPY ≈ 6.757 USD", "1 EUR ≈ 1.111 USD", "10 CNY ≈ 1.481 USD", "1 GBP ≈ 1.333 USD"}},
 	} {
 		check := func(t *testing.T, got []string) {
 			t.Helper()
@@ -187,5 +192,87 @@ func TestFXCommandOptions(t *testing.T) {
 	}
 	if got := localizations("discord.command.fx.option.base.name")[discordgo.Korean]; got != "기준통화" {
 		t.Errorf("ko name of base = %q, want the name the option always had", got)
+	}
+}
+
+// The home currency is the currency of the person's region: the region in the request's locale, else the
+// region Discord reports when it is the same language, else the likely region of the language.
+func TestFXHomeCurrencyFollowsTheRegion(t *testing.T) {
+	for _, tc := range []struct {
+		name, locale, tag string
+		home              string
+		rows              int // the board valued in home: five major currencies, home included, minus home
+	}{
+		{"ko", "ko", "", "KRW", 5},
+		{"ko-KR", "ko-KR", "", "KRW", 5},
+		{"ja", "ja", "", "JPY", 4},
+		{"en-US", "en-US", "", "USD", 4},
+		{"en-GB", "en-GB", "", "GBP", 4},
+		{"es-ES", "es-ES", "", "EUR", 4},
+		{"es-419 is not a country", "es-419", "", "USD", 4},
+		{"zh-CN", "zh-CN", "", "CNY", 4},
+		{"pt-BR", "pt-BR", "", "BRL", 5},
+		{"a bare language takes its likely region", "es", "", "EUR", 4},
+		// a saved language without a region takes Discord's region when it is the same language
+		{"saved en, Discord en-GB", "en", "en-GB", "GBP", 4},
+		{"saved ko, Discord ko", "ko", "ko", "KRW", 5},
+		{"saved es, Discord es-419", "es", "es-419", "USD", 4},
+		// ... and not when it is another language
+		{"saved ko, Discord en-GB", "ko", "en-GB", "KRW", 5},
+		{"saved es, Discord ko", "es", "ko", "EUR", 4},
+		// a region the locale names itself wins over Discord's
+		{"en-US, Discord en-GB", "en-US", "en-GB", "USD", 4},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			embed, out := fxRun(t, InvokeContext{Locale: tc.locale, Tag: tc.tag, UserID: "tester"}, nil)
+			if out["base"] != tc.home {
+				t.Errorf("home = %v, want %s (%s)", out["base"], tc.home, embed.Description)
+			}
+			if lines := strings.Split(embed.Description, "\n"); len(lines) != tc.rows {
+				t.Errorf("%d lines, want %d: %v", len(lines), tc.rows, lines)
+			}
+			if tc.home != "KRW" && strings.Contains(embed.Description, "KRW") && tc.locale != "ko" {
+				t.Errorf("won on a card of a home that is not Korean: %v", embed.Description)
+			}
+		})
+	}
+}
+
+// The Discord locale reaches the action as an input of the command, only when there is one.
+func TestFXBuildCarriesTheDiscordLocaleTag(t *testing.T) {
+	cmd, _ := ByName("fx")
+	_, in := cmd.Build(nil, InvokeContext{Locale: "en", Tag: "en-GB"})
+	if in["locale_tag"] != "en-GB" {
+		t.Errorf("input = %v", in)
+	}
+	if _, in = cmd.Build(nil, InvokeContext{Locale: "en"}); in["locale_tag"] != nil {
+		t.Errorf("a tag was sent without one: %v", in)
+	}
+}
+
+// A message has no locale of its own: the server's preferred one stands in.
+func TestFXPrefixReadsTheServersPreferredLocale(t *testing.T) {
+	d := newFXDelivery(t, nil)
+	if err := d.g.sess.State.GuildAdd(&discordgo.Guild{ID: "g", PreferredLocale: "en-GB"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := guildTag(d.g.sess, "g"); got != "en-GB" {
+		t.Fatalf("guildTag = %q", got)
+	}
+	if guildTag(d.g.sess, "") != "" || guildTag(d.g.sess, "other") != "" {
+		t.Error("a tag for a server that is not known")
+	}
+}
+
+// With no region anywhere, a command in English is valued in dollars and one in Korean in won; the won
+// is no part of an English board.
+func TestFXEnglishBoardHasNoWonUnlessAsked(t *testing.T) {
+	embed := fxEmbed(t, "en", nil, false)
+	if strings.Contains(embed.Description, "KRW") {
+		t.Errorf("won on an English board: %v", embed.Description)
+	}
+	embed = fxEmbed(t, "en", map[string]string{"base": "KRW"}, false)
+	if !strings.Contains(embed.Description, "USD ≈") || !strings.Contains(embed.Title, "KRW") {
+		t.Errorf("base won: %v / %s", embed.Description, embed.Title)
 	}
 }

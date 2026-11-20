@@ -115,9 +115,16 @@ func fxCardOf(t *testing.T, locale string, opts map[string]string, typed bool) [
 
 func fxEmbed(t *testing.T, locale string, opts map[string]string, typed bool) *discordgo.MessageEmbed {
 	t.Helper()
+	embed, _ := fxRun(t, InvokeContext{Locale: locale, UserID: "tester", Typed: typed}, opts)
+	return embed
+}
+
+// fxRun runs the command for ictx and returns the card with the action's raw output.
+func fxRun(t *testing.T, ictx InvokeContext, opts map[string]string) (*discordgo.MessageEmbed, map[string]any) {
+	t.Helper()
 	svc := svcForTest(t)
 	g := &Gateway{svc: svc}
-	unitsPerDollar := map[string]float64{"USD": 1, "KRW": 1350, "JPY": 148, "CNY": 6.75, "EUR": 0.9, "GBP": 0.75, "CHF": 0.8}
+	unitsPerDollar := map[string]float64{"USD": 1, "KRW": 1350, "JPY": 148, "CNY": 6.75, "EUR": 0.9, "GBP": 0.75, "CHF": 0.8, "BRL": 5.4}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		base := strings.TrimPrefix(r.URL.Path, "/latest/")
 		rates := make(map[string]float64)
@@ -133,16 +140,15 @@ func fxEmbed(t *testing.T, locale string, opts map[string]string, typed bool) *d
 	adapter.OpenBase, adapter.KeyedBase = server.URL, server.URL
 
 	cmd, _ := ByName("fx")
-	ictx := InvokeContext{Locale: locale, UserID: "tester", Typed: typed}
 	res := g.svc.Execute(context.Background(), requestFor(cmd, opts, ictx, ""))
 	if !res.OK {
-		t.Fatalf("%s %v: %+v", locale, opts, res.Error)
+		t.Fatalf("%s %v: %+v", ictx.Locale, opts, res.Error)
 	}
 	embed := g.renderInvoked(res, cmd, ictx).Embed
 	if len(embed.Fields) != 1 || embed.Footer == nil {
 		t.Error("missing update time or source")
 	}
-	return embed
+	return embed, res.Output
 }
 
 func TestFXCardsStateRatesInReadableUnits(t *testing.T) {
@@ -153,15 +159,16 @@ func TestFXCardsStateRatesInReadableUnits(t *testing.T) {
 	}{
 		{"ko board in won", "ko", nil, []string{"1달러 ≈ 1,350원", "100엔 ≈ 912.2원", "1유로 ≈ 1,500원", "1위안 ≈ 200원", "1파운드 ≈ 1,800원"}},
 		{"ko the home currency is the board", "ko", map[string]string{"currency": "원"}, []string{"1달러 ≈ 1,350원", "100엔 ≈ 912.2원", "1유로 ≈ 1,500원", "1위안 ≈ 200원", "1파운드 ≈ 1,800원"}},
-		{"ko one currency, both directions", "ko", map[string]string{"currency": "엔화"}, []string{"100엔 ≈ 912.2원", "1,000원 ≈ 109.6엔"}},
-		{"ko by code", "ko", map[string]string{"currency": "jpy"}, []string{"100엔 ≈ 912.2원", "1,000원 ≈ 109.6엔"}},
-		{"ko dollar", "ko", map[string]string{"currency": "달러"}, []string{"1달러 ≈ 1,350원", "10,000원 ≈ 7.407달러"}},
-		{"ko an amount of a currency in won", "ko", map[string]string{"currency": "엔", "amount": "50000"}, []string{"50,000엔 ≈ 456,100원"}},
+		{"ko one currency against the home currency first, then the board", "ko", map[string]string{"currency": "엔화"}, []string{"100엔 ≈ 912.2원", "100엔 ≈ 0.6757달러", "100엔 ≈ 0.6081유로", "100엔 ≈ 4.561위안", "100엔 ≈ 0.5068파운드"}},
+		{"ko by code", "ko", map[string]string{"currency": "jpy"}, []string{"100엔 ≈ 912.2원", "100엔 ≈ 0.6757달러", "100엔 ≈ 0.6081유로", "100엔 ≈ 4.561위안", "100엔 ≈ 0.5068파운드"}},
+		{"ko dollar, one dollar in each", "ko", map[string]string{"currency": "달러"}, []string{"1달러 ≈ 1,350원", "1달러 ≈ 148엔", "1달러 ≈ 0.9유로", "1달러 ≈ 6.75위안", "1달러 ≈ 0.75파운드"}},
+		{"ko an amount of a currency in each", "ko", map[string]string{"currency": "엔", "amount": "50000"}, []string{"50,000엔 ≈ 456,100원", "50,000엔 ≈ 337.8달러", "50,000엔 ≈ 304.1유로", "50,000엔 ≈ 2,280위안", "50,000엔 ≈ 253.4파운드"}},
 		{"ko an amount of won in every board currency", "ko", map[string]string{"amount": "10000"}, []string{"10,000원 ≈ 7.407달러", "10,000원 ≈ 1,096엔", "10,000원 ≈ 6.667유로", "10,000원 ≈ 50위안", "10,000원 ≈ 5.556파운드"}},
 		{"ko the home currency with an amount", "ko", map[string]string{"currency": "원", "amount": "10000"}, []string{"10,000원 ≈ 7.407달러", "10,000원 ≈ 1,096엔", "10,000원 ≈ 6.667유로", "10,000원 ≈ 50위안", "10,000원 ≈ 5.556파운드"}},
-		{"en board in dollars, krw included", "en", nil, []string{"1,000 JPY ≈ 6.757 USD", "1 EUR ≈ 1.111 USD", "10 CNY ≈ 1.481 USD", "1 GBP ≈ 1.333 USD", "10,000 KRW ≈ 7.407 USD"}},
-		{"en by name", "en", map[string]string{"currency": "Japanese Yen"}, []string{"1,000 JPY ≈ 6.757 USD", "1 USD ≈ 148 JPY"}},
-		{"ja reads names in other languages", "ja", map[string]string{"currency": "엔화", "amount": "100"}, []string{"100円 ≈ 0.6757ドル"}},
+		{"en board in dollars, no won", "en", nil, []string{"1,000 JPY ≈ 6.757 USD", "1 EUR ≈ 1.111 USD", "10 CNY ≈ 1.481 USD", "1 GBP ≈ 1.333 USD"}},
+		{"en by name", "en", map[string]string{"currency": "Japanese Yen"}, []string{"100 JPY ≈ 0.6757 USD", "100 JPY ≈ 0.6081 EUR", "100 JPY ≈ 4.561 CNY", "100 JPY ≈ 0.5068 GBP"}},
+		{"en won is shown only when asked for", "en", map[string]string{"currency": "krw"}, []string{"10 KRW ≈ 0.007407 USD", "10 KRW ≈ 1.096 JPY", "10 KRW ≈ 0.006667 EUR", "10 KRW ≈ 0.05 CNY", "10 KRW ≈ 0.005556 GBP"}},
+		{"ja reads names in other languages; yen is home", "ja", map[string]string{"currency": "엔화", "amount": "100"}, []string{"100円 ≈ 0.6757ドル", "100円 ≈ 0.6081ユーロ", "100円 ≈ 4.561人民元", "100円 ≈ 0.5068ポンド"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := fxCard(t, tc.locale, tc.opts)
@@ -201,7 +208,7 @@ func TestFXMissingRateIsAnInputError(t *testing.T) {
 	adapter := svc.Registry().FX
 	adapter.OpenBase, adapter.KeyedBase = server.URL, server.URL
 	cmd, _ := ByName("fx")
-	res := svc.Execute(context.Background(), requestFor(cmd, map[string]string{"currency": "BTN"}, InvokeContext{Locale: "ko", UserID: "tester"}, ""))
+	res := svc.Execute(context.Background(), requestFor(cmd, map[string]string{"currency": "BTN", "base": "KRW"}, InvokeContext{Locale: "ko", UserID: "tester"}, ""))
 	if !application.IsFXInputError(res) || res.Error.MessageKey != "fx.unsupported_currency" {
 		t.Fatalf("got %+v", res)
 	}

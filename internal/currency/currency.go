@@ -5,13 +5,14 @@
 //
 //	fx.currency.<CODE>  the names of one currency, comma separated; the first is the display name
 //	fx.unit.<CODE>      the smallest unit a locale quotes the currency in (ko: 100 for JPY)
-//	fx.home             the currency a locale's members think in (ko: KRW)
+//	(the home currency is not catalog data: it is the currency of the region the locale tag names, Home)
 //	fx.amount.named     how a number and a display name read together
 //	fx.amount.coded     the same for a currency without a name in that locale
 package currency
 
 import (
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -36,8 +37,17 @@ const (
 	significant = 4
 )
 
-// Board is the currencies the bare command compares with the home currency.
-var Board = []string{"USD", "JPY", "EUR", "CNY", "GBP", "KRW"}
+// Board is the major currencies every comparison offers; the home currency joins them when it is not one.
+var Board = []string{"USD", "JPY", "EUR", "CNY", "GBP"}
+
+// BoardFor is the currencies a card compares: the major ones, then home when it is not among them.
+func BoardFor(home string) []string {
+	out := slices.Clone(Board)
+	if !slices.Contains(out, home) {
+		out = append(out, home)
+	}
+	return out
+}
 
 // Lexicon is the currency data of a message catalog.
 type Lexicon struct{ cat *i18n.Catalog }
@@ -116,10 +126,13 @@ func (l *Lexicon) Name(locale, code string) string {
 	return ""
 }
 
-// Home is the currency a locale's members think in: the one its catalog names, else USD.
+// Home is the currency of the region a locale tag names: its explicit region (ko-KR, en-GB, pt-BR), else
+// the likely region of its language (ko: KR, ja: JP, es: ES). A region that is not a country (es-419), or
+// one with no single currency, gives USD.
 func (l *Lexicon) Home(locale string) string {
-	if v, ok := l.cat.Lookup(locale, "fx.home"); ok && ValidCode(v) {
-		return strings.ToUpper(strings.TrimSpace(v))
+	region, _ := language.Make(strings.ReplaceAll(strings.TrimSpace(locale), "_", "-")).Region()
+	if unit, ok := xcur.FromRegion(region); ok && ValidCode(unit.String()) {
+		return unit.String()
 	}
 	return "USD"
 }
@@ -141,6 +154,23 @@ type Quote struct {
 	To    string  `json:"to"`
 	Value float64 `json:"value"`
 	Text  string  `json:"text"`
+}
+
+// SharedUnit is the one unit of from that states every rate (units of a currency per one of from) in a
+// list: the locale's convention for from, made ten times larger while even the largest value would still
+// be under 1 ("1 USD ≈ 0.92 EUR / 150 JPY" keeps 1, 1 KRW becomes 10 or 1,000 when its yen are few).
+func (l *Lexicon) SharedUnit(locale, from string, rates []float64) float64 {
+	best := 0.0
+	for _, r := range rates {
+		if r > best && !math.IsInf(r, 0) {
+			best = r
+		}
+	}
+	unit := l.convention(locale, from)
+	for best > 0 && unit*best < 1-1e-12 && unit < maxUnit {
+		unit *= 10
+	}
+	return unit
 }
 
 // Quote states what unit of from is worth in to, given rate (units of to per one of from). With amount

@@ -360,7 +360,7 @@ func TestFXInvalidAmountMessageStatesTheCap(t *testing.T) {
 	}
 }
 
-// One language for the whole request: a saved language preference decides the home currency, the way the
+// One language for the whole request: a saved language preference decides the home currency (its likely region), the way the
 // quotes are written and the card's own words, whatever language Discord reported for the interaction.
 func TestFXOneLocalePerRequest(t *testing.T) {
 	setLocale := func(d *fxDelivery) {
@@ -379,15 +379,15 @@ func TestFXOneLocalePerRequest(t *testing.T) {
 			t.Fatalf("malformed answer: %v %s", err, body)
 		}
 		got := payload.Embeds[0]
-		// Spanish: home USD, codes, decimal comma, Spanish title; nothing Korean
-		if !strings.Contains(got.Title, "Tipos de cambio · USD") || !strings.Contains(got.Description, "1 JPY ≈ ") || !strings.Contains(got.Description, ",") {
+		// Spanish: the home currency of Spain first (euro), codes, decimal comma, Spanish title; nothing Korean
+		if !strings.Contains(got.Title, "Tipos de cambio · JPY") || !strings.HasPrefix(got.Description, "1.000 JPY ≈ ") || !strings.Contains(strings.Split(got.Description, "\n")[0], " EUR") || !strings.Contains(got.Description, ",") {
 			t.Errorf("card is not entirely Spanish: %+v", got)
 		}
 		if strings.Contains(got.Title, "환율") || strings.Contains(got.Description, "원") || strings.Contains(got.Description, "엔") {
 			t.Errorf("a Korean piece in a Spanish card: %+v", got)
 		}
-		if d.paths[0] != "/latest/USD" {
-			t.Errorf("rates asked for %v: the home currency should be the Spanish one (USD)", d.paths)
+		if d.paths[0] != "/latest/JPY" || strings.Contains(got.Description, "KRW") {
+			t.Errorf("rates asked for %v: the currency asked about, and no Korean home currency", d.paths)
 		}
 	}
 	t.Run("slash", func(t *testing.T) {

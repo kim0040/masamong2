@@ -3,6 +3,7 @@ package currency
 import (
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 
 	"masamong/internal/i18n"
@@ -60,7 +61,7 @@ func TestNamesBelongToOneCurrency(t *testing.T) {
 		}
 	}
 	for _, loc := range []string{"ko", "ja", "zh-Hans"} {
-		for _, code := range Board {
+		for _, code := range BoardFor(New(cat).Home(loc)) {
 			if New(cat).Name(loc, code) == "" {
 				t.Errorf("%s has no display name for board currency %s", loc, code)
 			}
@@ -68,11 +69,52 @@ func TestNamesBelongToOneCurrency(t *testing.T) {
 	}
 }
 
+// The home currency is the currency of the region the tag names: its own region when it has one, else the
+// likely region of its language; no catalog entry says it.
 func TestHome(t *testing.T) {
 	l := New(i18n.New())
-	for locale, want := range map[string]string{"ko": "KRW", "ko-KR": "KRW", "en": "USD", "en-US": "USD", "ja": "USD", "fr": "USD", "": "USD"} {
+	for locale, want := range map[string]string{
+		"ko": "KRW", "ko-KR": "KRW", "ko_KR": "KRW", "ja": "JPY", "ja-JP": "JPY",
+		"en": "USD", "en-US": "USD", "en-GB": "GBP", "es": "EUR", "es-ES": "EUR", "es-419": "USD", "es-MX": "MXN",
+		"zh-Hans": "CNY", "zh-CN": "CNY", "pt-BR": "BRL", "fr": "EUR", "de-CH": "CHF",
+		"": "USD", "xx": "USD", "en-001": "USD",
+	} {
 		if got := l.Home(locale); got != want {
 			t.Errorf("Home(%q) = %s, want %s", locale, got, want)
+		}
+	}
+}
+
+func TestBoardFor(t *testing.T) {
+	for home, want := range map[string]string{
+		"KRW": "USD JPY EUR CNY GBP KRW", "USD": "USD JPY EUR CNY GBP", "JPY": "USD JPY EUR CNY GBP", "BRL": "USD JPY EUR CNY GBP BRL",
+	} {
+		if got := strings.Join(BoardFor(home), " "); got != want {
+			t.Errorf("BoardFor(%s) = %s, want %s", home, got, want)
+		}
+	}
+	if len(Board) != 5 {
+		t.Errorf("the major currencies were changed by BoardFor: %v", Board)
+	}
+}
+
+// One currency against several is stated in one unit: the locale's, made larger only while even the
+// largest value would stay under 1.
+func TestSharedUnit(t *testing.T) {
+	l := New(i18n.New())
+	for _, tc := range []struct {
+		name, locale, from string
+		rates              []float64
+		want               float64
+	}{
+		{"a dollar in won and euros", "ko", "USD", []float64{1400, 0.92}, 1},
+		{"every rate under 1", "en", "KRW", []float64{0.00074, 0.11}, 10},
+		{"won in dollars only", "en", "KRW", []float64{0.00074}, 10000},
+		{"the locale's unit for yen", "ko", "JPY", []float64{9.3, 0.0067}, 100},
+		{"no rates", "en", "USD", nil, 1},
+	} {
+		if got := l.SharedUnit(tc.locale, tc.from, tc.rates); got != tc.want {
+			t.Errorf("%s: unit %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }

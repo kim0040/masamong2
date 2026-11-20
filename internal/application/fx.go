@@ -4,8 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"time"
+
+	"golang.org/x/text/language"
 
 	"masamong/internal/action"
 	"masamong/internal/currency"
@@ -46,6 +49,7 @@ type fxPlan struct {
 	symbols []string // the rates reported
 	pairs   []fxPair // the quotes stated
 	strict  string   // a currency that must have a rate (the one the person named), else ""
+	shared  bool     // the pairs without an amount share one unit of the same "from" (one currency against several)
 }
 
 // fxText is a text field of the input: absent is ok=false, present may be blank.
@@ -160,7 +164,7 @@ func (s *Service) financeFX(ctx context.Context, req action.Request, in map[stri
 	if !rates.NextUpdate.IsZero() {
 		out["next_update_at"] = rates.NextUpdate.Format(time.RFC3339)
 	}
-	quotes := fxQuotes(lex, req.Locale, rates, plan.pairs)
+	quotes := fxQuotes(lex, req.Locale, rates, plan.pairs, plan.shared)
 	out["quotes"] = quotes
 	if len(quotes) > 0 {
 		// the model that words the answer sees this result, not the tool's description
@@ -214,22 +218,49 @@ func (s *Service) fxRawPlan(lex *currency.Lexicon, in map[string]any, amount flo
 	return plan, true
 }
 
-// fxHomePlan is a request from a command: the person's home currency, and optionally a currency, a base
-// and an amount. The rates are fetched for the base (the home currency when none is named), so one call
-// serves both directions.
+// fxHomeTag is the locale tag the home currency is read from. The request's locale (the person's saved
+// language, else the Discord locale) says it when it names a region ("en-GB"); one that only names a
+// language ("en", a saved preference) takes the region of Discord's own tag when that is the same language
+// (en-GB), else the likely region of the language.
+func fxHomeTag(locale string, in map[string]any) string {
+	tag, _ := fxText(in, "locale_tag")
+	if strings.TrimSpace(tag) == "" {
+		return locale
+	}
+	have, discord := language.Make(locale), language.Make(tag)
+	if _, conf := have.Region(); conf == language.Exact {
+		return locale
+	}
+	haveBase, _ := have.Base()
+	discordBase, _ := discord.Base()
+	if haveBase == discordBase {
+		return tag
+	}
+	return locale
+}
+
+// fxHomePlan is a request from a command: the person's home currency (the currency of their region), and
+// optionally a currency, a base and an amount.
 //
-//	no currency (or the base itself)  the board: every board currency in the base (the home one when no
-//	                                  base is named); with an amount, that much base in each of them
-//	another currency                  that currency against the base, both directions; with an amount,
-//	                                  that much of it in the base
+//	nothing (or the home currency)    the board valued in home: every board currency, one unit of each in
+//	                                  home; with an amount, that much home in each
+//	base                              the same, valued in the base
+//	currency                          one unit of it in home first, then each board currency; with an
+//	                                  amount, that much of it in each
+//	currency and base                 the two against each other, both directions; with an amount, that
+//	                                  much of the currency in the base
+//
+// The currency being shown is never listed against itself, and a currency that is the base (or the home
+// currency when there is no base) is the same as none. The rates are fetched for the one currency the
+// others are stated against, so one call serves a card.
 func (s *Service) fxHomePlan(lex *currency.Lexicon, locale string, in map[string]any, amount float64) (fxPlan, bool) {
-	home := lex.Home(locale)
+	home := lex.Home(fxHomeTag(locale, in))
 	if text, _ := fxText(in, "home"); text != "" {
 		if code, ok := lex.Resolve(text); ok {
 			home = code
 		}
 	}
-	base := home
+	base, other := "", ""
 	if text, given := fxText(in, "base"); given {
 		code, ok := lex.Resolve(text)
 		if !ok {
@@ -237,41 +268,60 @@ func (s *Service) fxHomePlan(lex *currency.Lexicon, locale string, in map[string
 		}
 		base = code
 	}
-	plan := fxPlan{base: base}
-	other := ""
 	if text, given := fxText(in, "currency"); given {
 		code, ok := lex.Resolve(text)
 		if !ok {
-			return plan, false
+			return fxPlan{}, false
 		}
 		other = code
 	}
-	if other == "" || other == base {
-		for _, c := range currency.Board {
-			if c != base {
+	board := currency.BoardFor(home)
+	if other != "" && base != "" && other != base {
+		// the pair, both directions
+		plan := fxPlan{base: base, symbols: []string{other}, strict: other}
+		if amount > 0 {
+			plan.pairs = []fxPair{{from: other, to: base, amount: amount}}
+		} else {
+			plan.pairs = []fxPair{{from: other, to: base}, {from: base, to: other}}
+		}
+		return plan, true
+	}
+	if base == "" && other != "" && other != home {
+		// one currency against the home currency and the others, the home currency first
+		plan := fxPlan{base: other, strict: other, shared: true}
+		for _, c := range append([]string{home}, board...) {
+			if c != other && !slices.Contains(plan.symbols, c) {
 				plan.symbols = append(plan.symbols, c)
 			}
 		}
 		for _, c := range plan.symbols {
-			if amount > 0 {
-				plan.pairs = append(plan.pairs, fxPair{from: base, to: c, amount: amount})
-			} else {
-				plan.pairs = append(plan.pairs, fxPair{from: c, to: base})
-			}
+			plan.pairs = append(plan.pairs, fxPair{from: other, to: c, amount: amount})
 		}
 		return plan, true
 	}
-	plan.symbols, plan.strict = []string{other}, other
-	if amount > 0 {
-		plan.pairs = []fxPair{{from: other, to: base, amount: amount}}
-	} else {
-		plan.pairs = []fxPair{{from: other, to: base}, {from: base, to: other}}
+	// the board valued in the base, else in home
+	valued := home
+	if base != "" {
+		valued = base
+	}
+	plan := fxPlan{base: valued}
+	for _, c := range board {
+		if c != valued {
+			plan.symbols = append(plan.symbols, c)
+		}
+	}
+	for _, c := range plan.symbols {
+		if amount > 0 {
+			plan.pairs = append(plan.pairs, fxPair{from: valued, to: c, amount: amount})
+		} else {
+			plan.pairs = append(plan.pairs, fxPair{from: c, to: valued})
+		}
 	}
 	return plan, true
 }
 
 // fxQuotes states each pair from the fetched rates (units of a currency per one of the base).
-func fxQuotes(lex *currency.Lexicon, locale string, rates fx.Rates, pairs []fxPair) []map[string]any {
+func fxQuotes(lex *currency.Lexicon, locale string, rates fx.Rates, pairs []fxPair, shared bool) []map[string]any {
 	per := func(code string) (float64, bool) {
 		if code == rates.Base {
 			return 1, true
@@ -280,13 +330,29 @@ func fxQuotes(lex *currency.Lexicon, locale string, rates fx.Rates, pairs []fxPa
 		return v, ok && v > 0
 	}
 	out := []map[string]any{}
+	unit := 0.0 // shared: one unit of the one currency for every line, the largest value at least 1
+	if shared && len(pairs) > 0 && pairs[0].amount == 0 {
+		var all []float64
+		for _, p := range pairs {
+			if from, ok1 := per(p.from); ok1 {
+				if to, ok2 := per(p.to); ok2 {
+					all = append(all, to/from)
+				}
+			}
+		}
+		unit = lex.SharedUnit(locale, pairs[0].from, all)
+	}
 	for _, p := range pairs {
 		from, ok1 := per(p.from)
 		to, ok2 := per(p.to)
 		if !ok1 || !ok2 {
 			continue
 		}
-		if q, ok := lex.Quote(locale, p.from, p.to, to/from, p.amount); ok {
+		amount := p.amount
+		if unit > 0 {
+			amount = unit
+		}
+		if q, ok := lex.Quote(locale, p.from, p.to, to/from, amount); ok {
 			out = append(out, map[string]any{"from": q.From, "unit": q.Unit, "to": q.To, "value": q.Value, "text": q.Text})
 		}
 	}

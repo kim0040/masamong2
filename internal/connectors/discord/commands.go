@@ -81,6 +81,10 @@ type InvokeContext struct {
 	Private   bool // only the invoker sees the answer (a DM, or an ephemeral slash reply)
 	UserName  string
 	Typed     bool // the options are words of a message (a prefix command), not values Discord already typed
+	// Tag is the locale Discord reports (en-GB, es-419): the interaction's, or for a message the server's
+	// preferred one. It keeps the region that Locale (the language the answer is written in, possibly a saved
+	// preference) may have lost. Only the fx home currency reads it.
+	Tag string
 }
 
 func option(t discordgo.ApplicationCommandOptionType, name, desc string, required bool) *discordgo.ApplicationCommandOption {
@@ -168,14 +172,17 @@ func Commands() []Command {
 		{
 			Name: "fx", Desc: "Exchange rates", Action: "finance.fx",
 			Options: []*discordgo.ApplicationCommandOption{
-				option(str, "currency", "Currency code or name, e.g. USD or dollar", false),
-				option(str, "base", "Currency to show values in, e.g. USD or JPY (default: your home currency)", false),
+				option(str, "currency", "Currency code or name (USD, yen): its value in your currency and the main ones", false),
+				option(str, "base", "Currency to show values in, e.g. USD or JPY (default: your region's currency)", false),
 				option(discordgo.ApplicationCommandOptionNumber, "amount", "Amount to convert", false),
 			},
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
 				// what was typed goes to the action as it is: a given option, even a blank one, is checked there.
 				// The blank home is the home currency of the request's language, which the action knows.
 				in := map[string]any{"home": ""}
+				if c.Tag != "" {
+					in["locale_tag"] = c.Tag
+				}
 				if v, given := o["currency"]; given {
 					in["currency"] = v
 				}

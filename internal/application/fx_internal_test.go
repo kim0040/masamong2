@@ -193,20 +193,33 @@ func TestFXAmountAndNames(t *testing.T) {
 	}
 }
 
-// The command's request (home currency, what was typed): both directions, one provider call.
+// The command's request (home currency, what was typed): one provider call serves a card.
 func TestFXHomeRequest(t *testing.T) {
 	s := fixg1Svc(t, []string{"serper"}, nil, nil)
 	calls := fxRates(t, s)
 	res := s.Execute(context.Background(), action.Request{Action: "finance.fx", Locale: "ko", Input: []byte(`{"home":"KRW","currency":"엔화"}`)})
-	if !res.OK || res.Output["base"] != "KRW" || calls.Load() != 1 {
+	if !res.OK || res.Output["base"] != "JPY" || calls.Load() != 1 {
 		t.Fatalf("%+v calls=%d", res, calls.Load())
 	}
+	// one currency: its unit in the home currency first, then in each board currency, without itself
 	q := quotesOf(t, res.Output)
-	if len(q) != 2 || q[0]["text"] != "100엔 ≈ 933.3원" || q[1]["text"] != "1,000원 ≈ 107.1엔" {
+	if len(q) != 5 || q[0]["text"] != "100엔 ≈ 933.3원" || q[1]["text"] != "100엔 ≈ 0.6667달러" || q[4]["text"] != "100엔 ≈ 0.5333파운드" {
 		t.Fatalf("quotes %v", q)
 	}
-	if rates := res.Output["rates"].(map[string]any); len(rates) != 1 || rates["JPY"] == nil {
+	if rates := res.Output["rates"].(map[string]any); len(rates) != 5 || rates["JPY"] != nil || rates["KRW"] == nil {
 		t.Errorf("rates = %v", rates)
+	}
+	// a currency and a base: the pair, both directions, rates fetched for the base
+	res = s.Execute(context.Background(), action.Request{Action: "finance.fx", Locale: "ko", Input: []byte(`{"home":"KRW","currency":"엔화","base":"원"}`)})
+	q = quotesOf(t, res.Output)
+	if !res.OK || res.Output["base"] != "KRW" || len(q) != 2 || q[0]["text"] != "100엔 ≈ 933.3원" || q[1]["text"] != "1,000원 ≈ 107.1엔" {
+		t.Fatalf("pair: %+v", res)
+	}
+	// the region of the locale decides the home currency: Japan's is the yen, and a currency that is home
+	// is the board valued in it
+	res = s.Execute(context.Background(), action.Request{Action: "finance.fx", Locale: "ja", Input: []byte(`{"home":"","currency":"JPY"}`)})
+	if !res.OK || res.Output["base"] != "JPY" || len(quotesOf(t, res.Output)) != 4 {
+		t.Fatalf("ja: %+v", res)
 	}
 	for _, bad := range []string{`{"home":"KRW","currency":""}`, `{"home":"KRW","currency":"   "}`, `{"home":"KRW","currency":"U$D"}`, `{"home":"KRW","amount":"x"}`} {
 		before := calls.Load()
