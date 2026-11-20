@@ -11,6 +11,7 @@ import (
 
 	"masamong/internal/chat"
 	"masamong/internal/features/privacy"
+	"masamong/internal/lang"
 	"masamong/internal/memory/corpus"
 	"masamong/internal/memory/search"
 	"masamong/internal/storage"
@@ -174,7 +175,9 @@ func (s *Service) targetPeople(db *storage.Store, in ChatInput, planner []string
 			break
 		}
 	}
-	matches := search.NameMatcher(s.memorySearch())
+	// A Korean display name can be inflected even when the index language is English.
+	doc := s.Doc()
+	matches := search.NameMatcher(lang.MergeSearch(append(slices.Clone(doc.Memory.Languages), "ko"), doc.BotNames()))
 	for _, name := range planner {
 		for _, ref := range names.match(name, matches) {
 			add(ref)

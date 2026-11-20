@@ -12,7 +12,6 @@ import (
 
 	"masamong/internal/chat"
 	"masamong/internal/conversation"
-	"masamong/internal/features/privacy"
 	"masamong/internal/lang"
 	"masamong/internal/memory/corpus"
 	"masamong/internal/memory/episodes"
@@ -525,102 +524,24 @@ func (s *Service) cardIn(db *storage.Store, guild, ref string, labelOf func(stri
 
 var mentionPattern = regexp.MustCompile(`<@!?(\d+)>`)
 
-// turnCards are the caller's card and those of up to two other people of the caller's conversation (its
-// speakers and the people the message mentions), when memory.cards is on.
-func (s *Service) turnCards(db *storage.Store, in ChatInput, recent []corpus.Message, sources []string) []chat.RoomCard {
-	if in.GuildID == "" || !s.MemoryAllowed(in.SpeakerID) {
-		return nil
-	}
-	var check int
-	if db.Reader().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='person_card_item'`).Scan(&check) != nil || check == 0 {
-		return nil
-	}
-	room := roomOf(in.GuildID, in.ChannelID)
-	labels := s.refLabels(db, room)
-	caller := personRef(in.SpeakerID)
-	strict := s.guildPrivacy(in.GuildID)
-	var rooms []string // card_channel_only: the items from this channel and its threads
-	if strict.CardChannelOnly {
-		rooms = []string{}
-		for _, r := range s.channelRooms(in.GuildID, in.ChannelID) {
-			if !strings.HasPrefix(r, "kakao:") {
-				rooms = append(rooms, r)
-			}
-		}
-	}
-	labelOf := func(ref string) string {
-		if ref == caller && in.Speaker != "" {
-			return in.Speaker
-		}
-		return labels(ref)
+// turnCards reads only the people this request is about, never bystanders.
+func (s *Service) turnCards(db *storage.Store, in ChatInput, people []turnPerson) []chat.RoomCard {
+	var rooms []string
+	if s.guildPrivacy(in.GuildID).CardChannelOnly {
+		rooms = append([]string{}, s.channelRooms(in.GuildID, in.ChannelID)...)
 	}
 	var out []chat.RoomCard
-	if !s.ConsentAllows(in.SpeakerID, privacy.Profile) {
-		// "don't analyze me": no card of theirs (withdrawing deleted it; this covers the time in between)
-	} else if facts := s.cardIn(db, in.GuildID, caller, labelOf, rooms); len(facts) > 0 {
-		name := in.Speaker
-		if name == "" {
-			name = labels(caller)
-		}
-		out = append(out, chat.RoomCard{Name: name, Facts: facts, Caller: true})
-	}
-	// other people of the conversation, newest first
-	type person struct{ account, label string }
-	var people []person
-	seen := map[string]bool{in.SpeakerID: true, "": true}
-	for _, m := range mentionPattern.FindAllStringSubmatch(in.Message, -1) {
-		if !seen[m[1]] {
-			seen[m[1]] = true
-			people = append(people, person{account: m[1]})
-		}
-	}
-	for i := len(recent) - 1; i >= 0; i-- {
-		if a := recent[i].ActorAccount; !seen[a] {
-			seen[a] = true
-			people = append(people, person{account: a, label: recent[i].ActorLabel})
-		}
-	}
-	if len(sources) > 0 {
-		raw, _ := json.Marshal(sources)
-		rows, err := db.Reader().Query(`SELECT actor_account, actor_label FROM memory_observations WHERE observation_id IN (SELECT value FROM json_each(?))
-			AND actor_account<>'' AND record_kind=? ORDER BY parsed_time DESC LIMIT 40`, string(raw), corpus.HumanText)
-		if err == nil {
-			for rows.Next() {
-				var a, l string
-				if rows.Scan(&a, &l) == nil && !seen[a] {
-					seen[a] = true
-					people = append(people, person{account: a, label: l})
-				}
-			}
-			rows.Close()
-		}
-	}
-	others := 0
-	botID := s.botAccount(nil)
-	if strict.OwnCardOnly {
-		people = nil // own_card_only: only the caller's card
-	}
+	labels := s.refLabels(db, roomOf(in.GuildID, in.ChannelID))
 	for _, p := range people {
-		if others == chat.MaxOtherCards {
-			break
+		labelOf := func(ref string) string {
+			if ref == p.ref {
+				return p.label
+			}
+			return labels(ref)
 		}
-		if p.account == botID || !s.MemoryAllowed(p.account) || !s.ConsentAllows(p.account, privacy.Profile) {
-			continue
+		if facts := s.cardIn(db, in.GuildID, p.ref, labelOf, rooms); len(facts) > 0 {
+			out = append(out, chat.RoomCard{Name: p.label, Facts: facts, Caller: p.caller})
 		}
-		ref := personRef(p.account)
-		facts := s.cardIn(db, in.GuildID, ref, labelOf, rooms)
-		if len(facts) == 0 {
-			continue
-		}
-		name := p.label
-		if name == "" {
-			name = labels(ref)
-		}
-		if name == "" {
-			continue
-		}
-		out = append(out, chat.RoomCard{Name: name, Facts: facts})
-		others++
 	}
 	return out
 }

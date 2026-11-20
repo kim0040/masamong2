@@ -78,7 +78,7 @@ func (s *Service) turnRoomMemory(ctx context.Context, in ChatInput, pol config.C
 		rm.Topics = s.linkedTopics(db, in, q, sources, s.guildPrivacy(in.GuildID).NoHearsay)
 	}
 	if doc.Memory.CardsOn() {
-		rm.Cards = s.turnCards(db, in, recent, sources)
+		rm.Cards = s.turnCards(db, in, s.targetPeople(db, in, planner))
 	}
 	if len(rm.Episodes) == 0 && len(rm.Topics) == 0 && len(rm.Cards) == 0 {
 		return nil
