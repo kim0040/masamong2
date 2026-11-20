@@ -5,11 +5,11 @@
 name: wiki
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     # docs/** covers docs/wiki and docs/translations.json; READMEs and the checker itself too, since
     # the ci workflow skips docs-only changes and this job is the only docs gate
     paths: ["docs/**", "README*.md", "tools/doccheck/**", "internal/docnames/**", ".github/workflows/wiki.yml"]
-  # a docs change in a pull request gets the same doccheck run; only a push to main publishes
+  # a docs change on dev or in a pull request gets the same doccheck run; only a push to main publishes
   pull_request:
     paths: ["docs/**", "README*.md", "tools/doccheck/**", "internal/docnames/**"]
   workflow_dispatch:
@@ -30,7 +30,7 @@ jobs:
       - name: links and translations
         run: go run ./tools/doccheck
       - name: sync docs/wiki to the wiki repository
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           TOKEN: ${{ github.token }}
         run: |

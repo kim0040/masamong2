@@ -66,8 +66,9 @@ Ask 50+ questions people would really ask in the **Answer lab** and mark each re
 ## 3. Tag and release
 
 1. Pick the version (`vMAJOR.MINOR.PATCH`). A change that migrates settings or data by itself bumps at least MINOR; one that needs a manual migration bumps MAJOR.
-2. `git tag vX.Y.Z && git push origin vX.Y.Z` → the `release` workflow runs the full checks, builds every target, writes `SHA256SUMS`, simulates installs and creates the GitHub Release.
-3. Write the release notes: what changed, setting changes, known problems. Releases are not signed yet, so link the first-launch warning help in [Installation](https://github.com/kim0040/masamong2/wiki/Installation).
+2. Fast-forward `dev` into `main` (`git checkout main && git merge --ff-only dev && git push origin main`). Tags go only on `main`.
+3. `git tag vX.Y.Z && git push origin vX.Y.Z` → the `release` workflow runs the full checks, builds every target, writes `SHA256SUMS`, simulates installs and creates the GitHub Release.
+4. Write the release notes: what changed, setting changes, known problems. Releases are not signed yet, so link the first-launch warning help in [Installation](https://github.com/kim0040/masamong2/wiki/Installation).
 
 ## 4. Upgrading the real instance, and going back
 

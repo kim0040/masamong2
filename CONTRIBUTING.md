@@ -1,6 +1,6 @@
 # Masamong에 기여하기
 
-**In English:** Issues and pull requests are welcome; replies may be slow. Run `go test ./... && go vet ./...` before you open a pull request, and `make docs` if you changed documentation. Never include real conversations, user IDs, keys or production databases. Report security problems privately as described in [SECURITY.md](SECURITY.md). The rest of this page is in Korean.
+**In English:** Issues and pull requests are welcome; replies may be slow. Open pull requests against the `dev` branch (`main` is the stable branch releases are cut from). Run `go test ./... && go vet ./...` before you open a pull request, and `make docs` if you changed documentation. Never include real conversations, user IDs, keys or production databases. Report security problems privately as described in [SECURITY.md](SECURITY.md). The rest of this page is in Korean.
 
 Masamong에 관심을 가져 주셔서 감사합니다. Maintainer는 **김현민 (Hyeonmin Kim)**이며 연락처는 [mini0227kim@gmail.com](mailto:mini0227kim@gmail.com)입니다.
 
@@ -10,6 +10,12 @@ Masamong에 관심을 가져 주셔서 감사합니다. Maintainer는 **김현�
 2. `git status`, 최근 commit, 현재 diff를 확인합니다.
 3. 진행 중인 파일과 추적되지 않은 파일을 보존합니다. `reset`, `restore`, `clean`, 강제 push로 다른 작업을 지우지 않습니다.
 4. 관리자 GUI와 테스트 샌드박스를 혼동하지 않도록 [저장소 지도](docs/REPO_MAP.md)를 확인합니다.
+
+## 브랜치
+
+- `main`은 안정판입니다. 릴리스 태그와 설치 스크립트가 여기서 나갑니다.
+- `dev`는 개발판입니다. **풀 리퀘스트는 `dev`로 보내 주세요.** `dev`에서 작업 브랜치를 따서 작업합니다.
+- 자세한 흐름은 [개발 가이드](https://github.com/kim0040/masamong2/wiki/개발-가이드)의 브랜치 절에 있습니다.
 
 ## 개발 환경
 

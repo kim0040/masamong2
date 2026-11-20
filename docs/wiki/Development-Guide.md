@@ -99,6 +99,19 @@ The long load test (`soak`) runs on the 1st of each month; running it by hand be
 
 The steps before a tag (full checks, long load test, a week with a test bot, backup and rollback) are in the [Release checklist](https://github.com/kim0040/masamong2/wiki/Release-Checklist).
 
+### Branches
+
+| Branch | Role | How changes get in |
+|---|---|---|
+| `main` | Stable. The install scripts, README and wiki ship from here, and release tags go only here | `dev` fast-forwarded into it at a release; urgent fixes directly |
+| `dev` | Development. Features, fixes and contributed pull requests land here first and are checked by CI | merge a work branch or a pull request |
+
+- Send pull requests to `dev`. A maintainer retargets one opened against `main`.
+- Release: once CI passes on `dev`, run `git checkout main && git merge --ff-only dev && git push origin main`, then tag.
+- An urgent fix is made on `main`, tagged, then merged into `dev` right away.
+- Force pushes and deletion are blocked on `main`. `dev` is not blocked, but it is public history, so it is not force-pushed either.
+- The real instance only runs release tags from `main`. Try `dev` on a test bot or a test instance.
+
 ### Version numbers
 
 Versions are `vMAJOR.MINOR.PATCH` (semantic versioning); the first public release, on 2026-11-02, is `v1.0.0`.
