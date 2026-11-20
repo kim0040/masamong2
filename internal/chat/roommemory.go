@@ -221,6 +221,13 @@ func fitCards(cards []RoomCard) []string {
 	return lines
 }
 
+// HasPersonBlock reports whether any fact survives the answer's cleaning and
+// budget. Without a block, selecting different episodes would change the prompt.
+func (rm *RoomMemory) HasPersonBlock(v Voice) bool {
+	return rm != nil && len(rm.Cards) != 0 && v.pack().Memory.CardBlock != "" &&
+		len(fitCards(cleanRoomMemory(v, &RoomMemory{Cards: rm.Cards, Packs: rm.Packs}).Cards)) > 0
+}
+
 // dropShownLeaves removes memory hits whose leaf (or a leaf merged into it) belongs to a shown episode.
 func dropShownLeaves(hits []search.Hit, shown []RoomEpisode) ([]search.Hit, int) {
 	leaves := map[string]bool{}

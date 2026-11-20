@@ -36,17 +36,17 @@ const (
 )
 
 // turnRoomMemory gathers the room memory of one chat turn; nil when there is none or reading is off.
-func (s *Service) turnRoomMemory(ctx context.Context, in ChatInput, pol config.ChannelPolicy, voice chat.Voice, history []chat.Turn, recent []corpus.Message, planner []string) *chat.RoomMemory {
+func (s *Service) turnRoomMemory(ctx context.Context, in ChatInput, pol config.ChannelPolicy, voice chat.Voice, history []chat.Turn, recent []corpus.Message, used *[]string) (*chat.RoomMemory, func([]string) *chat.RoomMemory) {
 	doc := s.Doc()
 	if pol.MemoryUse == "off" || in.ChannelID == "" || s.Store == nil {
-		return nil
+		return nil, nil
 	}
 	if !doc.Memory.EpisodesOn() && !doc.Memory.StateOn() && !doc.Memory.CardsOn() {
-		return nil
+		return nil, nil
 	}
 	db, err := s.adminDB()
 	if err != nil || !db.IsSQLite() || !roomMemoryTables(db) {
-		return nil
+		return nil, nil
 	}
 	var contextText []string
 	for i := max(0, len(history)-contextLines); i < len(history); i++ {
@@ -69,21 +69,50 @@ func (s *Service) turnRoomMemory(ctx context.Context, in ChatInput, pol config.C
 	for _, m := range recent {
 		shown[m.ObservationID] = true
 	}
-	rm := &chat.RoomMemory{Packs: s.explicitPacks(voice)} // their instruction cues keep instructions out of the reply
 	rooms := s.channelRooms(in.GuildID, in.ChannelID)
+	var local []turnPerson
+	if doc.Memory.EpisodesOn() || doc.Memory.CardsOn() {
+		local = s.targetPeople(db, in, nil)
+	}
+	rm := chat.RoomMemory{Packs: s.explicitPacks(voice)}
+	pick := func(rooms []string, people ...turnPerson) []chat.RoomEpisode {
+		return s.relatedEpisodes(ctx, db, rooms, q, voice.Pack, planTalk(voice.Pack, in.Message), shown, s.guildPrivacy(in.GuildID).NoHearsay, people...)
+	}
 	if doc.Memory.EpisodesOn() {
-		rm.Episodes = s.relatedEpisodes(ctx, db, rooms, q, voice.Pack, planTalk(voice.Pack, in.Message), shown, s.guildPrivacy(in.GuildID).NoHearsay)
+		rm.Episodes = pick(rooms)
 	}
 	if doc.Memory.StateOn() {
 		rm.Topics = s.linkedTopics(db, in, q, sources, s.guildPrivacy(in.GuildID).NoHearsay)
 	}
-	if doc.Memory.CardsOn() {
-		rm.Cards = s.turnCards(db, in, s.targetPeople(db, in, planner))
+	var base *chat.RoomMemory
+	if len(rm.Episodes) != 0 || len(rm.Topics) != 0 {
+		base = &rm
 	}
-	if len(rm.Episodes) == 0 && len(rm.Topics) == 0 && len(rm.Cards) == 0 {
-		return nil
+	if !doc.Memory.EpisodesOn() && !doc.Memory.CardsOn() {
+		return base, nil
 	}
-	return rm
+	return base, func(planner []string) *chat.RoomMemory {
+		people := local
+		if len(planner) > 0 {
+			people = s.targetPeople(db, in, planner)
+		}
+		if len(people) == 0 || !s.MemoryAllowed(in.SpeakerID) {
+			return nil
+		}
+		group := s.channelRooms(in.GuildID, in.ChannelID)
+		if len(group) == 0 {
+			return nil
+		}
+		updated := rm
+		updated.Cards = s.turnCards(ctx, db, in, group, people, used)
+		if !updated.HasPersonBlock(voice) {
+			return nil // keep the original episodes, topics and prompt bytes
+		}
+		if doc.Memory.EpisodesOn() {
+			updated.Episodes = pick(group, people...)
+		}
+		return &updated
+	}
 }
 
 func roomMemoryTables(db *storage.Store) bool {
@@ -119,6 +148,7 @@ type episodeCandidate struct {
 	importance                                       int
 	lastSeen                                         string
 	items                                            []itemRow
+	participants                                     []string
 	score                                            int
 	openPlan                                         bool
 }
@@ -152,7 +182,7 @@ func namesOthers(text string, people []string) bool {
 
 // relatedEpisodes picks up to chat.MaxEpisodes episodes of the rooms related to the conversation, with
 // their live evidence, best first. Evidence in shown is not repeated.
-func (s *Service) relatedEpisodes(ctx context.Context, db *storage.Store, rooms []string, q episodes.Query, pack *lang.Pack, plans bool, shown map[string]bool, noHearsay bool) []chat.RoomEpisode {
+func (s *Service) relatedEpisodes(ctx context.Context, db *storage.Store, rooms []string, q episodes.Query, pack *lang.Pack, plans bool, shown map[string]bool, noHearsay bool, people ...turnPerson) []chat.RoomEpisode {
 	if len(rooms) == 0 {
 		return nil
 	}
@@ -218,6 +248,16 @@ func (s *Service) relatedEpisodes(ctx context.Context, db *storage.Store, rooms 
 			}
 		}
 		c.openPlan = plans && c.kind == "plan" && (c.status == episodes.Open || c.status == episodes.Decided)
+		for _, p := range people {
+			involved := !noHearsay && slices.Contains(c.participants, p.ref)
+			for _, it := range c.items {
+				involved = involved || slices.Contains(it.by, p.ref) || strings.Contains(it.text, "{@"+p.ref+"}")
+			}
+			if involved {
+				c.score += 2
+				break
+			}
+		}
 	}
 	var picked []*episodeCandidate
 	for i := range cands {
@@ -271,7 +311,7 @@ func (s *Service) relatedEpisodes(ctx context.Context, db *storage.Store, rooms 
 
 func loadEpisodeCandidates(db *storage.Store, rooms []string) []episodeCandidate {
 	raw, _ := json.Marshal(rooms)
-	rows, err := db.Reader().Query(`SELECT id, room, source, kind, title, status, due_at, when_text, importance, last_seen FROM channel_episode
+	rows, err := db.Reader().Query(`SELECT id, room, source, kind, title, status, due_at, when_text, importance, last_seen, participants FROM channel_episode
 		WHERE room IN (SELECT value FROM json_each(?)) ORDER BY last_seen DESC LIMIT ?`, string(raw), episodeCandidates)
 	if err != nil {
 		return nil
@@ -280,7 +320,9 @@ func loadEpisodeCandidates(db *storage.Store, rooms []string) []episodeCandidate
 	byID := map[string]int{}
 	for rows.Next() {
 		var c episodeCandidate
-		if rows.Scan(&c.id, &c.room, &c.source, &c.kind, &c.title, &c.status, &c.due, &c.when, &c.importance, &c.lastSeen) == nil {
+		var participants string
+		if rows.Scan(&c.id, &c.room, &c.source, &c.kind, &c.title, &c.status, &c.due, &c.when, &c.importance, &c.lastSeen, &participants) == nil {
+			_ = json.Unmarshal([]byte(participants), &c.participants)
 			byID[c.id] = len(cands)
 			cands = append(cands, c)
 		}

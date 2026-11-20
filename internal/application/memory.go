@@ -1665,9 +1665,8 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		known := append(append(slices.Clone(*in.sourceRefs), windowAll...), ambient...)
 		roomIn.sourceRefs = &known
 	}
-	people := func(targets []string) *chat.RoomMemory {
-		return s.turnRoomMemory(ctx, roomIn, pol, voice, history, recent, targets)
-	}
+	var personSources []string
+	roomMemory, people := s.turnRoomMemory(ctx, roomIn, pol, voice, history, recent, &personSources)
 	explicit, explicitCost := s.explicitMemoryTurn(ctx, in, voice, llm, history)
 	if explicit != nil {
 		in.Earlier = append(in.Earlier, *explicit)
@@ -1691,9 +1690,12 @@ func (s *Service) chatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		Ranking: rankingFor(in.Ranking, s.retrieveMode()), PlannerModel: "planner", LoopModel: doc.Chat.LoopRole(), ResponseModel: "response", TZ: tz,
 		BudgetUSD: parseUSD(doc.Memory.TurnBudgetUSD, 0.05), Earlier: in.Earlier,
 		Guard:      &chat.Guard{MaxUSD: parseUSD(doc.Limits.PerRequestBudgetUSD, 0), MaxCalls: doc.Limits.MaxExternalAttempts},
-		MaxHistory: maxHistory, ToolMode: s.toolMode(), LoopFinal: doc.Chat.LoopFinalMode(), People: people, Images: images, TurnStart: in.started,
+		MaxHistory: maxHistory, ToolMode: s.toolMode(), LoopFinal: doc.Chat.LoopFinalMode(), RoomMemory: roomMemory, People: people, Images: images, TurnStart: in.started,
 		OnProgress: in.OnProgress, // nil-safe in the runtime; a lab or dry-run turn passes it on when set
 	})
+	if in.sourceRefs != nil && res.Room != nil && res.Room.Cards > 0 {
+		*in.sourceRefs = append(*in.sourceRefs, personSources...)
+	}
 	noteTurnTiming(&res, "queue_wait", queueWait)
 	res.CostUSD += conv.costUSD + explicitCost + visionCost
 	if in.vision != nil && in.vision.Message != "" {
