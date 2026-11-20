@@ -71,6 +71,26 @@ func (f reviewPerson) attach(t *testing.T, guild, channel string) {
 
 func TestReviewPersonPrivacy(t *testing.T) {
 	tests := map[string]func(*testing.T, reviewPerson){
+		"BlockedTarget": func(t *testing.T, f reviewPerson) {
+			applyDoc(t, f.Service, func(d *config.Document) { d.Access.BlockedUsers = []string{"101"} })
+			if got := block(f.ask(t, "<@101> 어떤 사람이야?"), cardOpen, cardClose); got != "" {
+				t.Fatal(got)
+			}
+		},
+		"BlockedHearsayAuthor": func(t *testing.T, f reviewPerson) {
+			ev := f.source(t, "g", "c", "hidden-source", "202", "영희", f.at)
+			f.fact(t, "g", "c", "hidden-gossip", "101", "202", ev)
+			// A malformed by_refs that omits the blocked evidence author must not leak either.
+			f.fact(t, "g", "c", "misattributed", "101", "101", ev)
+			applyDoc(t, f.Service, func(d *config.Document) { g := d.Guilds["g"]; g.BlockedUsers = []string{"202"}; d.Guilds["g"] = g })
+			got := f.ask(t, "<@101> 어떤 사람이야?")
+			if b := block(got, cardOpen, cardClose); !strings.Contains(b, "민수 public") || strings.Contains(b, "hidden") || strings.Contains(b, "misattributed") {
+				t.Fatal(b)
+			}
+			if b := block(got, episodesOpen, episodesClose); strings.Contains(b, "hidden") || strings.Contains(b, "misattributed") {
+				t.Fatal(b)
+			}
+		},
 		"PrivateAlias": func(t *testing.T, f reviewPerson) {
 			f.source(t, "g", "unclassified", "rename", "101", "비공개별명", f.at.Add(time.Hour))
 			if got := block(f.ask(t, "비공개별명?"), cardOpen, cardClose); got != "" {

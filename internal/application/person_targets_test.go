@@ -38,6 +38,9 @@ func TestReviewResolverIntent(t *testing.T) {
 			t.Fatalf("seed: %v %v", ok, err)
 		}
 	}
+	d := s.Doc()
+	d.Access.BlockedUsers = []string{"606"}
+	s.setDoc(d, s.Revision())
 	for _, tc := range []struct {
 		msg, speaker string
 		want, plan   []string

@@ -593,7 +593,7 @@ func (s *Service) turnCards(ctx context.Context, db *storage.Store, in ChatInput
 	defer tx.Rollback()
 	strict := s.guildPrivacy(in.GuildID)
 	rooms := s.personRooms(tx, in.GuildID, in.ChannelID, strict.CardChannelOnly)
-	names, err := readPersonNames(tx, in.GuildID, rooms)
+	names, err := s.readPersonNames(tx, in.GuildID, rooms)
 	if err != nil {
 		return nil
 	}

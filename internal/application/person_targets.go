@@ -34,14 +34,30 @@ type turnNames struct {
 	denied  map[string]bool
 }
 
-func readPersonNames(tx *sql.Tx, guild string, rooms map[string]bool) (turnNames, error) {
-	n := turnNames{map[string]string{}, map[string][]string{}, map[string]bool{}}
+func (s *Service) deniedPeople(tx *sql.Tx, guild string) (map[string]bool, error) {
+	refs := map[string]bool{}
 	denied, err := withdrawnTx(tx, privacy.Memory, privacy.Profile)
 	if err != nil {
-		return n, err
+		return nil, err
 	}
 	for account := range denied {
-		n.denied[personRef(account)] = true
+		refs[personRef(account)] = true
+	}
+	// The same account lists as BlockedIn; episode subjects only carry refs.
+	doc := s.Doc()
+	for _, list := range [][]string{doc.Access.BlockedUsers, doc.Guilds[guild].BlockedUsers} {
+		for _, id := range list {
+			refs[personRef(id)] = true
+		}
+	}
+	return refs, nil
+}
+
+func (s *Service) readPersonNames(tx *sql.Tx, guild string, rooms map[string]bool) (turnNames, error) {
+	denied, err := s.deniedPeople(tx, guild)
+	n := turnNames{map[string]string{}, map[string][]string{}, denied}
+	if err != nil {
+		return n, err
 	}
 	raw, _ := json.Marshal(rooms)
 	rows, err := tx.Query(`SELECT person_ref,label FROM person_alias WHERE guild_id=? AND room IN (SELECT key FROM json_each(?)) ORDER BY last_seen DESC,label`, guild, string(raw))
@@ -129,7 +145,7 @@ func (n turnNames) match(text string, matches func(string, string) bool) []strin
 }
 
 func (s *Service) targetPeople(db *storage.Store, in ChatInput, _ []string) []turnPerson {
-	if in.GuildID == "" || in.GuildID == "0" || in.SpeakerID == "" || !s.MemoryAllowed(in.SpeakerID) {
+	if in.GuildID == "" || in.GuildID == "0" || in.SpeakerID == "" || s.BlockedIn(in.GuildID, in.SpeakerID) || !s.MemoryAllowed(in.SpeakerID) {
 		return nil
 	}
 	lines := s.liveLines(in.GuildID, in.ChannelID)
@@ -139,7 +155,7 @@ func (s *Service) targetPeople(db *storage.Store, in ChatInput, _ []string) []tu
 		return nil
 	}
 	defer tx.Rollback()
-	names, err := readPersonNames(tx, in.GuildID, s.personRooms(tx, in.GuildID, in.ChannelID, s.guildPrivacy(in.GuildID).CardChannelOnly))
+	names, err := s.readPersonNames(tx, in.GuildID, s.personRooms(tx, in.GuildID, in.ChannelID, s.guildPrivacy(in.GuildID).CardChannelOnly))
 	if err != nil {
 		return nil
 	}

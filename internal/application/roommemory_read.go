@@ -164,6 +164,37 @@ type personEpisodeScope struct {
 	people []turnPerson
 }
 
+// A person boost may surface the whole episode, not just the matching item.
+// Screen every subject, speaker and raw evidence author on the rendering snapshot.
+func (c episodeCandidate) canBoost(tx *sql.Tx, denied map[string]bool) bool {
+	check := func(refs []string) bool {
+		for _, ref := range refs {
+			if denied[ref] {
+				return false
+			}
+		}
+		return true
+	}
+	if !check(c.participants) || !check(episodes.TextRefs(c.title)) {
+		return false
+	}
+	for _, it := range c.items {
+		if !check(it.by) || !check(episodes.TextRefs(it.text)) {
+			return false
+		}
+		for _, id := range it.evidence {
+			var account string
+			if tx.QueryRow(`SELECT actor_account FROM memory_observations WHERE observation_id=? AND room=? AND record_kind=?`, id, c.room, corpus.HumanText).Scan(&account) != nil || account == "" || denied[personRef(account)] {
+				return false
+			}
+			if current, err := store.ObservationCurrent(tx, id); err != nil || !current {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 type itemRow struct {
 	id, kind, text string
 	evidence       []string
@@ -246,6 +277,18 @@ func (s *Service) relatedEpisodes(ctx context.Context, db *storage.Store, rooms 
 	// only in a room with many episodes: in a small one (a hiking club's five hikes) the shared word is
 	// what the talk is about, and the best few by importance and recency are the right ones
 	common := len(cands) >= 10
+	tx, err := db.Reader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil
+	}
+	defer tx.Rollback()
+	var denied map[string]bool
+	if len(bonus) > 0 {
+		denied, err = s.deniedPeople(tx, bonus[0].guild)
+		if err != nil {
+			bonus = nil
+		}
+	}
 	for i := range cands {
 		c := &cands[i]
 		for _, w := range matches[i] {
@@ -267,7 +310,7 @@ func (s *Service) relatedEpisodes(ctx context.Context, db *storage.Store, rooms 
 			for _, it := range c.items {
 				involved = involved || slices.Contains(it.by, p.ref) || strings.Contains(it.text, "{@"+p.ref+"}")
 			}
-			if involved {
+			if involved && !denied[p.ref] && c.canBoost(tx, denied) {
 				c.score += 2
 				break
 			}
@@ -289,11 +332,6 @@ func (s *Service) relatedEpisodes(ctx context.Context, db *storage.Store, rooms 
 		}
 		return a.lastSeen > b.lastSeen
 	})
-	tx, err := db.Reader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return nil
-	}
-	defer func() { _ = tx.Rollback() }()
 	var out []chat.RoomEpisode
 	for _, c := range picked {
 		if len(out) == chat.MaxEpisodes {
