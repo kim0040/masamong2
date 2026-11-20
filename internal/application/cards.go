@@ -674,11 +674,11 @@ func personFact(tx *sql.Tx, it itemRow, episodeRoom, saved, target string, names
 			return "", nil
 		}
 	}
-	authors := map[string]string{}
+	authors := map[string]bool{}
 	for _, id := range it.evidence {
-		var room, account, label, edited, kind string
-		if tx.QueryRow(`SELECT room,actor_account,actor_label,edited_at,record_kind FROM memory_observations WHERE observation_id=? AND platform='discord' AND source_room=room AND deleted_at='' AND trim(content)<>''`, id).
-			Scan(&room, &account, &label, &edited, &kind) != nil || account == "" || kind != corpus.HumanText {
+		var room, account, edited, kind string
+		if tx.QueryRow(`SELECT room,actor_account,edited_at,record_kind FROM memory_observations WHERE observation_id=? AND platform='discord' AND source_room=room AND deleted_at='' AND trim(content)<>''`, id).
+			Scan(&room, &account, &edited, &kind) != nil || account == "" || kind != corpus.HumanText {
 			return "", nil
 		}
 		local, allowed := rooms[room]
@@ -696,12 +696,12 @@ func personFact(tx *sql.Tx, it itemRow, episodeRoom, saved, target string, names
 				return "", nil
 			}
 		}
-		authors[ref] = label
+		authors[ref] = true
 	}
 	var speakers []string
 	for _, ref := range it.by {
-		label, ok := authors[ref]
-		if !ok {
+		label := names.label(ref)
+		if !authors[ref] || label == "" {
 			return "", nil
 		}
 		speakers = append(speakers, clip(label, 24))
