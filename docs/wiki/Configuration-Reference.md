@@ -313,6 +313,8 @@ Each level includes the levels above it in this table.
 
 Use the exact KMA area code or name. A specific area takes priority over its parent, with the code preferred to the name at each tier. An unmatched area uses level 1. Earthquakes reach every enabled room, regardless of area. Sea areas additionally require `marine: true`. After upgrading, set any desired areas per room. The old global `warning_regions` list is accepted when loading older files and has no effect on delivery.
 
+The room page in the console shows, for each saved area, whether it matches an area seen in KMA warnings. The bot ships no KMA area list, so an area that has had no warning yet can show as "not seen" even when its name is right. A lift goes only to the rooms that received the issue or upgrade for that level. After upgrading, the first warning check records what is in force as its starting point and announces nothing.
+
 ## personas
 
 Your own personas, in addition to the built-in ones (`friendly_ko`, `friendly_en`, `warm_ko`, `warm_ja`, …). A room without a persona uses the default of its language (the server's `guilds.<id>.locale`, then `i18n.default_locale`): with `i18n.polite_default` on, `warm_ko` for Korean and `warm_ja` for Japanese, otherwise `friendly_<locale>`. `warm_ko` and `warm_ja` are polite (해요체, です・ます); `friendly_ko` and `friendly_ja` are the casual presets and stay pickable. A built-in can be hidden from the console's lists without deleting it. Hiding `warm_ko` is also how to keep a Korean room on the casual voice:
