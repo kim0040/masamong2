@@ -702,14 +702,14 @@ func toolsIndex() string {
 			keys = append(keys, params...)
 		}
 		rows = append(rows, []string{
-			cell(t.ID), cell(t.ID), orDash(strings.Join(keys, " · ")),
+			cell(t.ID), orDash(strings.Join(keys, " · ")),
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i][0] < rows[j][0] })
 	var b strings.Builder
 	b.WriteString("# 채팅 도구 색인\n\n모델이 보는 내장 도구 목록: 호출하는 Action과 그 도구를 설명하는 언어팩 키.\n\n" + generatedHeader + "\n\n원본: `internal/tools/tools.go`의 `Builtins()` (도구 ID = catalog Action ID), `internal/lang/packs/" + lang.Default + ".json`의 `tools.<id>.*` (다른 팩은 부분 집합을 가질 수 있음)\n\n")
 	b.WriteString(table(
-		[]string{"도구 ID", "Action", "언어팩 키 (tools.<id>.아래)"},
+		[]string{"Action", "언어팩 키 (tools.<id>.아래)"},
 		rows))
 	return b.String()
 }
