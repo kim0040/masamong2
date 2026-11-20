@@ -531,10 +531,20 @@ var mentionPattern = regexp.MustCompile(`<@!?(\d+)>`)
 // Only the gateway's ordinary text channels and positively known public threads
 // can supply statements outside the current group. A private thread deliberately
 // has no parent record, so an unknown room is never assumed to be public.
+// It must be the first read on tx: the thread deletion boundary below relies on it.
 func (s *Service) personRooms(tx *sql.Tx, guild, channel string, localOnly bool) map[string]bool {
 	rooms := map[string]bool{} // value = local to this channel group
 	gw, ok := s.Discord.(interface{ PersonMemoryChannels(string) map[string]bool })
 	if !ok || channel == "" {
+		return rooms
+	}
+	// A deleted thread leaves memory before its tombstone commits (threadRooms).
+	// The generation is read before this snapshot starts and checked after it.
+	t := s.threadsLoaded()
+	t.mu.Lock()
+	gen, gone := t.scopeGen, t.deleted[channel]
+	t.mu.Unlock()
+	if gone {
 		return rooms
 	}
 	var deleted bool
@@ -557,6 +567,20 @@ func (s *Service) personRooms(tx *sql.Tx, guild, channel string, localOnly bool)
 		threads[id] = p
 	}
 	if rows.Err() != nil {
+		return rooms
+	}
+	t.mu.Lock()
+	settled := gen == t.scopeGen
+	for id := range threads {
+		// After a lifecycle change during the read, only the in-memory table (which
+		// never holds a deleted thread) vouches for a stored row.
+		if _, live := t.threads[id]; t.deleted[id] || !settled && !live {
+			delete(threads, id)
+		}
+	}
+	gone = t.deleted[channel]
+	t.mu.Unlock()
+	if gone {
 		return rooms
 	}
 	if p := threads[channel]; p != "" {
