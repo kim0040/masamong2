@@ -46,6 +46,7 @@ type kmaFeed struct {
 	mu       sync.Mutex
 	quakes   []string
 	warnings []string
+	text     []string // typ01 rows (REG_UP,…,CMD) served instead of the JSON warnings when set
 }
 
 func (f *kmaFeed) server(t *testing.T) *httptest.Server {
@@ -58,6 +59,10 @@ func (f *kmaFeed) server(t *testing.T) *httptest.Server {
 				return
 			}
 			_, _ = w.Write([]byte(`{"response":{"header":{"resultCode":"00","resultMsg":"NORMAL_SERVICE"},"body":{"items":{"item":[` + strings.Join(f.quakes, ",") + `]}}}}`))
+			return
+		}
+		if f.text != nil {
+			_, _ = w.Write([]byte("#START7777\n#  REG_UP, REG_UP_KO, REG_ID, REG_KO, TM_FC, TM_EF, WRN, LVL, CMD, ED_TM, --\n" + strings.Join(f.text, "\n") + "\n#7777END\n"))
 			return
 		}
 		_, _ = w.Write([]byte(`[` + strings.Join(f.warnings, ",") + `]`))
@@ -626,5 +631,90 @@ func TestDisasterLiftsGoWhereTheIssueWent(t *testing.T) {
 				t.Fatalf("delivery records outlived their warnings: %d %v", left, err)
 			}
 		})
+	}
+}
+
+// One response can list an issue and the later release of the same level (both encodings: Korean
+// command names in JSON, numeric codes in the typ01 text). The release ends the warning; an older
+// release, a replacement by another level and an extension do not.
+func TestDisasterReleaseInTheSameResponse(t *testing.T) {
+	type row struct{ level, cmd, fc, ef string }
+	json := func(r row) string {
+		lvl := map[string]string{"2": "주의", "3": "경보"}[r.level]
+		cmd := map[string]string{"1": "발표", "2": "대치", "3": "해제", "4": "대치해제", "5": "연장"}[r.cmd]
+		return fmt.Sprintf(`{"REG_UP":"L1050000","REG_UP_KO":"광주·전라남도","REG_ID":"L1052100","REG_KO":"목포시","TM_FC":%q,"TM_EF":%q,"WRN":"호우","LVL":%q,"CMD":%q,"ED_TM":""}`, r.fc, r.ef, lvl, cmd)
+	}
+	text := func(r row) string {
+		return strings.Join([]string{"L1050000", "광주·전라남도", "L1052100", "목포시", r.fc, r.ef, "R", r.level, r.cmd, "", ""}, ",")
+	}
+	issued := row{"3", "1", "202610011100", "202610011200"}
+	for _, tc := range []struct {
+		name string
+		rows []row
+		want []string
+	}{
+		{"later release", []row{issued, {"3", "3", "202610011250", "202610011300"}}, []string{"c1|✅ 호우경보 해제|목포시"}},
+		{"release at the same time, announced later", []row{issued, {"3", "3", "202610011130", "202610011200"}}, []string{"c1|✅ 호우경보 해제|목포시"}},
+		{"older release", []row{issued, {"3", "3", "202610011000", "202610011100"}}, nil},
+		{"replaced by an advisory", []row{issued, {"3", "4", "202610011250", "202610011300"}, {"2", "2", "202610011250", "202610011300"}}, []string{"c1|✅ 호우경보 해제|목포시", "c1|⚠️ 호우주의보 발표|목포시"}},
+		{"extended", []row{issued, {"3", "5", "202610011250", "202610011300"}}, nil},
+	} {
+		for _, encoding := range []string{"json", "text"} {
+			t.Run(tc.name+"/"+encoding, func(t *testing.T) {
+				svc := setupSvc(t)
+				feed := &kmaFeed{}
+				pointAt(t, svc, "kma", feed.server(t).URL, "KMA_TEST_KEY", "k")
+				if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "c1", "respond": "mention", "watch_level": map[string]int{"목포시": 5}}); !r.OK {
+					t.Fatal(r.Error)
+				}
+				applyDoc(t, svc, func(d *config.Document) {
+					g := d.Guilds["g1"]
+					g.Locale = "ko"
+					d.Guilds["g1"] = g
+				})
+				gw := &postingGateway{}
+				svc.Discord = gw
+				now := time.Date(2026, 10, 1, 3, 10, 0, 0, time.UTC)
+				serve := func(rows []row) {
+					feed.mu.Lock()
+					defer feed.mu.Unlock()
+					feed.warnings, feed.text = nil, nil
+					if encoding == "text" {
+						feed.text = []string{}
+					}
+					for _, r := range rows {
+						if encoding == "text" {
+							feed.text = append(feed.text, text(r))
+						} else {
+							feed.warnings = append(feed.warnings, json(r))
+						}
+					}
+				}
+				tick := func(rows []row) []string {
+					serve(rows)
+					before := len(gw.posts)
+					svc.Clock = clock.Fixed{T: now}
+					now = now.Add(5 * time.Minute)
+					application.DisasterTickForTest(svc, context.Background())
+					return gw.posts[before:]
+				}
+				tick(nil)
+				if got := tick([]row{issued}); len(got) != 1 || !strings.HasPrefix(got[0], "c1|⚠️ 호우경보 발표|목포시") {
+					t.Fatalf("issue: %q", got)
+				}
+				got := tick(tc.rows)
+				if len(got) != len(tc.want) {
+					t.Fatalf("got %q, want %q", got, tc.want)
+				}
+				for _, prefix := range tc.want {
+					if !strings.Contains(strings.Join(got, "\n"), prefix) {
+						t.Fatalf("missing %q in %q", prefix, got)
+					}
+				}
+				if got := tick(tc.rows); len(got) != 0 {
+					t.Fatalf("repeated: %q", got)
+				}
+			})
+		}
 	}
 }

@@ -443,6 +443,11 @@ func warningCancelled(command string) bool {
 	return false
 }
 
+// warningLater says a takes effect after b, or at the same time but was announced later.
+func warningLater(a, b kma.Warning) bool {
+	return a.Effective > b.Effective || a.Effective == b.Effective && a.Announced > b.Announced
+}
+
 func (snapshot warningSnapshot) record(w kma.Warning) {
 	key := warningKey(w)
 	old := snapshot[key]
@@ -468,6 +473,7 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 	}
 	current := warningSnapshot{}
 	cancelled := warningSnapshot{}
+	released := map[string]kma.Warning{} // the latest cancellation of each area, kind and level
 	for _, w := range all {
 		rank := warningRank(w)
 		if rank == 0 {
@@ -475,9 +481,19 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 		}
 		if warningCancelled(w.Command) {
 			cancelled.record(w)
+			if r, ok := released[warningKey(w)+"|"+w.Level]; !ok || warningLater(w, r) {
+				released[warningKey(w)+"|"+w.Level] = w
+			}
 			continue
 		}
 		current.record(w)
+	}
+	// A release of the same level published after its issue ends it, even when the response still
+	// lists the issue.
+	for k, w := range current {
+		if r, ok := released[k+"|"+w.Level]; ok && warningLater(r, w) {
+			delete(current, k)
+		}
 	}
 	var raw json.RawMessage
 	seen, err := s.kvGet("disaster:wrn_active", &raw)
