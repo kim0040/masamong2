@@ -104,4 +104,12 @@ func TestEpisodePersonBlockScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	check(get("other", false), []string{"기타"}, []string{"차를 좋아함"})
+	// Older extracts can identify a speaker but leave the subject as plain
+	// text. A statement they made about somebody else is not a self fact.
+	put("c", "101", "민수", "unattributed", "")
+	if _, err := s.Store.DB.Exec(`UPDATE episode_item SET text='지영이가 춤을 배운대' WHERE id='unattributed'`); err != nil {
+		t.Fatal(err)
+	}
+	check(get("c", false), []string{"지영이가 춤을 배운대"}, nil)
+	check(get("other", false), []string{"기타"}, []string{"지영이가"})
 }

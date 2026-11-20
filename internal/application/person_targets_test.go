@@ -15,14 +15,16 @@ func TestPersonTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.adminDB()
-	for _, p := range []struct{ id, label string }{{"1", "민수"}, {"2", "영희"}, {"3", "지수"}, {"4", "철수"}, {"5", "수빈"}, {"6", "수빈"}, {"7", "로봇"}, {"8", "떠난이"}, {"9", "비공개"}} {
+	for _, p := range []struct{ id, label string }{{"1", "민수"}, {"2", "영희"}, {"3", "지수"}, {"4", "철수"}, {"5", "수빈"}, {"6", "수빈"}, {"7", "로봇"}, {"8", "떠난이"}, {"9", "비공개"}, {"10", "미라"}} {
 		_, err := e.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", AuthorID: p.id, AuthorName: p.label, MessageID: p.id, At: time.Now(), Content: "hello", Bot: p.id == "7"})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 	if r := s.Execute(t.Context(), action.Request{Action: "privacy.consent", Input: []byte(`{"scope":"profile","user_id":"9","decision":"withdraw"}`)}); !r.OK {
+		t.Fatal(r.Error)
+	}
+	if r := s.Execute(t.Context(), action.Request{Action: "privacy.consent", Input: []byte(`{"scope":"memory","user_id":"10","decision":"withdraw"}`)}); !r.OK {
 		t.Fatal(r.Error)
 	}
 	for _, id := range []string{"3", "4"} {
@@ -42,7 +44,7 @@ func TestPersonTargets(t *testing.T) {
 		{"민수님은? 영희씨는?", "", nil, []string{"민수", "영희"}},
 		{"<@2> <@!1>", "", nil, []string{"영희", "민수"}},
 		{"수빈이는 누구야?", "", nil, nil},
-		{"<@7> 로봇 <@9> 비공개", "", nil, nil},
+		{"<@7> 로봇 <@9> 비공개 <@10> 미라", "", nil, nil},
 		{"떠난이는?", "", nil, []string{"떠난이"}},
 		{"어때?", "reply", nil, []string{"영희"}},
 		{"어때?", "reply-old", nil, []string{"민수"}},

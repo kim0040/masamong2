@@ -590,7 +590,7 @@ func (s *Service) turnCards(ctx context.Context, db *storage.Store, in ChatInput
 	cfg := s.Doc().Memory
 	var out []chat.RoomCard
 	for _, p := range people {
-		if names.denied[p.ref] {
+		if names.denied[p.ref] || strict.OwnCardOnly && !p.caller {
 			continue
 		}
 		var facts []string
@@ -634,10 +634,10 @@ func (s *Service) turnCards(ctx context.Context, db *storage.Store, in ChatInput
 
 func personFact(tx *sql.Tx, it itemRow, episodeRoom, saved, target string, names turnNames, rooms map[string]bool, noHearsay bool) (string, []string) {
 	subjects := episodes.TextRefs(it.text)
-	// In a shared item we cannot attribute individual clauses. Only an
-	// unambiguous self statement can travel beyond the channel group.
-	self := len(it.by) == 1 && it.by[0] == target && !namesOthers(it.text, []string{target})
-	if len(it.evidence) == 0 || len(it.by) == 0 || noHearsay && it.hearsay() {
+	// Older items may name a third person in plain text and carry only the
+	// speaker's by_ref. With no subject token, keep them in their source group.
+	self := len(it.by) == 1 && it.by[0] == target && (episodeRoom == "" || slices.Contains(subjects, target)) && !namesOthers(it.text, []string{target})
+	if len(it.evidence) == 0 || len(it.by) == 0 || noHearsay && (it.hearsay() || episodeRoom != "" && len(subjects) == 0) {
 		return "", nil
 	}
 	refs := uniqueStrings(append(append(slices.Clone(subjects), it.by...), target))
