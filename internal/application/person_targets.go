@@ -29,10 +29,12 @@ type turnPerson struct {
 var selfRequest = regexp.MustCompile(`(?i)(?:^|[^\pL\pN])(?:(?:나|저)(?:에\s*(?:대해|관해)|한테\s*어울)|(?:나[는도가를]?|저[는도가를]?|내가|제가|난|전|날|절)\s*(?:(?:뭘|뭐를|무엇을|뭐|어떤\s*걸)\s*)?(?:어떤\s*사람|누구|좋아|싫어|소개|그려|기억)|(?:나의|저의|내|제)\s*(?:취향|성격|별명|소개|특징|근황|취미)|(?:about me|describe me|draw me|remember me|who am i|what do i like|my (?:hobbies|interests|nickname|personality))\b|(?:sobre mí|descríbeme|quién soy|qué me gusta)\b|(?:私|僕|わたし)(?:について|の趣味|はどんな人)|(?:我是谁|我的爱好|介绍我|关于我))`)
 
 type turnNames struct {
-	current map[string]string
-	sources map[string]string
-	aliases map[string][]string
-	denied  map[string]bool
+	current      map[string]string
+	sources      map[string]string
+	aliases      map[string][]string
+	denied       map[string]bool
+	tx           *sql.Tx
+	guild, rooms string
 }
 
 func (s *Service) deniedPeople(tx *sql.Tx, guild string) (map[string]bool, error) {
@@ -54,34 +56,69 @@ func (s *Service) deniedPeople(tx *sql.Tx, guild string) (map[string]bool, error
 	return refs, nil
 }
 
-func (s *Service) readPersonNames(tx *sql.Tx, guild string, rooms map[string]bool) (turnNames, error) {
+const liveAliasSQL = ` JOIN memory_observations o ON o.observation_id=a.last_source
+		WHERE a.guild_id=? AND a.room IN (SELECT key FROM json_each(?)) AND o.deleted_at='' AND o.edited_at=''
+		AND NOT EXISTS(SELECT 1 FROM privacy_tombstones p WHERE (p.kind='message' AND p.source_id=o.native_message_id) OR (p.kind='account' AND p.source_id=o.actor_account))`
+
+func (n turnNames) label(ref string) string {
+	if v, ok := n.current[ref]; ok {
+		return v
+	}
+	var label, source string
+	if n.tx.QueryRow(`SELECT a.label,a.last_source FROM person_alias a`+liveAliasSQL+` AND a.person_ref=? ORDER BY a.last_seen DESC,a.label LIMIT 1`, n.guild, n.rooms, ref).Scan(&label, &source) == nil {
+		n.sources[ref] = source
+	}
+	n.current[ref] = label
+	return label
+}
+
+// Look up bounded starts in the message, not every name in the guild. For
+// unusually long/punctuation-heavy prose prefer missing a name to guessing.
+func aliasKeys(text string) []string {
+	if len(text) > 1024 {
+		return nil
+	}
+	runes := []rune(strings.ToLower(text))
+	var keys []string
+	for i, r := range runes {
+		if unicode.IsSpace(r) || i > 0 && (unicode.IsLetter(runes[i-1]) || unicode.IsDigit(runes[i-1])) {
+			continue
+		}
+		for j := i + 2; j <= len(runes); j++ {
+			if !unicode.IsSpace(runes[j-1]) {
+				if len(keys) == 1024 {
+					return nil
+				}
+				keys = append(keys, string(runes[i:j]))
+			}
+		}
+	}
+	return keys
+}
+
+func (s *Service) readPersonNames(tx *sql.Tx, guild string, rooms map[string]bool, text string) (turnNames, error) {
 	denied, err := s.deniedPeople(tx, guild)
-	n := turnNames{map[string]string{}, map[string]string{}, map[string][]string{}, denied}
+	raw, _ := json.Marshal(rooms)
+	n := turnNames{current: map[string]string{}, sources: map[string]string{}, aliases: map[string][]string{}, denied: denied, tx: tx, guild: guild, rooms: string(raw)}
 	if err != nil {
 		return n, err
 	}
-	raw, _ := json.Marshal(rooms)
-	rows, err := tx.Query(`SELECT a.person_ref,a.label,a.last_source FROM person_alias a JOIN memory_observations o ON o.observation_id=a.last_source
-		WHERE a.guild_id=? AND a.room IN (SELECT key FROM json_each(?)) AND o.deleted_at='' AND o.edited_at=''
-		AND NOT EXISTS(SELECT 1 FROM privacy_tombstones p WHERE (p.kind='message' AND p.source_id=o.native_message_id) OR (p.kind='account' AND p.source_id=o.actor_account))
-		ORDER BY a.last_seen DESC,a.label`, guild, string(raw))
+	keys := aliasKeys(text)
+	if len(keys) == 0 {
+		return n, nil
+	}
+	rawKeys, _ := json.Marshal(keys)
+	rows, err := tx.Query(`SELECT a.person_ref,a.folded FROM person_alias a INDEXED BY idx_person_alias_name`+liveAliasSQL+`
+		AND a.folded IN (SELECT value FROM json_each(?)) AND (SELECT cursor FROM person_alias_fill WHERE id=1)=-1`, guild, n.rooms, string(rawKeys))
 	if err != nil {
 		return n, err
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var ref, label, source string
-		if err := rows.Scan(&ref, &label, &source); err != nil {
+		var ref, key string
+		if err := rows.Scan(&ref, &key); err != nil {
 			return n, err
 		}
-		if ref == "" || strings.TrimSpace(label) == "" {
-			continue
-		}
-		if n.current[ref] == "" {
-			n.current[ref] = label
-			n.sources[ref] = source
-		}
-		key := strings.ToLower(label)
 		if !slices.Contains(n.aliases[key], ref) {
 			n.aliases[key] = append(n.aliases[key], ref)
 		}
@@ -150,27 +187,34 @@ func (n turnNames) match(text string, matches func(string, string) bool) []strin
 }
 
 func (s *Service) targetPeople(db *storage.Store, in ChatInput, _ []string) []turnPerson {
-	if in.GuildID == "" || in.GuildID == "0" || in.SpeakerID == "" || s.BlockedIn(in.GuildID, in.SpeakerID) || !s.MemoryAllowed(in.SpeakerID) {
-		return nil
-	}
-	lines := s.liveLines(in.GuildID, in.ChannelID)
-	bot := personRef(s.botAccount(lines))
 	tx, err := db.Reader().Begin()
 	if err != nil {
 		return nil
 	}
 	defer tx.Rollback()
-	names, err := s.readPersonNames(tx, in.GuildID, s.personRooms(tx, in.GuildID, in.ChannelID, s.guildPrivacy(in.GuildID).CardChannelOnly))
-	if err != nil {
-		return nil
+	rooms := s.personRooms(tx, in.GuildID, in.ChannelID, s.guildPrivacy(in.GuildID).CardChannelOnly)
+	people, _ := s.resolvePeople(tx, in, rooms)
+	return people
+}
+
+func (s *Service) resolvePeople(tx *sql.Tx, in ChatInput, rooms map[string]bool) ([]turnPerson, turnNames) {
+	if len(rooms) == 0 || in.GuildID == "" || in.GuildID == "0" || in.SpeakerID == "" || s.BlockedIn(in.GuildID, in.SpeakerID) || !s.MemoryAllowed(in.SpeakerID) {
+		return nil, turnNames{}
 	}
+	text := mentionPattern.ReplaceAllString(in.Message, " ")
+	names, err := s.readPersonNames(tx, in.GuildID, rooms, text)
+	if err != nil {
+		return nil, names
+	}
+	lines := s.liveLines(in.GuildID, in.ChannelID)
+	bot := personRef(s.botAccount(lines))
 	names.denied[bot] = true
 	caller := personRef(in.SpeakerID)
 	ownOnly := s.guildPrivacy(in.GuildID).OwnCardOnly
 	var out []turnPerson
 	seen := map[string]bool{}
 	add := func(ref string, explicit bool) {
-		if names.current[ref] == "" || seen[ref] || names.denied[ref] || ref != caller && ownOnly || ref == caller && !explicit {
+		if ref == "" || seen[ref] || names.denied[ref] || ref != caller && ownOnly || ref == caller && !explicit || names.label(ref) == "" {
 			return
 		}
 		p := turnPerson{ref, names.current[ref], ref == caller}
@@ -199,13 +243,12 @@ func (s *Service) targetPeople(db *storage.Store, in ChatInput, _ []string) []tu
 		}
 	}
 	// A Korean display name can be inflected even when the index language is English.
-	doc := s.Doc()
-	matches := search.NameMatcher(lang.MergeSearch(append(slices.Clone(doc.Memory.Languages), "ko", "ja"), doc.BotNames()))
 	// Any valid planner target already has one of these exact signals. A guess
 	// cannot add an account, change the order, or displace an explicit target.
-	var complete bool
-	if tx.QueryRow(`SELECT cursor=-1 FROM person_alias_fill WHERE id=1`).Scan(&complete) == nil && complete {
-		for _, ref := range names.match(mentionPattern.ReplaceAllString(in.Message, " "), matches) {
+	if len(names.aliases) > 0 {
+		doc := s.Doc()
+		matches := search.NameMatcher(lang.MergeSearch(append(slices.Clone(doc.Memory.Languages), "ko", "ja"), doc.BotNames()))
+		for _, ref := range names.match(text, matches) {
 			add(ref, false)
 		}
 	}
@@ -216,7 +259,7 @@ func (s *Service) targetPeople(db *storage.Store, in ChatInput, _ []string) []tu
 	if len(out) > 0 && out[0].caller {
 		limit++
 	}
-	return out[:min(len(out), limit)]
+	return out[:min(len(out), limit)], names
 }
 
 // Two explicitly addressed accounts may have the same current display name.

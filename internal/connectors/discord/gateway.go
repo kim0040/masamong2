@@ -624,6 +624,9 @@ func (g *Gateway) Channels(guildID string) []application.ChannelInfo {
 // PersonMemoryChannels reports known local rooms and which text/news rooms can
 // export a statement. Bot access alone says nothing about other members' access.
 func (g *Gateway) PersonMemoryChannels(guildID string) map[string]bool {
+	if !g.Connected() {
+		return nil
+	}
 	gu, err := g.sess.State.Guild(guildID)
 	if err != nil {
 		return nil

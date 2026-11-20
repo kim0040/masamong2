@@ -588,17 +588,18 @@ func (s *Service) personRooms(tx *sql.Tx, guild, channel string, localOnly bool)
 
 // turnCards renders existing records; it never promotes an item or creates a
 // fact. Keep the citation checks, scope checks and active-item reads on one snapshot.
-func (s *Service) turnCards(ctx context.Context, db *storage.Store, in ChatInput, group []string, people []turnPerson, used *[]string) []chat.RoomCard {
+func (s *Service) turnCards(ctx context.Context, db *storage.Store, in ChatInput, used *[]string) ([]chat.RoomCard, personEpisodeScope) {
 	tx, err := db.Reader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return nil
+		return nil, personEpisodeScope{}
 	}
 	defer tx.Rollback()
 	strict := s.guildPrivacy(in.GuildID)
 	rooms := s.personRooms(tx, in.GuildID, in.ChannelID, strict.CardChannelOnly)
-	names, err := s.readPersonNames(tx, in.GuildID, rooms)
-	if err != nil {
-		return nil
+	people, names := s.resolvePeople(tx, in, rooms)
+	scope := personEpisodeScope{guild: in.GuildID, rooms: rooms}
+	if len(people) == 0 {
+		return nil, scope
 	}
 	var available, local []string
 	for r, here := range rooms {
@@ -650,9 +651,10 @@ func (s *Service) turnCards(ctx context.Context, db *storage.Store, in ChatInput
 		}
 		if len(facts) > 0 {
 			out = append(out, chat.RoomCard{Name: names.current[p.ref], Facts: facts, Caller: p.caller})
+			scope.people = append(scope.people, p)
 		}
 	}
-	return out
+	return out, scope
 }
 
 func personFact(tx *sql.Tx, it itemRow, episodeRoom, saved, target string, names turnNames, rooms map[string]bool, noHearsay bool) (string, []string) {
@@ -675,7 +677,7 @@ func personFact(tx *sql.Tx, it itemRow, episodeRoom, saved, target string, names
 	authors := map[string]string{}
 	for _, id := range it.evidence {
 		var room, account, label, edited, kind string
-		if tx.QueryRow(`SELECT room,actor_account,actor_label,edited_at,record_kind FROM memory_observations WHERE observation_id=? AND deleted_at='' AND trim(content)<>''`, id).
+		if tx.QueryRow(`SELECT room,actor_account,actor_label,edited_at,record_kind FROM memory_observations WHERE observation_id=? AND platform='discord' AND source_room=room AND deleted_at='' AND trim(content)<>''`, id).
 			Scan(&room, &account, &label, &edited, &kind) != nil || account == "" || kind != corpus.HumanText {
 			return "", nil
 		}
@@ -704,7 +706,7 @@ func personFact(tx *sql.Tx, it itemRow, episodeRoom, saved, target string, names
 		}
 		speakers = append(speakers, clip(label, 24))
 	}
-	fact := episodes.StoredText(it.text, func(ref string) string { return names.current[ref] }, "?")
+	fact := episodes.StoredText(it.text, names.label, "?")
 	if !self {
 		fact = "[" + strings.Join(speakers, ", ") + "] " + fact
 	}

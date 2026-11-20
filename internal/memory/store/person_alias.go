@@ -11,7 +11,7 @@ import (
 	"masamong/internal/storage"
 )
 
-func savePersonAlias(tx *sql.Tx, observation, room, account, label, at string) error {
+func aliasValues(observation, room, account, label, at string) []any {
 	rest, ok := strings.CutPrefix(room, "discord:")
 	guild, channel, server := strings.Cut(rest, ":")
 	label = strings.TrimSpace(label)
@@ -23,9 +23,7 @@ func savePersonAlias(tx *sql.Tx, observation, room, account, label, at string) e
 		return nil // not a dated observation
 	}
 	at = t.UTC().Format("2006-01-02T15:04:05.000000000Z")
-	_, err = tx.Exec(`INSERT INTO person_alias_source(observation,guild_id,person_ref,label,room,at) VALUES(?,?,?,?,?,?) ON CONFLICT(observation) DO NOTHING`,
-		observation, guild, PersonRef(account), label, room, at)
-	return err
+	return []any{observation, guild, PersonRef(account), label, room, at, strings.ToLower(label)}
 }
 
 // Startup creates metadata only. A fresh, empty store needs no historical fill.
@@ -35,23 +33,24 @@ func migratePersonAliases(db *storage.Store) error {
 	}
 	return db.WithWriter(func(tx *sql.Tx) error {
 		var old bool
-		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM pragma_table_info('person_alias')) AND NOT EXISTS(SELECT 1 FROM pragma_table_info('person_alias') WHERE name='last_source')`).Scan(&old); err != nil {
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM pragma_table_info('person_alias')) AND NOT EXISTS(SELECT 1 FROM pragma_table_info('person_alias') WHERE name='folded')`).Scan(&old); err != nil {
 			return err
 		}
 		if old { // A guild-only summary cannot prove that a label is public.
-			if _, err := tx.Exec(`DROP TABLE person_alias; DELETE FROM person_alias_fill`); err != nil {
+			if _, err := tx.Exec(`DROP TABLE IF EXISTS person_alias_source; DROP TABLE person_alias; DELETE FROM person_alias_fill`); err != nil {
 				return err
 			}
 		}
 		for _, ddl := range []string{
 			`CREATE TABLE IF NOT EXISTS person_alias(guild_id TEXT NOT NULL,person_ref TEXT NOT NULL,label TEXT NOT NULL,
-			room TEXT NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,last_source TEXT NOT NULL,PRIMARY KEY(guild_id,person_ref,label,room)) WITHOUT ROWID`,
+			room TEXT NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,last_source TEXT NOT NULL,folded TEXT NOT NULL,PRIMARY KEY(guild_id,person_ref,label,room)) WITHOUT ROWID`,
+			`CREATE INDEX IF NOT EXISTS idx_person_alias_name ON person_alias(guild_id,folded)`,
 			`CREATE TABLE IF NOT EXISTS person_alias_source(observation TEXT PRIMARY KEY,guild_id TEXT NOT NULL,person_ref TEXT NOT NULL,
-			label TEXT NOT NULL,room TEXT NOT NULL,at TEXT NOT NULL) WITHOUT ROWID`,
+			label TEXT NOT NULL,room TEXT NOT NULL,at TEXT NOT NULL,folded TEXT NOT NULL) WITHOUT ROWID`,
 			`CREATE INDEX IF NOT EXISTS idx_person_alias_source ON person_alias_source(guild_id,person_ref,label,room,at,observation)`,
 			`CREATE TRIGGER IF NOT EXISTS person_alias_seen AFTER INSERT ON person_alias_source BEGIN
-			INSERT INTO person_alias(guild_id,person_ref,label,room,first_seen,last_seen,last_source)
-			VALUES(new.guild_id,new.person_ref,new.label,new.room,new.at,new.at,new.observation)
+			INSERT INTO person_alias(guild_id,person_ref,label,room,first_seen,last_seen,last_source,folded)
+			VALUES(new.guild_id,new.person_ref,new.label,new.room,new.at,new.at,new.observation,new.folded)
 			ON CONFLICT(guild_id,person_ref,label,room) DO UPDATE SET
 			last_source=CASE WHEN (new.at,new.observation)>(last_seen,last_source) THEN new.observation ELSE last_source END,
 			first_seen=min(first_seen,new.at),last_seen=max(last_seen,new.at); END`,
@@ -99,16 +98,20 @@ func indexAliasRows(tx *sql.Tx, query string, args ...any) error {
 		return err
 	}
 	defer rows.Close()
+	var argsToSave []any
 	for rows.Next() {
 		var observation, room, id, label, at string
 		if err := rows.Scan(&observation, &room, &id, &label, &at); err != nil {
 			return err
 		}
-		if err := savePersonAlias(tx, observation, room, id, label, at); err != nil {
-			return err
-		}
+		argsToSave = append(argsToSave, aliasValues(observation, room, id, label, at)...)
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil || len(argsToSave) == 0 {
+		return err
+	}
+	values := strings.TrimSuffix(strings.Repeat("(?,?,?,?,?,?,?),", len(argsToSave)/7), ",")
+	_, err = tx.Exec(`INSERT INTO person_alias_source(observation,guild_id,person_ref,label,room,at,folded) VALUES`+values+` ON CONFLICT(observation) DO NOTHING`, argsToSave...)
+	return err
 }
 
 func indexCapturedAliases(ctx context.Context, db *storage.Store, ids []string) error {

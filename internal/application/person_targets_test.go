@@ -1,6 +1,8 @@
 package application
 
 import (
+	"database/sql"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -8,6 +10,7 @@ import (
 	"masamong/internal/action"
 	"masamong/internal/config"
 	"masamong/internal/memory/engine"
+	"masamong/internal/memory/store"
 )
 
 type resolverGateway struct{ DiscordInfo }
@@ -17,13 +20,111 @@ func (resolverGateway) PersonMemoryChannels(string) map[string]bool {
 	return map[string]bool{"c": true}
 }
 
-func resolverService(t *testing.T) *Service {
-	s := privacyService(t)
+func resolverService(t testing.TB) *Service {
+	t.Helper()
+	s, err := Open(t.TempDir(), nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	if r := s.Execute(t.Context(), action.Request{Action: "setup.resume", Input: []byte(`{"instance":"resolver"}`)}); !r.OK {
+		t.Fatal(r.Error)
+	}
 	d := s.Doc()
 	d.Guilds = map[string]config.GuildSettings{"g": {Channels: map[string]config.ChannelPolicy{"c": {Capture: true}}}}
 	s.setDoc(d, s.Revision())
 	s.Discord = resolverGateway{}
 	return s
+}
+
+func loadCostGuild(t testing.TB, n int) *Service {
+	t.Helper()
+	s := resolverService(t)
+	d := s.Doc()
+	c := d.Guilds["g"].Channels["c"]
+	c.RAGView.Blocks = []string{"attached-block"}
+	d.Guilds["g"].Channels["c"] = c
+	s.setDoc(d, s.Revision())
+	e, err := s.MemoryEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for lo := 0; lo < n; lo += 256 {
+		if err := s.Store.WithWriter(func(tx *sql.Tx) error {
+			_, err := tx.Exec(`WITH RECURSIVE ids(i) AS (VALUES(?) UNION ALL SELECT i+1 FROM ids WHERE i<?)
+				INSERT INTO memory_observations(observation_id,platform,collection,source_room,room,native_message_id,actor_label,actor_account,content,parsed_time,record_kind,imported_at)
+				SELECT 'o'||i,'discord','discord','discord:g:c','discord:g:c','m'||i,'user-'||i,'u'||i,'fixture','2026-10-01T00:00:00Z','human_text','2026-10-01T00:00:00Z' FROM ids`, lo, min(lo+255, n-1))
+			return err
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Store.DB.Exec(`UPDATE person_alias_fill SET cursor=0`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.FillPersonAliases(t.Context(), s.Store); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := e.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", MessageID: "target", AuthorID: "101", AuthorName: "민수", Content: "hello", At: time.Now()}); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	return s
+}
+
+func TestReviewResolverCost(t *testing.T) {
+	s := loadCostGuild(t, 10000)
+	input := ChatInput{GuildID: "g", ChannelID: "c", SpeakerID: "303", Message: "오늘 날씨 알려줘"}
+	start := time.Now()
+	for range 100 {
+		if got := s.targetPeople(s.Store, input, nil); len(got) != 0 {
+			t.Fatal(got)
+		}
+	}
+	t.Logf("10,000 aliases, mean of 100 no-target resolutions: %v", time.Since(start)/100)
+	input.Message = "user-9876는?"
+	if got := s.targetPeople(s.Store, input, nil); len(got) != 1 || got[0].ref != personRef("u9876") {
+		t.Fatal(got)
+	}
+}
+
+func BenchmarkPersonResolver(b *testing.B) {
+	s := loadCostGuild(b, 10000)
+	for _, busy := range []bool{false, true} {
+		for _, named := range []bool{false, true} {
+			b.Run(fmt.Sprintf("named=%t/busy=%t", named, busy), func(b *testing.B) {
+				input := ChatInput{GuildID: "g", ChannelID: "c", SpeakerID: "303", Message: "오늘 날씨 알려줘"}
+				if named {
+					input.Message = "민수는 어떤 사람이야?"
+				}
+				if busy {
+					stop, done := make(chan struct{}), make(chan struct{})
+					go func() {
+						defer close(done)
+						for {
+							select {
+							case <-stop:
+								return
+							default:
+							}
+							if _, err := s.Store.DB.Exec(`UPDATE person_alias_fill SET cursor=-1`); err != nil {
+								return
+							}
+							var n int
+							_ = s.Store.Reader().QueryRow(`SELECT count(*) FROM person_alias`).Scan(&n)
+						}
+					}()
+					defer func() { close(stop); <-done }()
+				}
+				b.ReportAllocs()
+				for b.Loop() {
+					got := s.targetPeople(s.Store, input, nil)
+					if named && (len(got) != 1 || got[0].ref != personRef("101")) || !named && len(got) != 0 {
+						b.Fatal(got)
+					}
+				}
+			})
+		}
+	}
 }
 
 func TestReviewResolverIntent(t *testing.T) {
