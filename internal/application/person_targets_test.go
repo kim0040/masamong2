@@ -87,6 +87,57 @@ func TestReviewResolverCost(t *testing.T) {
 	}
 }
 
+func TestAliasFillRunsAfterStartup(t *testing.T) {
+	s := resolverService(t)
+	e, err := s.MemoryEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := e.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", MessageID: "legacy", AuthorID: "101", AuthorName: "민수", Content: "fixture", At: time.Now()}); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if _, err := s.Store.DB.Exec(`DELETE FROM person_alias_source; UPDATE person_alias_fill SET cursor=0;
+		CREATE TRIGGER fill_fault BEFORE INSERT ON person_alias BEGIN SELECT RAISE(ABORT,'fixture'); END`); err != nil {
+		t.Fatal(err)
+	}
+	root := s.DataRoot
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	next := func() *Service {
+		t.Helper()
+		n, err := Open(root, nil, false)
+		if err != nil {
+			t.Fatalf("optional fill blocked startup: %v", err)
+		}
+		return n
+	}
+	s = next()
+	if _, err := s.Store.DB.Exec(`DROP TRIGGER fill_fault`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s = next()
+	defer s.Close()
+	timeout := time.After(5 * time.Second)
+	for {
+		var ready bool
+		if err := s.Store.Reader().QueryRow(`SELECT (SELECT cursor=-1 FROM person_alias_fill) AND EXISTS(SELECT 1 FROM person_alias WHERE person_ref=?)`, personRef("101")).Scan(&ready); err != nil {
+			t.Fatal(err)
+		}
+		if ready {
+			return
+		}
+		select {
+		case <-timeout:
+			t.Fatal("startup worker did not fill persisted alias")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
 func BenchmarkPersonResolver(b *testing.B) {
 	s := loadCostGuild(b, 10000)
 	for _, busy := range []bool{false, true} {

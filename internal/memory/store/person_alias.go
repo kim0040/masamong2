@@ -11,7 +11,7 @@ import (
 	"masamong/internal/storage"
 )
 
-func aliasValues(observation, room, account, label, at string) []any {
+func aliasValues(observation, room, account, label, at string) []string {
 	rest, ok := strings.CutPrefix(room, "discord:")
 	guild, channel, server := strings.Cut(rest, ":")
 	label = strings.TrimSpace(label)
@@ -23,7 +23,7 @@ func aliasValues(observation, room, account, label, at string) []any {
 		return nil // not a dated observation
 	}
 	at = t.UTC().Format("2006-01-02T15:04:05.000000000Z")
-	return []any{observation, guild, PersonRef(account), label, room, at, strings.ToLower(label)}
+	return []string{observation, guild, PersonRef(account), label, room, at, strings.ToLower(label)}
 }
 
 // Startup creates metadata only. A fresh, empty store needs no historical fill.
@@ -37,7 +37,7 @@ func migratePersonAliases(db *storage.Store) error {
 			return err
 		}
 		if old { // A guild-only summary cannot prove that a label is public.
-			if _, err := tx.Exec(`DROP TABLE IF EXISTS person_alias_source; DROP TABLE person_alias; DELETE FROM person_alias_fill`); err != nil {
+			if _, err := tx.Exec(`DROP TABLE IF EXISTS person_alias_source; DROP TABLE person_alias; DROP TABLE IF EXISTS person_alias_fill`); err != nil {
 				return err
 			}
 		}
@@ -98,19 +98,25 @@ func indexAliasRows(tx *sql.Tx, query string, args ...any) error {
 		return err
 	}
 	defer rows.Close()
-	var argsToSave []any
+	var values [][]string
 	for rows.Next() {
 		var observation, room, id, label, at string
 		if err := rows.Scan(&observation, &room, &id, &label, &at); err != nil {
 			return err
 		}
-		argsToSave = append(argsToSave, aliasValues(observation, room, id, label, at)...)
+		if v := aliasValues(observation, room, id, label, at); v != nil {
+			values = append(values, v)
+		}
 	}
-	if err := rows.Err(); err != nil || len(argsToSave) == 0 {
+	if err := rows.Err(); err != nil || len(values) == 0 {
 		return err
 	}
-	values := strings.TrimSuffix(strings.Repeat("(?,?,?,?,?,?,?),", len(argsToSave)/7), ",")
-	_, err = tx.Exec(`INSERT INTO person_alias_source(observation,guild_id,person_ref,label,room,at,folded) VALUES`+values+` ON CONFLICT(observation) DO NOTHING`, argsToSave...)
+	// One bound argument per batch: the SQLite driver looks up positional
+	// arguments linearly, making thousands of placeholders quadratic.
+	raw, _ := json.Marshal(values)
+	_, err = tx.Exec(`INSERT INTO person_alias_source(observation,guild_id,person_ref,label,room,at,folded)
+		SELECT value->>0,value->>1,value->>2,value->>3,value->>4,value->>5,value->>6 FROM json_each(?) WHERE true
+		ON CONFLICT(observation) DO NOTHING`, string(raw))
 	return err
 }
 
