@@ -185,6 +185,65 @@ func TestDisasterAlertsWatchKMAAndAnnounce(t *testing.T) {
 	}
 }
 
+func TestDisasterWarningUpgrades(t *testing.T) {
+	svc := setupSvc(t)
+	feed := &kmaFeed{}
+	pointAt(t, svc, "kma", feed.server(t).URL, "KMA_TEST_KEY", "k")
+	if r := exec(svc, "channels.configure", map[string]any{"id": "c1", "guild_id": "g1", "respond": "mention"}); !r.OK {
+		t.Fatal(r.Error)
+	}
+	applyDoc(t, svc, func(d *config.Document) {
+		g := d.Guilds["g1"]
+		g.Locale = "ko"
+		d.Guilds["g1"] = g
+		d.DisasterAlerts.WarningRegions = []string{"경산"}
+	})
+	gw := &postingGateway{}
+	svc.Discord = gw
+	now := time.Date(2026, 7, 12, 0, 0, 0, 0, time.UTC)
+	check := func(rows []string, want ...string) {
+		t.Helper()
+		feed.warnings = rows
+		before := len(gw.posts)
+		now = now.Add(5 * time.Minute)
+		svc.Clock = clock.Fixed{T: now}
+		application.DisasterTickForTest(svc, context.Background())
+		got := gw.posts[before:]
+		if len(got) != len(want) {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+		for _, prefix := range want {
+			if !strings.Contains(strings.Join(got, "\n"), "c1|"+prefix) {
+				t.Errorf("missing %q in %v", prefix, got)
+			}
+		}
+	}
+	// Simulate an installation upgrading with an existing visible heat advisory.
+	legacy := `{"L1|H|2":{"RegionCode":"L1","Region":"경산시","Kind":"H","KindName":"폭염","Level":"2","LevelName":"주의보"}}`
+	if _, err := svc.Store.DB.Exec(`INSERT INTO admin_state(k,v,updated_at) VALUES(?,?,?)`, "disaster:wrn_active", legacy, now.Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	heatWarning := warning("L1", "경상북도", "경산시", "폭염  ", "경보    ", "변경")
+	rainAdvisory := warning("L2", "경상북도", "포항시", "호우", "주의", "발표")
+	check([]string{heatWarning, rainAdvisory}, "⚠️ 폭염 주의보 → 경보 격상|경산시")
+	check([]string{heatWarning, rainAdvisory})
+
+	heatEmergency := warning("L1", "경상북도", "경산시", "폭염  ", "중대경보", "변경")
+	rainWarning := warning("L2", "경상북도", "포항시", "호우", "경보", "대치")
+	// The silent rain advisory upgrades too. An explicit release row for heat is not a second post.
+	rows := []string{heatEmergency, warning("L1", "경상북도", "경산시", "폭염", "경보", "해제"), rainWarning}
+	check(rows, "⚠️ 폭염 경보 → 중대경보 격상|경산시", "⚠️ 호우 주의보 → 경보 격상|포항시")
+	check(rows)
+	// A warning for the same phenomenon in another area is a new issue.
+	otherHeat := warning("L2", "경상북도", "포항시", "폭염", "중대경보", "발표")
+	check([]string{otherHeat, rainWarning}, "✅ 폭염중대경보 해제|경산시", "⚠️ 폭염중대경보 발표|포항시")
+	// If both commands arrived between checks, their shared effective time identifies the upgrade.
+	wind := warning("L1", "경상북도", "경산시", "강풍", "경보", "대치")
+	rows = []string{otherHeat, rainWarning, warning("L1", "경상북도", "경산시", "강풍", "주의", "대치해제"), wind}
+	check(rows, "⚠️ 강풍 주의보 → 경보 격상|경산시")
+	check(rows)
+}
+
 // The watcher writes only what changed: with warnings on and the same ones still in force, a check
 // leaves every stored key alone, yet the console's "last checked" keeps moving (it is kept in memory).
 func TestDisasterAlertsIdleChecksWriteNothingButStatusStaysFresh(t *testing.T) {

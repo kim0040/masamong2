@@ -1137,6 +1137,7 @@
   "disaster.eqk.more": "…외 {n}건",
   "disaster.footer": "기상청 · {time} 기준",
   "disaster.wrn.issued": "⚠️ {kind}{level} 발표",
+  "disaster.wrn.upgraded": "⚠️ {kind} {from} → {level} 격상",
   "disaster.wrn.lifted": "✅ {kind}{level} 해제",
   "disaster.wrn.effective": "발효: {time}",
   "discord.command.places.name": "장소",

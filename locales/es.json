@@ -1135,6 +1135,7 @@
   "disaster.eqk.more": "…y {n} más",
   "disaster.footer": "KMA · a fecha de {time} KST",
   "disaster.wrn.issued": "⚠️ {kind} {level} emitido",
+  "disaster.wrn.upgraded": "⚠️ {kind} pasa de {from} a {level}",
   "disaster.wrn.lifted": "✅ {kind} {level} levantado",
   "disaster.wrn.effective": "En vigor: {time}",
   "discord.command.places.name": "lugares",
