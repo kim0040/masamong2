@@ -587,10 +587,16 @@ func (s *Service) personRooms(tx *sql.Tx, guild, channel string, localOnly bool)
 		parent = p
 	}
 	if public, known := channels[parent]; !known || !public {
-		if known {
-			rooms[roomOf(guild, channel)] = true
+		if !known {
+			return rooms
 		}
-		return rooms // private/restricted rooms stay inside themselves
+		// A private/restricted room is its own group: its statements and hearsay
+		// stay local, while a person's own public statements remain usable here.
+		rooms[roomOf(guild, channel)] = true
+		if localOnly {
+			return rooms
+		}
+		parent = ""
 	}
 	add := func(id, p string) {
 		capture := s.ownChannelPolicy(guild, p).Capture

@@ -303,11 +303,12 @@ func TestEpisodePersonBlockScope(t *testing.T) {
 	check(b, []string{"민수는 차를 좋아함", "[영희] 민수는 바둑을 둠"}, []string{"기타", "비밀"})
 	t.Log("fixture:\n" + b + cardClose)
 	check(get("other", false), []string{"차를 좋아함", "기타"}, []string{"바둑", "비밀"})
-	check(get("private", false), []string{"비밀"}, []string{"차를 좋아함", "기타", "바둑"})
+	check(get("private", false), []string{"비밀", "차를 좋아함"}, []string{"기타", "바둑"})
 	strict(t, s, config.GuildPrivacy{NoHearsay: true})
 	check(get("c", false), []string{"차를 좋아함"}, []string{"바둑", "기타", "비밀"})
 	strict(t, s, config.GuildPrivacy{CardChannelOnly: true})
 	check(get("other", false), []string{"기타"}, []string{"차를 좋아함", "바둑", "비밀"})
+	check(get("private", false), []string{"비밀"}, []string{"차를 좋아함", "기타", "바둑"})
 	strict(t, s, config.GuildPrivacy{})
 	// Even before a derived-item invalidation pass runs, an edit after the
 	// item was saved makes its old wording unusable.
