@@ -4,7 +4,7 @@
 
 | 파일 | 내용 | 원본 |
 |---|---|---|
-| [actions.md](actions.md) | 모든 Action: 상태, 효과, CLI 명령, 콘솔 경로, 처리 위치 | `internal/catalog`, `internal/application` |
+| [actions.md](actions.md) | 모든 Action: 상태, 효과, CLI 명령, 콘솔 경로, 처리 함수와 분기 위치 | `internal/catalog`, `internal/application` |
 | [commands.md](commands.md) | Discord 애플리케이션 명령: 한국어 이름, 호출하는 Action, 옵션 | `internal/connectors/discord`, `locales/` |
 | [tools.md](tools.md) | 모델이 보는 채팅 도구와 그 도구를 설명하는 언어팩 키 | `internal/tools`, `internal/lang/packs` |
 | [locales.md](locales.md) | 메시지 카탈로그 키 접두사와 로케일별 누락 | `locales/` |
