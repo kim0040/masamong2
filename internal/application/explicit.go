@@ -704,25 +704,27 @@ type forgetPlan struct {
 
 const forgetBatch = 256
 
+type forgetItem struct {
+	ID, Episode, Text, State, By, Evidence, Kind, Created string
+}
+
 // A single read snapshot (or the confirming writer) visits every matching
 // item, including hidden rows. Never keep the full set of bodies in memory.
-func walkForgetItems(tx *sql.Tx, guild, ref string, visit func([]myItem) error) error {
+func walkForgetItems(tx *sql.Tx, guild, ref string, visit func([]forgetItem) error) error {
 	var cursor int64
 	for {
-		rows, err := tx.Query(`SELECT i.rowid,i.id,i.episode_id,i.text,i.state,i.by_refs,i.evidence FROM episode_item i JOIN channel_episode e ON e.id=i.episode_id
+		rows, err := tx.Query(`SELECT i.rowid,i.id,i.episode_id,i.text,i.state,i.by_refs,i.evidence,i.kind,i.created_at FROM episode_item i JOIN channel_episode e ON e.id=i.episode_id
 			WHERE i.rowid>? AND e.guild_id=? AND (instr(i.text,?)>0 OR EXISTS(SELECT 1 FROM json_each(i.by_refs) WHERE value=?)) ORDER BY i.rowid LIMIT ?`, cursor, guild, "{@"+ref+"}", ref, forgetBatch)
 		if err != nil {
 			return err
 		}
-		var batch []myItem
+		var batch []forgetItem
 		for rows.Next() {
-			var it myItem
-			var state, by, ev string
-			if err := rows.Scan(&cursor, &it.ID, &it.Episode, &it.Text, &state, &by, &ev); err != nil {
+			var it forgetItem
+			if err := rows.Scan(&cursor, &it.ID, &it.Episode, &it.Text, &it.State, &it.By, &it.Evidence, &it.Kind, &it.Created); err != nil {
 				rows.Close()
 				return err
 			}
-			it.Evidence = []string{state, by, ev}
 			batch = append(batch, it)
 		}
 		err = rows.Err()
@@ -747,11 +749,19 @@ func allForgetPlan(tx *sql.Tx, guild, ref string) forgetPlan {
 	h := sha256.New()
 	enc := json.NewEncoder(h)
 	_ = enc.Encode([]string{"all", guild, ref})
-	p.err = walkForgetItems(tx, guild, ref, func(batch []myItem) error {
+	p.err = walkForgetItems(tx, guild, ref, func(batch []forgetItem) error {
 		for _, it := range batch {
 			_ = enc.Encode(it)
-			if len(p.items) < 3 {
-				p.items = append(p.items, it)
+			// The chat preview still shows the three newest active examples,
+			// not older rows or the contents of hidden facts being erased.
+			if it.State == "active" {
+				at := sort.Search(len(p.items), func(i int) bool { return p.items[i].Created <= it.Created })
+				if at < 3 {
+					p.items = append(p.items, myItem{})
+					copy(p.items[at+1:], p.items[at:])
+					p.items[at] = myItem{Text: it.Text, Created: it.Created}
+					p.items = p.items[:min(3, len(p.items))]
+				}
 			}
 			p.count++
 		}
@@ -818,9 +828,9 @@ func (s *Service) forgetPreview(db *storage.Store, guild, ref string, ids []stri
 	return p
 }
 
-// applyForget deletes what the plan shows.
 var errForgetChanged = errors.New("forget preview changed")
 
+// applyForget deletes what the plan shows.
 func (s *Service) applyForget(ctx context.Context, db *storage.Store, guild, ref string, p forgetPlan) (int, error) {
 	deleted := 0
 	err := db.WithWriterContext(ctx, func(tx *sql.Tx) error {
@@ -834,7 +844,7 @@ func (s *Service) applyForget(ctx context.Context, db *storage.Store, guild, ref
 			if current.token != p.token {
 				return errForgetChanged
 			}
-			if err := walkForgetItems(tx, guild, ref, func(batch []myItem) error {
+			if err := walkForgetItems(tx, guild, ref, func(batch []forgetItem) error {
 				ids := make([]string, 0, len(batch))
 				for _, it := range batch {
 					ids = append(ids, it.ID)
