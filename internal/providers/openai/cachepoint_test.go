@@ -249,3 +249,41 @@ func TestAnthropicCachePointStaysOnTheMarkedBlock(t *testing.T) {
 		t.Fatalf("no marker stays in the turns: %v", got)
 	}
 }
+
+// An attempt on a host that takes no breakpoint strips the mark on its own copy of the messages:
+// the caller's slice keeps it, so a flagged fallback still ends the stable prefix — and the caller
+// can send the same request again with the mark intact.
+func TestCachePointSurvivesFallbackAttempts(t *testing.T) {
+	var first, second map[string]any
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&first)
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":{"message":"unavailable"}}`))
+	}))
+	t.Cleanup(bad.Close)
+	good := chatOKServer(t, &second)
+	flaggedHost(t, "openrouter", good+"/api/v1", true)
+	c := providers.NewClient(5*time.Second, nil)
+	c.MaxRetries = 0
+	a, b := New(c, bad.URL, providers.Offline()), New(c, good+"/api/v1", providers.Offline())
+	b.API = APIOpenRouter
+	a.Failover = &Failover{Model: "local", Fallbacks: []Fallback{{A: b, Model: "anthropic/claude-haiku-5.5"}}}
+
+	req := ChatRequest{Model: "local", MaxTokens: 50, Messages: []Message{
+		{Role: "system", Content: "S", CachePoint: true},
+		{Role: "user", Content: "Q"},
+	}}
+	res, err := a.Chat(context.Background(), req)
+	if err != nil || !res.Fallback {
+		t.Fatalf("the fallback serves the call: %v %+v", err, res)
+	}
+	if cacheMarks(first) != 0 {
+		t.Fatalf("the host that takes none saw none: %v", first["messages"])
+	}
+	if cacheMarks(second) != 1 {
+		t.Fatalf("the flagged fallback received the one breakpoint: %v", second["messages"])
+	}
+	if !req.Messages[0].CachePoint {
+		t.Fatal("the caller's marked message keeps its mark")
+	}
+}

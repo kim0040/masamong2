@@ -807,8 +807,11 @@ func (a *Adapter) chat(ctx context.Context, req ChatRequest) (ChatResult, error)
 	}
 	req = a.resolveQuick(req)
 	if !a.cachePointOK(req.Model) {
+		// a host that takes no breakpoint never sees the field — on this attempt's own copy of the
+		// messages, so the caller's (and a fallback attempt's) keep the mark
+		req.Messages = slices.Clone(req.Messages)
 		for i := range req.Messages {
-			req.Messages[i].CachePoint = false // a host that takes no breakpoint never sees the field
+			req.Messages[i].CachePoint = false
 		}
 	}
 	out, err := a.chatOnce(ctx, req, true)
