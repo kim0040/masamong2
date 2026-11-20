@@ -85,7 +85,7 @@ masamong channels configure --guild_id 123456789 --id 987654321 --respond mentio
 | `/places` | Restaurants, cafes, shops (Kakao Map; needs a Kakao REST key) |
 | `/ranking` | Top talkers in this room: today, this week, this month, all time |
 | `/quote` | Stock quotes (needs a Finnhub key) |
-| `/fx` | Exchange rates. No option: the main currencies in your home currency (won for Korean, dollars otherwise). `currency` (a code like `USD` or a name like `yen`): both directions. `amount`: convert that sum. Values use the unit people say ("100 yen ≈ 930 won", "10,000 KRW ≈ 7.2 USD") |
+| `/fx` | Exchange rates. No option: the main currencies in your home currency (won for Korean, dollars otherwise). `currency` (a code like `USD` or a name like `yen`): that currency against your home currency, both directions. `base`: the main currencies valued in that currency ("1 USD ≈ 148 JPY"); with `currency`, those two against each other (`!fx usd eur`). `amount`: convert that sum (of `currency`, else of the base or home currency). Values use the unit people say ("100 yen ≈ 930 won", "10,000 KRW ≈ 7.2 USD") |
 | `/search` | Web search (needs a key for Tavily, Linkup, Exa, Serper, Brave, TinyFish or Kakao) |
 | `/poll` | A Discord poll in this room |
 | `/summary` | Three-line summary and decisions of the recent conversation (rooms that collect conversation) |
