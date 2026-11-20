@@ -906,7 +906,17 @@ func fxPrefixOptions(tail string, opts map[string]string) {
 	if _, ok := lex.Resolve(opts["currency"]); ok {
 		return
 	}
-	for i := 1; i < len(words); i++ {
+	// a side longer than the longest admissible name cannot resolve, so only the splits inside it are
+	// tried (a long unknown input stays one currency without scanning them all)
+	bound := lex.MaxNameWords()
+	lo, hi := len(words)-bound, bound
+	if lo < 1 {
+		lo = 1
+	}
+	if hi > len(words)-1 {
+		hi = len(words) - 1
+	}
+	for i := lo; i <= hi; i++ {
 		first, second := strings.Join(words[:i], " "), strings.Join(words[i:], " ")
 		_, ok1 := lex.Resolve(first)
 		_, ok2 := lex.Resolve(second)

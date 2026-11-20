@@ -12,8 +12,11 @@ package currency
 
 import (
 	"math"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"unicode/utf8"
 
 	xcur "golang.org/x/text/currency"
 	"golang.org/x/text/language"
@@ -57,6 +60,54 @@ type Lexicon struct{ cat *i18n.Catalog }
 
 // New reads currency data from cat.
 func New(cat *i18n.Catalog) *Lexicon { return &Lexicon{cat: cat} }
+
+// nameIndex is a catalog's folded name -> code map for every name every locale lists, with the folded
+// length of the longest name. It is built once per catalog (they can be swapped for a bundle) and is
+// read-only after.
+type nameIndex struct {
+	byName  map[string]string
+	maxName int // runes in the longest folded name: more typed words than this cannot be one name
+}
+
+var nameIndexes sync.Map // *i18n.Catalog -> *nameIndex
+
+func (l *Lexicon) index() *nameIndex {
+	if v, ok := nameIndexes.Load(l.cat); ok {
+		return v.(*nameIndex)
+	}
+	idx := &nameIndex{byName: map[string]string{}, maxName: 3}
+	for _, loc := range l.cat.Locales() {
+		pre := l.cat.Prefixed(loc, namePrefix)
+		codes := make([]string, 0, len(pre))
+		for code := range pre {
+			codes = append(codes, code)
+		}
+		sort.Strings(codes)
+		for _, code := range codes {
+			if !ValidCode(code) {
+				continue
+			}
+			for _, n := range names(pre[code]) {
+				key := fold(n)
+				if key == "" {
+					continue
+				}
+				if _, taken := idx.byName[key]; !taken {
+					idx.byName[key] = strings.ToUpper(code)
+				}
+				if w := utf8.RuneCountInString(key); w > idx.maxName {
+					idx.maxName = w
+				}
+			}
+		}
+	}
+	actual, _ := nameIndexes.LoadOrStore(l.cat, idx)
+	return actual.(*nameIndex)
+}
+
+// MaxNameWords bounds how many typed words one currency name is read as: a side of a split longer
+// than the longest admissible name is never asked of Resolve, so a long unknown input stays one name.
+func (l *Lexicon) MaxNameWords() int { return l.index().maxName }
 
 // providerCodes is every currency code ExchangeRate-API publishes it serves rates for
 // (https://www.exchangerate-api.com/docs/supported-currencies, checked 2026-11-20). Nine of them —
@@ -131,20 +182,8 @@ func (l *Lexicon) Resolve(text string) (string, bool) {
 	if len(t) == 3 && ValidCode(t) {
 		return strings.ToUpper(t), true
 	}
-	key := fold(t)
-	for _, loc := range l.cat.Locales() {
-		for code, list := range l.cat.Prefixed(loc, namePrefix) {
-			if !ValidCode(code) {
-				continue
-			}
-			for _, n := range names(list) {
-				if fold(n) == key {
-					return strings.ToUpper(code), true
-				}
-			}
-		}
-	}
-	return "", false
+	code, ok := l.index().byName[fold(t)]
+	return code, ok
 }
 
 // Name is the display name of code in locale ("" when the locale has none: show the code).

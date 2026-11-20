@@ -3,6 +3,7 @@ package discord
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -91,6 +92,31 @@ func TestFXPrefixParsing(t *testing.T) {
 		if opts["currency"] != tc.currency || opts["base"] != tc.base || opts["amount"] != tc.amount {
 			t.Errorf("%q: currency %q base %q amount %q, want %q %q %q", tc.text, opts["currency"], opts["base"], opts["amount"], tc.currency, tc.base, tc.amount)
 		}
+	}
+}
+
+// A tail that is no currency stays one currency for the action to refuse — however long it is:
+// only splits where each side could still be a name are tried, so a long unknown input parses at
+// once (the benchmark keeps it that way).
+func TestFXPrefixLongUnknownInputStaysOneName(t *testing.T) {
+	tail := strings.Repeat("x ", 999) + "x" // 1,999 characters of unknown words
+	cmd, opts, ok := ParsePrefix("!", "!fx "+tail)
+	if !ok || cmd.Name != "fx" {
+		t.Fatalf("the long input did not parse as fx")
+	}
+	if opts["currency"] != tail || opts["base"] != "" || opts["amount"] != "" {
+		t.Errorf("opts = %v, want the whole tail as one currency", opts)
+	}
+}
+
+func BenchmarkFXPrefixLongUnknownInput(b *testing.B) {
+	for _, n := range []int{1, 100, 998} {
+		b.Run(fmt.Sprint(n), func(b *testing.B) {
+			text := "!fx" + strings.Repeat(" x", n)
+			for b.Loop() {
+				ParsePrefix("!", text)
+			}
+		})
 	}
 }
 
