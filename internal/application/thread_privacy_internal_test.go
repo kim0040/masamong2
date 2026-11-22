@@ -64,12 +64,12 @@ func TestThreadReadCannotPublishAfterPrivacyChange(t *testing.T) {
 						<-resume
 					}
 				}
-				threadTestHooks.afterRead.Store(&hook)
+				s.hooks.threads.afterRead.Store(&hook)
 				// This cleanup was registered after deliveryService: release and join before it closes DBs.
 				t.Cleanup(func() {
 					release()
 					awaitThreadSignal(t, done, "thread read cleanup")
-					threadTestHooks.afterRead.Store(nil)
+					s.hooks.threads.afterRead.Store(nil)
 				})
 				go func() {
 					defer close(done)

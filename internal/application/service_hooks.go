@@ -24,6 +24,8 @@ type serviceHooks struct {
 	// statsDay runs after each finished day of the statistics rollup (a test stops a backfill midway);
 	// a test may set and clear it while the service runs.
 	statsDay atomic.Pointer[func(s *Service, ctx context.Context, group, day string)]
+	// threads run inside the thread bookkeeping (threads.go).
+	threads threadHooks
 	// oldEditsAtOnce settles old edits at the first idle pass instead of oldEditsDelay after the start.
 	oldEditsAtOnce bool
 }

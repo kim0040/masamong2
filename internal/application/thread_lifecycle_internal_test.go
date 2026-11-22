@@ -30,9 +30,9 @@ func TestThreadLifecyclePersistsAcrossTickEviction(t *testing.T) {
 					s.threads.mu.Unlock()
 					s.ensureThread("target", true)
 				}
-				h := &threadTestHooks.beforeArchiveDB
+				h := &s.hooks.threads.beforeArchiveDB
 				if phase == "before-write" {
-					h = &threadTestHooks.beforeArchiveWrite
+					h = &s.hooks.threads.beforeArchiveWrite
 				}
 				var ticked bool
 				hook := func(string) {
@@ -92,11 +92,11 @@ func TestThreadLifecycleInvalidatesAnOlderRead(t *testing.T) {
 			<-resume
 		}
 	}
-	threadTestHooks.afterRead.Store(&hook)
+	s.hooks.threads.afterRead.Store(&hook)
 	t.Cleanup(func() {
 		release()
 		awaitThreadSignal(t, done, "archive read cleanup")
-		threadTestHooks.afterRead.Store(nil)
+		s.hooks.threads.afterRead.Store(nil)
 	})
 	go func() {
 		defer close(done)
@@ -106,7 +106,7 @@ func TestThreadLifecycleInvalidatesAnOlderRead(t *testing.T) {
 	s.ThreadArchived("target", true)
 	release()
 	awaitThreadSignal(t, done, "old snapshot after archive")
-	threadTestHooks.afterRead.Store(nil)
+	s.hooks.threads.afterRead.Store(nil)
 	s.threads.mu.Lock()
 	info := s.threads.threads["target"]
 	s.threads.mu.Unlock()

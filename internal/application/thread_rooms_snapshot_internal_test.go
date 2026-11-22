@@ -17,8 +17,8 @@ func TestThreadRoomsRechecksDeletedSnapshot(t *testing.T) {
 			s.ThreadDeleted("target")
 		}
 	}
-	threadTestHooks.afterRoomsRead.Store(&hook)
-	t.Cleanup(func() { threadTestHooks.afterRoomsRead.Store(nil) })
+	s.hooks.threads.afterRoomsRead.Store(&hook)
+	t.Cleanup(func() { s.hooks.threads.afterRoomsRead.Store(nil) })
 	rooms := s.threadRooms("g", "parent")
 	if len(rooms) != 0 || reads.Load() != 2 {
 		t.Error("parent scope published a snapshot from before deletion")
@@ -39,8 +39,8 @@ func TestThreadRoomsUnderConstantOtherChanges(t *testing.T) {
 			s.ThreadDeleted("gone")
 		}
 	}
-	threadTestHooks.afterRoomsRead.Store(&hook)
-	t.Cleanup(func() { threadTestHooks.afterRoomsRead.Store(nil) })
+	s.hooks.threads.afterRoomsRead.Store(&hook)
+	t.Cleanup(func() { s.hooks.threads.afterRoomsRead.Store(nil) })
 	rooms := s.threadRooms("g", "parent")
 	if len(rooms) != 1 || rooms[0] != engine.RoomKey("g", "kept") {
 		t.Fatalf("rooms = %v, want only the kept thread", rooms)

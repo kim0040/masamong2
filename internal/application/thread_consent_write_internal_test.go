@@ -20,8 +20,8 @@ func TestThreadParticipantWriteCannotFollowWithdrawal(t *testing.T) {
 					s.forgetThreadOwner("member")
 				}
 			}
-			threadTestHooks.beforeParticipantWrite.Store(&hook)
-			t.Cleanup(func() { threadTestHooks.beforeParticipantWrite.Store(nil) })
+			s.hooks.threads.beforeParticipantWrite.Store(&hook)
+			t.Cleanup(func() { s.hooks.threads.beforeParticipantWrite.Store(nil) })
 			s.NoteThreadParticipant("target", "member")
 			var n int
 			if err := s.Store.DB.QueryRow(`SELECT count(*) FROM thread_participants WHERE user_id='member'`).Scan(&n); err != nil {

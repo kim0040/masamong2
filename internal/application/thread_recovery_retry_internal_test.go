@@ -17,8 +17,8 @@ func TestThreadRecoveryRetriesInvalidatedSnapshot(t *testing.T) {
 			s.forgetThreadOwner("unrelated")
 		}
 	}
-	threadTestHooks.afterRead.Store(&hook)
-	t.Cleanup(func() { threadTestHooks.afterRead.Store(nil) })
+	s.hooks.threads.afterRead.Store(&hook)
+	t.Cleanup(func() { s.hooks.threads.afterRead.Store(nil) })
 	if !s.recoverThread("target", false) {
 		t.Error("unrelated withdrawal made this lookup miss")
 	}
@@ -35,8 +35,8 @@ func TestThreadRecoveryRetryIsBounded(t *testing.T) {
 	s.threads.mu.Unlock()
 	var reads atomic.Int32
 	hook := func(string) { reads.Add(1); s.forgetThreadOwner("unrelated") }
-	threadTestHooks.afterRead.Store(&hook)
-	t.Cleanup(func() { threadTestHooks.afterRead.Store(nil) })
+	s.hooks.threads.afterRead.Store(&hook)
+	t.Cleanup(func() { s.hooks.threads.afterRead.Store(nil) })
 	if s.recoverThread("target", false) {
 		t.Error("repeatedly invalidated snapshots were published")
 	}
