@@ -459,14 +459,14 @@ func TestDisasterTickReadsOneConfigRevision(t *testing.T) {
 	}
 }
 
-// revisionSwapGateway applies a configuration change the first time the watcher asks whether Discord is
+// configSwapGateway applies a configuration change the first time the watcher asks whether Discord is
 // connected, which is after the check has read its configuration.
-type revisionSwapGateway struct {
+type configSwapGateway struct {
 	postingGateway
 	onConnected func()
 }
 
-func (g *revisionSwapGateway) Connected() bool {
+func (g *configSwapGateway) Connected() bool {
 	if swap := g.onConnected; swap != nil {
 		g.onConnected = nil
 		swap()
@@ -490,7 +490,7 @@ func TestDisasterApprovalReadsTheChecksRevision(t *testing.T) {
 	if r := exec(svc, "access.policy", map[string]any{"server_approval": true}); !r.OK {
 		t.Fatal(r.Error)
 	}
-	gw := &revisionSwapGateway{}
+	gw := &configSwapGateway{}
 	svc.Discord = gw
 	now := time.Date(2026, 10, 1, 3, 20, 0, 0, time.UTC)
 	svc.Clock = clock.Fixed{T: now}
