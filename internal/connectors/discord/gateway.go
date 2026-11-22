@@ -1118,7 +1118,7 @@ func (g *Gateway) handleComponent(s *discordgo.Session, i *discordgo.Interaction
 		r := g.renderInvoked(res, Command{Name: parts[0], Action: req.Action}, ictx)
 		edit := &discordgo.WebhookEdit{Embeds: ptrEmbeds(r.Embeds()), AllowedMentions: noMentions}
 		if r.Components != nil {
-			edit.Components = &r.Components
+			edit.Components = dmRefresh(r.Components, i.GuildID, ictx) // a DM press keeps the server (private_cards.go)
 		}
 		final, cancelFinal := g.finalContext(base)
 		defer cancelFinal()
