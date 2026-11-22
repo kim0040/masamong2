@@ -75,6 +75,7 @@ func (s *Service) RunScheduler(ctx context.Context) {
 				if s.updateDue() && updateChecking.CompareAndSwap(false, true) {
 					s.ownedGo("update check", func(ctx context.Context) { defer updateChecking.Store(false); s.checkUpdate(ctx) })
 				}
+				s.ownedGo("update news", func(ctx context.Context) { s.updateNewsTick(ctx) })
 				if now := s.Clock.Now(); now.Sub(lastClean) >= time.Hour && len(s.leftoverList()) > 0 {
 					lastClean = now
 					s.ownedGo("maintenance leftovers", func(context.Context) { s.cleanDataLeftovers() })
