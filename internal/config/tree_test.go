@@ -37,7 +37,7 @@ func TestSchemaCarriesWhatTheFormNeeds(t *testing.T) {
 	if n := find("retention", "audit_days"); n.Implied != (Retention{}).Days()["audit"] {
 		t.Fatalf("audit_days implied %v", n.Implied)
 	}
-	if n := find("memory", "index_workers"); n.Implied != 8 || *n.Min != 1 || *n.Max != MaxIndexWorkers {
+	if n := find("memory", "index_workers"); n.Implied != 8 || *n.Min != 0 || *n.Max != MaxIndexWorkers {
 		t.Fatalf("memory.index_workers %+v", n)
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
@@ -344,10 +345,14 @@ func (levels *WatchLevels) UnmarshalYAML(node *yaml.Node) error {
 // ChannelPolicy is isolated to one source channel. Capture stores this channel's messages as memory;
 // MemoryUse lets replies search memory (the channel's own room plus attached blocks only).
 type ChannelPolicy struct {
-	Respond    string         `yaml:"respond,omitempty" json:"respond,omitempty"` // command|mention|always|off
-	PersonaRef string         `yaml:"persona_ref,omitempty" json:"persona_ref,omitempty"`
-	Rules      string         `yaml:"rules,omitempty" json:"rules,omitempty"` // extra reply rules for this channel
-	Capture    bool           `yaml:"capture,omitempty" json:"capture,omitempty"`
+	Respond    string `yaml:"respond,omitempty" json:"respond,omitempty"` // command|mention|always|off
+	PersonaRef string `yaml:"persona_ref,omitempty" json:"persona_ref,omitempty"`
+	Rules      string `yaml:"rules,omitempty" json:"rules,omitempty"` // extra reply rules for this channel
+	// Capture stores this channel's messages as memory: on unless the file says capture: false.
+	// It is written explicitly so an operator's off survives a marshal round-trip; captureSet marks
+	// a value the file actually set (see parse).
+	Capture    bool `yaml:"capture" json:"capture"`
+	captureSet bool
 	Logging    ChannelLogging `yaml:"logging,omitempty" json:"logging,omitempty"`
 	MemoryUse  string         `yaml:"memory_use,omitempty" json:"memory_use,omitempty"` // on | off
 	Proactive  bool           `yaml:"proactive,omitempty" json:"proactive,omitempty"`   // superseded by Participation; always false
@@ -385,8 +390,8 @@ type ChannelPolicy struct {
 // ChannelConversation is how a conversation with the bot may continue in a channel.
 type ChannelConversation struct {
 	// Follow lets the person the bot just answered carry on without tagging it: off (default, an
-	// experimental feature), reply_only (only replies to the bot's message) or window (the scored
-	// follow-up window). Decisions are recorded either way, to tune the defaults from real use.
+	// experimental feature) or window (the scored follow-up window). Decisions are recorded either
+	// way, to tune the defaults from real use. A stored reply_only is read as off (ParseCommitted).
 	Follow string `yaml:"follow,omitempty" json:"follow,omitempty"`
 	// FollowWindowSec is how long the window stays open after a reply (0 = 90; a question from the bot
 	// adds 60).
@@ -422,7 +427,7 @@ type ChannelConversation struct {
 var (
 	NameCallModes     = []string{"addressed", "always", "off"}
 	AttributionModes  = []string{"on", "structural", "off"}
-	FollowModes       = []string{"off", "reply_only", "window"}
+	FollowModes       = []string{"off", "window"}
 	ThreadModes       = []string{"offer", "auto_task", "off"}
 	ThreadFollowModes = []string{"participants", "all"}
 	ThreadRecapModes  = []string{"plan", "always", "off"}
@@ -658,7 +663,7 @@ func DefaultChannelPolicy() ChannelPolicy {
 	return ChannelPolicy{
 		Respond:    "command",
 		PersonaRef: "",
-		Capture:    false,
+		Capture:    true,
 		Logging:    ChannelLogging{Level: "ops", RetainDays: 30},
 		MemoryUse:  "on",
 		Proactive:  false,
@@ -670,6 +675,12 @@ func DefaultChannelPolicy() ChannelPolicy {
 // persona; the effective persona is resolved from the language at read time.
 func NormalizeChannelPolicy(p ChannelPolicy) ChannelPolicy {
 	d := DefaultChannelPolicy()
+	// Capture is on unless the file set it explicitly (parse marks captureSet); a policy built in
+	// code is treated like a channel the file never mentioned, not like an operator's off.
+	if !p.captureSet {
+		p.Capture = true
+		p.captureSet = true
+	}
 	if p.Respond == "" {
 		p.Respond = d.Respond
 	}
@@ -1004,11 +1015,13 @@ func DefaultBackup() Backup { return Backup{Schedule: "weekly", Hour: 4, Weekday
 // whose policy has capture on; Embed runs background indexing; Retrieve is the ranking mode replies
 // use (off disables memory search everywhere).
 type MemoryFlags struct {
-	Capture          bool     `yaml:"capture" json:"capture"`
-	Extract          bool     `yaml:"extract" json:"extract"` // claims: not implemented (sandbox B3 unmeasured)
-	Embed            bool     `yaml:"embed" json:"embed"`
-	Retrieve         string   `yaml:"retrieve" json:"retrieve"` // off | auto | hybrid | rerank
-	Summaries        bool     `yaml:"summaries,omitempty" json:"summaries,omitempty"`
+	Capture  bool   `yaml:"capture" json:"capture"`
+	Extract  bool   `yaml:"extract" json:"extract"` // claims: not implemented (sandbox B3 unmeasured)
+	Embed    bool   `yaml:"embed" json:"embed"`
+	Retrieve string `yaml:"retrieve" json:"retrieve"` // unset = auto; off | auto | hybrid | rerank
+	// Summaries builds leaf and session summaries: on unless the file says summaries: false. Written
+	// explicitly so an operator's off survives a marshal round-trip.
+	Summaries        bool     `yaml:"summaries" json:"summaries"`
 	NaiveTimezone    string   `yaml:"naive_timezone,omitempty" json:"naive_timezone,omitempty"` // declared zone of Kakao (naive) times
 	IndexBudgetUSD   string   `yaml:"index_budget_usd,omitempty" json:"index_budget_usd,omitempty"`
 	TurnBudgetUSD    string   `yaml:"turn_budget_usd,omitempty" json:"turn_budget_usd,omitempty"`
@@ -1052,7 +1065,7 @@ type MemoryFlags struct {
 	// so the search that follows finds the vector ready. on | off, empty = on. Off sends the message to
 	// the embedding provider only when a search asks for it (see WarmQueryOn).
 	WarmQuery string `yaml:"warm_query,omitempty" json:"warm_query,omitempty"`
-	// MessageVectors also embeds every message of a closed leaf on its own (1024 dimensions at most) and
+	// MessageVectors also embeds every message of a closed leaf on its own (512 dimensions at most) and
 	// lets search use those vectors as one more candidate source, so a one-line fact in a long leaf is
 	// found. It costs storage and memory (about 1 KB of RAM per message) and one embedding per message.
 	// Unset = on (see MessageVectorsOn); an explicit false is kept and turns it off.
@@ -1163,15 +1176,15 @@ type ChatSettings struct {
 // Absence — never a value of 0 — means the default.
 type TranscriptChars int
 
-// UnmarshalYAML refuses a transcript_chars that is not an integer 1000–20000. It runs only when the
-// key is present, so the default stays unset while an explicit 0, a fraction or a number outside the
-// range comes back as an error naming the key.
+// UnmarshalYAML refuses a transcript_chars that is not an integer. It runs only when the key is
+// present; the 1000–20000 range is checked in parse, where a committed document gets the value
+// clamped and reported instead of failing to load.
 func (t *TranscriptChars) UnmarshalYAML(n *yaml.Node) error {
 	var v int
 	if n.Kind != yaml.ScalarNode || n.Tag != "!!int" {
 		return fmt.Errorf("chat.transcript_chars must be an integer 1000–20000 (unset means the default 5000)")
 	}
-	if err := n.Decode(&v); err != nil || v < 1000 || v > 20000 {
+	if err := n.Decode(&v); err != nil {
 		return fmt.Errorf("chat.transcript_chars must be an integer 1000–20000 (unset means the default 5000)")
 	}
 	*t = TranscriptChars(v)
@@ -1372,7 +1385,7 @@ func Default(instanceID, dataDir string) Document {
 		Limits: Limits{
 			Profile: "lite", MonthlyBudgetUSD: "10.00", PerRequestBudgetUSD: "0.15", MaxExternalAttempts: 10,
 		},
-		Memory: MemoryFlags{Capture: false, Extract: false, Embed: true, Retrieve: "auto", Summaries: true,
+		Memory: MemoryFlags{Capture: true, Extract: false, Embed: true, Retrieve: "auto", Summaries: true,
 			NaiveTimezone: "Asia/Seoul", IndexBudgetUSD: "1.00", TurnBudgetUSD: "0.05", IndexIntervalMin: 10,
 			Languages: []string{"ko"}},
 		Participation: Participation{Enabled: false, Mode: "off"},
@@ -1391,11 +1404,12 @@ func Default(instanceID, dataDir string) Document {
 func Parse(raw []byte) (Document, error) { return parse(raw, nil) }
 
 // Problem is a setting of a committed configuration that this release no longer accepts. The setting is
-// switched off, not the whole bot: an upgrade must not stop a daemon over an address it used to run with.
+// switched off or brought back inside its limit, not the whole bot: an upgrade must not stop a daemon
+// over an address it used to run with or a number it stored.
 type Problem struct {
-	Path   string `json:"path"`   // providers.<id>.base_url, tools.<id>.http.url
+	Path   string `json:"path"`   // providers.<id>.base_url, tools.<id>.http.url, backup.keep
 	Reason string `json:"reason"` // what is wrong with it, in words an operator can act on
-	Off    string `json:"off"`    // what was switched off: providers.<id>, tools.<id>
+	Off    string `json:"off"`    // what the stored value became: providers.<id>, tools.<id>, or the clamped path
 }
 
 // ParseCommitted reads a configuration that was accepted earlier (the committed revision at start,
@@ -1410,20 +1424,52 @@ func ParseCommitted(raw []byte) (Document, []Problem, error) {
 }
 
 func parse(raw []byte, problems *[]Problem) (Document, error) {
+	// JSON input is a subset of YAML, but the YAML decoder refuses JSON's \uXXXX surrogate-pair
+	// escapes. Re-encode real JSON as YAML first; something that only looks like JSON flows on to
+	// the YAML decoder for its own error.
+	if trimmed := bytes.TrimSpace(raw); len(trimmed) > 0 && trimmed[0] == '{' {
+		var v any
+		if err := json.Unmarshal(trimmed, &v); err == nil {
+			if y, err := yaml.Marshal(v); err == nil {
+				raw = y
+			}
+		}
+	}
 	var d Document
 	dec := yaml.NewDecoder(strings.NewReader(string(raw)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&d); err != nil {
 		return Document{}, fmt.Errorf("config parse: %w", err)
 	}
+	// keys records which keys the file sets explicitly: memory is on by default, so a switch the
+	// file does not name gets its default while a value it sets is never changed.
+	var keys struct {
+		Memory map[string]any `yaml:"memory"`
+		Chat   map[string]any `yaml:"chat"`
+		Guilds map[string]struct {
+			Channels map[string]map[string]any `yaml:"channels"`
+		} `yaml:"guilds"`
+	}
+	_ = yaml.Unmarshal(raw, &keys)
+	if _, merged := keys.Memory["<<"]; !merged {
+		if _, set := keys.Memory["capture"]; !set {
+			d.Memory.Capture = true
+		}
+		if _, set := keys.Memory["embed"]; !set {
+			d.Memory.Embed = true
+		}
+		if _, set := keys.Memory["summaries"]; !set {
+			d.Memory.Summaries = true
+		}
+	}
 	if !slices.Contains(DMAllowModes, d.DM.AllowMode()) {
 		return Document{}, fmt.Errorf("dm.allow must be members, operators or off")
 	}
-	if d.DM.PerUserPerDay < -1 || d.DM.PerUserPerDay > 10000 {
-		return Document{}, fmt.Errorf("dm.per_user_per_day must be -1 (unlimited), 0 (default), or 1..10000")
+	if err := checkBoundInt(problems, "dm.per_user_per_day", "-1 (unlimited), 0 (default), or 1..10000", &d.DM.PerUserPerDay); err != nil {
+		return Document{}, err
 	}
-	if d.DM.PerDay < -1 || d.DM.PerDay > 100000 {
-		return Document{}, fmt.Errorf("dm.per_day must be -1 (unlimited), 0 (default), or 1..100000")
+	if err := checkBoundInt(problems, "dm.per_day", "-1 (unlimited), 0 (default), or 1..100000", &d.DM.PerDay); err != nil {
+		return Document{}, err
 	}
 	if d.SchemaVersion != 1 {
 		return Document{}, fmt.Errorf("unsupported schema_version %d", d.SchemaVersion)
@@ -1507,7 +1553,7 @@ func parse(raw []byte, problems *[]Problem) (Document, error) {
 		}
 	}
 	if d.Memory.Retrieve == "" {
-		d.Memory.Retrieve = "off"
+		d.Memory.Retrieve = "auto"
 	}
 	if !slices.Contains(RetrieveModes, d.Memory.Retrieve) {
 		return Document{}, fmt.Errorf("memory.retrieve must be one of %v", RetrieveModes)
@@ -1527,21 +1573,30 @@ func parse(raw []byte, problems *[]Problem) (Document, error) {
 	if d.Chat.Progress != "" && !slices.Contains(ProgressModes, d.Chat.Progress) {
 		return Document{}, fmt.Errorf("chat.progress must be one of %v", ProgressModes)
 	}
-	// chat.transcript_chars needs no check here: its decoder accepts only a present integer
-	// 1000–20000 and never runs for an unset key (TranscriptChars.UnmarshalYAML)
+	// a key written at all must be an integer 1000–20000; absence means the default
+	// (TranscriptChars.UnmarshalYAML refuses non-integers before this runs)
+	if _, set := keys.Chat["transcript_chars"]; set {
+		if err := checkBoundInt(problems, "chat.transcript_chars", "an integer 1000–20000 (unset means the default 5000)", (*int)(&d.Chat.TranscriptChars)); err != nil {
+			return Document{}, err
+		}
+	}
 	// pages a search reads: a request that reads dozens of pages would only slow every search and spend the
 	// daily page quota
-	if n := d.WebSearch.ReadPages; n != nil && (*n < 0 || *n > 10) {
-		return Document{}, fmt.Errorf("web_search.read_pages must be 0–10")
+	if n := d.WebSearch.ReadPages; n != nil {
+		if err := checkBoundInt(problems, "web_search.read_pages", "0–10", n); err != nil {
+			return Document{}, err
+		}
 	}
-	if n := d.WebSearch.DeepPages; n != nil && (*n < 0 || *n > 10) {
-		return Document{}, fmt.Errorf("web_search.deep_pages must be 0–10")
+	if n := d.WebSearch.DeepPages; n != nil {
+		if err := checkBoundInt(problems, "web_search.deep_pages", "0–10", n); err != nil {
+			return Document{}, err
+		}
 	}
 	if d.WebSearch.Fetch != "" && !slices.Contains(FetchKinds, d.WebSearch.Fetch) {
 		return Document{}, fmt.Errorf("web_search.fetch must be one of %v", FetchKinds)
 	}
-	if n := d.WebSearch.FetchDailyLimit; n < 0 || n > 5000 {
-		return Document{}, fmt.Errorf("web_search.fetch_daily_limit must be 0–5000 (0 = the default)")
+	if err := checkBoundInt(problems, "web_search.fetch_daily_limit", "0–5000 (0 = the default)", &d.WebSearch.FetchDailyLimit); err != nil {
+		return Document{}, err
 	}
 	for _, l := range d.Memory.Languages {
 		if _, ok := lang.Get(l); !ok {
@@ -1578,14 +1633,36 @@ func parse(raw []byte, problems *[]Problem) (Document, error) {
 	if !slices.Contains(BackupSchedules, d.Backup.Schedule) {
 		return Document{}, fmt.Errorf("backup.schedule must be one of %v", BackupSchedules)
 	}
-	if d.Backup.Hour < 0 || d.Backup.Hour > 23 || d.Backup.Weekday < 0 || d.Backup.Weekday > 6 {
-		return Document{}, fmt.Errorf("backup.hour must be 0–23 and backup.weekday 0–6")
+	if err := checkBoundInt(problems, "backup.hour", "0–23", &d.Backup.Hour); err != nil {
+		return Document{}, err
 	}
-	if d.Backup.Keep < 1 || d.Backup.Keep > 100 {
-		return Document{}, fmt.Errorf("backup.keep must be 1–100")
+	if err := checkBoundInt(problems, "backup.weekday", "0–6", &d.Backup.Weekday); err != nil {
+		return Document{}, err
 	}
-	if d.Limits.BudgetAlertPercent < 0 || d.Limits.BudgetAlertPercent > 100 {
-		return Document{}, fmt.Errorf("limits.budget_alert_percent must be 0–100")
+	if err := checkBoundInt(problems, "backup.keep", "1–365", &d.Backup.Keep); err != nil {
+		return Document{}, err
+	}
+	if err := checkBoundInt(problems, "limits.budget_alert_percent", "0–100 (0 = the default)", &d.Limits.BudgetAlertPercent); err != nil {
+		return Document{}, err
+	}
+	if err := checkBoundInt(problems, "limits.max_concurrent_turns", "0–64 (0 = the default)", &d.Limits.MaxConcurrentTurns); err != nil {
+		return Document{}, err
+	}
+	if err := checkBoundInt(problems, "limits.max_external_attempts", "0–20 (0 = no cap)", &d.Limits.MaxExternalAttempts); err != nil {
+		return Document{}, err
+	}
+	if err := checkBoundInt(problems, "memory.backfill_days", "-1–30 (-1 = off, 0 = the default)", &d.Memory.BackfillDays); err != nil {
+		return Document{}, err
+	}
+	// index_interval_min: an absent key decodes to 0 (the runtime applies its own floor), so only a
+	// written value inside or outside the documented range is checked
+	if d.Memory.IndexIntervalMin != 0 {
+		if err := checkBoundInt(problems, "memory.index_interval_min", "1–1440", &d.Memory.IndexIntervalMin); err != nil {
+			return Document{}, err
+		}
+	}
+	if err := checkBoundInt(problems, "memory.index_workers", "0–256 (0 = the default)", &d.Memory.IndexWorkers); err != nil {
+		return Document{}, err
 	}
 	if len(d.Memory.PersonAliases) > 500 {
 		return Document{}, fmt.Errorf("memory.person_aliases: at most 500 people")
@@ -1623,6 +1700,9 @@ func parse(raw []byte, problems *[]Problem) (Document, error) {
 	}
 	if !slices.Contains(ParticipationModes, d.Participation.Mode) {
 		return Document{}, fmt.Errorf("participation.mode must be one of %v", ParticipationModes)
+	}
+	if err := checkBound(problems, "participation.min_score", "0–1 (0 = the default)", d.Participation.MinScore, func(v float64) { d.Participation.MinScore = v }); err != nil {
+		return Document{}, err
 	}
 	for _, v := range []string{d.Participation.QuietStart, d.Participation.QuietEnd} {
 		if v != "" && !validHHMM(v) {
@@ -1662,6 +1742,12 @@ func parse(raw []byte, problems *[]Problem) (Document, error) {
 			if channelID == "" {
 				return Document{}, fmt.Errorf("guilds.%s.channels: empty channel id", guildID)
 			}
+			// an explicit capture (or a YAML merge, whose decoded value is kept) is never defaulted
+			if chMap, ok := keys.Guilds[guildID].Channels[channelID]; ok {
+				_, set := chMap["capture"]
+				_, merged := chMap["<<"]
+				ch.captureSet = set || merged
+			}
 			ch = NormalizeChannelPolicy(ch)
 			if !ValidRespond(ch.Respond) {
 				return Document{}, fmt.Errorf("guilds.%s.channels.%s.respond must be one of %v", guildID, channelID, RespondModes)
@@ -1671,6 +1757,17 @@ func parse(raw []byte, problems *[]Problem) (Document, error) {
 			}
 			if ch.Participation != "" && !slices.Contains(ParticipationModes, ch.Participation) {
 				return Document{}, fmt.Errorf("guilds.%s.channels.%s.participation must be one of %v", guildID, channelID, ParticipationModes)
+			}
+			if ch.Conversation.Follow == "reply_only" {
+				// reply_only was retired: a stored value is read as off, a new write is rejected
+				if problems == nil {
+					return Document{}, fmt.Errorf("guilds.%s.channels.%s.conversation.follow must be one of %v", guildID, channelID, FollowModes)
+				}
+				ch.Conversation.Follow = "off"
+				*problems = append(*problems, Problem{
+					Path:   "guilds." + guildID + ".channels." + channelID + ".conversation.follow",
+					Reason: "reply_only is retired; the stored value is read as off",
+					Off:    "guilds." + guildID + ".channels." + channelID + ".conversation.follow"})
 			}
 			for _, c := range []struct {
 				key, v  string
@@ -1699,9 +1796,24 @@ func parse(raw []byte, problems *[]Problem) (Document, error) {
 				}
 			}
 			seenHash := map[string]bool{}
+			atts := ch.RAGAttachments[:0]
 			for i, att := range ch.RAGAttachments {
 				if att.ID == "" || att.ContentHash == "" || att.Filename == "" {
 					return Document{}, fmt.Errorf("guilds.%s.channels.%s.rag_attachments[%d] needs id, content_hash, filename", guildID, channelID, i)
+				}
+				// stored_name names the staged file the attachment delete path joins to the channel
+				// RAG dir; only the generated form (<sha256 hex><extension>) is safe to delete. A
+				// candidate with anything else is rejected; a committed document drops the
+				// attachment and reports it instead of failing to load.
+				if att.StoredName != "" && !storedNameForm.MatchString(att.StoredName) {
+					if problems == nil {
+						return Document{}, fmt.Errorf("guilds.%s.channels.%s.rag_attachments[%d].stored_name is not a generated name", guildID, channelID, i)
+					}
+					*problems = append(*problems, Problem{
+						Path:   fmt.Sprintf("guilds.%s.channels.%s.rag_attachments[%d].stored_name", guildID, channelID, i),
+						Reason: "is not a generated name; the attachment was dropped",
+						Off:    fmt.Sprintf("guilds.%s.channels.%s.rag_attachments[%d]", guildID, channelID, i)})
+					continue
 				}
 				if seenHash[att.ContentHash] {
 					return Document{}, fmt.Errorf("guilds.%s.channels.%s.rag_attachments: duplicate content_hash in channel", guildID, channelID)
@@ -1711,7 +1823,9 @@ func parse(raw []byte, problems *[]Problem) (Document, error) {
 					att.Purpose = "retrieval_context"
 					ch.RAGAttachments[i] = att
 				}
+				atts = append(atts, att)
 			}
+			ch.RAGAttachments = atts
 			g.Channels[channelID] = ch
 		}
 		d.Guilds[guildID] = g
@@ -1744,6 +1858,43 @@ func Hash(raw []byte) string {
 func validHHMM(v string) bool {
 	t, err := time.Parse("15:04", v)
 	return err == nil && t.Format("15:04") == v
+}
+
+// storedNameForm is the name channelsAttachmentAdd gives a staged file: the content's sha256 hex
+// with the original extension. Anything else — a separator, a drive letter, a dot file — could point
+// the attachment delete path outside the channel RAG dir.
+var storedNameForm = regexp.MustCompile(`^[0-9a-f]{64}(\.[^/\\\x00]*)?$`)
+
+// checkBound compares a stored number with the schema limit the console declares for the same key
+// (bounds in tree.go). A candidate outside the range is an error; a committed document is clamped
+// and reported as a Problem instead of failing to load.
+func checkBound(problems *[]Problem, path, msg string, v float64, set func(float64)) error {
+	b, ok := bounds[path]
+	if !ok {
+		return fmt.Errorf("%s: no schema bound to check against", path)
+	}
+	lo, hi := *b[0], *b[1]
+	if v >= lo && v <= hi {
+		return nil
+	}
+	if problems == nil {
+		return fmt.Errorf("%s must be %s", path, msg)
+	}
+	clamped := lo
+	if v > hi {
+		clamped = hi
+	}
+	set(clamped)
+	*problems = append(*problems, Problem{
+		Path:   path,
+		Reason: fmt.Sprintf("must be %s; the stored %v was clamped to %v", msg, v, clamped),
+		Off:    path})
+	return nil
+}
+
+// checkBoundInt is checkBound for integer settings.
+func checkBoundInt(problems *[]Problem, path, msg string, v *int) error {
+	return checkBound(problems, path, msg, float64(*v), func(f float64) { *v = int(f) })
 }
 
 func validFallbacks(d Document, role string, m Model) error {
