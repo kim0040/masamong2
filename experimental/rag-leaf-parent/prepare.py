@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+import traceback
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -39,7 +40,8 @@ def main() -> int:
     except PlaygroundError as exc:
         print(f"실패: {exc}", file=sys.stderr)
         return 1
-    except Exception as exc:  # noqa: BLE001 - surface prep failures cleanly
+    except Exception as exc:  # noqa: BLE001 - expected errors are PlaygroundError; the rest need the stack
+        traceback.print_exc()
         print(f"실패: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
     meta = result["meta"]
