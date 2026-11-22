@@ -41,13 +41,32 @@ import (
 // release archive). A source build (a version without x.y.z) and a folder the service cannot write are
 // told to use the installer instead.
 
-// updateDownloadPrefix is where release files may come from; tests point it at a local server.
-var updateDownloadPrefix = "https://github.com/%s/releases/download/"
+// updateDownloadPrefix is where release files may come from; a test points its service at a local
+// server (serviceHooks.downloads).
+const updateDownloadPrefix = "https://github.com/%s/releases/download/"
+
+// downloadPrefix is where this service's release files may come from, the repository filled in.
+func (s *Service) downloadPrefix() string {
+	prefix := updateDownloadPrefix
+	if p := s.hooks.downloads.Load(); p != nil {
+		prefix = *p
+	}
+	return strings.Replace(prefix, "%s", UpdateRepo, 1)
+}
 
 // updateRedirectHost says which hosts a release download may be redirected to: GitHub answers a
-// release asset with a redirect to its file host. Tests widen it to their local server.
-var updateRedirectHost = func(host string) bool {
+// release asset with a redirect to its file host. A test widens it for its service to its local server
+// (serviceHooks.redirectHost).
+func updateRedirectHost(host string) bool {
 	return host == "github.com" || strings.HasSuffix(host, ".githubusercontent.com")
+}
+
+// redirectHost is the service's redirect policy for release downloads.
+func (s *Service) redirectHost() func(host string) bool {
+	if f := s.hooks.redirectHost.Load(); f != nil {
+		return *f
+	}
+	return updateRedirectHost
 }
 
 // selfExecutable is the running program's path; tests point it at a temporary folder.
@@ -220,7 +239,7 @@ func (s *Service) updateApply(ctx context.Context, req action.Request) action.Re
 // and returns that file. The caller deletes it. The sum check is the same one as before: the hex
 // digest of every byte, lower-cased, must equal the SHA256SUMS line for this asset.
 func downloadRelease(ctx context.Context, s *Service, st updateState, dir string) (string, error) {
-	prefix := strings.Replace(updateDownloadPrefix, "%s", UpdateRepo, 1)
+	prefix := s.downloadPrefix()
 	for _, u := range []string{st.Asset.URL, st.SumsURL} {
 		if !strings.HasPrefix(u, prefix) {
 			return "", fmt.Errorf("unexpected download address %s", u)
@@ -232,7 +251,7 @@ func downloadRelease(ctx context.Context, s *Service, st updateState, dir string
 			_ = os.Remove(p)
 		}
 	}
-	client := providers.NewDownloadClient(10*time.Minute, s.Log, updateRedirectHost)
+	client := providers.NewDownloadClient(10*time.Minute, s.Log, s.redirectHost())
 	client.UserAgent = "masamong/" + Version
 	client.MaxRetries = 1
 	client.MaxBody = updateSumsMax

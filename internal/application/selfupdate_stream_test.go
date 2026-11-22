@@ -382,12 +382,10 @@ func TestUpdateDownloadFailureRemovesTheTempFile(t *testing.T) {
 		_, _ = w.Write(body)
 	}))
 	defer srv.Close()
-	old := updateDownloadPrefix
-	t.Cleanup(func() { updateDownloadPrefix = old })
-	updateDownloadPrefix = srv.URL + "/dl/%s/"
+	prefix := srv.URL + "/dl/%s/"
 	base := srv.URL + "/dl/" + UpdateRepo + "/v1/"
 	st := updateState{Asset: &updateAsset{Name: name, URL: base + name}, SumsURL: base + "SHA256SUMS"}
-	if _, err := downloadRelease(context.Background(), &Service{Log: slog.Default()}, st, dir); err == nil || !strings.Contains(err.Error(), "does not match SHA256SUMS") {
+	if _, err := downloadRelease(context.Background(), downloadService(prefix), st, dir); err == nil || !strings.Contains(err.Error(), "does not match SHA256SUMS") {
 		t.Fatalf("bad sum: %v", err)
 	}
 	if left := updateTempFiles(t, dir); len(left) != 0 {
@@ -396,7 +394,7 @@ func TestUpdateDownloadFailureRemovesTheTempFile(t *testing.T) {
 
 	// the same bytes with the real sum (any case) land in one file
 	good.Store(true)
-	arc, err := downloadRelease(context.Background(), &Service{Log: slog.Default()}, st, dir)
+	arc, err := downloadRelease(context.Background(), downloadService(prefix), st, dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -535,13 +533,11 @@ func TestUpdateDownloadLeftoversAreRemoved(t *testing.T) {
 		http.Error(w, "no", http.StatusBadGateway)
 	}))
 	defer srv.Close()
-	old := updateDownloadPrefix
-	t.Cleanup(func() { updateDownloadPrefix = old })
-	updateDownloadPrefix = srv.URL + "/dl/%s/"
+	prefix := srv.URL + "/dl/%s/"
 	base := srv.URL + "/dl/" + UpdateRepo + "/v1/"
 	name := "masamong_test.tar.gz"
 	st := updateState{Asset: &updateAsset{Name: name, URL: base + name}, SumsURL: base + "SHA256SUMS"}
-	if _, err := downloadRelease(context.Background(), &Service{Log: slog.Default()}, st, dir); err == nil {
+	if _, err := downloadRelease(context.Background(), downloadService(prefix), st, dir); err == nil {
 		t.Fatal("a failing release download succeeded")
 	}
 	if _, err := os.Lstat(leftover); !os.IsNotExist(err) {
@@ -551,4 +547,11 @@ func TestUpdateDownloadLeftoversAreRemoved(t *testing.T) {
 	if left := updateTempFiles(t, dir); len(left) != 0 {
 		t.Fatalf("download left %v", left)
 	}
+}
+
+// downloadService is a bare service whose release downloads come from prefix (a test server).
+func downloadService(prefix string) *Service {
+	s := &Service{Log: slog.Default()}
+	s.hooks.downloads.Store(&prefix)
+	return s
 }

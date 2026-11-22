@@ -43,6 +43,10 @@ type serviceHooks struct {
 	news atomic.Pointer[newsLimits]
 	// updateAPI points the release check at a test server (updates.go).
 	updateAPI atomic.Pointer[string]
+	// downloads points release downloads at a test server (selfupdate.go).
+	downloads atomic.Pointer[string]
+	// redirectHost widens where a release download may be redirected (selfupdate.go).
+	redirectHost atomic.Pointer[func(host string) bool]
 	// oldEditsAtOnce settles old edits at the first idle pass instead of oldEditsDelay after the start.
 	oldEditsAtOnce bool
 }

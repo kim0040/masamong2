@@ -78,8 +78,8 @@ func TestUpdateApplyInstallsTheReleaseAndRestarts(t *testing.T) {
 		}
 	}
 	defer application.SetVersionForTest("0.2.0")()
-	defer application.UseSelfUpdateForTest(srv.URL+"/dl/%s/", bin)()
 	svc := setupSvc(t)
+	defer application.UseSelfUpdateForTest(svc, srv.URL+"/dl/%s/", bin)()
 	application.UseUpdateAPIForTest(svc, srv.URL+"/api/%s")
 
 	st := out(t, svc, "updates.check", nil)

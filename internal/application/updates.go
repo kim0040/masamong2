@@ -222,10 +222,10 @@ func (s *Service) updatesAction(ctx context.Context, req action.Request) action.
 // failure, a size over the limit, notes that do not validate or name another version) gives "" and
 // the console simply shows no notes: they are an extra, never a reason to fail the check.
 func (s *Service) fetchReleaseNotes(ctx context.Context, url, tag string) string {
-	if !strings.HasPrefix(url, strings.Replace(updateDownloadPrefix, "%s", UpdateRepo, 1)) {
+	if !strings.HasPrefix(url, s.downloadPrefix()) {
 		return ""
 	}
-	client := providers.NewDownloadClient(15*time.Second, s.Log, updateRedirectHost)
+	client := providers.NewDownloadClient(15*time.Second, s.Log, s.redirectHost())
 	client.UserAgent = "masamong/" + Version
 	client.MaxRetries = 0
 	client.MaxBody = updateNotesMax

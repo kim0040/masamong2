@@ -51,8 +51,8 @@ func TestUpdateCheckReadsTheNewerReleasesNotes(t *testing.T) {
 	}))
 	defer srv.Close()
 	defer application.SetVersionForTest("0.2.0")()
-	defer application.UseSelfUpdateForTest(srv.URL+"/dl/%s/", t.TempDir())()
 	svc := setupSvc(t)
+	defer application.UseSelfUpdateForTest(svc, srv.URL+"/dl/%s/", t.TempDir())()
 	application.UseUpdateAPIForTest(svc, srv.URL+"/api/%s")
 
 	o := out(t, svc, "updates.check", nil)

@@ -231,12 +231,13 @@ func UseUpdateAPIForTest(s *Service, url string) {
 // NewerVersionForTest exposes the version comparison.
 func NewerVersionForTest(latest, current string) bool { return newerVersion(latest, current) }
 
-// UseSelfUpdateForTest points release downloads at a local server and the running programs at dir.
-func UseSelfUpdateForTest(downloadPrefix, dir string) (restore func()) {
-	oldPrefix, oldSelf := updateDownloadPrefix, selfExecutable
-	updateDownloadPrefix = downloadPrefix
+// UseSelfUpdateForTest points s's release downloads at a local server and the running programs (a
+// process value) at dir.
+func UseSelfUpdateForTest(s *Service, downloadPrefix, dir string) (restore func()) {
+	oldSelf := selfExecutable
+	s.hooks.downloads.Store(&downloadPrefix)
 	selfExecutable = func() (string, error) { return filepath.Join(dir, exeName("masamongd")), nil }
-	return func() { updateDownloadPrefix, selfExecutable = oldPrefix, oldSelf }
+	return func() { selfExecutable = oldSelf }
 }
 
 // UpdateAssetNameForTest is this computer's release archive name.
