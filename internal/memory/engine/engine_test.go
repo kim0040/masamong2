@@ -28,6 +28,7 @@ import (
 	"masamong/internal/providers"
 	"masamong/internal/providers/openai"
 	"masamong/internal/storage"
+	"masamong/internal/testutil"
 )
 
 // fakeProvider serves /embeddings (deterministic bag-of-bigram vectors), /rerank and /chat/completions.
@@ -443,7 +444,9 @@ func TestReplacedEnginesCloseTheirIndexes(t *testing.T) {
 		}
 		cur = next
 	}
-	time.Sleep(100 * time.Millisecond)
+	// the retired engines' delayed closes are the only thing still outstanding; wait for the count to
+	// come back down instead of guessing at their timers
+	testutil.WaitFor(t, 2*time.Second, "the retired engines' delayed closes", func() bool { return openLexicalDBs() <= base })
 	if got := settleDBs(); got > base {
 		t.Fatalf("in-memory index databases: %d before, %d after 5 engine replacements", base, got)
 	}

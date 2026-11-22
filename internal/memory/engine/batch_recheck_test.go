@@ -15,6 +15,7 @@ import (
 	"masamong/internal/providers"
 	"masamong/internal/providers/openai"
 	"masamong/internal/storage"
+	"masamong/internal/testutil"
 )
 
 // engineAt is newEngine on a database file the test names, so it can be closed and opened again.
@@ -259,12 +260,9 @@ func TestBatchDiscardEndsADrainThatWaits(t *testing.T) {
 	drained := make(chan error, 1)
 	go func() { _, err := e.DrainBatch(context.Background(), &plan); drained <- err }()
 	before := fb.polls.Load()
-	for deadline := time.Now().Add(5 * time.Second); fb.polls.Load() < before+2; {
-		if time.Now().After(deadline) {
-			t.Fatal("the drain does not poll")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	testutil.WaitFor(t, 5*time.Second, "the drain to poll the batch twice", func() bool {
+		return fb.polls.Load() >= before+2
+	})
 	if err := e.DiscardBatch(context.Background(), batchRoom); err != nil {
 		t.Fatal(err)
 	}

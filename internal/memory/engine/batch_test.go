@@ -645,11 +645,20 @@ func TestBatchCancelPlanAppliesFinishedAndDeletes(t *testing.T) {
 		sum.drop[fmt.Sprintf("s%d", i)] = true // and none of them will have finished
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	go func() { time.Sleep(20 * time.Millisecond); cancel() }()
+	defer cancel()
+	sum.onPoll = func() { cancel() } // the console cancel lands while the wait is up
 	if err := e.WaitBatch(ctx, &plan, nil); !errors.Is(err, context.Canceled) {
 		t.Fatalf("a cancelled wait returns the context error: %v", err)
 	}
-	go func() { time.Sleep(20 * time.Millisecond); sum.set(openai.BatchCancelled) }() // the host takes a moment
+	// the host takes a moment: the batch reads as cancelled at the poll after the cancel was sent
+	sum.onPoll = func() {
+		sum.mu.Lock()
+		asked := len(sum.cancels) > 0
+		sum.mu.Unlock()
+		if asked {
+			sum.set(openai.BatchCancelled)
+		}
+	}
 	applied, done, err := e.CancelPlan(context.Background(), &plan)
 	if err != nil || applied.Saved != 4 || !done {
 		t.Fatalf("cancel: %v %+v done=%v", err, applied, done)
