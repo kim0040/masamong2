@@ -262,10 +262,13 @@ func (t *turn) planTurn(ctx context.Context) turnPlan {
 		t.res.Timing["tool_loop"] = loop.trace.Ms
 		if loop.err != nil && req.ToolMode == ToolModeLoop {
 			// the model takes no tools (or failed): the planner chooses the tools of this turn, except
-			// the ones the loop ran before it died — their results stay the turn's, not run twice.
+			// the ones the loop ran before it died — their results stay the turn's, not run twice. A tool
+			// the loop only asked for without its required input (needs_input) never ran: it stays.
 			plannerTools = others
 			for _, r := range loopTools {
-				plannerTools = plannerTools.without(r.Tool)
+				if r.Status != "needs_input" {
+					plannerTools = plannerTools.without(r.Tool)
+				}
 			}
 			planRaw = t.askPlanner(ctx, memTool, plannerTools)
 			plan, assessed, intent = t.readPlan(planRaw, plannerTools)

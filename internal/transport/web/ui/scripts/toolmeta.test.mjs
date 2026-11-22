@@ -80,6 +80,28 @@ test('toObject trims, converts numbers, keeps base keys the form does not show, 
   assert.deepEqual(toObject(inputs, { flag: '' }).obj, {})
 })
 
+test('a list input keeps its array through the form: saved defaults survive a change to another field', async () => {
+  const { toValues, toObject } = await meta()
+  const inputs = [
+    { name: 'question', type: 'text', required: true }, { name: 'options', type: 'list', max: 10 },
+    { name: 'duration_hours', type: 'number' },
+  ]
+  const saved = { options: ['Tea', 'Coffee'], duration_hours: 24 }
+  const vals = toValues(inputs, saved)
+  assert.equal(typeof vals.options, 'string')
+  assert.deepEqual(toObject(inputs, vals, saved).obj, saved, 'untouched, the saved object comes back as it was')
+  // the person changes the duration only
+  const changed = toObject(inputs, { ...vals, duration_hours: '48' }, saved).obj
+  assert.deepEqual(changed, { options: ['Tea', 'Coffee'], duration_hours: 48 })
+  // typed in the form: one entry per comma, blanks dropped; emptied, the key goes
+  assert.deepEqual(toObject(inputs, { options: ' Tea , ,Coffee, Milk ' }).obj, { options: ['Tea', 'Coffee', 'Milk'] })
+  assert.deepEqual(toObject(inputs, { options: ' ' }, { options: ['Tea'] }).obj, {})
+  // entries the form cannot show (objects with an id and a label) are kept, not flattened
+  const rich = { options: [{ id: 'a', label: 'Tea' }, { id: 'b', label: 'Coffee' }] }
+  assert.deepEqual(toValues(inputs, rich), {})
+  assert.deepEqual(toObject(inputs, toValues(inputs, rich), rich).obj, rich)
+})
+
 test('exampleInput fills from the sample and localized examples, never a provider input', async () => {
   const { exampleInput } = await meta()
   const inputs = [

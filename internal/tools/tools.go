@@ -159,6 +159,8 @@ func Builtins() []Builtin {
 				{Name: "topic", Type: "select", Options: []string{"general", "news", "research"}},
 				// with depth deep: the same question asked from other angles, searched in the same call
 				{Name: "queries", Type: "list", Max: 3},
+				// how many result pages are read for passages; 0 keeps the search to snippets (searchPages)
+				{Name: "pages", Type: "number", Min: 0, Max: 10, Example: "3"},
 				{Name: "provider", Type: "provider"}}},
 		{ID: "places.search", Feature: "search", Chat: true, Command: true, Implemented: true, Final: true, Parallel: true, Required: []string{"query"}, Sample: map[string]any{"query": "강남역 맛집", "size": 3},
 			Providers: []string{"kakao_search"},
@@ -357,6 +359,7 @@ var (
 		"servicekey", "secret", "clientsecret", "password", "passwd", "signature", "sig", "appkey", "appsecret"}
 	wholePlaceRE  = regexp.MustCompile(`^\{[a-z][a-z0-9_]*\}$`)
 	credPlaceRE   = regexp.MustCompile(`\{credential\}`)
+	credQuotedRE  = regexp.MustCompile(`"\{credential\}"|'\{credential\}'`)
 	literalPairRE = regexp.MustCompile(`=[^\s=;&]+`)
 )
 
@@ -387,8 +390,9 @@ func SecretQueryName(name string) bool {
 
 // DirectHeaderValue reports whether a header value holds a key itself. Any literal is one; a
 // {credential} placeholder alone (Bearer {credential}, a cookie's session={credential}) is the
-// reference it should be. A placeholder mixed with a second literal value — a name=literal beside it
-// (session={credential}; fallback=x) — keeps a key in the configuration.
+// reference it should be, with or without quotes around it (session="{credential}"). A placeholder mixed
+// with a second literal value — a name=literal beside it (session={credential}; fallback=x), or text
+// inside its quotes — keeps a key in the configuration.
 func DirectHeaderValue(value string) bool {
 	v := strings.TrimSpace(value)
 	if v == "" {
@@ -397,6 +401,7 @@ func DirectHeaderValue(value string) bool {
 	if !strings.Contains(v, "{credential}") {
 		return true
 	}
+	v = credQuotedRE.ReplaceAllString(v, "{credential}") // the quotes around the reference alone hold nothing
 	return literalPairRE.MatchString(credPlaceRE.ReplaceAllString(v, ""))
 }
 

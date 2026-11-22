@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"masamong/internal/action"
 	"masamong/internal/errclass"
 )
 
@@ -41,5 +42,32 @@ func TestDoctorShowsDeliveryPermissionProblems(t *testing.T) {
 	raw, _ := json.Marshal(exec(svc, "runtime.doctor", nil).Output)
 	if !strings.Contains(string(raw), "delivery_permission:1") {
 		t.Fatalf("doctor: %s", raw)
+	}
+}
+
+// The poll's options arrive as a list (the console's saved defaults, a model's call) or, from a
+// configuration saved while the console flattened lists, as one comma-separated text: both name the
+// same choices. Nothing named gives yes/no.
+func TestPollCreateAcceptsOptionsAsListOrText(t *testing.T) {
+	svc := setupSvc(t)
+	labels := func(r action.Result) []string {
+		t.Helper()
+		if !r.OK {
+			t.Fatalf("create %+v", r.Error)
+		}
+		var out []string
+		for _, o := range r.Output["options"].([]any) {
+			out = append(out, o.(map[string]any)["label"].(string))
+		}
+		return out
+	}
+	for name, options := range map[string]any{"list": []string{"Tea", "Coffee"}, "text": "Tea, Coffee", "lines": "Tea\nCoffee"} {
+		got := labels(exec(svc, "polls.create", map[string]any{"question": "drink? " + name, "options": options}))
+		if len(got) != 2 || got[0] != "Tea" || got[1] != "Coffee" {
+			t.Fatalf("%s: options %v", name, got)
+		}
+	}
+	if got := labels(exec(svc, "polls.create", map[string]any{"question": "plain"})); len(got) != 2 || got[0] != "Yes" {
+		t.Fatalf("default options %v", got)
 	}
 }

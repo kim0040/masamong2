@@ -105,6 +105,12 @@
       "month"
      ]
     },
+    "pages": {
+     "type": "integer",
+     "description": "3",
+     "minimum": 0,
+     "maximum": 10
+    },
     "queries": {
      "type": "array",
      "description": "Only with deep: 1–3 more search queries that ask the same question from other angles (in the language of query). Otherwise leave out.",

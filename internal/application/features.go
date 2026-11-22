@@ -1168,12 +1168,19 @@ func (s *Service) polls(req action.Request) action.Result {
 			opts = append(opts, poll.Option{ID: id, Label: id})
 		}
 		if len(opts) == 0 {
-			if raw, ok := in["options"].([]any); ok {
-				for _, x := range raw {
-					switch v := x.(type) {
-					case map[string]any:
-						opts = append(opts, poll.Option{ID: fmt.Sprint(v["id"]), Label: fmt.Sprint(v["label"])})
-					case string:
+			raw, _ := in["options"].([]any)
+			if text, ok := in["options"].(string); ok {
+				// one text (a configuration saved while the console flattened the list): a choice per line or comma
+				for _, part := range strings.FieldsFunc(text, func(r rune) bool { return r == '\n' || r == ',' }) {
+					raw = append(raw, strings.TrimSpace(part))
+				}
+			}
+			for _, x := range raw {
+				switch v := x.(type) {
+				case map[string]any:
+					opts = append(opts, poll.Option{ID: fmt.Sprint(v["id"]), Label: fmt.Sprint(v["label"])})
+				case string:
+					if v != "" {
 						opts = append(opts, poll.Option{ID: v, Label: v})
 					}
 				}

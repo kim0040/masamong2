@@ -105,6 +105,12 @@
       "month"
      ]
     },
+    "pages": {
+     "type": "integer",
+     "description": "3",
+     "minimum": 0,
+     "maximum": 10
+    },
     "queries": {
      "type": "array",
      "description": "deep일 때만: 같은 질문을 다른 각도로 바꾼 검색어 1~3개(query와 같은 언어로). 그 밖에는 비운다.",
