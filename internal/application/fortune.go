@@ -1040,8 +1040,8 @@ func (s *Service) runFortuneMorning(ctx context.Context) {
 		return
 	}
 	defer morningRunning.Store(false)
-	sender, ok := s.Discord.(DiscordSender)
-	if s.Discord == nil || !ok || !s.Discord.Connected() {
+	sender, ok := s.Discord().(DiscordSender)
+	if s.Discord() == nil || !ok || !s.Discord().Connected() {
 		return
 	}
 	if r, found := tools.Find(s.toolRegistry(), "fortune.subscribe"); found && !r.Enabled {

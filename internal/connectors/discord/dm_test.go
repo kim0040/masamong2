@@ -54,7 +54,7 @@ func dmGateway(t *testing.T, model bool) (*Gateway, *fakeDiscord) {
 	fake := &fakeDiscord{}
 	sess.Client = &http.Client{Transport: fake}
 	g := &Gateway{svc: svc, sess: sess, ctx: context.Background(), log: svc.Log, ActionTimeout: 10 * time.Second, cfg: config.Discord{MessageContent: true, CommandPrefix: "!"}}
-	svc.Discord = g
+	svc.SetDiscord(g)
 	g.merge.fire = g.answerHeld
 	g.merge.forget = g.forgetFollow
 	return g, fake

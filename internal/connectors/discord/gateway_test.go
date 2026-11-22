@@ -393,7 +393,7 @@ func TestReadyDisconnectResumeRestoresScheduledDeliveryGate(t *testing.T) {
 		t.Fatal("RESUMED did not restore the scheduled-send gate")
 	}
 
-	svc.Discord = g
+	svc.SetDiscord(g)
 	inv := &action.Invoker{Via: "command", GuildID: "g", ChannelID: "c", UserID: "u1", Name: "Taylor"}
 	proposal := svc.Execute(context.Background(), action.Request{Action: "reminders.propose", Locale: "en", Invoker: inv, Input: mustJSON(map[string]any{"text": "in 5 minutes stretch"})})
 	if !proposal.OK {
@@ -417,7 +417,7 @@ func TestReadyDisconnectResumeRestoresScheduledDeliveryGate(t *testing.T) {
 		t.Fatalf("reminder confirmation: %+v", confirmed.Error)
 	}
 	svc.Clock = clock.Fixed{T: now.Add(6 * time.Minute)}
-	if svc.Discord == nil || !svc.Discord.Connected() {
+	if svc.Discord() == nil || !svc.Discord().Connected() {
 		t.Fatal("the reminder scheduler's Connected gate stayed closed after resume")
 	}
 }

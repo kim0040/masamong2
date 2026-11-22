@@ -22,7 +22,7 @@ func TestDisasterFeatureSwitchStopsTheWatcher(t *testing.T) {
 		t.Fatal(r.Error)
 	}
 	gw := &postingGateway{}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	now := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
 	tick := func(d time.Duration) {
 		now = now.Add(d)

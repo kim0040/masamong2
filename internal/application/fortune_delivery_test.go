@@ -151,7 +151,7 @@ func TestBriefingHeldByQuietHoursIsWordedForItsDelivery(t *testing.T) {
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	rig := newBriefingRig(t, time.Date(2026, 10, 15, 20, 0, 0, 0, seoul), "23:30", []string{"23:00", "07:00"}, nil)
 	gw := &dmGateway{}
-	rig.svc.Discord = gw
+	rig.svc.SetDiscord(gw)
 	rig.runAt(time.Date(2026, 10, 15, 23, 21, 0, 0, seoul)) // written within the lead
 	if rig.count() != 1 {
 		t.Fatalf("written early: %d prompts", rig.count())
@@ -177,7 +177,7 @@ func TestCatchUpBriefingIsRewrittenForItsSlot(t *testing.T) {
 	t.Run("rewritten", func(t *testing.T) {
 		rig := newBriefingRig(t, time.Date(2026, 10, 15, 5, 0, 0, 0, seoul), "07:00", nil, nil)
 		gw := &dmGateway{}
-		rig.svc.Discord = gw
+		rig.svc.SetDiscord(gw)
 		rig.runAt(time.Date(2026, 10, 15, 6, 52, 0, 0, seoul))
 		if rig.count() != 1 || len(gw.sent) != 0 {
 			t.Fatalf("written early: prompts %d sent %d", rig.count(), len(gw.sent))
@@ -197,7 +197,7 @@ func TestCatchUpBriefingIsRewrittenForItsSlot(t *testing.T) {
 	t.Run("cap spent", func(t *testing.T) {
 		rig := newBriefingRig(t, time.Date(2026, 10, 15, 5, 0, 0, 0, seoul), "07:00", nil, map[string]any{"generation_attempts": 1})
 		gw := &dmGateway{}
-		rig.svc.Discord = gw
+		rig.svc.SetDiscord(gw)
 		rig.runAt(time.Date(2026, 10, 15, 6, 52, 0, 0, seoul))
 		rig.runAt(time.Date(2026, 10, 15, 15, 0, 0, 0, seoul))
 		if rig.count() != 1 || len(gw.sent) != 1 {
@@ -217,7 +217,7 @@ func TestEveningBriefingRetriedAfterMidnight(t *testing.T) {
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	rig := newBriefingRig(t, time.Date(2026, 10, 15, 20, 0, 0, 0, seoul), "23:58", nil, nil)
 	gw := &flakyDM{fail: 1}
-	rig.svc.Discord = gw
+	rig.svc.SetDiscord(gw)
 	rig.runAt(time.Date(2026, 10, 15, 23, 48, 0, 0, seoul))
 	wantAll(t, "prompt", rig.prompt(0), "내일(2026-10-16)")
 	rig.runAt(time.Date(2026, 10, 15, 23, 58, 0, 0, seoul)) // not delivered: retried in two minutes
@@ -239,7 +239,7 @@ func TestFailedRewriteSendsTheWrittenTextNeutrally(t *testing.T) {
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	rig := newBriefingRig(t, time.Date(2026, 10, 15, 5, 0, 0, 0, seoul), "07:00", nil, nil)
 	gw := &dmGateway{}
-	rig.svc.Discord = gw
+	rig.svc.SetDiscord(gw)
 	rig.runAt(time.Date(2026, 10, 15, 6, 52, 0, 0, seoul))
 	rig.setFailing(true)
 	rig.runAt(time.Date(2026, 10, 15, 15, 0, 0, 0, seoul)) // the rewrite fails
@@ -264,7 +264,7 @@ func TestDayOldBriefingGivesWayToTodays(t *testing.T) {
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	rig := newBriefingRig(t, time.Date(2026, 10, 15, 5, 0, 0, 0, seoul), "07:00", nil, nil)
 	gw := &dmGateway{}
-	rig.svc.Discord = gw
+	rig.svc.SetDiscord(gw)
 	rig.runAt(time.Date(2026, 10, 15, 6, 52, 0, 0, seoul)) // written, then the host stops
 	for _, at := range []time.Time{time.Date(2026, 10, 16, 8, 0, 0, 0, seoul), time.Date(2026, 10, 16, 8, 1, 0, 0, seoul), time.Date(2026, 10, 16, 8, 2, 0, 0, seoul)} {
 		rig.runAt(at)
@@ -290,7 +290,7 @@ func TestEveningBriefingAtMonthAndYearEnd(t *testing.T) {
 	} {
 		rig := newBriefingRig(t, c.day.Add(20*time.Hour), "23:59", nil, nil)
 		gw := &dmGateway{}
-		rig.svc.Discord = gw
+		rig.svc.SetDiscord(gw)
 		rig.runAt(c.day.Add(23*time.Hour + 59*time.Minute))
 		if len(gw.sent) != 1 {
 			t.Fatalf("%s: sent %d", c.task, len(gw.sent))
@@ -305,7 +305,7 @@ func TestEveningBriefingAtMonthAndYearEnd(t *testing.T) {
 func TestEveningPromptDoesNotSayToday(t *testing.T) {
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	rig := newBriefingRig(t, time.Date(2026, 10, 15, 18, 0, 0, 0, seoul), "21:00", nil, nil)
-	rig.svc.Discord = &dmGateway{}
+	rig.svc.SetDiscord(&dmGateway{})
 	rig.runAt(time.Date(2026, 10, 15, 21, 0, 0, 0, seoul))
 	p := rig.prompt(0)
 	wantAll(t, "prompt", p, "내일(2026-10-16)", "기준 시각: 2026-10-16 21:00", "기준일의 간지", "기준 시각의 천체 배치", "SUMMARY: 하루의")
@@ -337,7 +337,7 @@ func TestCrashDuringRewriteKeepsTheWrittenText(t *testing.T) {
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	rig := newBriefingRig(t, time.Date(2026, 10, 15, 5, 0, 0, 0, seoul), "07:00", nil, nil)
 	gw := &dmGateway{}
-	rig.svc.Discord = gw
+	rig.svc.SetDiscord(gw)
 	rig.runAt(time.Date(2026, 10, 15, 6, 52, 0, 0, seoul)) // written for the morning, then the host is down
 	var during string
 	rig.mu.Lock()
@@ -365,7 +365,7 @@ func TestCrashDuringRewriteKeepsTheWrittenText(t *testing.T) {
 		t.Fatal(err)
 	}
 	gw2 := &dmGateway{}
-	rig.svc.Discord = gw2
+	rig.svc.SetDiscord(gw2)
 	rig.mu.Lock()
 	rig.onCall = nil
 	rig.mu.Unlock()
@@ -389,7 +389,7 @@ func TestBriefingSlotGraceAfterTheBoundary(t *testing.T) {
 	run := func(t *testing.T, sub string, planned time.Time, fail int, late time.Duration) (prompts int, sent []action.Card) {
 		rig := newBriefingRig(t, planned.Add(-3*time.Hour), sub, nil, nil)
 		gw := &flakyDM{fail: fail}
-		rig.svc.Discord = gw
+		rig.svc.SetDiscord(gw)
 		rig.runAt(planned.Add(-8 * time.Minute)) // written within the lead
 		if fail > 0 {
 			rig.runAt(planned) // not delivered, retried in two minutes

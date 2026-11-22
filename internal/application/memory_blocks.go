@@ -1348,10 +1348,10 @@ func (s *Service) knownChannels() []channelInfo {
 	var out []channelInfo
 	seen := map[string]bool{}
 	guildNames := map[string]string{}
-	if s.Discord != nil && s.Discord.Connected() {
-		for _, g := range s.Discord.Guilds() {
+	if s.Discord() != nil && s.Discord().Connected() {
+		for _, g := range s.Discord().Guilds() {
 			guildNames[g.ID] = g.Name
-			for _, c := range s.Discord.Channels(g.ID) {
+			for _, c := range s.Discord().Channels(g.ID) {
 				if c.Type != "" && c.Type != "text" {
 					continue
 				}

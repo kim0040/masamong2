@@ -71,7 +71,7 @@ func TestTaskRunsWhenDueAndPostsTheAnswer(t *testing.T) {
 	serveAnyServer(t, svc)
 	applyDoc(t, svc, func(d *config.Document) { d.Discord.Enabled = true; d.I18n.Timezone = "Asia/Seoul" })
 	gw := &postGateway{}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	svc.Clock = clock.Fixed{T: now}
 	r := as(svc, "reminders.propose", map[string]any{"kind": "task", "when": "오전 9시", "repeat": "daily", "what": "국제 정세 뉴스",
 		"task": "오늘 국제 정세 주요 뉴스를 찾아 정리해 줘"}, viaChat("u1"))

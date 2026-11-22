@@ -48,10 +48,10 @@ func invitePermissions() int64 {
 // missingRecommended lists the recommended permissions the bot lacks in a channel.
 func (s *Service) missingRecommended(guildID, channelID string) []string {
 	out := []string{}
-	if s.Discord == nil || !s.Discord.Connected() {
+	if s.Discord() == nil || !s.Discord().Connected() {
 		return out
 	}
-	bits, ok := s.Discord.Permissions(guildID, channelID)
+	bits, ok := s.Discord().Permissions(guildID, channelID)
 	if !ok || bits&permAdministrator != 0 {
 		return out
 	}
@@ -65,10 +65,10 @@ func (s *Service) missingRecommended(guildID, channelID string) []string {
 
 // missingPerms lists the required permissions the bot lacks in a channel; known=false without a gateway.
 func (s *Service) missingPerms(guildID, channelID string) (missing []string, known bool) {
-	if s.Discord == nil || !s.Discord.Connected() {
+	if s.Discord() == nil || !s.Discord().Connected() {
 		return nil, false
 	}
-	bits, ok := s.Discord.Permissions(guildID, channelID)
+	bits, ok := s.Discord().Permissions(guildID, channelID)
 	if !ok {
 		return nil, false
 	}
@@ -88,7 +88,7 @@ func (s *Service) missingPerms(guildID, channelID string) (missing []string, kno
 // is remembered (discord:perms_ok), so losing one stays "lost" (danger) until it is fixed, however
 // often the dashboard is loaded.
 func (s *Service) permsAttention() []attention {
-	if s.Discord == nil || !s.Discord.Connected() {
+	if s.Discord() == nil || !s.Discord().Connected() {
 		return nil
 	}
 	now := map[string][]string{}
@@ -176,11 +176,11 @@ func (s *Service) channelsPermissions(req action.Request) action.Result {
 
 // serversAttention lists servers the bot was invited to that wait for an operator's approval.
 func (s *Service) serversAttention() []attention {
-	if s.Discord == nil || !s.Discord.Connected() {
+	if s.Discord() == nil || !s.Discord().Connected() {
 		return nil
 	}
 	var names []string
-	for _, g := range s.Discord.Guilds() {
+	for _, g := range s.Discord().Guilds() {
 		if !s.GuildAllowed(g.ID) {
 			names = append(names, g.Name)
 		}

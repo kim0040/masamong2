@@ -475,7 +475,8 @@ func (s *Service) runScheduledRetention(ctx context.Context) scheduleState {
 	return st
 }
 
-// retentionPasses marks a service whose scheduled pass is running (the entry exists only meanwhile).
+// retentionPasses marks a service whose usage_gc pass is running, scheduled or run from the console
+// (the entry exists only meanwhile).
 var retentionPasses sync.Map // *Service → struct{}
 
 // startRetentionPass runs the usage_gc pass off the scheduler tick (a first statistics backfill can

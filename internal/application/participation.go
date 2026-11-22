@@ -581,8 +581,8 @@ func (s *Service) considerCandidate(cand *partCandidate) {
 				if text == "" || !s.stillCurrent(cand) {
 					return ""
 				}
-				poster, ok := s.Discord.(ChannelPoster)
-				if !ok || s.Discord == nil || !s.Discord.Connected() {
+				poster, ok := s.Discord().(ChannelPoster)
+				if !ok || s.Discord() == nil || !s.Discord().Connected() {
 					postErr = errors.New("discord not connected")
 					return ""
 				}
@@ -656,8 +656,8 @@ func (s *Service) offerPlan(ctx context.Context, cand *partCandidate, mode strin
 		s.logParticipation(cand, mode, partShadow, clip(j.Reason, 200), j.Score, draft, cost)
 		return
 	}
-	poster, ok := s.Discord.(ChannelPoster)
-	if !ok || s.Discord == nil || !s.Discord.Connected() {
+	poster, ok := s.Discord().(ChannelPoster)
+	if !ok || s.Discord() == nil || !s.Discord().Connected() {
 		s.logParticipation(cand, mode, partError, "discord not connected", j.Score, draft, cost)
 		return
 	}

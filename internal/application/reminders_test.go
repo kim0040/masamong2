@@ -65,7 +65,7 @@ func remindSvc(t *testing.T, now time.Time) (*application.Service, *postGateway)
 	serveAnyServer(t, svc)
 	applyDoc(t, svc, func(d *config.Document) { d.Discord.Enabled = true; d.I18n.Timezone = "Asia/Seoul" })
 	gw := &postGateway{}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	svc.Clock = clock.Fixed{T: now}
 	return svc, gw
 }

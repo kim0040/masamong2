@@ -125,6 +125,8 @@ type Engine struct {
 	// retired is set when a newer engine replaced this one (a config change): a rebuild still running
 	// here must not install an index nobody will ever close.
 	retired atomic.Bool
+	// stopping is set when the owner shuts down (StopReload): a rebuild stops at its next stage
+	stopping atomic.Bool
 	// adapted is set once stored vectors of a larger dimensionality were moved to this space
 	adaptMu sync.Mutex
 	adapted bool
@@ -460,12 +462,14 @@ func (e *Engine) Reload() (map[string]int, error) {
 func (e *Engine) LastReload() time.Duration { return time.Duration(e.lastReload.Load()) }
 
 func (e *Engine) reload() (map[string]int, error) {
-	if e.retired.Load() {
-		return nil, errRetired // its successor rebuilds; building here would be thrown away
+	if e.reloadStopped("start") {
+		return nil, errRetired // its successor rebuilds, or the owner is closing; this build would be thrown away
 	}
 	rec := &reloadRecorder{started: time.Now()}
 	info, err := e.reloadSampled(rec)
 	switch {
+	case errors.Is(err, errRetired):
+		e.finishMeasurement(rec, ReloadDiscarded) // stopped between stages
 	case err != nil:
 		e.finishMeasurement(rec, ReloadFailed)
 	case len(rec.samples) == 0 || rec.samples[len(rec.samples)-1].Stage != StagePublish:
@@ -512,6 +516,9 @@ func (e *Engine) reloadSampled(rec *reloadRecorder) (map[string]int, error) {
 	msgs, roomSigs, err := e.loadMessages(loadRooms)
 	if err != nil {
 		return nil, err
+	}
+	if e.reloadStopped("messages") {
+		return nil, errRetired
 	}
 	space := e.EmbedSpace()
 	var identityStarted time.Time
@@ -635,6 +642,9 @@ func (e *Engine) reloadSampled(rec *reloadRecorder) (map[string]int, error) {
 		}
 		coldRows = make(map[string][2]search.QuantizedRow, len(wanted))
 		err := e.Store.ScanLeafVectorBatches(names, space, e.Settings.Recipe.Version(), func(batch []store.StoredLeaf) error {
+			if e.reloadStopped("vectors") {
+				return errRetired
+			}
 			fetchPeak = max(fetchPeak, len(batch))
 			var raw [][]byte
 			var ids []string
@@ -666,6 +676,9 @@ func (e *Engine) reloadSampled(rec *reloadRecorder) (map[string]int, error) {
 	// Keep float16 blobs for at most one batch, including the first load. Reading all blobs into
 	// one map before quantizing doubled the vector footprint even when there was no old index.
 	for lo := 0; lo < len(out); lo += 500 {
+		if e.reloadStopped("vectors") {
+			return nil, errRetired
+		}
 		batch := out[lo:min(len(out), lo+500)]
 		var fetch []string
 		for _, p := range batch {
@@ -726,6 +739,9 @@ func (e *Engine) reloadSampled(rec *reloadRecorder) (map[string]int, error) {
 	e.lastReused.Store(int64(reused))
 	e.lastRead.Store(int64(time.Since(started)))
 	rec.sample(StageRead)
+	if e.reloadStopped("read") {
+		return nil, errRetired
+	}
 	cfg := e.Settings.Search
 	cfg.SummaryEnabled = e.Settings.Summaries && len(sums) > 0
 	if !cfg.SummaryEnabled {
@@ -741,6 +757,10 @@ func (e *Engine) reloadSampled(rec *reloadRecorder) (map[string]int, error) {
 		return nil, err
 	}
 	rec.sample(StageBuild)
+	if e.reloadStopped("build") {
+		ix.Close() // in-memory databases: closed, not dropped
+		return nil, errRetired
+	}
 	info := map[string]int{"rooms": len(names), "messages": len(msgs), "leaves": len(lv), "summaries": len(sums), "stale": stale, "vector_fetch_peak": fetchPeak, "leaf_vectors_streamed": streamedLeafVectors}
 	if identity != nil {
 		info["identity_prepare_us"], info["identity_input_rows"] = identityPrepare, identityRows
@@ -766,9 +786,9 @@ func (e *Engine) reloadSampled(rec *reloadRecorder) (map[string]int, error) {
 	for _, r := range rooms {
 		ix.RoomRevisions[r.Room.Room] = r.Revision
 	}
-	if e.retired.Load() {
-		// replaced while building: the successor has its own index. Each index holds in-memory SQLite
-		// databases (a goroutine and memory each), so an unused one is closed, not dropped.
+	if e.reloadStopped("publish") {
+		// replaced while building (the successor has its own index) or the owner is closing. Each index
+		// holds in-memory SQLite databases (a goroutine and memory each), so an unused one is closed.
 		ix.Close()
 		return info, nil
 	}

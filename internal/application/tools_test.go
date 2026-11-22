@@ -150,9 +150,9 @@ func TestToolCommandReadinessAndDoctorSurface(t *testing.T) {
 		d.Memory.NaiveTimezone = "Mars/Base"
 		d.Discord.Enabled = true
 	})
-	svc.Discord = &startupDoctorGateway{status: application.DiscordStartupStatus{
+	svc.SetDiscord(&startupDoctorGateway{status: application.DiscordStartupStatus{
 		Attempts: 4, LastError: "discord open: temporary network outage", NextRetry: "2026-10-05T00:30:00Z",
-	}}
+	}})
 	res := exec(svc, "runtime.doctor", nil)
 	if !res.OK {
 		t.Fatalf("doctor: %+v", res.Error)
@@ -639,7 +639,7 @@ func TestHelpListsOnlyReadyTools(t *testing.T) {
 func TestDoctorShowsConnectingWhileTheFirstDiscordAttemptRuns(t *testing.T) {
 	svc := setupSvc(t)
 	applyDoc(t, svc, func(d *config.Document) { d.Discord.Enabled = true })
-	svc.Discord = &startupDoctorGateway{status: application.DiscordStartupStatus{Connecting: true}}
+	svc.SetDiscord(&startupDoctorGateway{status: application.DiscordStartupStatus{Connecting: true}})
 	res := exec(svc, "runtime.doctor", nil)
 	if !res.OK {
 		t.Fatalf("doctor: %+v", res.Error)
@@ -654,7 +654,7 @@ func TestDoctorShowsConnectingWhileTheFirstDiscordAttemptRuns(t *testing.T) {
 		}
 	}
 	// after an attempt succeeded and the gateway later dropped, it is a real disconnect again
-	svc.Discord = &startupDoctorGateway{status: application.DiscordStartupStatus{Attempts: 1}}
+	svc.SetDiscord(&startupDoctorGateway{status: application.DiscordStartupStatus{Attempts: 1}})
 	res = exec(svc, "runtime.doctor", nil)
 	discord = res.Output["features"].(map[string]any)["discord"].(map[string]any)
 	if discord["status"] != "error" || discord["reason"] != "gateway_disconnected" {

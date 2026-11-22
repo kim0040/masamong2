@@ -171,8 +171,8 @@ func (s *Service) alertsReady() (DiscordSender, string) {
 	case len(doc.Access.Operators) == 0:
 		return nil, "no_operators"
 	}
-	dm, ok := s.Discord.(DiscordSender)
-	if !ok || s.Discord == nil || !s.Discord.Connected() {
+	dm, ok := s.Discord().(DiscordSender)
+	if !ok || s.Discord() == nil || !s.Discord().Connected() {
 		return nil, "discord_offline"
 	}
 	return dm, ""
@@ -339,12 +339,12 @@ func (s *Service) alertsAction(ctx context.Context, req action.Request) action.R
 	defer alertMu.Unlock()
 	// a test works with alerts off: it checks that the operators can be reached
 	var dm DiscordSender
-	switch d, ok := s.Discord.(DiscordSender); {
+	switch d, ok := s.Discord().(DiscordSender); {
 	case s.practice:
 		why = "practice"
 	case len(doc.Access.Operators) == 0:
 		why = "no_operators"
-	case !ok || !s.Discord.Connected():
+	case !ok || !s.Discord().Connected():
 		why = "discord_offline"
 	default:
 		dm, why = d, ""

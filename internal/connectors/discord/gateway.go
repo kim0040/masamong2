@@ -198,7 +198,7 @@ func Start(ctx context.Context, svc *application.Service, cfg config.Discord, lo
 	sess.AddHandler(g.onPollVoteRemove)
 	sess.AddHandler(g.onReactionAdd)
 	sess.AddHandler(g.onReactionRemove)
-	svc.Discord = g
+	svc.SetDiscord(g)
 	SetCatalog(svc.I18n)
 	svc.SetCommandMenu(commandHints())
 	events, unsubscribe := svc.Subscribe()

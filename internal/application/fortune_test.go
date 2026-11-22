@@ -147,7 +147,7 @@ func TestMorningBriefingIsWrittenEarlyAndSentOnce(t *testing.T) {
 		t.Fatalf("subscribe: %+v", r)
 	}
 	gw := &dmGateway{}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	at := func(h, m int) { svc.Clock = clock.Fixed{T: time.Date(2026, 9, 29, h, m, 0, 0, seoul)} }
 	ctx := context.Background()
@@ -232,7 +232,7 @@ func TestFortuneTagReadingBecomesACard(t *testing.T) {
 
 	_ = as(svc, "fortune.subscribe", map[string]any{"op": "subscribe", "time": "07:30"}, dm)
 	gw := &dmGateway{}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	due := time.Date(2026, 10, 16, 7, 30, 0, 0, seoul)
 	svc.Clock = clock.Fixed{T: due}
 	application.RunFortuneMorning(svc, context.Background())
@@ -363,7 +363,7 @@ func TestBriefingFollowsTheSendTime(t *testing.T) {
 		_ = as(svc, "fortune.subscribe", map[string]any{"op": "register", "birth_date": "1995-06-15"}, dm)
 		_ = as(svc, "fortune.subscribe", map[string]any{"op": "subscribe", "time": c.at}, dm)
 		gw := &dmGateway{}
-		svc.Discord = gw
+		svc.SetDiscord(gw)
 		svc.Clock = clock.Fixed{T: c.due}
 		application.RunFortuneMorning(svc, context.Background())
 		srv.Close()

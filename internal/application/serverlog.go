@@ -84,10 +84,10 @@ func (s *Service) serverLogChannel(guildID string) (string, string) {
 	case "", "off":
 		return "", "off"
 	case config.GuildLogAuto:
-		if s.Discord == nil {
+		if s.Discord() == nil {
 			return "", "none"
 		}
-		for _, c := range s.Discord.Channels(guildID) {
+		for _, c := range s.Discord().Channels(guildID) {
 			if strings.EqualFold(c.Name, config.GuildLogName) {
 				return c.ID, "auto"
 			}
@@ -99,7 +99,7 @@ func (s *Service) serverLogChannel(guildID string) (string, string) {
 
 // serverLogOK reports whether the server takes log entries now and where they go.
 func (s *Service) serverLogOK(guildID string) (string, bool) {
-	if s.practice || guildID == "" || s.Discord == nil || !s.Discord.Connected() || !s.GuildAllowed(guildID) || s.pauseState().All {
+	if s.practice || guildID == "" || s.Discord() == nil || !s.Discord().Connected() || !s.GuildAllowed(guildID) || s.pauseState().All {
 		return "", false
 	}
 	ch, _ := s.serverLogChannel(guildID)
@@ -443,7 +443,7 @@ func (s *Service) serverLogSend(e serverLogEntry) {
 	delete(st.dropped, e.guild)
 	st.mu.Unlock()
 
-	poster, ok := s.Discord.(ChannelPoster)
+	poster, ok := s.Discord().(ChannelPoster)
 	if !ok {
 		return
 	}
@@ -496,8 +496,8 @@ func (s *Service) serverLogView(guildID string) map[string]any {
 	l := s.Doc().Guilds[guildID].Log
 	ch, how := s.serverLogChannel(guildID)
 	out := map[string]any{"channel_id": ch, "source": how, "deletes": l.DeletesOn(), "deleted_text": l.TextOn(), "problems": l.ProblemsOn()}
-	if ch != "" && s.Discord != nil && s.Discord.Connected() {
-		if bits, ok := s.Discord.Permissions(guildID, ch); ok && bits&permAdministrator == 0 {
+	if ch != "" && s.Discord() != nil && s.Discord().Connected() {
+		if bits, ok := s.Discord().Permissions(guildID, ch); ok && bits&permAdministrator == 0 {
 			var missing []string
 			for _, p := range requiredPerms {
 				if p.Key != "read_message_history" && bits&p.Bit == 0 {
@@ -508,7 +508,7 @@ func (s *Service) serverLogView(guildID string) map[string]any {
 				out["missing"] = missing
 			}
 		}
-		for _, c := range s.Discord.Channels(guildID) {
+		for _, c := range s.Discord().Channels(guildID) {
 			if c.ID == ch {
 				out["channel_name"] = c.Name
 			}
@@ -535,8 +535,8 @@ func (s *Service) serverLogTest(ctx context.Context, req action.Request) action.
 	if s.practice {
 		return action.Fail(req, errcode.InvalidInput, "generic.error", "practice mode posts nothing to Discord", map[string]any{"reason": "practice"})
 	}
-	poster, ok := s.Discord.(ChannelPoster)
-	if !ok || !s.Discord.Connected() {
+	poster, ok := s.Discord().(ChannelPoster)
+	if !ok || !s.Discord().Connected() {
 		return action.Fail(req, errcode.DiscordNotConnected, "generic.error", "Discord is not connected", map[string]any{"reason": "discord_offline"})
 	}
 	ch, how := s.serverLogChannel(in.GuildID)

@@ -188,10 +188,10 @@ func (s *Service) imagesAsync(ctx context.Context, req action.Request, in map[st
 	if !ok || origin.MessageID == "" {
 		return action.Result{}, false
 	}
-	if s.Discord == nil || !s.Discord.Connected() {
+	if s.Discord() == nil || !s.Discord().Connected() {
 		return action.Result{}, false
 	}
-	if _, ok := s.Discord.(ImagePoster); !ok {
+	if _, ok := s.Discord().(ImagePoster); !ok {
 		return action.Result{}, false
 	}
 	now := s.Clock.Now()
@@ -321,7 +321,7 @@ func (s *Service) imagePolicySkip(j *imageJob) string {
 // imageReady reports whether the gateway is connected and still lists the job's server. A reconnect
 // makes both false for a moment, so it is a reason to wait, never to drop.
 func (s *Service) imageReady(j *imageJob) bool {
-	dc := s.Discord
+	dc := s.Discord()
 	if dc == nil || !dc.Connected() {
 		return false
 	}
@@ -352,7 +352,7 @@ func (s *Service) waitImageReady(ctx context.Context, j *imageJob) bool {
 
 // imageCannotAttach reports a channel where the bot is known not to be allowed to attach files.
 func (s *Service) imageCannotAttach(j *imageJob) bool {
-	dc := s.Discord
+	dc := s.Discord()
 	if dc == nil {
 		return false
 	}
@@ -442,7 +442,7 @@ func (s *Service) runImageJob(ctx context.Context, j *imageJob) {
 		s.postImageFailure(ctx, j)
 		return
 	}
-	poster, ok := s.Discord.(ImagePoster)
+	poster, ok := s.Discord().(ImagePoster)
 	if !ok {
 		s.postImageFailure(ctx, j)
 		return
@@ -480,7 +480,7 @@ func (s *Service) postImageFailure(ctx context.Context, j *imageJob) {
 		s.dropImageJob(j, why)
 		return
 	}
-	poster, ok := s.Discord.(ChannelPoster)
+	poster, ok := s.Discord().(ChannelPoster)
 	if !ok {
 		s.dropImageJob(j, "no_poster")
 		return

@@ -28,7 +28,7 @@ func taskWithSearch(t *testing.T, plan string, services func(svc *application.Se
 	})
 	services(svc)
 	gw := &postGateway{}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	svc.Clock = clock.Fixed{T: time.Date(2026, 10, 15, 20, 0, 0, 0, seoul)}
 	if r := as(svc, "reminders.propose", map[string]any{"kind": "task", "when": "오전 9시", "repeat": "daily", "what": "캠핑장 요금",
 		"task": "가평 캠핑장 요금을 찾아 정리해 줘"}, viaChat("u1")); r.Output["status"] != "scheduled" {

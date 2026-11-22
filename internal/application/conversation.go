@@ -56,8 +56,8 @@ type convContext struct {
 
 // botAccount is the bot's own Discord account ID, when known.
 func (s *Service) botAccount(lines []conversation.Line) string {
-	if s.Discord != nil {
-		if id, _ := s.Discord.BotUser(); id != "" {
+	if s.Discord() != nil {
+		if id, _ := s.Discord().BotUser(); id != "" {
 			return id
 		}
 	}

@@ -792,8 +792,8 @@ func (s *Service) decorateTurns(list []TurnRecord) {
 	marks := s.turnMarks(ids)
 	names := s.turnChannelNames(list)
 	botID, botName := "", ""
-	if s.Discord != nil {
-		botID, botName = s.Discord.BotUser()
+	if s.Discord() != nil {
+		botID, botName = s.Discord().BotUser()
 	}
 	for i := range list {
 		list[i].Feedback, list[i].Implicit, list[i].Mark = fb[list[i].ID], implicit[list[i].ID], marks[list[i].ID]
@@ -808,7 +808,7 @@ func (s *Service) decorateTurns(list []TurnRecord) {
 // turnChannelNames maps the listed turns' channels to their Discord names, one lookup per server.
 func (s *Service) turnChannelNames(list []TurnRecord) map[string]string {
 	out := map[string]string{}
-	if s.Discord == nil || !s.Discord.Connected() {
+	if s.Discord() == nil || !s.Discord().Connected() {
 		return out
 	}
 	seen := map[string]bool{}
@@ -817,7 +817,7 @@ func (s *Service) turnChannelNames(list []TurnRecord) map[string]string {
 			continue
 		}
 		seen[t.GuildID] = true
-		for _, c := range s.Discord.Channels(t.GuildID) {
+		for _, c := range s.Discord().Channels(t.GuildID) {
 			out[c.ID] = c.Name
 		}
 	}
@@ -1235,10 +1235,10 @@ func (s *Service) dashboardOverview(ctx context.Context, req action.Request) act
 		dbStatus = map[string]any{"status": "error", "backend": s.Store.Backend, "reason": pingErr.Error()}
 	}
 	discord := status("discord")
-	if s.Discord != nil {
-		if s.Discord.Connected() {
-			discord = map[string]any{"status": "ready", "guilds": len(s.Discord.Guilds())}
-			if _, name := s.Discord.BotUser(); name != "" {
+	if s.Discord() != nil {
+		if s.Discord().Connected() {
+			discord = map[string]any{"status": "ready", "guilds": len(s.Discord().Guilds())}
+			if _, name := s.Discord().BotUser(); name != "" {
 				discord["bot"] = name
 			}
 		} else if s.Doc().Discord.Enabled {
@@ -1431,7 +1431,7 @@ func (s *Service) checklist(memCounts map[string]int) []map[string]any {
 	_, _ = s.kvGet("checklist:ack", &ack)
 	return []map[string]any{
 		{"id": "model_key", "done": llmReady, "route": "/connections"},
-		{"id": "discord", "done": s.Discord != nil && s.Discord.Connected(), "route": "/connections"},
+		{"id": "discord", "done": s.Discord() != nil && s.Discord().Connected(), "route": "/connections"},
 		{"id": "first_room", "done": roomReady, "route": "/rooms"},
 		{"id": "test_chat", "done": num(`SELECT COUNT(*) FROM turn_log WHERE outcome='answered'`) > 0, "route": "/lab"},
 		{"id": "import", "done": intOf("observations") > 0, "route": "/blocks?import=1"},

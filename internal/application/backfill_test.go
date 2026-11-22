@@ -57,7 +57,7 @@ func TestBackfillCatchesUpFromTheLastStoredMessage(t *testing.T) {
 		}
 		gw.msgs = append(gw.msgs, m)
 	}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	eng, err := svc.MemoryEngine()
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +124,7 @@ func TestBackfillStopsAtTheWindow(t *testing.T) {
 		{ID: snowflake(now.Add(-48 * time.Hour)), AuthorID: "u", AuthorName: "a", Content: "이틀 전", At: now.Add(-48 * time.Hour)},
 		{ID: snowflake(now.Add(-time.Hour)), AuthorID: "u", AuthorName: "a", Content: "한 시간 전", At: now.Add(-time.Hour)},
 	}}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	eng, _ := svc.MemoryEngine()
 	m := gw.msgs[0]
 	_, _ = eng.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", MessageID: m.ID, AuthorID: "u", AuthorName: "a", Content: m.Content, At: m.At})
@@ -154,7 +154,7 @@ func TestBackfillFollowsMemoryConsent(t *testing.T) {
 		{ID: snowflake(at(3)), AuthorID: "20002", AuthorName: "b", Content: "차단된 사람", At: at(3)},
 		{ID: snowflake(at(2)), AuthorID: "30003", AuthorName: "c", Content: "철회한 사람", At: at(2)},
 	}}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	eng, _ := svc.MemoryEngine()
 	m := gw.msgs[0]
 	_, _ = eng.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", MessageID: m.ID, AuthorID: m.AuthorID, AuthorName: "a", Content: m.Content, At: m.At})

@@ -67,7 +67,7 @@ func dailyDeliveryService(t *testing.T, now time.Time, zone, date, fortuneTime, 
 		t.Fatal(err)
 	}
 	svc.Clock = clock.Fixed{T: now}
-	svc.Discord = sender
+	svc.SetDiscord(sender)
 	return svc
 }
 

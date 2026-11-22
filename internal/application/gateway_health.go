@@ -29,10 +29,10 @@ type DiscordHealthReporter interface {
 
 // gatewayHealth reads the snapshot from a gateway that reports one.
 func (s *Service) gatewayHealth() (GatewayHealth, bool) {
-	if s.Discord == nil {
+	if s.Discord() == nil {
 		return GatewayHealth{}, false
 	}
-	r, ok := s.Discord.(DiscordHealthReporter)
+	r, ok := s.Discord().(DiscordHealthReporter)
 	if !ok {
 		return GatewayHealth{}, false
 	}
@@ -49,10 +49,10 @@ type DiscordReconciliationReporter interface {
 // reconciliationBlocked is the number of recovery files waiting for an operator, 0 when the gateway
 // reports none or cannot report.
 func (s *Service) reconciliationBlocked() int {
-	if s.Discord == nil {
+	if s.Discord() == nil {
 		return 0
 	}
-	r, ok := s.Discord.(DiscordReconciliationReporter)
+	r, ok := s.Discord().(DiscordReconciliationReporter)
 	if !ok {
 		return 0
 	}

@@ -16,7 +16,7 @@ func alertSvc(t *testing.T) (*application.Service, *dmGateway, func(time.Duratio
 	t.Helper()
 	svc := setupSvc(t)
 	gw := &dmGateway{}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	now := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
 	svc.Clock = clock.Fixed{T: now}
 	applyDoc(t, svc, func(d *config.Document) { d.Access.Operators = []string{"op1", "op2"}; d.I18n.DefaultLocale = "ko" })

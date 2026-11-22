@@ -59,7 +59,7 @@ func member(guild, user string) *action.Invoker {
 func TestNewServersWaitForApproval(t *testing.T) {
 	svc := setupSvc(t)
 	gw := &serverGateway{guilds: []application.GuildInfo{{ID: oldServer, Name: "old friends"}}}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	// the first connection approves the servers the bot is already in, once
 	svc.SeedServers([]string{oldServer})
 	if !svc.GuildAllowed(oldServer) {
@@ -143,7 +143,7 @@ func TestNewServersWaitForApproval(t *testing.T) {
 func TestDecliningAServerTakesTheBotOut(t *testing.T) {
 	svc := setupSvc(t)
 	gw := &serverGateway{guilds: []application.GuildInfo{{ID: stranger, Name: "strangers"}}}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	// without confirm it only says what would happen
 	r := exec(svc, "channels.leave", map[string]any{"guild_id": stranger})
 	if !r.OK || r.Output["confirm_required"] != true || r.Output["name"] != "strangers" || len(gw.left) != 0 {
@@ -206,7 +206,7 @@ func TestServerManagersRunTheirServerFromDiscord(t *testing.T) {
 	}
 	// the bot, oneself and operators cannot be blocked; a missing target is explained
 	for _, who := range []string{"900000000000000009", "400000000000000001", "400000000000000009"} {
-		svc.Discord = &serverGateway{}
+		svc.SetDiscord(&serverGateway{})
 		if r := as(svc, "access.policy", map[string]any{"op": "block", "user": who}, manager); r.OK || r.Error.MessageKey != "access.cannot_block" {
 			t.Fatalf("blocking %s: %+v", who, r)
 		}
@@ -300,7 +300,7 @@ func TestChangeLogFiltersAndPages(t *testing.T) {
 
 func TestInviteAsksOnlyForWhatTheBotUses(t *testing.T) {
 	svc := setupSvc(t)
-	svc.Discord = &serverGateway{}
+	svc.SetDiscord(&serverGateway{})
 	r := exec(svc, "channels.invite", map[string]any{"guild_id": oldServer})
 	if !r.OK {
 		t.Fatal(r.Error)

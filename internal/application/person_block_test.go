@@ -229,7 +229,7 @@ func TestReviewPersonPrivacy(t *testing.T) {
 
 func TestEpisodePersonBlockScope(t *testing.T) {
 	s, m, e := memorySvc(t)
-	s.Discord = &personGateway{}
+	s.SetDiscord(&personGateway{})
 	applyDoc(t, s, func(d *config.Document) { d.Guilds["g"].Channels["other"] = config.ChannelPolicy{Capture: true} })
 	s.NoteThread("g", "thread", "c", false)
 	ref := store.PersonRef("101")

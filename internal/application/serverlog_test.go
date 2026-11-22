@@ -61,7 +61,7 @@ func logSvc(t *testing.T) (*application.Service, *logGateway) {
 		d.Discord.Enabled, d.I18n.DefaultLocale, d.Access.Servers = true, "ko", []string{"g"}
 	})
 	gw := &logGateway{fakeGateway: fakeGateway{bits: 1<<10 | 1<<11 | 1<<14 | 1<<16}}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	setLog(t, svc, config.GuildLog{Channel: config.GuildLogAuto})
 	return svc, gw
 }

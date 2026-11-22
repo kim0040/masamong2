@@ -33,7 +33,7 @@ func TestLostDiscordPermissionStaysAnAlertUntilFixed(t *testing.T) {
 	}
 	all := int64(1<<10 | 1<<11 | 1<<14 | 1<<16)
 	gw := &fakeGateway{bits: all}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	if got := permAlerts(t, svc); len(got) != 0 {
 		t.Fatalf("full permissions raised %v", got)
 	}
@@ -60,7 +60,7 @@ func TestThreadPermissionsReportedWhileThreadsAreOn(t *testing.T) {
 	}
 	base := int64(1<<10 | 1<<11 | 1<<14 | 1<<16)
 	gw := &fakeGateway{bits: base | 1<<38} // no Create Public Threads
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	missing := func() []any {
 		return out(t, svc, "channels.permissions", map[string]any{"guild_id": "g1", "channel_id": "c1"})["thread_missing"].([]any)
 	}

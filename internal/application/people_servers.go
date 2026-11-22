@@ -270,8 +270,8 @@ func personNames(person *serverPerson) (string, []string) {
 
 func (s *Service) peopleServerNames() map[string]string {
 	names := map[string]string{}
-	if s.Discord != nil && s.Discord.Connected() {
-		for _, guild := range s.Discord.Guilds() {
+	if s.Discord() != nil && s.Discord().Connected() {
+		for _, guild := range s.Discord().Guilds() {
 			if guild.ID != "" && guild.Name != "" {
 				names[guild.ID] = guild.Name
 			}

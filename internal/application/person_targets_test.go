@@ -35,7 +35,7 @@ func resolverService(t testing.TB) *Service {
 	d := s.Doc()
 	d.Guilds = map[string]config.GuildSettings{"g": {Channels: map[string]config.ChannelPolicy{"c": {Capture: true}}}}
 	s.setDoc(d, s.Revision())
-	s.Discord = resolverGateway{}
+	s.SetDiscord(resolverGateway{})
 	return s
 }
 

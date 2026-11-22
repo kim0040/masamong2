@@ -48,7 +48,7 @@ func TestLiveScheduledTask(t *testing.T) {
 		t.Fatalf("%+v", r.Error)
 	}
 	gw := &postGateway{}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	svc.Clock = clock.Fixed{T: now}
 	// each turn comes 30 seconds after the last; a later one is the untagged follow-up the window answers
 	at := now

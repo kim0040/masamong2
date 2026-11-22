@@ -89,10 +89,10 @@ func (s *Service) announceUpdates(ctx context.Context) {
 		_ = s.kvSet(updatesAnnouncedKey, cur)
 		return
 	}
-	if s.Discord == nil || !s.Discord.Connected() {
+	if s.Discord() == nil || !s.Discord().Connected() {
 		return // after the gateway is ready
 	}
-	gw, ok := s.Discord.(newsGateway)
+	gw, ok := s.Discord().(newsGateway)
 	if !ok {
 		return
 	}

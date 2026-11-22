@@ -200,7 +200,7 @@ func TestRepeatingSurvivesAStopBetweenLeaseAndSend(t *testing.T) {
 		t.Run(fmt.Sprintf("crash_after_send=%v", after), func(t *testing.T) {
 			svc, base := remindSvc(t, now)
 			gw := &hookGateway{postGateway: base, crashBefore: !after, crashAfter: after}
-			svc.Discord = gw
+			svc.SetDiscord(gw)
 			id := setSeries(t, svc, "u1", map[string]any{"when": "8am", "what": "pill", "repeat": "daily"})
 			remAt(svc, time.Date(2026, 9, 29, 8, 0, 30, 0, seoul))
 			if !deliverCrashing(svc) {
@@ -300,7 +300,7 @@ func TestRepeatingCancelPauseAndResumeApplyToTheSeries(t *testing.T) {
 	// cancelled by the owner while an occurrence is being sent: that one goes, the series stops
 	svc2, base := remindSvc(t, now)
 	gw2 := &hookGateway{postGateway: base}
-	svc2.Discord = gw2
+	svc2.SetDiscord(gw2)
 	id2 := setSeries(t, svc2, "u1", map[string]any{"when": "8am", "what": "pill", "repeat": "daily"})
 	gw2.before = func() {
 		if r := as(svc2, "reminders.update", map[string]any{"op": "cancel", "id": id2}, inv); r.Output["status"] != "cancelled" {
@@ -854,7 +854,7 @@ func TestRepeatingMissedSeriesDropsContextAndPauseCannotStrandTheLastOccurrence(
 	// pausing while the last occurrence is going out does not leave a paused series with nothing to resume
 	svc2, base := remindSvc(t, now)
 	gw := &hookGateway{postGateway: base}
-	svc2.Discord = gw
+	svc2.SetDiscord(gw)
 	id2 := setSeries(t, svc2, "u1", map[string]any{"when": "8am", "what": "last", "repeat": "daily", "count": 1})
 	gw.before = func() {
 		as(svc2, "reminders.update", map[string]any{"op": "pause", "id": id2}, inChannel("u1"))

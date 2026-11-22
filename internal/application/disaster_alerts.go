@@ -126,10 +126,10 @@ func (s *Service) disasterTick(ctx context.Context) {
 		return
 	}
 	r := s.Registry()
-	if r == nil || r.KMA == nil || !r.KMA.Configured() || s.Discord == nil || !s.Discord.Connected() {
+	if r == nil || r.KMA == nil || !r.KMA.Configured() || s.Discord() == nil || !s.Discord().Connected() {
 		return
 	}
-	poster, ok := s.Discord.(ChannelPoster)
+	poster, ok := s.Discord().(ChannelPoster)
 	if !ok {
 		return
 	}
@@ -749,7 +749,7 @@ func (s *Service) disasterAlertsStatus(req action.Request) action.Result {
 		reason = "off"
 	case r == nil || r.KMA == nil || !r.KMA.Configured():
 		reason = "no_kma_key"
-	case s.Discord == nil || !s.Discord.Connected():
+	case s.Discord() == nil || !s.Discord().Connected():
 		reason = "discord_offline"
 	case channels == 0:
 		reason = "no_channels"

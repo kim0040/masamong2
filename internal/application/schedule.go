@@ -202,6 +202,11 @@ func (s *Service) schedulesAction(ctx context.Context, req action.Request) actio
 			}
 			return action.OK(req, map[string]any{"state": st})
 		case "usage_gc":
+			// one pass at a time: this run and the scheduler's (startRetentionPass) share the mark
+			if _, busy := retentionPasses.LoadOrStore(s, struct{}{}); busy {
+				return action.Fail(req, errcode.ActionUnavailable, "generic.error", "a usage_gc pass is already running", nil)
+			}
+			defer retentionPasses.Delete(s)
 			// the pass finishes statistics first, which can take a while: it follows the service's
 			// lifetime like a backup, not the request's
 			wctx, done, ok := s.detachedWork(ctx)

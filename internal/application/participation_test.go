@@ -101,7 +101,7 @@ func partSvc(t *testing.T, mode string) (*application.Service, *postGateway, *ju
 		d.Guilds = map[string]config.GuildSettings{"g": {Locale: "ko", Channels: map[string]config.ChannelPolicy{"c": {Respond: "mention", Participation: mode, Capture: true}}}}
 	})
 	gw := &postGateway{}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	application.SetParticipationWait(svc, 30*time.Millisecond)
 	return svc, gw, js
 }
