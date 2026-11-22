@@ -74,6 +74,8 @@ func TestActivityRankingShowsLastNameAndLeavesOutWithdrawn(t *testing.T) {
 	}
 	say("1001", "Zed", now.Add(-48*time.Hour)) // the older name sorts last in the alphabet
 	say("1001", "Amy", now)                    // renamed, the latest
+	say("1003", "New", now)                    // the newer observation arrives first
+	say("1003", "Old", now.Add(-time.Hour))    // an older observation arriving late keeps the new name
 	for i := 0; i < 3; i++ {
 		say("1002", "Bob", now.Add(-time.Duration(i)*time.Minute))
 	}
@@ -94,8 +96,14 @@ func TestActivityRankingShowsLastNameAndLeavesOutWithdrawn(t *testing.T) {
 	}
 	m, _ := jsonRoundTrip(r.Output)
 	top := m["top"].([]any)
-	first := top[0].(map[string]any)
-	if len(top) != 1 || first["name"] != "Amy" || first["count"].(float64) != 2 || first["share"] != "100.0" || m["total_messages"].(float64) != 2 || m["people"].(float64) != 1 {
-		t.Fatalf("last name, withdrawn person left out of list, total and head count: %v", m)
+	if len(top) != 2 || m["total_messages"].(float64) != 4 || m["people"].(float64) != 2 {
+		t.Fatalf("withdrawn person left out of list, total and head count: %v", m)
+	}
+	first, second := top[0].(map[string]any), top[1].(map[string]any)
+	if first["name"] != "Amy" || first["count"].(float64) != 2 || first["share"] != "50.0" {
+		t.Fatalf("last name across days: %v", first)
+	}
+	if second["name"] != "New" || second["count"].(float64) != 2 || second["share"] != "50.0" {
+		t.Fatalf("an out-of-order older observation must not rename the row: %v", second)
 	}
 }
