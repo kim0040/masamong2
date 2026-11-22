@@ -5,6 +5,8 @@ import { onLive } from './live.svelte'
 export const overview = $state<{ data: any; at: number; error?: string }>({ data: null, at: 0 })
 let inflight: Promise<void> | null = null
 let started = false
+// the dashboard snapshot is read again this often while the tab is visible (changes also arrive live)
+const OVERVIEW_POLL_MS = 30_000
 
 export function refreshOverview(poll = false): Promise<void> {
   if (!canLoadProtectedActions(session.value)) return Promise.resolve()
@@ -37,5 +39,5 @@ export function startOverview() {
   started = true
   void refreshOverview()
   onLive(['config', 'job', 'turn', 'runtime', 'audit', 'provider', 'discord'], () => void refreshOverview())
-  setInterval(() => document.visibilityState === 'visible' && refreshOverview(true), 30000)
+  setInterval(() => document.visibilityState === 'visible' && refreshOverview(true), OVERVIEW_POLL_MS)
 }

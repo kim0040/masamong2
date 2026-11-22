@@ -24,6 +24,15 @@
   import Switch from '../components/Switch.svelte'
   import * as I from '../lib/icons'
 
+  // turns per request, and the list length from which only the rows in view are drawn
+  const PAGE_SIZE = 50
+  const VIRTUAL_FROM = 120
+  // rows drawn above and below the view, and how many rows before the end the next page is asked for
+  const OVERSCAN_ROWS = 12
+  const LOAD_AHEAD_ROWS = 8
+  // height used until a drawn row can be measured (the stylesheet fixes rows of a virtual list to this height)
+  const FALLBACK_ROW_PX = 56
+
   let outcome = $state(route.query.get('outcome') ?? '')
   let tool = $state(route.query.get('tool') ?? '')
   let channel = $state(route.query.get('channel') ?? '')
@@ -55,7 +64,7 @@
   async function load(more = false) {
     loading = !more
     loadError = undefined
-    const r = await call('turns.list', { outcome, tool, channel_id: channel, lab, tools_only: toolsOnly, limit: 50, before: more ? next : undefined })
+    const r = await call('turns.list', { outcome, tool, channel_id: channel, lab, tools_only: toolsOnly, limit: PAGE_SIZE, before: more ? next : undefined })
     loading = false
     if (!r.ok) {
       if (more) toast('error', t('load.failed'), r.error?.message)
@@ -126,20 +135,27 @@
     return () => mq.removeEventListener('change', f)
   })
   // long lists render only the rows in view (fixed row height) and load more near the end
-  const ROW = 56
+  let rowPx = $state(FALLBACK_ROW_PX)
   let scroller: HTMLDivElement | undefined = $state()
   let scrollTop = $state(0)
   let viewH = $state(640)
-  const virtual = $derived(turns.length > 120)
-  const start = $derived(virtual ? Math.max(0, Math.floor(scrollTop / ROW) - 12) : 0)
-  const end = $derived(virtual ? Math.min(turns.length, Math.ceil((scrollTop + viewH) / ROW) + 12) : turns.length)
+  const virtual = $derived(turns.length > VIRTUAL_FROM)
+  const start = $derived(virtual ? Math.max(0, Math.floor(scrollTop / rowPx) - OVERSCAN_ROWS) : 0)
+  const end = $derived(virtual ? Math.min(turns.length, Math.ceil((scrollTop + viewH) / rowPx) + OVERSCAN_ROWS) : turns.length)
   const rows = $derived(turns.slice(start, end))
+  // the row height comes from what is drawn, so the spacer rows stay right if the stylesheet changes it
+  $effect(() => {
+    if (!virtual || !scroller) return
+    void rows
+    const h = scroller.querySelector<HTMLElement>('tbody tr:not([aria-hidden])')?.offsetHeight ?? 0
+    if (h > 0 && h !== rowPx) rowPx = h
+  })
   let loadingMore = false
   async function onscroll() {
     if (!scroller) return
     scrollTop = scroller.scrollTop
     viewH = scroller.clientHeight
-    if (next && !loadingMore && scroller.scrollTop + scroller.clientHeight > scroller.scrollHeight - ROW * 8) {
+    if (next && !loadingMore && scroller.scrollTop + scroller.clientHeight > scroller.scrollHeight - rowPx * LOAD_AHEAD_ROWS) {
       loadingMore = true
       await load(true)
       loadingMore = false
@@ -185,7 +201,7 @@
         <table class="table" aria-rowcount={turns.length + 1}>
           <thead><tr><th>{t('turns.col.time')}</th><th>{t('turns.col.message')}</th><th class="w">{t('turns.col.tools')}</th><th class="r w">{t('turns.col.evidence')}</th><th class="r w">{t('turns.col.latency')}</th><th class="r w">{t('turns.col.cost')}</th><th class="w">{t('turns.col.outcome')}</th></tr></thead>
           <tbody>
-            {#if start > 0}<tr aria-hidden="true" style:height="{start * ROW}px"><td colspan="7"></td></tr>{/if}
+            {#if start > 0}<tr aria-hidden="true" style:height="{start * rowPx}px"><td colspan="7"></td></tr>{/if}
             {#each rows as tr, i (tr.id)}
               <tr class="clickable" class:selected={selected?.id === tr.id} aria-rowindex={start + i + 2}>
                 <td class="nowrap num muted">{relative(tr.at)}</td>
@@ -197,7 +213,7 @@
                 <td class="w"><Status tone={outcomeTone(tr.outcome)} label={t(`outcome.${tr.outcome}`)} size="sm" />{#if tr.feedback}<span class="fb xs num" title={t('turns.feedback_title')}>{#if tr.feedback.good}<span>👍 {tr.feedback.good}</span>{/if}{#if tr.feedback.bad}<span class="bad">👎 {tr.feedback.bad}</span>{/if}</span>{/if}</td>
               </tr>
             {/each}
-            {#if end < turns.length}<tr aria-hidden="true" style:height="{(turns.length - end) * ROW}px"><td colspan="7"></td></tr>{/if}
+            {#if end < turns.length}<tr aria-hidden="true" style:height="{(turns.length - end) * rowPx}px"><td colspan="7"></td></tr>{/if}
           </tbody>
         </table>
       </div>
