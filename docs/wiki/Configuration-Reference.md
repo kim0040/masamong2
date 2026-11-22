@@ -313,7 +313,7 @@ Each level includes the levels above it in this table.
 
 Use the exact KMA area code or name. A specific area takes priority over its parent, with the code preferred to the name at each tier. An unmatched area uses level 1. Earthquakes reach every enabled room, regardless of area. Sea areas additionally require `marine: true`. After upgrading, set any desired areas per room. The old global `warning_regions` list is accepted when loading older files and has no effect on delivery.
 
-The room page in the console shows, for each saved area, whether it matches an area seen in KMA warnings. The bot ships no KMA area list, so an area that has had no warning yet can show as "not seen" even when its name is right. A lift goes only to the rooms that received the issue or upgrade for that level. After upgrading, the first warning check records what is in force as its starting point and announces nothing.
+The room page in the console shows, for each saved area, whether it matches an area seen in KMA warnings. The bot ships no KMA area list, so an area that has had no warning yet can show as "not seen" even when its name is right. A lift goes only to the rooms that received the issue or upgrade for that level. After upgrading, the first warning check records what is in force as its starting point and announces nothing, and those warnings end without a lift. A room with no area set gets earthquakes only, and no lifts.
 
 ## personas
 
