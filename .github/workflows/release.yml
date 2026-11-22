@@ -174,6 +174,18 @@ jobs:
           name: masamong-release-${{ needs.build.outputs.version }}
           path: release
       - run: cd release && sha256sum -c SHA256SUMS
+      # The notes are committed before the tag (make release-notes VERSION=...): the Markdown is the
+      # release text and the JSON is attached as release-notes.json, which the console reads. A tag
+      # without them keeps GitHub's generated notes.
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" release/* --title "Masamong $GITHUB_REF_NAME" --generate-notes
+        run: |
+          notes="release-notes/$GITHUB_REF_NAME.md"
+          if [ -f "$notes" ] && [ -f "release-notes/$GITHUB_REF_NAME.json" ]; then
+            mkdir -p "$RUNNER_TEMP/assets"
+            cp "release-notes/$GITHUB_REF_NAME.json" "$RUNNER_TEMP/assets/release-notes.json"
+            gh release create "$GITHUB_REF_NAME" release/* "$RUNNER_TEMP/assets/release-notes.json" --title "Masamong $GITHUB_REF_NAME" --notes-file "$notes"
+          else
+            echo "::warning::no release-notes/$GITHUB_REF_NAME.md and .json; using generated notes"
+            gh release create "$GITHUB_REF_NAME" release/* --title "Masamong $GITHUB_REF_NAME" --generate-notes
+          fi
