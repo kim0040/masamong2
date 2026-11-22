@@ -23,7 +23,7 @@
   const LISTS = {
     name_call: ['addressed', 'always', 'off'],
     attribution: ['on', 'structural', 'off'],
-    follow: ['off', 'reply_only', 'window'],
+    follow: ['off', 'window'],
     thread: ['offer', 'auto_task', 'off'],
     thread_follow: ['participants', 'all'],
     thread_recap: ['plan', 'always', 'off'],
@@ -32,7 +32,10 @@
   } as const
   type Key = keyof typeof LISTS
   const top = (k: Key) => (k === 'name_call' || k === 'attribution')
-  const current = (k: Key): string => (top(k) ? pol[k] : conv[k]) || LISTS[k][0]
+  const current = (k: Key): string => {
+    const v = (top(k) ? pol[k] : conv[k]) || LISTS[k][0]
+    return k === 'follow' && v === 'reply_only' ? 'off' : v // an old stored value reads as off
+  }
   const options = (k: Key) => LISTS[k].map((v) => ({ value: v, label: t(`conv.${k}.${v}`) }))
   async function choose(k: Key, v: string) {
     const path = top(k) ? [...base, k] : [...base, 'conversation', k]

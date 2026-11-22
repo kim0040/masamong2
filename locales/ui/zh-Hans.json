@@ -910,7 +910,6 @@
   "conv.follow.hint": "决定机器人刚回复过的人不再标记它而继续说话时，机器人是否回应。默认关闭，但即使关闭，也会记录“本会回应的时刻”，供日后调整默认值。",
   "conv.follow.label": "继续对话方式",
   "conv.follow.off": "关闭（仅记录）",
-  "conv.follow.reply_only": "与关闭相同（不再使用）",
   "conv.follow.window": "接话窗口（按评分判断）",
   "conv.follow_max_untagged": "连续未标记回复上限",
   "conv.follow_max_untagged.hint": "连续未标记回复达到此次数后，下一次需要标记。留空为 12 次。",

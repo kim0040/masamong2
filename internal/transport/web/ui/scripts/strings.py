@@ -1242,7 +1242,6 @@ add("", {
     "conv.follow.label": ("이어 말하기 방식", "Follow-up mode"),
     "conv.follow.hint": ("봇이 방금 답한 사람이 다시 태그하지 않고 말을 이을 때 봇이 답할지 정합니다. 기본은 꺼짐이지만, \"답했을 상황\"은 꺼져 있어도 기록해 두어 나중에 기본값을 맞추는 데 씁니다.", "Sets whether the bot answers when the person it just answered carries on without tagging it. It is off by default, but the moments it would have answered are recorded even while off, to tune the defaults later."),
     "conv.follow.off": ("끔 (기록만)", "Off (record only)"),
-    "conv.follow.reply_only": ("끔과 같음 (더 이상 쓰이지 않음)", "Same as off (no longer used)"),
     "conv.follow.window": ("이어 말하기 창 (점수로 판단)", "Follow-up window (scored)"),
     "conv.follow_window_sec": ("창 유지 시간(초)", "Window length (seconds)"),
     "conv.follow_window_sec.hint": ("봇이 답한 뒤 이 시간 동안은 태그 없는 말도 이어 말로 봅니다. 비우면 90초, 최대 600초입니다.", "After a reply, untagged lines inside this time count as carrying on. Empty means 90 seconds; the most is 600."),

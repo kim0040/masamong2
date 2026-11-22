@@ -910,7 +910,6 @@
   "conv.follow.hint": "Define si el bot responde cuando la persona a la que acaba de responder sigue sin etiquetarlo. Está desactivado por defecto, pero los momentos en que habría respondido se registran igualmente para ajustar los valores por defecto más adelante.",
   "conv.follow.label": "Modo de continuación",
   "conv.follow.off": "Desactivado (solo registrar)",
-  "conv.follow.reply_only": "Igual que desactivado (ya no se usa)",
   "conv.follow.window": "Ventana de continuación (con puntuación)",
   "conv.follow_max_untagged": "Respuestas seguidas sin etiqueta",
   "conv.follow_max_untagged.hint": "Tras tantas respuestas seguidas sin etiqueta, la siguiente necesita etiqueta. Vacío son 12.",

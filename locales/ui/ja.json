@@ -910,7 +910,6 @@
   "conv.follow.hint": "ボットが直前に返答した人がタグなしで続けたとき、ボットが答えるかを決めます。既定はオフですが、オフでも「答えたはずの場面」は記録され、後で既定値を調整するのに使います。",
   "conv.follow.label": "続けて話す方式",
   "conv.follow.off": "オフ(記録のみ)",
-  "conv.follow.reply_only": "オフと同じ（今後は使われません）",
   "conv.follow.window": "継続ウィンドウ(スコアで判断)",
   "conv.follow_max_untagged": "タグなし返答の連続上限",
   "conv.follow_max_untagged.hint": "タグなしで続けて答えた回数がこの数に達すると、次はタグが必要になります。空欄は12回です。",
