@@ -6,6 +6,7 @@
   import { call, postJSON, can } from '../lib/api.svelte'
   import { resource } from '../lib/resource.svelte'
   import { onLive } from '../lib/live.svelte'
+  import { navigate } from '../lib/router.svelte'
   import { cfg, useConfig, patchConfig } from '../lib/config.svelte'
   import { toast } from '../lib/toast.svelte'
   import { num, ms, relative, datetime, usd, duration } from '../lib/format'
@@ -29,9 +30,24 @@
   import { widthChoices, widthDirection, widthState, narrowWithoutRerank, widthBasis, sameWidthBasis, widthRead, widthApplied, widthApproval, widthRequest, widthReplyFits, recommendedWidth, recTicks, recAfterRefresh, recLiveStart, recLiveChange, recLiveLoaded, type EmbedWidthInfo, type WidthChoice, type WidthBasis, type WidthApproval, type RecWidth, type RecLive } from '../lib/embedwidth'
   import * as I from '../lib/icons'
 
+  // limits this page checks before it saves a price or a call time limit
+  const PRICE_MAX_USD_PER_MTOK = 1000
+  const TIMEOUT_MIN_S = 5
+  const TIMEOUT_MAX_S = 600
+  const CHANNELS_POLL_MS = 30_000
+  // the host answers a role's reasoning lookup (caps_pending) within about 20 s: read the table again at these delays
+  const CAPS_RECHECK_MS = [2000, 5000, 10_000]
+  // a published price is a snapshot the release carried; past this age it may no longer be the host's
+  const PRICE_STALE_DAYS = 120
+  const KEY_OLD_DAYS = 180
+  const DAY_MS = 864e5
+  // a second width change within this time of the last one does not repeat the "stale" warning
+  const WIDTH_STALE_TOAST_GAP_MS = 2000
+  const validTimeout = (secs: number) => Number.isInteger(secs) && (secs === 0 || (secs >= TIMEOUT_MIN_S && secs <= TIMEOUT_MAX_S))
+
   useConfig()
   const providers = resource<any>('providers.list', () => ({}), { live: ['config'] })
-  const channels = resource<any>('channels.list', () => ({}), { live: ['discord', 'config'], poll: 30000 })
+  const channels = resource<any>('channels.list', () => ({}), { live: ['discord', 'config'], poll: CHANNELS_POLL_MS })
 
   // key entry
   let keyOpen = $state(false)
@@ -94,7 +110,7 @@
     void providers.refresh()
     // the host is asked about its role models' reasoning after the test answers: read the Models
     // table's source again while that lookup is likely running (it takes up to 20 s)
-    if (r.ok && r.output?.caps_pending) for (const at of [2000, 5000, 10000]) capsTimers.push(setTimeout(() => void providers.refresh(), at))
+    if (r.ok && r.output?.caps_pending) for (const at of CAPS_RECHECK_MS) capsTimers.push(setTimeout(() => void providers.refresh(), at))
     return r.ok
   }
   let capsTimers: ReturnType<typeof setTimeout>[] = []
@@ -289,8 +305,8 @@
       return
     }
     const jobs = (r.output?.reindex_jobs ?? []).length
-    if (jobs) toast('ok', t('conn.rec_applied', { id: provName(recFor) }), t('conn.rec_reindex_started', { n: jobs }), { label: t('conn.rec_jobs_go'), run: () => void (location.href = '/jobs') })
-    else toast('ok', t('conn.rec_applied', { id: provName(recFor) }), r.output?.embed_changes ? t('conn.rec_reindex') : undefined, r.output?.embed_changes ? { label: t('conn.rec_reindex_go'), run: () => void (location.href = '/blocks') } : undefined)
+    if (jobs) toast('ok', t('conn.rec_applied', { id: provName(recFor) }), t('conn.rec_reindex_started', { n: jobs }), { label: t('conn.rec_jobs_go'), run: () => navigate('/jobs') })
+    else toast('ok', t('conn.rec_applied', { id: provName(recFor) }), r.output?.embed_changes ? t('conn.rec_reindex') : undefined, r.output?.embed_changes ? { label: t('conn.rec_reindex_go'), run: () => navigate('/blocks') } : undefined)
     recFor = ''
     void providers.refresh()
   }
@@ -312,10 +328,9 @@
     const p = prices[role]
     return p?.source === 'published' ? t('conn.price_src.published', { date: p.checked ?? '' }) : t(`conn.price_src.${p?.source}`)
   }
-  // a published price is a snapshot the release carried; past ~4 months it may no longer be the host's
   const priceStale = (role: string) => {
     const p = prices[role]
-    return p?.source === 'published' && !!p.checked && Date.now() - Date.parse(p.checked) > 120 * 864e5
+    return p?.source === 'published' && !!p.checked && Date.now() - Date.parse(p.checked) > PRICE_STALE_DAYS * DAY_MS
   }
   // an operator price for hosts that do not list prices (USD per million tokens)
   let priceFor = $state('')
@@ -360,9 +375,9 @@
     const a = priceIn.trim() === '' ? 0 : Number(priceIn)
     const b = priceOut.trim() === '' ? 0 : Number(priceOut)
     const c = priceCached.trim() === '' ? 0 : Number(priceCached)
-    if ([a, b, c].some((v) => Number.isNaN(v) || v < 0 || v > 1000)) return void (priceErr = t('conn.price_invalid'))
+    if ([a, b, c].some((v) => Number.isNaN(v) || v < 0 || v > PRICE_MAX_USD_PER_MTOK)) return void (priceErr = t('conn.price_invalid'))
     const secs = timeoutSecs.trim() === '' ? 0 : Number(timeoutSecs)
-    if (timeoutRole(priceFor) && (!Number.isInteger(secs) || (secs !== 0 && (secs < 5 || secs > 600)))) return void (timeoutErr = t('conn.timeout_invalid'))
+    if (timeoutRole(priceFor) && !validTimeout(secs)) return void (timeoutErr = t('conn.timeout_invalid'))
     const base = ['models', priceFor]
     const ops: any[] = [a ? { path: [...base, 'price_in_per_mtok'], value: a } : { path: [...base, 'price_in_per_mtok'], op: 'unset' }, b ? { path: [...base, 'price_out_per_mtok'], value: b } : { path: [...base, 'price_out_per_mtok'], op: 'unset' },
       c ? { path: [...base, 'price_cached_in_per_mtok'], value: c } : { path: [...base, 'price_cached_in_per_mtok'], op: 'unset' }]
@@ -430,9 +445,9 @@
       seen.add(`${r.provider}|${model}`)
       const pin = r.price_in.trim() === '' ? 0 : Number(r.price_in)
       const pout = r.price_out.trim() === '' ? 0 : Number(r.price_out)
-      if ([pin, pout].some((v) => Number.isNaN(v) || v < 0 || v > 1000)) return void (fbErr = t('conn.price_invalid'))
+      if ([pin, pout].some((v) => Number.isNaN(v) || v < 0 || v > PRICE_MAX_USD_PER_MTOK)) return void (fbErr = t('conn.price_invalid'))
       const secs = r.timeout.trim() === '' ? 0 : Number(r.timeout)
-      if (!Number.isInteger(secs) || (secs !== 0 && (secs < 5 || secs > 600))) return void (fbErr = t('conn.timeout_invalid'))
+      if (!validTimeout(secs)) return void (fbErr = t('conn.timeout_invalid'))
       const f: any = { provider: r.provider, model }
       if (pin) f.price_in_per_mtok = pin
       if (pout) f.price_out_per_mtok = pout
@@ -505,7 +520,7 @@
     const provider = modelProv
     const r = await call('models.select', includeEmbed ? { role, provider, model, include_embed: true } : { role, provider, model })
     if (r.ok) {
-      toast('ok', t('conn.model_set', { role: t(`role.${role}`), model }), includeEmbed ? t('conn.rec_reindex') : undefined, includeEmbed ? { label: t('conn.rec_reindex_go'), run: () => void (location.href = '/blocks') } : undefined)
+      toast('ok', t('conn.model_set', { role: t(`role.${role}`), model }), includeEmbed ? t('conn.rec_reindex') : undefined, includeEmbed ? { label: t('conn.rec_reindex_go'), run: () => navigate('/blocks') } : undefined)
       modelsFor = ''
       // the picker (and a confirm that was on top of it) are gone: keyboard focus goes back to the role's button
       await tick()
@@ -641,7 +656,7 @@
     widthLowerApproval = null
     await tick()
     widthPick = currentWidthPick()
-    if (notify && before && Date.now() - widthVoidedAt > 2000) toast('warn', t('conn.width_stale_title'), t('conn.width_stale_body'))
+    if (notify && before && Date.now() - widthVoidedAt > WIDTH_STALE_TOAST_GAP_MS) toast('warn', t('conn.width_stale_title'), t('conn.width_stale_body'))
     widthVoidedAt = Date.now()
     return info ? 'ok' : 'failed'
   }
@@ -683,7 +698,7 @@
       const done = widthApplied(r.output)
       if (done === 'unchanged') return toast('info', t('conn.width_unchanged', { n: choice.width }))
       const again = done === 'reembed'
-      toast('ok', t('conn.width_set', { n: choice.width }), again ? t('conn.width_reindex') : t('conn.width_cut_done'), again ? { label: t('conn.rec_reindex_go'), run: () => void (location.href = '/blocks') } : undefined)
+      toast('ok', t('conn.width_set', { n: choice.width }), again ? t('conn.width_reindex') : t('conn.width_cut_done'), again ? { label: t('conn.rec_reindex_go'), run: () => navigate('/blocks') } : undefined)
       return
     }
     // changed elsewhere since the picker opened: read it again and ask again, as every config save does
@@ -838,7 +853,7 @@
           <dl class="health xs">
             {#if h.last_ok}<dt>{t('conn.last_ok')}</dt><dd title={datetime(h.last_ok, true)}>{relative(h.last_ok)}</dd>{/if}
             {#if h.last_error_at}<dt>{t('conn.last_error')}</dt><dd title={h.last_error}>{relative(h.last_error_at)}</dd>{/if}
-            {#if h.key_updated_at}<dt>{t('conn.key_age')}</dt><dd title={datetime(h.key_updated_at, true)} class:old={Date.now() - Date.parse(h.key_updated_at) > 180 * 864e5}>{relative(h.key_updated_at)}</dd>{/if}
+            {#if h.key_updated_at}<dt>{t('conn.key_age')}</dt><dd title={datetime(h.key_updated_at, true)} class:old={Date.now() - Date.parse(h.key_updated_at) > KEY_OLD_DAYS * DAY_MS}>{relative(h.key_updated_at)}</dd>{/if}
           </dl>
         {/if}
         <div class="row acts">
