@@ -278,6 +278,9 @@ func (g *Gateway) sendBubbles(ctx context.Context, s *discordgo.Session, guildID
 func (g *Gateway) handleMore(s *discordgo.Session, i *discordgo.InteractionCreate, messageID string) {
 	ctx, cancel := context.WithTimeout(g.runCtx(), 2500*time.Millisecond)
 	defer cancel()
+	if g.refuseBlocked(ctx, s, i) {
+		return
+	}
 	_, ok := g.more.peek(messageID)
 	if !ok {
 		// kept for an hour in memory only (or the bot restarted): say so instead of doing nothing

@@ -349,6 +349,9 @@ func (g *Gateway) handleThreadComponent(s *discordgo.Session, i *discordgo.Inter
 			Data: &discordgo.InteractionResponseData{Content: text, Flags: discordgo.MessageFlagsEphemeral, AllowedMentions: noMentions}},
 			discordgo.WithContext(ctx))
 	}
+	if g.refuseBlocked(ctx, s, i) {
+		return
+	}
 	switch {
 	case len(parts) == 4 && (parts[1] == "open" || parts[1] == "stay"):
 		turnID, caller := parts[2], parts[3]
@@ -420,6 +423,21 @@ func (g *Gateway) handleThreadComponent(s *discordgo.Session, i *discordgo.Inter
 			_ = g.svc.CloseThread(wctx, threadID, "stop")
 		})
 	}
+}
+
+// refuseBlocked answers a button press of a person blocked there with the refusal only they see, as their
+// commands get (access.blocked), and reports whether it did. The thread and "more" buttons act without an
+// Action, so they check here.
+func (g *Gateway) refuseBlocked(ctx context.Context, s *discordgo.Session, i *discordgo.InteractionCreate) bool {
+	actor := actorID(i.Interaction)
+	if !g.svc.BlockedIn(i.GuildID, actor) {
+		return false
+	}
+	text := messages.T(g.svc.LocaleFor(actor, g.locale(i.GuildID)), "access.blocked")
+	_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource,
+		Data: &discordgo.InteractionResponseData{Content: text, Flags: discordgo.MessageFlagsEphemeral, AllowedMentions: noMentions}},
+		discordgo.WithContext(ctx))
+	return true
 }
 
 // componentsWithout is a message's component rows without the buttons whose custom id starts with
