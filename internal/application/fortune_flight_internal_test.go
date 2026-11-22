@@ -134,7 +134,7 @@ func TestZodiacWaiterTakesOverFromATimedOutGenerator(t *testing.T) {
 	started := make(chan struct{})
 	leaderCtx, cancelLeader := context.WithCancel(context.Background())
 	joined := make(chan struct{}, 1)
-	setZodiacHook(t, &zodiacTestHooks.joined, func(string) {
+	setZodiacHook(t, &s.hooks.zodiac.joined, func(string) {
 		select {
 		case joined <- struct{}{}:
 		default:
@@ -194,7 +194,7 @@ func TestZodiacLateRequestReadsWhatTheFlightAheadStored(t *testing.T) {
 	parked, resume := make(chan struct{}), make(chan struct{})
 	unblock := releaseZodiacHold(t, resume)
 	var first atomic.Bool
-	setZodiacHook(t, &zodiacTestHooks.afterMiss, func(string) {
+	setZodiacHook(t, &s.hooks.zodiac.afterMiss, func(string) {
 		if first.CompareAndSwap(false, true) { // the late request: the one that missed first
 			close(parked)
 			<-resume
@@ -242,7 +242,7 @@ func TestZodiacGeneratorReadsTheCacheAfterItsSlot(t *testing.T) {
 	release := make(chan struct{})
 	unblock := releaseZodiacHold(t, release)
 	atSlot := make(chan struct{})
-	setZodiacHook(t, &zodiacTestHooks.beforeSlot, func(key string) {
+	setZodiacHook(t, &s.hooks.zodiac.beforeSlot, func(key string) {
 		if key == "waits" {
 			close(atSlot)
 		}

@@ -422,9 +422,9 @@ func (s *Service) zodiacSlots() chan struct{} {
 	return z.slots
 }
 
-// zodiacTestHooks let a test stop a request at the points where another one can slip in; they are nil
-// outside tests.
-var zodiacTestHooks struct {
+// zodiacHooks let a test stop a request at the points where another one can slip in
+// (serviceHooks.zodiac); they are nil outside tests.
+type zodiacHooks struct {
 	afterMiss  atomic.Pointer[func(key string)] // the cache had no text, the flight table is not looked at yet
 	joined     atomic.Pointer[func(key string)] // a flight is running and this request is about to wait for it
 	beforeSlot atomic.Pointer[func(key string)] // this request owns the flight and is about to wait for a slot
@@ -454,7 +454,7 @@ func (s *Service) zodiacText(ctx context.Context, db *storage.Store, key string,
 		if err := ctx.Err(); err != nil {
 			return "", false, err
 		}
-		zodiacHook(&zodiacTestHooks.afterMiss, key)
+		zodiacHook(&s.hooks.zodiac.afterMiss, key)
 		z.flightMu.Lock()
 		f, running := z.flights[key]
 		if !running {
@@ -466,7 +466,7 @@ func (s *Service) zodiacText(ctx context.Context, db *storage.Store, key string,
 		}
 		z.flightMu.Unlock()
 		if running {
-			zodiacHook(&zodiacTestHooks.joined, key)
+			zodiacHook(&s.hooks.zodiac.joined, key)
 			select {
 			case <-f.done:
 			case <-ctx.Done():
@@ -504,7 +504,7 @@ func (s *Service) generateZodiac(ctx context.Context, db *storage.Store, key str
 	if text, ok := zodiacCached(ctx, db, key); ok {
 		return text, true, nil
 	}
-	zodiacHook(&zodiacTestHooks.beforeSlot, key)
+	zodiacHook(&s.hooks.zodiac.beforeSlot, key)
 	slots := s.zodiacSlots()
 	select {
 	case slots <- struct{}{}:

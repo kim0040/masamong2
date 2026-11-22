@@ -26,6 +26,8 @@ type serviceHooks struct {
 	statsDay atomic.Pointer[func(s *Service, ctx context.Context, group, day string)]
 	// threads run inside the thread bookkeeping (threads.go).
 	threads threadHooks
+	// zodiac stop a zodiac request where another can slip in (fortune.go).
+	zodiac zodiacHooks
 	// oldEditsAtOnce settles old edits at the first idle pass instead of oldEditsDelay after the start.
 	oldEditsAtOnce bool
 }
