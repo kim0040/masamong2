@@ -266,19 +266,19 @@ func Open(dataRoot string, clk clock.Clock, webBuild bool) (*Service, error) {
 	return OpenLogged(dataRoot, clk, webBuild, nil)
 }
 
-// openHooked is Open with a test's hooks in place before any worker starts.
-func openHooked(dataRoot string, hooks serviceHooks) (*Service, error) {
-	return openService(dataRoot, nil, false, nil, hooks)
+// openHooked is Open with a test's hooks (set by hook) in place before any worker starts.
+func openHooked(dataRoot string, hook func(*serviceHooks)) (*Service, error) {
+	return openService(dataRoot, nil, false, nil, hook)
 }
 
 // OpenLogged is Open with the daemon's logger, wrapped so the console's live log sees its records
 // (CaptureLogs). It is installed before any worker starts: workers read s.Log, so it is never swapped
 // afterwards. A nil log keeps Open's slog.Default() without the live log.
 func OpenLogged(dataRoot string, clk clock.Clock, webBuild bool, log *slog.Logger) (*Service, error) {
-	return openService(dataRoot, clk, webBuild, log, serviceHooks{})
+	return openService(dataRoot, clk, webBuild, log, nil)
 }
 
-func openService(dataRoot string, clk clock.Clock, webBuild bool, log *slog.Logger, hooks serviceHooks) (*Service, error) {
+func openService(dataRoot string, clk clock.Clock, webBuild bool, log *slog.Logger, hook func(*serviceHooks)) (*Service, error) {
 	if clk == nil {
 		clk = clock.Real{}
 	}
@@ -293,7 +293,9 @@ func openService(dataRoot string, clk clock.Clock, webBuild bool, log *slog.Logg
 		WebBuild: webBuild,
 		Log:      slog.Default(),
 		watchers: map[chan Event]struct{}{},
-		hooks:    hooks,
+	}
+	if hook != nil {
+		hook(&s.hooks)
 	}
 	if log != nil {
 		s.Log = s.CaptureLogs(log)

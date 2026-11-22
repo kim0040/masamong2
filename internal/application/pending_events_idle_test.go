@@ -26,11 +26,14 @@ func TestPendingEventWorkerBacksOffWakesOnEnqueueAndStopsOnShutdown(t *testing.T
 	var mu sync.Mutex
 	var steps []time.Time
 	// setting the service up starts the worker, with the shrunk intervals
-	s := hookedService(t, serviceHooks{pendingPollMin: 40 * time.Millisecond, pendingPollMax: 10 * time.Second, pendingStep: func() {
-		mu.Lock()
-		steps = append(steps, time.Now())
-		mu.Unlock()
-	}})
+	s := hookedService(t, func(h *serviceHooks) {
+		h.pendingPollMin, h.pendingPollMax = 40*time.Millisecond, 10*time.Second
+		h.pendingStep = func() {
+			mu.Lock()
+			steps = append(steps, time.Now())
+			mu.Unlock()
+		}
+	})
 	count := func() int { mu.Lock(); defer mu.Unlock(); return len(steps) }
 	waitFor := func(what string, limit time.Duration, ok func() bool) {
 		t.Helper()

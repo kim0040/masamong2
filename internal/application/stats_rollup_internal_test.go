@@ -524,8 +524,7 @@ func TestStatsRollupStopsBetweenDaysOnClose(t *testing.T) {
 			<-ctx.Done() // stays inside the rollup until Close cancels it
 		}
 	}
-	statsDayHook.Store(&hook)
-	t.Cleanup(func() { statsDayHook.Store(nil) })
+	s.hooks.statsDay.Store(&hook)
 	if !s.startRetentionPass(context.Background()) {
 		t.Fatal("pass not started")
 	}

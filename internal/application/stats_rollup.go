@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"masamong/internal/action"
@@ -102,9 +101,6 @@ func (s *Service) statsClaim(ctx context.Context, wait bool) (func(), bool) {
 		}
 	}
 }
-
-// statsDayHook runs after each finished day (tests stop a backfill midway). Never set in production.
-var statsDayHook atomic.Pointer[func(s *Service, ctx context.Context, group, day string)]
 
 // ---------------------------------------------------------------------------
 // days
@@ -423,7 +419,7 @@ func (s *Service) statsRollupGroup(ctx context.Context, db *storage.Store, doc c
 		}
 		zones[d] = zoneName
 		through = statsLaterDay(through, d)
-		if h := statsDayHook.Load(); h != nil {
+		if h := s.hooks.statsDay.Load(); h != nil {
 			(*h)(s, ctx, g, d)
 		}
 		select {

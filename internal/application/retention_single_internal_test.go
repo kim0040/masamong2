@@ -29,8 +29,7 @@ func TestUsageGCRunsOneAtATime(t *testing.T) {
 			}
 		}
 	}
-	statsDayHook.Store(&hook)
-	t.Cleanup(func() { statsDayHook.Store(nil) })
+	s.hooks.statsDay.Store(&hook)
 	runNow := func() action.Result {
 		raw, _ := json.Marshal(map[string]any{"id": "usage_gc"})
 		return s.Execute(context.Background(), action.Request{Action: "schedules.run", Input: raw, Locale: "en"})
@@ -58,7 +57,7 @@ func TestUsageGCRunsOneAtATime(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	statsDayHook.Store(nil)
+	s.hooks.statsDay.Store(nil)
 	if r := runNow(); !r.OK {
 		t.Fatalf("run now after the scheduled pass: %+v", r.Error)
 	}

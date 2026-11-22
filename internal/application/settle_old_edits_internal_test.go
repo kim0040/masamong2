@@ -387,7 +387,7 @@ func TestAnUpgradedDatabaseKeepsRepliesOnAnOldEdit(t *testing.T) {
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err := openHooked(dir, serviceHooks{oldEditsAtOnce: true})
+	s, err := openHooked(dir, func(h *serviceHooks) { h.oldEditsAtOnce = true })
 	if err != nil {
 		t.Fatal(err)
 	}

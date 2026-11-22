@@ -17,9 +17,9 @@ func forgetCaps(s *Service) {
 }
 
 // hookedService is privacyService with a test's hooks given to the constructor.
-func hookedService(t *testing.T, hooks serviceHooks) *Service {
+func hookedService(t *testing.T, hook func(*serviceHooks)) *Service {
 	t.Helper()
-	s, err := openHooked(t.TempDir(), hooks)
+	s, err := openHooked(t.TempDir(), hook)
 	if err != nil {
 		t.Fatal(err)
 	}
