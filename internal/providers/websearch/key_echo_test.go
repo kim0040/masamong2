@@ -95,3 +95,26 @@ func TestReaderErrorsDoNotCarryTheKey(t *testing.T) {
 		}
 	}
 }
+
+// Brave and TinyFish search send a GET with the key in a header; their errors must not carry it either.
+func TestBraveAndTinyFishErrorsDoNotCarryTheKey(t *testing.T) {
+	for _, kind := range []string{"brave", "tinyfish"} {
+		for _, status := range []int{400, 401, 403, 422} {
+			srv := keyEchoServer(status, `{"error":{"message":"token `+echoedKey+` refused"},"detail":"key `+echoedKey+`"}`)
+			t.Setenv("ECHO_KEY", echoedKey)
+			cred, _ := providers.Resolve("env:ECHO_KEY")
+			s, err := New(kind, echoClient(), srv.URL, cred)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = s.Search(context.Background(), Query{Text: "q", Max: 3})
+			srv.Close()
+			if err == nil {
+				t.Fatalf("%s/%d: no error", kind, status)
+			}
+			if strings.Contains(err.Error(), echoedKey) {
+				t.Errorf("%s/%d: the error carries the key: %v", kind, status, err)
+			}
+		}
+	}
+}
