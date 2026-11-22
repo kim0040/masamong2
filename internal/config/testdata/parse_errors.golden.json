@@ -1,0 +1,442 @@
+{
+  "admin.web.hosts count": {
+    "strict": "admin.web.hosts: at most 8 names",
+    "lenient": "admin.web.hosts: at most 8 names"
+  },
+  "admin.web.hosts name": {
+    "strict": "admin.web.hosts: \"bad host\" is not a host name (no scheme, port, path or wildcard)",
+    "lenient": "admin.web.hosts: \"bad host\" is not a host name (no scheme, port, path or wildcard)"
+  },
+  "alerts.min_severity": {
+    "strict": "alerts.min_severity must be one of [warn danger]",
+    "lenient": "alerts.min_severity must be one of [warn danger]"
+  },
+  "backup.hour": {
+    "strict": "backup.hour must be 0–23",
+    "lenient": "",
+    "problems": [
+      "backup.hour | must be 0–23; the stored 24 was clamped to 23 | backup.hour"
+    ]
+  },
+  "backup.keep": {
+    "strict": "backup.keep must be 1–365",
+    "lenient": "",
+    "problems": [
+      "backup.keep | must be 1–365; the stored 366 was clamped to 365 | backup.keep"
+    ]
+  },
+  "backup.schedule": {
+    "strict": "backup.schedule must be one of [off daily weekly]",
+    "lenient": "backup.schedule must be one of [off daily weekly]"
+  },
+  "backup.weekday": {
+    "strict": "backup.weekday must be 0–6",
+    "lenient": "",
+    "problems": [
+      "backup.weekday | must be 0–6; the stored 7 was clamped to 6 | backup.weekday"
+    ]
+  },
+  "channel attachment duplicate": {
+    "strict": "guilds.g1.channels.c1.rag_attachments: duplicate content_hash in channel",
+    "lenient": "guilds.g1.channels.c1.rag_attachments: duplicate content_hash in channel"
+  },
+  "channel attachment fields": {
+    "strict": "guilds.g1.channels.c1.rag_attachments[0] needs id, content_hash, filename",
+    "lenient": "guilds.g1.channels.c1.rag_attachments[0] needs id, content_hash, filename"
+  },
+  "channel attachment stored_name": {
+    "strict": "guilds.g1.channels.c1.rag_attachments[0].stored_name is not a generated name",
+    "lenient": "",
+    "problems": [
+      "guilds.g1.channels.c1.rag_attachments[0].stored_name | is not a generated name; the attachment was dropped | guilds.g1.channels.c1.rag_attachments[0]"
+    ]
+  },
+  "channel attribution": {
+    "strict": "guilds.g1.channels.c1.attribution must be one of [on structural off]",
+    "lenient": "guilds.g1.channels.c1.attribution must be one of [on structural off]"
+  },
+  "channel conversation number": {
+    "strict": "guilds.g1.channels.c1.conversation: a number is out of range",
+    "lenient": "guilds.g1.channels.c1.conversation: a number is out of range"
+  },
+  "channel disaster_alerts": {
+    "strict": "guilds.g1.channels.c1.disaster_alerts must be on or off",
+    "lenient": "guilds.g1.channels.c1.disaster_alerts must be on or off"
+  },
+  "channel follow reply_only": {
+    "strict": "guilds.g1.channels.c1.conversation.follow must be one of [off window]",
+    "lenient": "",
+    "problems": [
+      "guilds.g1.channels.c1.conversation.follow | reply_only is retired; the stored value is read as off | guilds.g1.channels.c1.conversation.follow"
+    ]
+  },
+  "channel id": {
+    "strict": "guilds.g1.channels: empty channel id",
+    "lenient": "guilds.g1.channels: empty channel id"
+  },
+  "channel logging.level": {
+    "strict": "guilds.g1.channels.c1.logging.level must be one of [off errors ops]",
+    "lenient": "guilds.g1.channels.c1.logging.level must be one of [off errors ops]"
+  },
+  "channel name_call": {
+    "strict": "guilds.g1.channels.c1.name_call must be one of [addressed always off]",
+    "lenient": "guilds.g1.channels.c1.name_call must be one of [addressed always off]"
+  },
+  "channel participation": {
+    "strict": "guilds.g1.channels.c1.participation must be one of [off collect shadow conservative]",
+    "lenient": "guilds.g1.channels.c1.participation must be one of [off collect shadow conservative]"
+  },
+  "channel respond": {
+    "strict": "guilds.g1.channels.c1.respond must be one of [command mention always off]",
+    "lenient": "guilds.g1.channels.c1.respond must be one of [command mention always off]"
+  },
+  "channel retain_days": {
+    "strict": "guilds.g1.channels.c1.logging.retain_days out of range",
+    "lenient": "guilds.g1.channels.c1.logging.retain_days out of range"
+  },
+  "channel room_style": {
+    "strict": "guilds.g1.channels.c1.conversation.room_style must be one of [off on]",
+    "lenient": "guilds.g1.channels.c1.conversation.room_style must be one of [off on]"
+  },
+  "channel thread": {
+    "strict": "guilds.g1.channels.c1.conversation.thread must be one of [offer auto_task off]",
+    "lenient": "guilds.g1.channels.c1.conversation.thread must be one of [offer auto_task off]"
+  },
+  "channel unknown tool": {
+    "strict": "guilds.g1.channels.c1.tools: unknown tool \"nope.tool\"",
+    "lenient": "guilds.g1.channels.c1.tools: unknown tool \"nope.tool\""
+  },
+  "channel update_news": {
+    "strict": "guilds.g1.channels.c1.update_news must be on or off",
+    "lenient": "guilds.g1.channels.c1.update_news must be on or off"
+  },
+  "channel watch_level": {
+    "strict": "guilds.g1.channels.c1.watch_level requires a region code or name and level 1–5, got \"r\"=9",
+    "lenient": "guilds.g1.channels.c1.watch_level requires a region code or name and level 1–5, got \"r\"=9"
+  },
+  "chat.loop_final": {
+    "strict": "chat.loop_final must be one of [tools search off]",
+    "lenient": "chat.loop_final must be one of [tools search off]"
+  },
+  "chat.progress": {
+    "strict": "chat.progress must be one of [slow deep off]",
+    "lenient": "chat.progress must be one of [slow deep off]"
+  },
+  "chat.tool_mode": {
+    "strict": "chat.tool_mode must be one of [loop planner shadow]",
+    "lenient": "chat.tool_mode must be one of [loop planner shadow]"
+  },
+  "chat.tool_model": {
+    "strict": "chat.tool_model must be one of [planner response]",
+    "lenient": "chat.tool_model must be one of [planner response]"
+  },
+  "chat.transcript_chars": {
+    "strict": "chat.transcript_chars must be an integer 1000–20000 (unset means the default 5000)",
+    "lenient": "",
+    "problems": [
+      "chat.transcript_chars | must be an integer 1000–20000 (unset means the default 5000); the stored 999 was clamped to 1000 | chat.transcript_chars"
+    ]
+  },
+  "chat.vision": {
+    "strict": "chat.vision must be one of [auto off]",
+    "lenient": "chat.vision must be one of [auto off]"
+  },
+  "decode unknown key": {
+    "strict": "config parse: yaml: unmarshal errors:\n  line 12: field bogus not found in type config.Document",
+    "lenient": "config parse: yaml: unmarshal errors:\n  line 12: field bogus not found in type config.Document"
+  },
+  "disaster_alerts magnitude": {
+    "strict": "disaster_alerts earthquake magnitudes must be between 0 and 10",
+    "lenient": "disaster_alerts earthquake magnitudes must be between 0 and 10"
+  },
+  "discord.token_ref": {
+    "strict": "discord.token_ref must be env:NAME, file:PATH or keychain:NAME, never the token",
+    "lenient": "discord.token_ref must be env:NAME, file:PATH or keychain:NAME, never the token"
+  },
+  "dm.allow": {
+    "strict": "dm.allow must be members, operators or off",
+    "lenient": "dm.allow must be members, operators or off"
+  },
+  "dm.per_day": {
+    "strict": "dm.per_day must be -1 (unlimited), 0 (default), or 1..100000",
+    "lenient": "",
+    "problems": [
+      "dm.per_day | must be -1 (unlimited), 0 (default), or 1..100000; the stored 100001 was clamped to 100000 | dm.per_day"
+    ]
+  },
+  "dm.per_user_per_day": {
+    "strict": "dm.per_user_per_day must be -1 (unlimited), 0 (default), or 1..10000",
+    "lenient": "",
+    "problems": [
+      "dm.per_user_per_day | must be -1 (unlimited), 0 (default), or 1..10000; the stored 10001 was clamped to 10000 | dm.per_user_per_day"
+    ]
+  },
+  "fallback duplicate": {
+    "strict": "models.response.fallbacks[1]: m-1 on openrouter is already in the list",
+    "lenient": "models.response.fallbacks[1]: m-1 on openrouter is already in the list"
+  },
+  "fallback effort": {
+    "strict": "models.response.fallbacks[0].effort \"bogus\" must be one of [none minimal low medium high xhigh max] (or empty for the role's)",
+    "lenient": "models.response.fallbacks[0].effort \"bogus\" must be one of [none minimal low medium high xhigh max] (or empty for the role's)"
+  },
+  "fallback model": {
+    "strict": "models.response.fallbacks[0].model is required",
+    "lenient": "models.response.fallbacks[0].model is required"
+  },
+  "fallback price": {
+    "strict": "models.response.fallbacks[0]: prices must be 0–1000 USD per million tokens",
+    "lenient": "models.response.fallbacks[0]: prices must be 0–1000 USD per million tokens"
+  },
+  "fallback provider": {
+    "strict": "models.response.fallbacks[0].provider \"nope\" is not a configured provider",
+    "lenient": "models.response.fallbacks[0].provider \"nope\" is not a configured provider"
+  },
+  "fallback provider kind": {
+    "strict": "models.response.fallbacks[0].provider \"brave\" is not a model provider",
+    "lenient": "models.response.fallbacks[0].provider \"brave\" is not a model provider"
+  },
+  "fallback timeout": {
+    "strict": "models.response.fallbacks[0].timeout_seconds must be 5–600 (or 0 for the role's default)",
+    "lenient": "models.response.fallbacks[0].timeout_seconds must be 5–600 (or 0 for the role's default)"
+  },
+  "fallbacks count": {
+    "strict": "models.response.fallbacks: at most 3",
+    "lenient": "models.response.fallbacks: at most 3"
+  },
+  "fallbacks role": {
+    "strict": "models.embed.fallbacks: only [response planner summary vision] can have fallbacks",
+    "lenient": "models.embed.fallbacks: only [response planner summary vision] can have fallbacks"
+  },
+  "guild id": {
+    "strict": "guilds: empty guild id",
+    "lenient": "guilds: empty guild id"
+  },
+  "guild log.channel": {
+    "strict": "guilds.g1.log.channel must be a channel ID, auto or off",
+    "lenient": "guilds.g1.log.channel must be a channel ID, auto or off"
+  },
+  "instance.bot_names": {
+    "strict": "instance.bot_names: at most 8 names",
+    "lenient": "instance.bot_names: at most 8 names"
+  },
+  "instance.id": {
+    "strict": "instance.id required",
+    "lenient": "instance.id required"
+  },
+  "instance.log_level": {
+    "strict": "instance.log_level must be one of [debug info warn error]",
+    "lenient": "instance.log_level must be one of [debug info warn error]"
+  },
+  "limits.budget_alert_percent": {
+    "strict": "limits.budget_alert_percent must be 0–100 (0 = the default)",
+    "lenient": "",
+    "problems": [
+      "limits.budget_alert_percent | must be 0–100 (0 = the default); the stored 101 was clamped to 100 | limits.budget_alert_percent"
+    ]
+  },
+  "limits.max_concurrent_turns": {
+    "strict": "limits.max_concurrent_turns must be 0–64 (0 = the default)",
+    "lenient": "",
+    "problems": [
+      "limits.max_concurrent_turns | must be 0–64 (0 = the default); the stored 65 was clamped to 64 | limits.max_concurrent_turns"
+    ]
+  },
+  "limits.max_external_attempts": {
+    "strict": "limits.max_external_attempts must be 0–20 (0 = no cap)",
+    "lenient": "",
+    "problems": [
+      "limits.max_external_attempts | must be 0–20 (0 = no cap); the stored 21 was clamped to 20 | limits.max_external_attempts"
+    ]
+  },
+  "memory.backfill_days": {
+    "strict": "memory.backfill_days must be -1–30 (-1 = off, 0 = the default)",
+    "lenient": "",
+    "problems": [
+      "memory.backfill_days | must be -1–30 (-1 = off, 0 = the default); the stored 31 was clamped to 30 | memory.backfill_days"
+    ]
+  },
+  "memory.day_boundary": {
+    "strict": "memory.day_boundary is HH:MM",
+    "lenient": "memory.day_boundary is HH:MM"
+  },
+  "memory.derived_budget_usd": {
+    "strict": "memory.derived_budget_usd must be a USD amount from 0 to 1000",
+    "lenient": "memory.derived_budget_usd must be a USD amount from 0 to 1000"
+  },
+  "memory.episodes": {
+    "strict": "memory.episodes must be on or off",
+    "lenient": "memory.episodes must be on or off"
+  },
+  "memory.index_interval_min": {
+    "strict": "memory.index_interval_min must be 1–1440",
+    "lenient": "",
+    "problems": [
+      "memory.index_interval_min | must be 1–1440; the stored 1441 was clamped to 1440 | memory.index_interval_min"
+    ]
+  },
+  "memory.index_workers": {
+    "strict": "memory.index_workers must be 0–256 (0 = the default)",
+    "lenient": "",
+    "problems": [
+      "memory.index_workers | must be 0–256 (0 = the default); the stored 100000 was clamped to 256 | memory.index_workers"
+    ]
+  },
+  "memory.languages": {
+    "strict": "memory.languages: no language pack \"xx\" (have [en es ja ko zh-Hans])",
+    "lenient": "memory.languages: no language pack \"xx\" (have [en es ja ko zh-Hans])"
+  },
+  "memory.leaf_split": {
+    "strict": "memory.leaf_split must be time_gap or fixed",
+    "lenient": "memory.leaf_split must be time_gap or fixed"
+  },
+  "memory.person_aliases count": {
+    "strict": "memory.person_aliases: at most 500 people",
+    "lenient": "memory.person_aliases: at most 500 people"
+  },
+  "memory.person_aliases entry": {
+    "strict": "memory.person_aliases.p: a name with 1–20 other names",
+    "lenient": "memory.person_aliases.p: a name with 1–20 other names"
+  },
+  "memory.retrieve": {
+    "strict": "memory.retrieve must be one of [off auto hybrid rerank]",
+    "lenient": "memory.retrieve must be one of [off auto hybrid rerank]"
+  },
+  "model effort role": {
+    "strict": "models.embed.effort \"high\": only the chat roles [response planner summary vision] take one of [none minimal low medium high xhigh max]",
+    "lenient": "models.embed.effort \"high\": only the chat roles [response planner summary vision] take one of [none minimal low medium high xhigh max]"
+  },
+  "model effort value": {
+    "strict": "models.response.effort \"bogus\": only the chat roles [response planner summary vision] take one of [none minimal low medium high xhigh max]",
+    "lenient": "models.response.effort \"bogus\": only the chat roles [response planner summary vision] take one of [none minimal low medium high xhigh max]"
+  },
+  "model price": {
+    "strict": "models.response: prices must be 0–1000 USD per million tokens",
+    "lenient": "models.response: prices must be 0–1000 USD per million tokens"
+  },
+  "model provider": {
+    "strict": "models.response.provider \"nope\" is not a configured provider",
+    "lenient": "models.response.provider \"nope\" is not a configured provider"
+  },
+  "model role": {
+    "strict": "models.bogus is not a known role (use one of [response planner summary embed rerank image vision])",
+    "lenient": "models.bogus is not a known role (use one of [response planner summary embed rerank image vision])"
+  },
+  "model timeout": {
+    "strict": "models.response.timeout_seconds must be 5–600 (or 0 for the default)",
+    "lenient": "models.response.timeout_seconds must be 5–600 (or 0 for the default)"
+  },
+  "participation quiet format": {
+    "strict": "participation.quiet_start and quiet_end are HH:MM",
+    "lenient": "participation.quiet_start and quiet_end are HH:MM"
+  },
+  "participation quiet pair": {
+    "strict": "participation quiet hours need both quiet_start and quiet_end",
+    "lenient": "participation quiet hours need both quiet_start and quiet_end"
+  },
+  "participation.min_score": {
+    "strict": "participation.min_score must be 0–1 (0 = the default)",
+    "lenient": "",
+    "problems": [
+      "participation.min_score | must be 0–1 (0 = the default); the stored 2 was clamped to 1 | participation.min_score"
+    ]
+  },
+  "participation.mode": {
+    "strict": "participation.mode must be one of [off collect shadow conservative]",
+    "lenient": "participation.mode must be one of [off collect shadow conservative]"
+  },
+  "persona id": {
+    "strict": "personas: empty id",
+    "lenient": "personas: empty id"
+  },
+  "provider api": {
+    "strict": "providers.brave.api \"responses\": only openai_compat providers take one of [openrouter openai gemini anthropic compatible]",
+    "lenient": "providers.brave.api \"responses\": only openai_compat providers take one of [openrouter openai gemini anthropic compatible]"
+  },
+  "provider base_url": {
+    "strict": "providers.brave.base_url: the address scheme \"ftp\" is not allowed; use https",
+    "lenient": "",
+    "problems": [
+      "providers.brave.base_url | the address scheme \"ftp\" is not allowed; use https | providers.brave"
+    ]
+  },
+  "provider byok_only": {
+    "strict": "providers.brave.byok_only: \"a\": \"b\" must map a model family to an OpenRouter provider slug (anthropic: anthropic)",
+    "lenient": "providers.brave.byok_only: \"a\": \"b\" must map a model family to an OpenRouter provider slug (anthropic: anthropic)"
+  },
+  "provider credential_ref": {
+    "strict": "providers.brave.credential_ref must be env:NAME, file:PATH or keychain:NAME, never the secret",
+    "lenient": "providers.brave.credential_ref must be env:NAME, file:PATH or keychain:NAME, never the secret"
+  },
+  "provider kind": {
+    "strict": "providers.brave.kind \"nope\" is not one of [fake kma exchangerate finnhub kakao_search tavily linkup exa serper brave tinyfish jina_reader openai_compat practice open_meteo]",
+    "lenient": "providers.brave.kind \"nope\" is not one of [fake kma exchangerate finnhub kakao_search tavily linkup exa serper brave tinyfish jina_reader openai_compat practice open_meteo]"
+  },
+  "raw: raw empty": {
+    "strict": "config parse: EOF",
+    "lenient": "config parse: EOF"
+  },
+  "raw: raw json bad field": {
+    "strict": "config parse: yaml: unmarshal errors:\n  line 1: field bogus not found in type config.Document",
+    "lenient": "config parse: yaml: unmarshal errors:\n  line 1: field bogus not found in type config.Document"
+  },
+  "raw: raw not yaml": {
+    "strict": "config parse: yaml: line 1: did not find expected ',' or ']'",
+    "lenient": "config parse: yaml: line 1: did not find expected ',' or ']'"
+  },
+  "raw: raw wrong type": {
+    "strict": "config parse: yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `one` into int",
+    "lenient": "config parse: yaml: unmarshal errors:\n  line 1: cannot unmarshal !!str `one` into int"
+  },
+  "schema_version": {
+    "strict": "unsupported schema_version 2",
+    "lenient": "unsupported schema_version 2"
+  },
+  "tool description": {
+    "strict": "tools.ops.demo.description: required (the planner decides from it)",
+    "lenient": "tools.ops.demo.description: required (the planner decides from it)"
+  },
+  "tool not built in": {
+    "strict": "tools.nope: not a built-in tool (an operator tool needs an http: block)",
+    "lenient": "tools.nope: not a built-in tool (an operator tool needs an http: block)"
+  },
+  "tool url policy": {
+    "strict": "tools.ops.demo.http.url: plain http is only allowed for localhost, 127.x.x.x and [::1], not for \"example.test\"; use https",
+    "lenient": "",
+    "problems": [
+      "tools.ops.demo.http.url | plain http is only allowed for localhost, 127.x.x.x and [::1], not for \"example.test\"; use https | tools.ops.demo"
+    ]
+  },
+  "web_search.deep_pages": {
+    "strict": "web_search.deep_pages must be 0–10",
+    "lenient": "",
+    "problems": [
+      "web_search.deep_pages | must be 0–10; the stored 11 was clamped to 10 | web_search.deep_pages"
+    ]
+  },
+  "web_search.fetch": {
+    "strict": "web_search.fetch must be one of [tinyfish jina off]",
+    "lenient": "web_search.fetch must be one of [tinyfish jina off]"
+  },
+  "web_search.fetch_daily_limit": {
+    "strict": "web_search.fetch_daily_limit must be 0–5000 (0 = the default)",
+    "lenient": "",
+    "problems": [
+      "web_search.fetch_daily_limit | must be 0–5000 (0 = the default); the stored 5001 was clamped to 5000 | web_search.fetch_daily_limit"
+    ]
+  },
+  "web_search.order twice": {
+    "strict": "web_search.order lists \"brave\" twice",
+    "lenient": "web_search.order lists \"brave\" twice"
+  },
+  "web_search.order unknown": {
+    "strict": "web_search.order[0] \"nope\" is not a search provider (kinds [tavily linkup exa serper brave tinyfish kakao_search])",
+    "lenient": "web_search.order[0] \"nope\" is not a search provider (kinds [tavily linkup exa serper brave tinyfish kakao_search])"
+  },
+  "web_search.read_pages": {
+    "strict": "web_search.read_pages must be 0–10",
+    "lenient": "",
+    "problems": [
+      "web_search.read_pages | must be 0–10; the stored 11 was clamped to 10 | web_search.read_pages"
+    ]
+  }
+}
