@@ -180,3 +180,22 @@ func TestSchemaEnumsMatchParse(t *testing.T) {
 		}
 	}
 }
+
+// A backup section written before the explicit-zero rule keeps its schedule: an omitted hour is
+// midnight and an omitted weekday Sunday, as they always read; only keep gets its default.
+func TestBackupSectionKeepsItsOmittedHour(t *testing.T) {
+	d, err := Parse([]byte(minimalDoc + "backup:\n  schedule: daily\n  keep: 4\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Backup.Hour != 0 || d.Backup.Weekday != 0 || d.Backup.Schedule != "daily" || d.Backup.Keep != 4 {
+		t.Fatalf("an existing daily backup must stay at midnight: %+v", d.Backup)
+	}
+	d, err = Parse([]byte(minimalDoc + "backup:\n  schedule: weekly\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Backup.Hour != 0 || d.Backup.Keep != DefaultBackup().Keep {
+		t.Fatalf("an omitted keep gets its default, an omitted hour stays midnight: %+v", d.Backup)
+	}
+}

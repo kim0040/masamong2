@@ -390,18 +390,17 @@ func (p *parser) backup() error {
 	// key scan cannot see, so a merged section is checked as decoded (the all-zero read of it still
 	// counts as absent, like before).
 	_, merged := p.keys.Backup["<<"]
+	onlyMerge := merged && len(p.keys.Backup) == 1
 	if merged && d.Backup == (Backup{}) {
 		merged = false
 	}
-	if !merged {
+	if !merged && (len(p.keys.Backup) == 0 || onlyMerge) && d.Backup == (Backup{}) {
+		d.Backup = def // documents written before backup existed
+	} else if !merged {
+		// a section that names some keys keeps the decoded hour and weekday as before (an omitted hour
+		// is midnight, an omitted weekday Sunday): defaulting them now would move existing schedules
 		if d.Backup.Schedule == "" {
 			d.Backup.Schedule = def.Schedule
-		}
-		if _, set := p.keys.Backup["hour"]; !set {
-			d.Backup.Hour = def.Hour
-		}
-		if _, set := p.keys.Backup["weekday"]; !set {
-			d.Backup.Weekday = def.Weekday
 		}
 		if _, set := p.keys.Backup["keep"]; !set {
 			d.Backup.Keep = def.Keep
