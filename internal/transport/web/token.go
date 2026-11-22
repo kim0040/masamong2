@@ -114,6 +114,9 @@ func LoginURL(bind, token string) string {
 
 func onceDir(dataRoot string) string { return filepath.Join(dataRoot, "admin", "login-once") }
 
+// onceTTL bounds how long a one-time login code stays valid; the sweep removes codes past it.
+const onceTTL = 2 * time.Minute
+
 // CreateOnce writes a fresh one-time code and returns it.
 func CreateOnce(dataRoot string) (string, error) {
 	var b [18]byte
@@ -141,7 +144,7 @@ func ConsumeOnce(dataRoot, code string, now time.Time) bool {
 	dir := onceDir(dataRoot)
 	if entries, err := os.ReadDir(dir); err == nil {
 		for _, e := range entries {
-			if info, err := e.Info(); err == nil && now.Sub(info.ModTime()) > 2*time.Minute {
+			if info, err := e.Info(); err == nil && now.Sub(info.ModTime()) > onceTTL {
 				_ = os.Remove(filepath.Join(dir, e.Name()))
 			}
 		}
@@ -158,7 +161,7 @@ func ConsumeOnce(dataRoot, code string, now time.Time) bool {
 	if os.Remove(p) != nil {
 		return false
 	}
-	return now.Sub(info.ModTime()) <= 2*time.Minute
+	return now.Sub(info.ModTime()) <= onceTTL
 }
 
 // OnceURL is the launcher's sign-in link for a bind address.

@@ -35,7 +35,9 @@ func open(root string) *application.Service {
 	if err != nil {
 		die("key: %v", err)
 	}
-	os.Setenv("MASAMONG_OPENROUTER_KEY", strings.TrimSpace(string(key)))
+	if err := os.Setenv("MASAMONG_OPENROUTER_KEY", strings.TrimSpace(string(key))); err != nil {
+		die("setenv: %v", err)
+	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		die("mkdir: %v", err)
 	}
@@ -47,15 +49,26 @@ func open(root string) *application.Service {
 }
 
 func run(svc *application.Service, act string, in map[string]any) (map[string]any, error) {
-	raw, _ := json.Marshal(in)
+	raw, err := json.Marshal(in)
+	if err != nil {
+		return nil, fmt.Errorf("%s: marshal input: %w", act, err)
+	}
 	r := svc.Execute(context.Background(), action.Request{Action: act, Input: raw, Locale: "ko", RequestID: "eval"})
 	if !r.OK {
-		b, _ := json.Marshal(r.Error)
+		b, err := json.Marshal(r.Error)
+		if err != nil {
+			return nil, fmt.Errorf("%s failed and its error will not marshal: %w", act, err)
+		}
 		return nil, fmt.Errorf("%s: %s", act, b)
 	}
-	b, _ := json.Marshal(r.Output)
+	b, err := json.Marshal(r.Output)
+	if err != nil {
+		return nil, fmt.Errorf("%s: marshal output: %w", act, err)
+	}
 	var m map[string]any
-	_ = json.Unmarshal(b, &m)
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, fmt.Errorf("%s: unmarshal output: %w", act, err)
+	}
 	return m, nil
 }
 
