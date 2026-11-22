@@ -15,7 +15,7 @@ import (
 //
 // Stored: the turn id, server and channel IDs, counts, the failure class (a short machine value) and
 // whether the reply reference was dropped. No message text and no Discord user id. Rows go after
-// deliveryKeepDays.
+// retention.ledger_days (90 days unless configured, retention.go).
 
 // DeliveryReport is the outcome of posting one reply. It carries no message bodies.
 type DeliveryReport struct {
@@ -28,10 +28,7 @@ type DeliveryReport struct {
 	PartEnds         []int          // byte ends in the connector's delivered text, in send order
 }
 
-const (
-	deliveryKeepDays   = 90
-	deliveryAlertEvery = 6 * time.Hour
-)
+const deliveryAlertEvery = 6 * time.Hour
 
 var deliverySQLite = []string{
 	`CREATE TABLE IF NOT EXISTS delivery_ledger (

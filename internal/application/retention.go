@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"masamong/internal/memory/engine"
@@ -38,10 +39,11 @@ var pruneRules = []pruneRule{
 	{name: "usage_detail", table: "tool_usage", column: "day", extra: "scope<>'all'", days: "usage", dayOnly: true},
 	{name: "usage_totals", table: "tool_usage", column: "day", extra: "scope='all'", days: "turns", dayOnly: true},
 	{name: "query_cache", table: "memory_embed_cache", column: "created_at", extra: "kind='query'", days: "query_cache"},
-	// reminders that are over (and their text) go with turn details; plan offers once their time passed
-	{name: "reminders", table: "reminders", column: "updated_at", extra: "status IN ('sent','cancelled','missed','failed','unknown')", days: "turn_detail"},
-	{name: "reminders_stale", table: "reminders", column: "updated_at", extra: "status='proposed'", days: "usage"},
-	{name: "reminder_offers", table: "reminder_offers", column: "expires_at", days: "usage"},
+	// reminders that are over (and their text) go with the member context (retention.context_days);
+	// proposals nobody confirmed and plan offers once their time passed go sooner (retention.pending_days)
+	{name: "reminders", table: "reminders", column: "updated_at", extra: "status IN ('sent','cancelled','missed','failed','unknown')", days: "context"},
+	{name: "reminders_stale", table: "reminders", column: "updated_at", extra: "status='proposed'", days: "pending"},
+	{name: "reminder_offers", table: "reminder_offers", column: "expires_at", days: "pending"},
 	{name: "participation_log", table: "participation_log", column: "created_at", days: "turn_detail"},
 	{name: "activity", table: "activity_counts", column: "day", days: "turns", dayOnly: true},
 	// the replies' feedback and which message was which reply, with the turn records they belong to
@@ -49,38 +51,79 @@ var pruneRules = []pruneRule{
 	{name: "reply_messages", table: "reply_messages", column: "at", days: "turn_detail"},
 	// the bot's conversation context per channel is trimmed to its last turns on every reply; a channel
 	// that went quiet (chat turned off, the bot left the server) keeps them until they age out here
-	{name: "chat_context", table: "chat_turns", column: "created_at", days: "turn_detail"},
-	// how each reply was delivered (not configurable: a fixed 90 days, see deliveryKeepDays)
-	{name: "delivery_ledger", table: "delivery_ledger", column: "created_at", days: "delivery"},
+	// (retention.context_days: member content, so a record key set to -1 does not keep it)
+	{name: "chat_context", table: "chat_turns", column: "created_at", days: "context"},
+	// how each reply was delivered (retention.ledger_days, like the call ledgers below)
+	{name: "delivery_ledger", table: "delivery_ledger", column: "created_at", days: "ledger"},
 	// the bot's conversation decisions (body-free reference data for tuning the experimental features)
 	{name: "conversation_log", table: "conversation_log", column: "created_at", days: "turns"},
 	// closed threads the bot made (an open one is kept: it is still answered)
 	{name: "channel_threads", table: "channel_threads", column: "last_at", days: "turns", extra: "state<>'open'"},
-	// the model and tool call ledgers (body-free), likewise a fixed 90 days
+	// the model and tool call ledgers (body-free, retention.ledger_days)
 	{name: "llm_calls", table: "llm_calls", column: "created_at", days: "ledger"},
 	{name: "tool_calls", table: "tool_calls", column: "created_at", days: "ledger"},
 }
 
-// runRetention deletes records older than their retention and strips old turn details. It works in
-// small batches with pauses, so replies waiting for the database are never held up for long.
+// runRetention runs one retention pass (retentionPass) and returns how many rows each rule removed.
 func (s *Service) runRetention(ctx context.Context) (map[string]int64, error) {
+	res, err := s.retentionPass(ctx)
+	return res.removed, err
+}
+
+// retentionResult is what one pass did: rows removed per rule, the rules a statistics gate held back
+// (and why), and the statistics rollup that ran first.
+type retentionResult struct {
+	removed  map[string]int64
+	held     map[string]string
+	stats    *statsRollupOutput
+	statsErr string
+}
+
+// retentionPass is one ordered pass: it first finishes the statistics of past days (stats_rollup.go),
+// then deletes records older than their retention and strips old turn details. A table the statistics
+// read is pruned only up to the end of the last day they finished (review H3). It works in small
+// batches with pauses, so replies waiting for the database are never held up for long.
+func (s *Service) retentionPass(ctx context.Context) (retentionResult, error) {
+	res := retentionResult{held: map[string]string{}}
 	if s.Store == nil {
-		return nil, nil
+		return res, nil
 	}
 	if _, err := s.adminDB(); err != nil { // turn_log and audit_log live in the admin tables
-		return nil, err
+		return res, err
 	}
 	eng, err := s.MemoryEngine() // makes sure the embed cache has its kind column
 	if err != nil {
-		return nil, err
+		return res, err
 	}
+	if s.statsOn() {
+		if release, ok := s.statsClaim(ctx, false); ok {
+			rolled, err := s.statsRollup(ctx, statsRollupInput{})
+			release()
+			res.stats = &rolled
+			if err != nil {
+				res.statsErr = err.Error()
+			}
+		} else {
+			res.statsErr = "another statistics rollup is running"
+		}
+		if ctx.Err() != nil { // shutdown during the rollup: prune on the next pass
+			return res, ctx.Err()
+		}
+	}
+	gate := s.statsGate(ctx, res.stats, res.statsErr)
 	days := s.Doc().Retention.Days()
-	days["delivery"], days["ledger"] = deliveryKeepDays, ledgerKeepDays
 	now := s.Clock.Now().UTC()
 	out := map[string]int64{}
+	res.removed = out
 	if n := s.pruneImages(); n > 0 {
 		out["images"] = int64(n)
 	}
+	type pruneStep struct {
+		r      pruneRule
+		cutoff string
+	}
+	var steps []pruneStep
+	cuts := map[string]string{} // source table → cut, recorded before any of its rows go
 	for _, r := range pruneRules {
 		d := days[r.days]
 		if d < 0 {
@@ -91,27 +134,53 @@ func (s *Service) runRetention(ctx context.Context) (map[string]int64, error) {
 		if r.dayOnly {
 			cutoff = cut.In(s.instanceZone()).Format("2006-01-02")
 		}
-		where := r.column + " < ?"
-		if r.extra != "" {
-			where += " AND " + r.extra
+		cutoff, why := gate.bound(r.table, r.dayOnly, cutoff)
+		if why != "" {
+			res.held[r.name] = why
 		}
-		n, err := s.pruneDelete(ctx, r.table, where, cutoff)
-		out[r.name] = n
+		if cutoff == "" {
+			out[r.name] = 0
+			continue
+		}
+		if _, src := statsSourceGroup(r.table); src && cutoff > cuts[r.table] {
+			cuts[r.table] = cutoff
+		}
+		steps = append(steps, pruneStep{r, cutoff})
+	}
+	jobCut, jobWhy := gate.bound("jobs", false, now.AddDate(0, 0, -jobRetentionDays).Format(time.RFC3339))
+	if jobWhy != "" {
+		res.held["jobs"] = jobWhy
+	}
+	if jobCut != "" {
+		cuts["jobs"] = jobCut
+	}
+	if err := s.statsNotePruned(cuts); err != nil {
+		return res, fmt.Errorf("statistics prune record: %w", err)
+	}
+	for _, st := range steps {
+		where := st.r.column + " < ?"
+		if st.r.extra != "" {
+			where += " AND " + st.r.extra
+		}
+		n, err := s.pruneDelete(ctx, st.r.table, where, st.cutoff)
+		out[st.r.name] = n
 		if err != nil {
-			return out, fmt.Errorf("%s: %w", r.name, err)
+			return res, fmt.Errorf("%s: %w", st.r.name, err)
 		}
 	}
 	// Participants are retained with their thread; once retention removes a closed thread, its raw
 	// participant account IDs must leave with it as well.
 	if n, err := s.pruneOrphanThreadParticipants(ctx); err != nil {
 		out["thread_participants_orphan"] = n
-		return out, fmt.Errorf("thread_participants_orphan: %w", err)
+		return res, fmt.Errorf("thread_participants_orphan: %w", err)
 	} else {
 		out["thread_participants_orphan"] = n
 	}
-	if n, err := s.pruneFinishedJobs(ctx, now.AddDate(0, 0, -jobRetentionDays).Format(time.RFC3339)); err != nil {
+	if jobCut == "" {
+		out["jobs"] = 0
+	} else if n, err := s.pruneFinishedJobs(ctx, jobCut); err != nil {
 		out["jobs"] = n
-		return out, fmt.Errorf("jobs: %w", err)
+		return res, fmt.Errorf("jobs: %w", err)
 	} else {
 		out["jobs"] = n
 	}
@@ -122,14 +191,14 @@ func (s *Service) runRetention(ctx context.Context) (map[string]int64, error) {
 		out["reminder_context"] = n
 	}
 	if err != nil {
-		return out, fmt.Errorf("reminder_context: %w", err)
+		return res, fmt.Errorf("reminder_context: %w", err)
 	}
 	n, err = s.pruneDelete(ctx, "reminder_context", `at<>'' AND at < ?`, now.Add(-contextKeep).Format(time.RFC3339))
 	if n > 0 {
 		out["reminder_context_old"] = n
 	}
 	if err != nil {
-		return out, fmt.Errorf("reminder_context_old: %w", err)
+		return res, fmt.Errorf("reminder_context_old: %w", err)
 	}
 	// turn rows stay for stats and reports; their full detail (message, answer, evidence) goes sooner
 	if d := days["turn_detail"]; d >= 0 {
@@ -147,14 +216,14 @@ func (s *Service) runRetention(ctx context.Context) (map[string]int64, error) {
 		})
 		out["turn_detail"] = n
 		if err != nil {
-			return out, fmt.Errorf("turn_detail: %w", err)
+			return res, fmt.Errorf("turn_detail: %w", err)
 		}
 	}
 	if s.Store.IsSQLite() {
 		// Trace dependencies are shared with their turn. Retire a trace if that turn never finished
 		// committing or its details have expired, before removing the turn's evidence links.
 		if _, err := s.updateRowsBatched(ctx, "traces", `body='{}'`, `body<>'{}' AND COALESCE(json_extract(body,'$.turn_id'),'')<>'' AND NOT EXISTS(SELECT 1 FROM turn_log t WHERE t.id=json_extract(traces.body,'$.turn_id') AND t.body<>'{}')`); err != nil {
-			return out, err
+			return res, err
 		}
 		// References expire in the same pass as the rows and details that held them.
 		n, err := s.batched(ctx, func() (int64, error) {
@@ -175,7 +244,7 @@ func (s *Service) runRetention(ctx context.Context) (map[string]int64, error) {
 		})
 		out["evidence_refs"] = n
 		if err != nil {
-			return out, fmt.Errorf("evidence_refs: %w", err)
+			return res, fmt.Errorf("evidence_refs: %w", err)
 		}
 		// After the turn entries above: a chat turn stays indexed while a turn record links to it too.
 		n, err = eng.Store.PruneChatHolders(ctx, pruneBatch, now.Add(-chatLinkHold))
@@ -196,19 +265,19 @@ func (s *Service) runRetention(ctx context.Context) (map[string]int64, error) {
 			})
 			out["privacy_tombstones"] = removed
 			if err != nil {
-				return out, err
+				return res, err
 			}
 			// a late edit older than these is older than anything retention still keeps
 			if _, err := s.Store.DB.ExecContext(ctx, `DELETE FROM message_kept_revisions WHERE at < ?`, cutoff); err != nil {
-				return out, err
+				return res, err
 			}
 			// a settled edit means nothing once its tombstones are gone
 			if _, err := s.Store.DB.ExecContext(ctx, `DELETE FROM privacy_settled WHERE NOT EXISTS (SELECT 1 FROM privacy_tombstones t WHERE t.kind IN ('source','message','going') AND t.source_id=privacy_settled.source_id)`); err != nil {
-				return out, err
+				return res, err
 			}
 		}
 		if err != nil {
-			return out, fmt.Errorf("evidence_refs: %w", err)
+			return res, fmt.Errorf("evidence_refs: %w", err)
 		}
 	}
 	// once: earlier versions kept a second copy of every leaf and summary vector in the embedding cache
@@ -224,7 +293,7 @@ func (s *Service) runRetention(ctx context.Context) (map[string]int64, error) {
 		})
 		out["embed_cache_duplicates"] = n
 		if err != nil {
-			return out, fmt.Errorf("embed_cache_duplicates: %w", err)
+			return res, fmt.Errorf("embed_cache_duplicates: %w", err)
 		}
 		_ = s.kvSet("memory:cache_dedup", true)
 	}
@@ -232,7 +301,7 @@ func (s *Service) runRetention(ctx context.Context) (map[string]int64, error) {
 		// keep the planner's statistics fresh as tables grow and shrink (cheap; SQLite skips unchanged tables)
 		_, _ = s.Store.DB.ExecContext(ctx, `PRAGMA optimize`)
 	}
-	return out, nil
+	return res, nil
 }
 
 func (s *Service) pruneOrphanThreadParticipants(ctx context.Context) (int64, error) {
@@ -366,14 +435,32 @@ func (s *Service) batched(ctx context.Context, step func() (int64, error)) (int6
 	}
 }
 
-// runScheduledRetention is the usage_gc schedule: prune and record the outcome for the console.
+// runScheduledRetention is the usage_gc schedule: finish the statistics, prune and record the outcome
+// for the console. The state says which tables waited for the statistics and why (held), and what the
+// rollup did (stats, stats_error). A pass stopped by shutdown is not recorded, so the next start runs
+// it again after retentionDelay instead of a day later.
 func (s *Service) runScheduledRetention(ctx context.Context) scheduleState {
 	started := s.Clock.Now()
-	removed, err := s.runRetention(ctx)
+	res, err := s.retentionPass(ctx)
+	removed := res.removed
 	st := scheduleState{LastRun: started.UTC().Format(time.RFC3339), OK: err == nil,
 		DurationMS: s.Clock.Now().Sub(started).Milliseconds(), Detail: map[string]any{"removed": removed}}
+	if len(res.held) > 0 {
+		st.Detail["held"] = res.held
+	}
+	if res.stats != nil {
+		st.Detail["stats"] = res.stats
+	}
+	if res.statsErr != "" {
+		st.Detail["stats_error"] = res.statsErr
+		s.Log.Warn("statistics rollup did not finish; the tables it reads wait for it", "err", res.statsErr)
+	}
 	if err != nil {
 		st.Error = err.Error()
+		if ctx.Err() != nil {
+			s.Log.Info("retention pass stopped by shutdown; it runs again after the next start")
+			return st
+		}
 		s.Log.Warn("retention pass failed", "err", err)
 	} else {
 		var total int64
@@ -386,6 +473,25 @@ func (s *Service) runScheduledRetention(ctx context.Context) scheduleState {
 	}
 	_ = s.kvSet("schedule:usage_gc", st)
 	return st
+}
+
+// retentionPasses marks a service whose scheduled pass is running (the entry exists only meanwhile).
+var retentionPasses sync.Map // *Service → struct{}
+
+// startRetentionPass runs the usage_gc pass off the scheduler tick (a first statistics backfill can
+// take minutes, review M5), one at a time; Close stops it between days and batches.
+func (s *Service) startRetentionPass(parent context.Context) bool {
+	if _, busy := retentionPasses.LoadOrStore(s, struct{}{}); busy {
+		return false
+	}
+	if !s.ownedGoContext("usage_gc", parent, func(ctx context.Context) {
+		defer retentionPasses.Delete(s)
+		s.runScheduledRetention(ctx)
+	}) {
+		retentionPasses.Delete(s)
+		return false
+	}
+	return true
 }
 
 // retentionDue reports whether the daily pass should run now.

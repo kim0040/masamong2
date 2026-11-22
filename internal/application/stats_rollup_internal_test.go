@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -232,6 +233,175 @@ func TestStatsRollupComputesEachGroupFromItsSources(t *testing.T) {
 	}
 }
 
+// A finished day is final: after its source rows are pruned it keeps its totals, a forced recompute
+// outside the sources' retention window is refused (H1), and the days a long downtime left unfinished
+// are finished before the prune that would take their rows (H3).
+func TestStatsFinishedDayOutlivesItsPrunedSource(t *testing.T) {
+	s, clk := statsRollupService(t, "Asia/Seoul")
+	ctx := context.Background()
+	local := func(day, hm string) time.Time {
+		tm, err := time.ParseInLocation("2006-01-02 15:04", day+" "+hm, statsKST)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tm
+	}
+	llm := func(day string, n int) {
+		for i := 0; i < n; i++ {
+			statsLLM(t, s, local(day, "12:00").Add(time.Duration(i)*time.Minute), "chat", "gpt-x", 1, 10, 1, 500, 0.001, "", "stop", "")
+		}
+	}
+	llm("2026-10-08", 1)
+	llm("2026-10-09", 2)
+	llm("2026-10-10", 1)
+	// the scheduled pass: from now on the service knows pruning has run
+	if st := s.runScheduledRetention(ctx); !st.OK {
+		t.Fatal(st.Error)
+	}
+	if days := statsDaysOf(t, s, statsGroupLLM); !slices.Equal(days, []string{"2026-10-08", "2026-10-09", "2026-10-10"}) {
+		t.Fatalf("finished %v", days)
+	}
+	// written before the service went down for 120 days, never rolled up
+	llm("2026-10-11", 3)
+	llm("2026-10-12", 1)
+	clk.t = clk.t.AddDate(0, 0, 120)
+	if st := s.runScheduledRetention(ctx); !st.OK {
+		t.Fatal(st.Error)
+	}
+	if n := statsCount(t, s, `SELECT COUNT(*) FROM llm_calls`); n != 0 {
+		t.Fatalf("ledger rows older than ledger_days stay: %d", n)
+	}
+	for day, want := range map[string]int64{"2026-10-08": 1, "2026-10-09": 2, "2026-10-10": 1, "2026-10-11": 3, "2026-10-12": 1} {
+		if got := statsN(t, s, day, "llm.calls", "role=chat|model=gpt-x|provider=none"); got != want {
+			t.Errorf("%s: %d calls after the prune, want %d", day, got, want)
+		}
+	}
+	last := statsLastFinishable(clk.t, statsKST)
+	if days := statsDaysOf(t, s, statsGroupLLM); days[len(days)-1] != last || len(days) != 3+120 {
+		t.Fatalf("days after the downtime: %d through %s, want through %s", len(days), days[len(days)-1], last)
+	}
+	// forcing a day whose source was pruned is refused; the totals stay
+	out := statsRollupNow(t, s, statsRollupInput{Group: statsGroupLLM, Since: "2026-10-09", Force: true})
+	if out.Skipped[statsGroupLLM] != "outside_retention" {
+		t.Fatalf("forced outside the window: %+v", out)
+	}
+	if statsN(t, s, "2026-10-09", "llm.calls", "role=chat|model=gpt-x|provider=none") != 2 {
+		t.Fatal("a refused force changed a finished day")
+	}
+	// without force a finished day is never rewritten, with force one inside the window is
+	inside := statsDayAdd(last, -2)
+	llm(inside, 2)
+	if out := statsRollupNow(t, s, statsRollupInput{Group: statsGroupLLM, Since: inside}); out.Finished[statsGroupLLM] != 0 {
+		t.Fatalf("finished days rewritten without force: %+v", out)
+	}
+	if n := statsCount(t, s, `SELECT COUNT(*) FROM stats_daily WHERE day=?`, inside); n != 0 {
+		t.Fatalf("an unforced run changed a finished day: %d rows", n)
+	}
+	if out := statsRollupNow(t, s, statsRollupInput{Group: statsGroupLLM, Since: inside, Force: true}); out.Finished[statsGroupLLM] != 3 || out.Skipped[statsGroupLLM] != "" {
+		t.Fatalf("forced inside the window: %+v", out)
+	}
+	if statsN(t, s, inside, "llm.calls", "role=chat|model=gpt-x|provider=none") != 2 {
+		t.Fatal("a forced day was not recomputed")
+	}
+}
+
+// Prune waits for the rollup (H3): a source table of a group never rolled up is not pruned at all, one
+// whose group finished through some day is pruned only up to the end of that day, and the schedule state
+// says why. With statistics off the gate is off.
+func TestStatsPruneWaitsForUnrolledDays(t *testing.T) {
+	s, clk := statsRollupService(t, "Asia/Seoul")
+	ctx := context.Background()
+	old := clk.t.AddDate(0, 0, -100)
+	statsLLM(t, s, old, "chat", "gpt-x", 1, 10, 1, 500, 0.001, "", "stop", "")
+	statsLLM(t, s, old.AddDate(0, 0, 5), "chat", "gpt-x", 1, 10, 1, 500, 0.001, "", "stop", "")
+	oldDay := clk.t.AddDate(0, 0, -410).In(statsKST).Format("2006-01-02")
+	statsMust(t, s, `INSERT INTO activity_counts(day, guild_id, channel_id, user_id, name, n, last_at) VALUES(?, 'g', 'c', 'u1', '', 4, ?)`, oldDay, stamp(old))
+	// tools: finished through one old day; a row of that day and one of the next, both past ledger_days
+	toolDay := old.In(statsKST).Format("2006-01-02")
+	if err := s.statsReplaceDay(ctx, statsDayWrite{Group: statsGroupTools, Day: toolDay, Zone: "Asia/Seoul"}); err != nil {
+		t.Fatal(err)
+	}
+	tool := func(at time.Time) {
+		statsMust(t, s, `INSERT INTO tool_calls(turn_id, tool, guard, status, latency_ms, cost_usd, result_chars, class, provider, created_at)
+			VALUES('', 'search.web', 'allowed', 'ok', 100, 0, 1, '', '', ?)`, stamp(at))
+	}
+	finishedAt := statsDayStart(toolDay, statsKST).Add(12 * time.Hour)
+	tool(finishedAt)
+	tool(finishedAt.AddDate(0, 0, 1))
+
+	// a rollup that is already running (or failed) leaves the days unfinished
+	statsRollups.Store(s, struct{}{})
+	res, err := s.retentionPass(ctx)
+	statsRollups.Delete(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.statsErr == "" || res.stats != nil {
+		t.Fatalf("the busy rollup is not reported: %+v", res)
+	}
+	if n := statsCount(t, s, `SELECT COUNT(*) FROM llm_calls`); n != 2 || res.removed["llm_calls"] != 0 || !strings.Contains(res.held["llm_calls"], "first llm statistics rollup") {
+		t.Fatalf("llm rows not rolled up were pruned (or not said why): %d left, held %q", n, res.held["llm_calls"])
+	}
+	if statsCount(t, s, `SELECT COUNT(*) FROM activity_counts`) != 1 || res.held["activity"] == "" {
+		t.Fatalf("activity of a day not rolled up was pruned: %+v", res.held)
+	}
+	if n := statsCount(t, s, `SELECT COUNT(*) FROM tool_calls`); n != 1 || res.removed["tool_calls"] != 1 || !strings.Contains(res.held["tool_calls"], "finished through "+toolDay) {
+		t.Fatalf("tool rows: %d left (want the unfinished day's), removed %d, held %q", n, res.removed["tool_calls"], res.held["tool_calls"])
+	}
+	if statsCount(t, s, `SELECT COUNT(*) FROM tool_calls WHERE created_at=?`, stamp(finishedAt.AddDate(0, 0, 1))) != 1 {
+		t.Fatal("the row of the unfinished day went")
+	}
+
+	// the scheduled pass rolls them up first, then prunes; its state shows the rollup
+	st := s.runScheduledRetention(ctx)
+	if !st.OK || st.Detail["stats"] == nil {
+		t.Fatalf("scheduled pass: %+v", st)
+	}
+	if n := statsCount(t, s, `SELECT COUNT(*) FROM llm_calls`) + statsCount(t, s, `SELECT COUNT(*) FROM tool_calls`) + statsCount(t, s, `SELECT COUNT(*) FROM activity_counts`); n != 0 {
+		t.Fatalf("%d source rows left after the rollup finished their days", n)
+	}
+	for _, c := range []struct {
+		day, metric, dims string
+		want              int64
+	}{
+		{old.In(statsKST).Format("2006-01-02"), "llm.calls", "role=chat|model=gpt-x|provider=none", 1},
+		{old.AddDate(0, 0, 5).In(statsKST).Format("2006-01-02"), "llm.calls", "role=chat|model=gpt-x|provider=none", 1},
+		{statsDayAdd(toolDay, 1), "tools.calls", "tool=search.web|status=ok|class=none|provider=none", 1},
+		{oldDay, "activity.messages", "", 4},
+	} {
+		if got := statsN(t, s, c.day, c.metric, c.dims); got != c.want {
+			t.Errorf("%s %s: %d, want %d", c.day, c.metric, got, c.want)
+		}
+	}
+	if statsCount(t, s, `SELECT COUNT(*) FROM stats_daily WHERE day=? AND metric='tools.calls'`, toolDay) != 0 {
+		t.Fatal("a finished day was rewritten")
+	}
+	var rec map[string]string
+	if ok, _ := s.kvGet(statsPrunedKey, &rec); !ok || rec["llm_calls"] == "" || rec["activity_counts"] == "" {
+		t.Fatalf("prune cuts not recorded: %v", rec)
+	}
+
+	// statistics off: the gate is off, and the cut is still recorded
+	off := false
+	d := s.Doc()
+	d.Stats.Enabled = &off
+	s.setDoc(d, s.Revision())
+	statsLLM(t, s, clk.t.AddDate(0, 0, -200), "chat", "gpt-x", 1, 1, 1, 1, 0, "", "", "")
+	before := rec["llm_calls"]
+	clk.t = clk.t.Add(48 * time.Hour)
+	res, err = s.retentionPass(ctx)
+	if err != nil || res.stats != nil || len(res.held) != 0 {
+		t.Fatalf("statistics off: %+v %v", res, err)
+	}
+	if statsCount(t, s, `SELECT COUNT(*) FROM llm_calls`) != 0 {
+		t.Fatal("with statistics off old rows are pruned as before")
+	}
+	_, _ = s.kvGet(statsPrunedKey, &rec)
+	if rec["llm_calls"] <= before {
+		t.Fatalf("cut not moved: %q → %q", before, rec["llm_calls"])
+	}
+}
+
 // An install upgraded to statistics has pruned before cuts were recorded: its first backfill starts
 // inside every source's retention window and skips each source's oldest surviving day, which a prune
 // may have cut in half (H1). An install that never pruned starts at its oldest row.
@@ -333,6 +503,82 @@ func TestStatsRollupZoneChangeCountsEveryRowOnce(t *testing.T) {
 	_ = s.Store.DB.QueryRow(`SELECT zone FROM stats_days WHERE grp='turns' AND day='2026-10-11'`).Scan(&zone)
 	if zone != "UTC" {
 		t.Fatalf("a forced day moved to %q", zone)
+	}
+}
+
+// Close stops a backfill between days (M5): the days finished so far are whole, nothing is pruned, the
+// schedule does not record a run, and the next start continues after the last finished day.
+func TestStatsRollupStopsBetweenDaysOnClose(t *testing.T) {
+	s := privacyService(t)
+	clk := &movableClock{t: time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)}
+	s.Clock = clk
+	statsSetZone(s, "Asia/Seoul")
+	first := "2026-09-21"
+	for i := 0; i < 20; i++ {
+		statsTurn(t, s, statsDayStart(statsDayAdd(first, i), statsKST).Add(12*time.Hour), "answered", 0, 100, 0, 0)
+	}
+	reached := make(chan struct{})
+	hook := func(svc *Service, ctx context.Context, group, day string) {
+		if svc == s && group == statsGroupTurns && day == "2026-09-23" {
+			close(reached)
+			<-ctx.Done() // stays inside the rollup until Close cancels it
+		}
+	}
+	statsDayHook.Store(&hook)
+	t.Cleanup(func() { statsDayHook.Store(nil) })
+	if !s.startRetentionPass(context.Background()) {
+		t.Fatal("pass not started")
+	}
+	if s.startRetentionPass(context.Background()) {
+		t.Fatal("a second pass started beside the first")
+	}
+	select {
+	case <-reached:
+	case <-time.After(20 * time.Second):
+		t.Fatal("the rollup never reached the third day")
+	}
+	closed := make(chan error, 1)
+	go func() { closed <- s.Close() }()
+	select {
+	case err := <-closed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("Close waited for the whole backfill")
+	}
+
+	s2, err := Open(s.DataRoot, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s2.Close() })
+	s2.Clock = clk
+	statsSetZone(s2, "Asia/Seoul")
+	if days := statsDaysOf(t, s2, statsGroupTurns); !slices.Equal(days, []string{"2026-09-21", "2026-09-22", "2026-09-23"}) {
+		t.Fatalf("finished before Close: %v", days)
+	}
+	if n := statsCount(t, s2, `SELECT COUNT(*) FROM stats_daily WHERE metric='turns.count'`); n != 3 {
+		t.Fatalf("%d day rows for 3 finished days", n)
+	}
+	if n := statsCount(t, s2, `SELECT COUNT(*) FROM turn_log`); n != 20 {
+		t.Fatalf("source rows pruned during a stopped pass: %d", n)
+	}
+	var gc scheduleState
+	if ok, _ := s2.kvGet("schedule:usage_gc", &gc); ok {
+		t.Fatalf("a pass stopped by shutdown was recorded as run: %+v", gc)
+	}
+	if _, err := s2.runRetention(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	days := statsDaysOf(t, s2, statsGroupTurns)
+	if len(days) != 20 || days[0] != first || days[19] != "2026-10-10" {
+		t.Fatalf("after restart: %v", days)
+	}
+	for _, d := range days {
+		if n := statsN(t, s2, d, "turns.count", "outcome=answered"); n != 1 {
+			t.Fatalf("%s: %d turns", d, n)
+		}
 	}
 }
 

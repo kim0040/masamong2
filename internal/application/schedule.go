@@ -70,7 +70,7 @@ func (s *Service) RunScheduler(ctx context.Context) {
 					s.ownedGo("notices", func(ctx context.Context) { defer noticesTicking.Store(false); s.noticesTick(ctx) })
 				}
 				if s.retentionDue(s.Clock.Now(), started) {
-					s.runScheduledRetention(ctx)
+					s.startRetentionPass(ctx)
 				}
 				if s.updateDue() && updateChecking.CompareAndSwap(false, true) {
 					s.ownedGo("update check", func(ctx context.Context) { defer updateChecking.Store(false); s.checkUpdate(ctx) })
@@ -200,7 +200,14 @@ func (s *Service) schedulesAction(ctx context.Context, req action.Request) actio
 			}
 			return action.OK(req, map[string]any{"state": st})
 		case "usage_gc":
-			st := s.runScheduledRetention(context.Background())
+			// the pass finishes statistics first, which can take a while: it follows the service's
+			// lifetime like a backup, not the request's
+			wctx, done, ok := s.detachedWork(ctx)
+			if !ok {
+				return action.Fail(req, errcode.IO, "generic.error", "service is shutting down", nil)
+			}
+			defer done()
+			st := s.runScheduledRetention(wctx)
 			if !st.OK {
 				return action.Fail(req, errcode.IO, "generic.error", st.Error, nil)
 			}

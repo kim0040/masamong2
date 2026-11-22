@@ -23,11 +23,9 @@ import (
 //
 // Stored: turn and job ids, role, model, provider, token counts, timing, cost, the failure class (a
 // short machine value), and for tools the parameter NAMES only. No message text, no parameter values,
-// no Discord user id. Rows go after ledgerKeepDays (retention.go). Rows are written off the turn's
-// path: a ledger write that fails or is slow must never delay or fail a reply, so it is dropped with a
-// debug line.
-
-const ledgerKeepDays = 90
+// no Discord user id. Rows go after retention.ledger_days (90 days unless configured, retention.go).
+// Rows are written off the turn's path: a ledger write that fails or is slow must never delay or fail
+// a reply, so it is dropped with a debug line.
 
 var ledgerSQLite = []string{
 	`CREATE TABLE IF NOT EXISTS llm_calls (
