@@ -1,6 +1,6 @@
 # Common builds. The console (internal/transport/web/ui) is committed pre-built in ui/dist, so plain
 # `go build` works without Node; run `make ui` after changing the console.
-.PHONY: ui check build test docs docs-record codemap release-notes try install uninstall app release
+.PHONY: ui check build test parity docs docs-record codemap release-notes try install uninstall app release
 
 ui:
 	cd internal/transport/web/ui && npm ci && npm run build
@@ -14,6 +14,11 @@ build:
 
 test:
 	go test ./...
+
+# the Python sandbox against the Go port on a made-up corpus (leaves, full-text ranking, retrieval incl. time-range
+# and person cases); needs python3 with numpy, no stored chat or keys: PYTHON=python3.12 make parity
+parity:
+	scripts/parity.sh
 
 # documentation: links resolve, translated pages are in step (docs/translations.json), and command names match the page's language
 docs:

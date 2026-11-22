@@ -9,8 +9,14 @@ the repository (the scratch folder) and never commit it.
         python3 experimental/rag-leaf-parent/parity_dump.py <out_dir> discord
     MASAMONG_SANDBOX_DATA=test-sandbox/data-discord-gap30 MASAMONG_SANDBOX_CONFIG=test-sandbox/config.discord-gap30.json \
         MASAMONG_PARITY_RETRIEVE=<out_dir>/retrieve_discord.json go test ./internal/memory/search/ -run Parity -v
+
+With PARITY_INTENTS=<intents.json> (made by parity_synth.py) the dump also holds one question per planner-intent
+case: the case's planner output goes through bot_plan.intent_from_plan, so the time-range, person and recent
+paths are compared too, and a case may carry the reference clock. `make parity` runs all of this on the
+synthetic corpus (no stored chat, no keys).
 """
 import json, os, sys
+from datetime import datetime, timedelta, timezone
 from parity_numeric import platform_metadata, capture_generation, simulate_dot, packing_variants
 repo = os.getcwd()
 sys.path.insert(0, os.path.join(repo, "experimental/rag-leaf-parent"))
@@ -19,6 +25,10 @@ out_dir, gold_name = sys.argv[1], sys.argv[2]
 import numpy as np
 import engine as E
 capture_generation(E)
+# The speaker run is fused inside person_retrieval; record its two sources like the others so the dumped
+# tree carries them (without this the person cases have a speaker run with no children).
+import person_retrieval
+person_retrieval.fuse = E.fuse
 # 옛 정렬을 비교할 때만 사용한다. 기본 덤프와 검색은 항상 안정 정렬이다.
 if os.environ.get("PARITY_SORT") == "legacy":
     original_argsort = np.argsort
@@ -110,8 +120,39 @@ for doc_id in random.sample(leaf_ids, min(int(os.environ.get("PARITY_N", "60")),
         continue
     qvec[text] = [float(x) for x in index.leaf_vectors[id_to_idx[doc_id]]]
     questions.append({"question_id": doc_id, "query": text, "source_leaf_doc_id": doc_id})
+# Planner-intent cases (synthetic corpus only): one extra question each, with the planner output that the
+# product's planner would give, so the intent-conditioned paths run on both sides.
+plans, references = {}, {}
+if os.environ.get("PARITY_INTENTS"):
+    for case in json.load(open(os.environ["PARITY_INTENTS"], encoding="utf-8")):
+        doc_id = case["leaf"]
+        leaf = index.leaf_by_id[doc_id]
+        rows = [m for m in msgs[int(leaf["start"]):int(leaf["end"])] if (m.get("content") or "").strip()]
+        text = " ".join((m.get("content") or "").strip() for m in rows[:2])[:40]
+        qvec[text] = [float(x) for x in index.leaf_vectors[id_to_idx[doc_id]]]
+        qid = "intent:" + case["name"]
+        questions.append({"question_id": qid, "query": text, "source_leaf_doc_id": doc_id, "all_rooms": case["scope"] == "all"})
+        plans[qid] = {"parsed": {"parsed": True, **case["plan"]}}
+        references[qid] = case.get("reference")
 gold = {"questions": questions}
-plans = {}
+def zone(text):
+    """'+09:00' -> that fixed offset (no zone database is needed on either side)."""
+    if not text:
+        return None
+    sign = -1 if text[0] == "-" else 1
+    hours, minutes = text.lstrip("+-").split(":")
+    return timezone(sign * timedelta(hours=int(hours), minutes=int(minutes)))
+def reference_for(ref):
+    if not ref:
+        return None
+    from retrieval_post import TimeReference
+    return TimeReference(mode=ref["mode"], now=datetime.fromisoformat(ref["now"]), tz=zone(ref.get("tz")),
+                         naive_tz=zone(ref.get("naive_tz")), source=ref.get("source", ""))
+# trace.time keys the Go side reports (search.TimeMeta); the Go test drops empty values on both sides
+TIME_KEYS = ("time_kind", "time_window_applied", "time_window_hard", "recent_window_applied", "recent_window_days",
+             "recent_window_leaves", "time_pool_n", "time_records_in_range_n", "time_window_scale", "time_window_scale_applied",
+             "time_from", "time_to", "time_window_invalid", "time_window_invalid_reason", "time_unresolved",
+             "time_unresolved_reason", "time_unresolved_partial", "recent_pool_n", "recent_window_blocks")
 def cached(text):
     return qvec.get(text)
 vectors = {}
@@ -131,6 +172,8 @@ class FakeRerank:
     def __init__(self, *a, **k):
         self.model = k.get("model", "fake")
     def rerank(self, query, docs, top_n=None):
+        if not docs:  # the real client refuses an empty pool, and the Go side treats it as a failed rerank
+            raise E.RerankError("empty documents")
         def score(d):
             return 0.3 + 0.6 * ((len(d) * 7919) % 1000) / 1000.0
         order = sorted(range(len(docs)), key=lambda i: (-score(docs[i]), i))[: top_n or len(docs)]
@@ -151,14 +194,16 @@ for q in gold["questions"]:
     vectors[query] = qv
     plan = plans.get(q["question_id"]) or {}
     intent = intent_from_plan(plan.get("parsed")) if plan.get("parsed") else None
-    room = leaf_room.get(q.get("source_leaf_doc_id") or "", "")
-    rec = {"question_id": q["question_id"], "query": query, "room": room, "intent": intent, "modes": {}}
+    room = "" if q.get("all_rooms") else leaf_room.get(q.get("source_leaf_doc_id") or "", "")
+    reference = references.get(q["question_id"])
+    rec = {"question_id": q["question_id"], "query": query, "room": room, "intent": intent, "time_reference": reference, "modes": {}}
     for mode, avail in (("hybrid", False), ("auto", False), ("rerank", True)):
         E._rerank_available = (lambda a=avail: a)
         trace = {}
         try:
             hits = E.retrieve(index, FakeClient(), query, top_k=5, mode="leaf_parent", q_vec=np.asarray(qv, dtype=np.float32),
-                              ranking=mode, remaining_budget=0.2, trace=trace, source_room_id=room or None, intent=dict(intent) if intent else None)
+                              ranking=mode, remaining_budget=0.2, trace=trace, source_room_id=room or None, intent=dict(intent) if intent else None,
+                              time_reference=reference_for(reference))
         except RuntimeError as e:
             rec["modes"][mode] = {"error": str(e)}
             continue
@@ -176,10 +221,22 @@ for q in gold["questions"]:
             "queries": trace.get("queries_used"), "persons": trace.get("persons"), "recovery": bool(trace.get("recovery_performed")),
             "scores": trace.get("parity_scores"), "tree": trace.get("parity_tree"),
             "final_scores": final_scores,
+            "time": {k: trace[k] for k in TIME_KEYS if k in trace},
         }
         rec["modes"][mode]["packing_variants"] = packing_variants(E, index, rec["modes"][mode]["hits"], trace["parity_scores"])
     rows.append(rec)
 os.makedirs(out_dir, exist_ok=True)
+# the full-text index (SQLite FTS5 here, internal/memory/lexical there): every dumped query, and its first word,
+# against the leaf and the summary index, all matches in bm25 order (internal/memory/lexical/parity_test.go)
+lexical_queries = []
+for rec in rows:
+    for text in (rec["query"], rec["query"].split()[0] if rec["query"].split() else ""):
+        if text and text not in lexical_queries:
+            lexical_queries.append(text)
+json.dump({"queries": [{"q": q, "leaf": index.leaf_fts.search(q, -1),
+                        "summary": index.summary_fts.search(q, -1) if index.summary_fts is not None else []}
+                       for q in lexical_queries]},
+          open(os.path.join(out_dir, "lexical.json"), "w", encoding="utf-8"), ensure_ascii=False)
 metadata = platform_metadata(np)
 metadata["dot_simulation"] = os.environ.get("PARITY_DOT", "blas_float32")
 metadata["sort_simulation"] = os.environ.get("PARITY_SORT", "stable")

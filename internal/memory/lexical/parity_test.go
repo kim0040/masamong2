@@ -50,25 +50,46 @@ func TestSandboxFTS5Parity(t *testing.T) {
 	if err := si.AddMany(sd); err != nil {
 		t.Fatal(err)
 	}
+	tied := 0 // groups of equal bm25 scores that came back in a different order
 	check := func(name string, ix *Index, q string, want [][2]any) (orderOK bool) {
 		got := ix.Search(q, 0)
 		if len(got) != len(want) {
 			t.Errorf("%s %q: %d hits, want %d", name, q, len(got), len(want))
 			return false
 		}
-		orderOK = true
+		sameScore := func(a, b float64) bool { return math.Abs(a-b) <= 1e-9*math.Max(1, math.Abs(b)) }
 		for i := range got {
-			wid, wsc := want[i][0].(string), want[i][1].(float64)
-			if math.Abs(got[i].Score-wsc) > 1e-9*math.Max(1, math.Abs(wsc)) {
+			if wsc := want[i][1].(float64); !sameScore(got[i].Score, wsc) {
 				t.Errorf("%s %q #%d: score %.12f want %.12f", name, q, i, got[i].Score, wsc)
 				return false
 			}
-			if got[i].DocID != wid {
-				t.Errorf("%s %q #%d: %s want %s", name, q, i, got[i].DocID, wid)
-				return false
-			}
 		}
-		return orderOK
+		// SQL leaves the order of equal scores open and the two SQLite builds may order them differently,
+		// so inside a group of equal scores the documents must be the same set; across groups the order is exact.
+		for i := 0; i < len(got); {
+			j := i + 1
+			for j < len(got) && sameScore(want[j][1].(float64), want[i][1].(float64)) {
+				j++
+			}
+			same := true
+			inGroup := map[string]int{}
+			for k := i; k < j; k++ {
+				inGroup[want[k][0].(string)]++
+				inGroup[got[k].DocID]--
+				same = same && got[k].DocID == want[k][0].(string)
+			}
+			for id, n := range inGroup {
+				if n != 0 {
+					t.Errorf("%s %q #%d-%d: %s differs from the sandbox's documents", name, q, i, j-1, id)
+					return false
+				}
+			}
+			if !same {
+				tied++
+			}
+			i = j
+		}
+		return true
 	}
 	hits := 0
 	for _, qq := range dump.Queries {
@@ -76,7 +97,7 @@ func TestSandboxFTS5Parity(t *testing.T) {
 		check("summary", si, qq.Q, qq.Summary)
 		hits += len(qq.Leaf) + len(qq.Summary)
 	}
-	t.Logf("queries=%d ranked hits compared=%d", len(dump.Queries), hits)
+	t.Logf("queries=%d ranked hits compared=%d tie groups in another order=%d", len(dump.Queries), hits, tied)
 }
 
 func readJSON(t *testing.T, path string, v any) {

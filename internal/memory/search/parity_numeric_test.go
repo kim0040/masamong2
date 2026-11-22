@@ -410,7 +410,7 @@ type parityScore struct {
 	Sources map[string]int     `json:"sources"`
 }
 
-func parityGenerate(ix *Index, query string, vector []float32, it Intent, scope Scope, emb QueryEmbedder, res Result) *Fusion {
+func parityGenerate(ix *Index, query string, vector []float32, it Intent, scope Scope, emb QueryEmbedder, res Result, ref *TimeReference) *Fusion {
 	cfg := ix.Cfg
 	recovered, _ := res.Trace["recovery_performed"].(bool)
 	lexLim, denLim := cfg.searchLimits()
@@ -423,7 +423,7 @@ func parityGenerate(ix *Index, query string, vector []float32, it Intent, scope 
 	q := FitQuery(vector, ix.LeafVecs.Dims)
 	allowed := ix.scopeAllowed(scope)
 	gen := ix.generate(context.Background(), emb, query, q, it, allowed, true,
-		cfg.poolSize(5, recovered), lexLim, denLim, timeScale, limitScale, nil)
+		cfg.poolSize(5, recovered), lexLim, denLim, timeScale, limitScale, ref)
 	lexQuery, _ := ix.lexicalQueryExpanded(query, it)
 	leaf := ix.hybrid("leaf", ix.leafLex, ix.LeafVecs, ix.leafIDs, query, q, cfg.weights(), gen.allowed, lexLim, denLim, lexQuery, nil)
 	for _, c := range gen.fusion.Ordered {
@@ -436,8 +436,8 @@ func parityGenerate(ix *Index, query string, vector []float32, it Intent, scope 
 	return gen.fusion
 }
 
-func parityDiagnose(t *testing.T, ix *Index, query string, vector []float32, it Intent, scope Scope, emb QueryEmbedder, res Result, want dumpMode) {
-	f := parityGenerate(ix, query, vector, it, scope, emb, res)
+func parityDiagnose(t *testing.T, ix *Index, query string, vector []float32, it Intent, scope Scope, emb QueryEmbedder, res Result, want dumpMode, ref *TimeReference) {
+	f := parityGenerate(ix, query, vector, it, scope, emb, res, ref)
 	got := asStrings(res.Trace["fusion_ids"])
 	for i, id := range got {
 		if i >= len(want.FusionIDs) || id == want.FusionIDs[i] {
