@@ -124,6 +124,9 @@ type Options struct {
 	Wait      time.Duration
 	Log       io.Writer                         // progress lines for a terminal; nil = silent
 	OnceURL   func(bind string) (string, error) // builds the one-time sign-in link
+	// Token reads the console token. It is how Open proves that the recorded address is this data folder's
+	// console before OnceURL builds a link for it; required whenever OnceURL is set.
+	Token func() (string, error)
 }
 
 // Result says what Open did.
