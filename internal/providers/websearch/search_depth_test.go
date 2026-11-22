@@ -18,7 +18,7 @@ import (
 func fetchClient(t *testing.T) (*providers.Client, providers.Credential) {
 	t.Helper()
 	c := providers.NewClient(5*time.Second, nil)
-	t.Setenv("FK", "fk")
+	t.Setenv("FK", "test-key-1")
 	cred, _ := providers.Resolve("env:FK")
 	return c, cred
 }
@@ -34,7 +34,7 @@ func TestTinyFishFetchParsesPagesAndErrors(t *testing.T) {
 		mu.Lock()
 		bodies = append(bodies, b)
 		mu.Unlock()
-		if r.Header.Get("X-API-Key") != "fk" || r.Method != http.MethodPost {
+		if r.Header.Get("X-API-Key") != "test-key-1" || r.Method != http.MethodPost {
 			w.WriteHeader(401)
 			return
 		}
@@ -359,7 +359,7 @@ func serve(t *testing.T, kind string, reply string, q Query) (seenReq, Response)
 	defer srv.Close()
 	c := providers.NewClient(5*time.Second, nil)
 	c.MaxRetries = 0
-	t.Setenv("K", "k")
+	t.Setenv("K", "test-key-1")
 	cred, _ := providers.Resolve("env:K")
 	s, err := New(kind, c, srv.URL, cred)
 	if err != nil {
@@ -468,7 +468,7 @@ func TestKakaoDeepAsksWebAndBlogAtOnce(t *testing.T) {
 	defer srv.Close()
 	c := providers.NewClient(5*time.Second, nil)
 	c.MaxRetries = 0
-	t.Setenv("K", "k")
+	t.Setenv("K", "test-key-1")
 	cred, _ := providers.Resolve("env:K")
 	s, _ := New("kakao_search", c, srv.URL, cred)
 

@@ -34,11 +34,15 @@ func (s *Service) providerFail(req action.Request, provider string, err error) a
 }
 
 // providerResult is the failed result for err without noting it in the provider's health: for an error
-// that is not the provider's (the turn ended, our own time limit).
+// that is not the provider's (the turn ended, our own time limit). The console gets the error's class
+// and the HTTP status, never the service's message or the request's URL: either can repeat the key back.
 func (s *Service) providerResult(req action.Request, provider string, err error) action.Result {
 	var pe *providers.Error
 	var ae *openai.APIError
 	args := map[string]any{"provider": provider}
+	if errors.As(err, &pe) {
+		args["kind"], args["status"], args["attempts"] = pe.Kind, pe.Status, pe.Attempts
+	}
 	switch {
 	case errors.Is(err, providers.ErrNoCredential):
 		return action.Fail(req, errcode.ProviderUnconfigured, "provider.unconfigured", s.msg(req, "provider.unconfigured", "provider", provider), args)
@@ -46,28 +50,24 @@ func (s *Service) providerResult(req action.Request, provider string, err error)
 		args["detail"] = err.Error()
 		return action.Fail(req, errcode.BudgetExceeded, "generic.error", err.Error(), args)
 	case errors.Is(err, decode.ErrHTMLResponse), errors.Is(err, decode.ErrUnexpected):
-		args["detail"] = err.Error()
-		return action.Fail(req, errcode.ProviderFormat, "generic.error", "provider returned an unexpected format: "+err.Error(), args)
+		return action.Fail(req, errcode.ProviderFormat, "generic.error", "provider returned an unexpected format", args)
 	case errors.Is(err, websearch.ErrNotPublic):
 		return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), args)
 	case errors.Is(err, decode.ErrKMAService), errors.Is(err, decode.ErrKMATextError), errors.Is(err, fx.ErrProvider), errors.Is(err, openai.ErrAuth), errors.Is(err, websearch.ErrAuth), errors.Is(err, finnhub.ErrForbidden), errors.Is(err, openmeteo.ErrProvider):
-		args["detail"] = err.Error()
-		return action.Fail(req, errcode.ProviderRejected, "generic.error", err.Error(), args)
+		return action.Fail(req, errcode.ProviderRejected, "generic.error", s.msg(req, "generic.error"), args)
 	case errors.Is(err, finnhub.ErrRateLimited), errors.Is(err, kakao.ErrQuotaExceeded):
-		res := action.Fail(req, errcode.ProviderRateLimited, "generic.error", err.Error(), args)
+		res := action.Fail(req, errcode.ProviderRateLimited, "generic.error", s.msg(req, "generic.error"), args)
 		res.Error.Retryable = true
 		return res
 	case errors.As(err, &ae):
 		args["type"], args["code"] = ae.Type, ae.Code
-		return action.Fail(req, errcode.ProviderRejected, "generic.error", ae.Message, args)
+		return action.Fail(req, errcode.ProviderRejected, "generic.error", s.msg(req, "generic.error"), args)
 	case errors.As(err, &pe):
-		args["kind"], args["status"], args["attempts"], args["url"] = pe.Kind, pe.Status, pe.Attempts, pe.URL
-		res := action.Fail(req, errcode.ProviderUnavailable, "generic.error", err.Error(), args)
+		res := action.Fail(req, errcode.ProviderUnavailable, "generic.error", s.msg(req, "generic.error"), args)
 		res.Error.Retryable = pe.Retryable()
 		return res
 	}
-	args["detail"] = err.Error()
-	return action.Fail(req, errcode.ProviderError, "generic.error", err.Error(), args)
+	return action.Fail(req, errcode.ProviderError, "generic.error", s.msg(req, "generic.error"), args)
 }
 
 func fptr(v *float64) any {

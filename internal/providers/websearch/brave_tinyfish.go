@@ -21,7 +21,7 @@ func get(ctx context.Context, c *providers.Client, rawURL string, headers map[st
 	if err != nil {
 		var pe *providers.Error
 		if errors.As(err, &pe) && (pe.Status == 401 || pe.Status == 403) {
-			return nil, fmt.Errorf("%w: %s", ErrAuth, serviceMessage(resp, headerSecrets(headers)...))
+			return nil, &authError{pe: pe, msg: serviceMessage(resp, headerSecrets(headers)...)}
 		}
 		if msg := serviceMessage(resp, headerSecrets(headers)...); msg != "" {
 			return nil, fmt.Errorf("%w: %s", err, msg)

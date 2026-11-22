@@ -26,13 +26,13 @@ func TestEachServiceRequestAndResponse(t *testing.T) {
 		wantField                              map[string]any
 		wantTitle, wantURL, wantAnswer         string
 	}{
-		{"tavily", "/search", "Authorization", "Bearer k", `{"query":"q","answer":"요약 답","results":[{"title":"T1","url":"https://a.example/1","content":"본문 1","score":0.9,"published_date":"2026-09-29"}],"response_time":0.8,"usage":{"credits":1}}`,
+		{"tavily", "/search", "Authorization", "Bearer test-key-1", `{"query":"q","answer":"요약 답","results":[{"title":"T1","url":"https://a.example/1","content":"본문 1","score":0.9,"published_date":"2026-09-29"}],"response_time":0.8,"usage":{"credits":1}}`,
 			map[string]any{"query": "캠핑 장비", "max_results": float64(3), "time_range": "week"}, "T1", "https://a.example/1", "요약 답"},
-		{"linkup", "/v1/search", "Authorization", "Bearer k", `{"results":[{"type":"text","name":"L1","url":"https://b.example/1","content":"내용","favicon":"x"},{"type":"image","name":"img","url":"https://b.example/i.png"}]}`,
+		{"linkup", "/v1/search", "Authorization", "Bearer test-key-1", `{"results":[{"type":"text","name":"L1","url":"https://b.example/1","content":"내용","favicon":"x"},{"type":"image","name":"img","url":"https://b.example/i.png"}]}`,
 			map[string]any{"q": "캠핑 장비", "depth": "standard", "outputType": "searchResults", "maxResults": float64(3)}, "L1", "https://b.example/1", ""},
-		{"exa", "/search", "x-api-key", "k", `{"requestId":"r","results":[{"title":"E1","url":"https://c.example/1","publishedDate":"2026-09-01T00:00:00.000Z","author":null,"highlights":["첫 부분","둘째 부분"]}],"costDollars":{"total":0.007}}`,
+		{"exa", "/search", "x-api-key", "test-key-1", `{"requestId":"r","results":[{"title":"E1","url":"https://c.example/1","publishedDate":"2026-09-01T00:00:00.000Z","author":null,"highlights":["첫 부분","둘째 부분"]}],"costDollars":{"total":0.007}}`,
 			map[string]any{"query": "캠핑 장비", "numResults": float64(3), "type": "auto"}, "E1", "https://c.example/1", ""},
-		{"serper", "/search", "X-API-KEY", "k", `{"searchParameters":{"q":"q"},"answerBox":{"snippet":"상자 답"},"organic":[{"title":"S1","link":"https://d.example/1","snippet":"스니펫","date":"2 days ago","position":1}]}`,
+		{"serper", "/search", "X-API-KEY", "test-key-1", `{"searchParameters":{"q":"q"},"answerBox":{"snippet":"상자 답"},"organic":[{"title":"S1","link":"https://d.example/1","snippet":"스니펫","date":"2 days ago","position":1}]}`,
 			map[string]any{"q": "캠핑 장비", "num": float64(3), "gl": "kr", "hl": "ko", "tbs": "qdr:w"}, "S1", "https://d.example/1", "상자 답"},
 	}
 	for _, tc := range cases {
@@ -51,7 +51,7 @@ func TestEachServiceRequestAndResponse(t *testing.T) {
 			defer srv.Close()
 			c := providers.NewClient(5*time.Second, nil)
 			c.MaxRetries = 0
-			t.Setenv("K", "k")
+			t.Setenv("K", "test-key-1")
 			cred, _ := providers.Resolve("env:K")
 			s, err := New(tc.kind, c, srv.URL, cred)
 			if err != nil {
@@ -73,7 +73,7 @@ func TestEachServiceRequestAndResponse(t *testing.T) {
 				t.Fatalf("exa cost and highlights: %+v", res)
 			}
 			// a wrong key is ErrAuth with the service's message
-			t.Setenv("K", "wrong")
+			t.Setenv("K", "wrong-key")
 			bad, _ := providers.Resolve("env:K")
 			s2, _ := New(tc.kind, c, srv.URL, bad)
 			if _, err := s2.Search(context.Background(), Query{Text: "x"}); !errors.Is(err, ErrAuth) || !strings.Contains(err.Error(), "invalid API key") {
@@ -240,7 +240,7 @@ func TestDepthAndNewsPerService(t *testing.T) {
 			defer srv.Close()
 			c := providers.NewClient(5*time.Second, nil)
 			c.MaxRetries = 0
-			t.Setenv("K", "k")
+			t.Setenv("K", "test-key-1")
 			cred, _ := providers.Resolve("env:K")
 			s, err := New(tc.kind, c, srv.URL, cred)
 			if err != nil {
@@ -337,7 +337,7 @@ func TestResearchPerService(t *testing.T) {
 			defer srv.Close()
 			c := providers.NewClient(5*time.Second, nil)
 			c.MaxRetries = 0
-			t.Setenv("K", "k")
+			t.Setenv("K", "test-key-1")
 			cred, _ := providers.Resolve("env:K")
 			s, err := New(tc.kind, c, srv.URL, cred)
 			if err != nil {
@@ -449,7 +449,7 @@ func TestSerperScholarKeepsRecentYears(t *testing.T) {
 	defer srv.Close()
 	c := providers.NewClient(5*time.Second, nil)
 	c.MaxRetries = 0
-	t.Setenv("K", "k")
+	t.Setenv("K", "test-key-1")
 	cred, _ := providers.Resolve("env:K")
 	s, _ := New("serper", c, srv.URL, cred)
 	var titles []string
@@ -472,7 +472,7 @@ func TestSerperScholarKeepsRecentYears(t *testing.T) {
 func TestBraveAndTinyFishKeys(t *testing.T) {
 	for kind, header := range map[string]string{"brave": "X-Subscription-Token", "tinyfish": "X-API-Key"} {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Header.Get(header) != "k" {
+			if r.Header.Get(header) != "test-key-1" {
 				w.WriteHeader(401)
 				_, _ = w.Write([]byte(`{"error":{"message":"invalid API key"}}`))
 				return
@@ -481,13 +481,13 @@ func TestBraveAndTinyFishKeys(t *testing.T) {
 		}))
 		c := providers.NewClient(5*time.Second, nil)
 		c.MaxRetries = 0
-		t.Setenv("K", "k")
+		t.Setenv("K", "test-key-1")
 		good, _ := providers.Resolve("env:K")
 		s, _ := New(kind, c, srv.URL, good)
 		if _, err := s.Search(context.Background(), Query{Text: "x"}); err != nil {
 			t.Errorf("%s: %v", kind, err)
 		}
-		t.Setenv("K", "wrong")
+		t.Setenv("K", "wrong-key")
 		bad, _ := providers.Resolve("env:K")
 		s, _ = New(kind, c, srv.URL, bad)
 		if _, err := s.Search(context.Background(), Query{Text: "x"}); !errors.Is(err, ErrAuth) {
@@ -553,7 +553,7 @@ func TestTavilyAsksForPublishedDates(t *testing.T) {
 	defer srv.Close()
 	c := providers.NewClient(5*time.Second, nil)
 	c.MaxRetries = 0
-	t.Setenv("K", "k")
+	t.Setenv("K", "test-key-1")
 	cred, _ := providers.Resolve("env:K")
 	s, _ := New("tavily", c, srv.URL, cred)
 	if _, err := s.Search(context.Background(), Query{Text: "환율"}); err != nil || got["include_published_date"] != true {
