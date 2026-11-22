@@ -594,7 +594,7 @@ var statsRegistry = func() []statsMetric {
 		{Name: "llm.errors", Group: statsGroupLLM, Kind: statsDerived, Doc: "failed model calls by class (a job aggregate row counts once: at least one failed)",
 			Dims: []statsDim{role, classDim()}, Export: operational},
 		{Name: "llm.finish", Group: statsGroupLLM, Kind: statsDerived, Doc: "model calls by finish reason bucket",
-			Dims: []statsDim{role, {Key: "finish", Values: []string{"none", "stop", "length", "tool_calls", "content_filter", statsOther}, Fold: statsFinish}},
+			Dims:   []statsDim{role, {Key: "finish", Values: []string{"none", "stop", "length", "tool_calls", "content_filter", statsOther}, Fold: statsFinish}},
 			Export: operational},
 
 		{Name: "tools.calls", Group: statsGroupTools, Kind: statsDerived, Doc: "tool executions",
@@ -644,7 +644,7 @@ var statsRegistry = func() []statsMetric {
 			}, Vals: []string{"attempts"}, Export: member},
 
 		{Name: "jobs.runs", Group: statsGroupJobs, Kind: statsDerived, Doc: "background jobs by type, status and error code",
-			Dims: []statsDim{openDim("type", []string{jobPrepare}, foldJobType), closedDim("status", statsJobStatuses, nil), codeDim()},
+			Dims:   []statsDim{openDim("type", []string{jobPrepare}, foldJobType), closedDim("status", statsJobStatuses, nil), codeDim()},
 			Export: operational},
 
 		{Name: "activity.messages", Group: statsGroupActivity, Kind: statsDerived, Doc: "messages captured from Discord (consenting members)",
@@ -1141,7 +1141,7 @@ type statsExportDoc struct {
 	Install     statsExportInstall `json:"install"`
 	Period      statsExportPeriod  `json:"period"`
 	// Settings: booleans, enumerations and bucketed numbers only; no names, hostnames, zones or keys (H5 rule 6).
-	Settings map[string]any  `json:"settings"`
+	Settings map[string]any   `json:"settings"`
 	Weekly   []statsExportRow `json:"weekly"`
 	Totals   []statsExportRow `json:"totals"`
 }
