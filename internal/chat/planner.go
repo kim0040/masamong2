@@ -13,6 +13,7 @@ package chat
 import (
 	"encoding/json"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -732,9 +733,7 @@ func isPlaceholder(re *regexp.Regexp, v any) bool {
 }
 
 // closedChoices checks a planned step's closed choices as the tool loop does (prepare): a value outside
-// a declared choice (reminders.update op confirm) is removed and named in stripped. Keys the tool does not
-// declare are kept: the language packs' planner prompts name some the tools take without declaring them
-// (polls.create options), and the tool reads only what it knows.
+// a declared choice (reminders.update op confirm) is removed and named in stripped.
 func closedChoices(tool string, info ToolInfo, params map[string]any, stripped *[]string) {
 	for _, p := range allowedParams(info) {
 		v, ok := params[p.Name]
@@ -801,6 +800,24 @@ func Assess(v Voice, p Plan, ts Toolset, memoryOn, hasTimeRef bool) Assessment {
 		case !enabled:
 			st.State = "disabled"
 		default:
+			// a step carries only what the tool declares (the same keys the loop's schema offers): an
+			// invented provider choice or a poll's id never reaches the tool
+			declared := map[string]bool{}
+			for _, p := range allowedParams(info) {
+				declared[p.Name] = true
+			}
+			for _, k := range info.Required {
+				declared[k] = true
+			}
+			var dropped []string
+			for k := range params {
+				if !declared[k] {
+					delete(params, k)
+					dropped = append(dropped, s.Tool+"."+k)
+				}
+			}
+			slices.Sort(dropped)
+			a.Stripped = append(a.Stripped, dropped...)
 			closedChoices(s.Tool, info, params, &a.Stripped)
 			for _, k := range info.Required {
 				if isPlaceholder(ph, params[k]) {

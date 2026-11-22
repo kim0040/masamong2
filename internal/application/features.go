@@ -1299,6 +1299,8 @@ func (s *Service) polls(req action.Request) action.Result {
 var errPollExists = errors.New("a poll with this id exists")
 
 // createPoll stores a new poll; an id already in use is refused (errPollExists) in the same write.
+// The insert itself must not upsert: a second create that passed the check (another daemon, a race
+// on TiDB) fails on the duplicate key instead of writing over the poll.
 func (s *Service) createPoll(p poll.Poll) error {
 	raw, err := poll.Marshal(p)
 	if err != nil {
@@ -1312,7 +1314,7 @@ func (s *Service) createPoll(p poll.Poll) error {
 		if n > 0 {
 			return errPollExists
 		}
-		return s.Store.UpsertPoll(tx, p.ID, p.ScopeKey, p.Revision, string(raw), s.Clock.Now().UTC().Format(time.RFC3339))
+		return s.Store.InsertPoll(tx, p.ID, p.ScopeKey, p.Revision, string(raw), s.Clock.Now().UTC().Format(time.RFC3339))
 	})
 	if err == nil {
 		s.emit("poll", p.ID, map[string]any{"status": string(p.Status), "revision": p.Revision})

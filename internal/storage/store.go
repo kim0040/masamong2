@@ -280,6 +280,14 @@ func (s *Store) UpsertRevision(tx *sql.Tx, revision int, status, hash, content s
 	return err
 }
 
+// InsertPoll stores a new poll. A duplicate id is an error on both backends (UNIQUE constraint /
+// duplicate entry): making a poll never replaces one, and the statement is the same on SQLite and TiDB.
+func (s *Store) InsertPoll(tx *sql.Tx, id, scopeKey string, revision int, state, createdAt string) error {
+	_, err := tx.Exec(`INSERT INTO polls(id, scope_key, revision, state, created_at) VALUES(?,?,?,?,?)`,
+		id, scopeKey, revision, state, createdAt)
+	return err
+}
+
 func (s *Store) UpsertPoll(tx *sql.Tx, id, scopeKey string, revision int, state, createdAt string) error {
 	if s.Backend == BackendTiDB {
 		_, err := tx.Exec(`INSERT INTO polls(id, scope_key, revision, state, created_at) VALUES(?,?,?,?,?)

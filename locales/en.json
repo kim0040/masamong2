@@ -1173,7 +1173,7 @@
   "discord.chat.limited": "I can’t keep replying right now. Please try again in a little while.",
   "features.reason.timezone_invalid": "Unknown time zone: {arg}",
   "features.reason.config_setting_rejected": "Switched off because this release no longer accepts it — {arg}. Fix the address in Settings, then enable it again.",
-  "features.reason.tool_direct_key": "{arg} keeps a key written into its headers or web address, so exports and backups carry it as plain text. Move the key to credential_ref and use the credential placeholder in its place.",
+  "features.reason.tool_direct_key": "{arg} keeps a key written into its headers or web address, so it stays in the settings and in backups as plain text (config.show masks it). Move the key to credential_ref and use the credential placeholder in its place.",
   "features.reason.maintenance_leftovers": "{arg} old file(s) from a restore or a backup could not be deleted yet (another program is probably using them). Masamong keeps trying every hour; nothing needs to be done.",
   "features.reason.restore_failed": "The last restore ({arg}) could not start. Nothing was changed and the bot kept running on the current data. See Maintenance for the reason.",
   "features.reason.gateway_retrying": "Retrying the Discord connection.",

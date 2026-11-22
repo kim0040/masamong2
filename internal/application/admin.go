@@ -1582,7 +1582,7 @@ func (s *Service) configPatch(req action.Request) action.Result {
 	}
 	candidate, err := config.FromTree(tree)
 	if err != nil {
-		return action.Fail(req, errcode.ConfigInvalid, "generic.error", err.Error(), nil)
+		return s.configFail(req, errcode.ConfigInvalid, err, nil)
 	}
 	if boolVal(in, "dry_run") {
 		cur, _ := config.Marshal(s.Doc())

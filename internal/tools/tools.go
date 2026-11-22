@@ -172,6 +172,7 @@ func Builtins() []Builtin {
 				{Name: "async", Type: "bool", Operator: true}}},
 		{ID: "polls.create", Feature: "polls", Chat: true, Command: true, Implemented: true, Required: []string{"question"}, Scoped: true, Writes: true, Once: true,
 			Inputs: []Input{{Name: "question", Type: "text", Required: true}, {Name: "options_text", Type: "text"},
+				{Name: "options", Type: "list", Max: 10},
 				{Name: "duration_hours", Type: "number", Min: 1, Max: 768, Example: "24"}, {Name: "allow_multiselect", Type: "bool"}}},
 		{ID: "help.version", Chat: true, Command: true, Implemented: true, Sample: map[string]any{}},
 		{ID: "activity.ranking", Chat: true, Command: true, Implemented: true, Scoped: true, Sample: map[string]any{"period": "week"},
@@ -345,15 +346,59 @@ func validateHTTP(id string, s Settings, skipURL bool) error {
 	return nil
 }
 
-// Header and query names that carry a key. A header is one when its lowercased name is listed or holds
-// one of secretNameParts; a query parameter when its lowercased name is listed.
+// Header and query names that carry a key. Names are compared normalized (lowercase, - and _ dropped:
+// X-Auth-Key, authKey and api_key are one name to a service). A header is one when its name is listed
+// or holds one of secretNameParts; a query parameter when its name is listed. Export masking
+// (config.show) uses the same classifiers so what validation refuses is what an export hides.
 var (
-	secretHeaders   = []string{"authorization", "proxy-authorization", "cookie"}
-	secretNameParts = []string{"api-key", "api_key", "apikey", "token", "secret", "password", "signature"}
-	secretQuery     = []string{"key", "apikey", "api_key", "api-key", "appkey", "app_key", "servicekey", "service_key",
-		"access_token", "token", "auth", "auth_token", "secret", "client_secret", "password", "passwd", "signature", "sig"}
-	wholePlaceRE = regexp.MustCompile(`^\{[a-z][a-z0-9_]*\}$`)
+	secretHeaders   = []string{"authorization", "proxyauthorization", "cookie"}
+	secretNameParts = []string{"key", "token", "secret", "auth", "signature", "password"}
+	secretQuery     = []string{"key", "apikey", "token", "accesstoken", "authtoken", "auth", "authkey",
+		"servicekey", "secret", "clientsecret", "password", "passwd", "signature", "sig", "appkey", "appsecret"}
+	wholePlaceRE  = regexp.MustCompile(`^\{[a-z][a-z0-9_]*\}$`)
+	credPlaceRE   = regexp.MustCompile(`\{credential\}`)
+	literalPairRE = regexp.MustCompile(`=[^\s=;&]+`)
 )
+
+// normalizedSecretName folds a header or query name for comparison: lowercase, - and _ dropped.
+func normalizedSecretName(name string) string {
+	return strings.NewReplacer("-", "", "_", "").Replace(strings.ToLower(strings.TrimSpace(name)))
+}
+
+// SecretHeaderName reports whether a header name carries a key: an authorization or cookie header,
+// or a key-like name (X-API-Key, X-Auth-Key, authKey).
+func SecretHeaderName(name string) bool {
+	n := normalizedSecretName(name)
+	if slices.Contains(secretHeaders, n) {
+		return true
+	}
+	for _, part := range secretNameParts {
+		if strings.Contains(n, part) {
+			return true
+		}
+	}
+	return false
+}
+
+// SecretQueryName reports whether a query parameter name carries a key.
+func SecretQueryName(name string) bool {
+	return slices.Contains(secretQuery, normalizedSecretName(name))
+}
+
+// DirectHeaderValue reports whether a header value holds a key itself. Any literal is one; a
+// {credential} placeholder alone (Bearer {credential}, a cookie's session={credential}) is the
+// reference it should be. A placeholder mixed with a second literal value — a name=literal beside it
+// (session={credential}; fallback=x) — keeps a key in the configuration.
+func DirectHeaderValue(value string) bool {
+	v := strings.TrimSpace(value)
+	if v == "" {
+		return false
+	}
+	if !strings.Contains(v, "{credential}") {
+		return true
+	}
+	return literalPairRE.MatchString(credPlaceRE.ReplaceAllString(v, ""))
+}
 
 // DirectSecretError says which field of an operator tool holds a key written into the configuration. The
 // caller shows it in the person's language from Tool, Field and Param (never the value); Error is the
@@ -388,11 +433,9 @@ func DirectSecret(id string, h *HTTP) error {
 		return nil
 	}
 	for _, name := range slices.Sorted(maps.Keys(h.Headers)) {
-		v := strings.TrimSpace(h.Headers[name])
-		if v == "" || strings.Contains(v, "{credential}") || !secretHeader(name) {
-			continue
+		if SecretHeaderName(name) && DirectHeaderValue(h.Headers[name]) {
+			return &DirectSecretError{Tool: id, Field: "headers." + name}
 		}
-		return &DirectSecretError{Tool: id, Field: "headers." + name}
 	}
 	if _, query, ok := strings.Cut(h.URL, "?"); ok {
 		query, _, _ = strings.Cut(query, "#")
@@ -402,26 +445,13 @@ func DirectSecret(id string, h *HTTP) error {
 			if unescaped, err := url.QueryUnescape(name); err == nil {
 				name = unescaped
 			}
-			if v == "" || v == "{credential}" || wholePlaceRE.MatchString(v) || !slices.Contains(secretQuery, strings.ToLower(name)) {
+			if v == "" || v == "{credential}" || wholePlaceRE.MatchString(v) || !SecretQueryName(name) {
 				continue
 			}
 			return &DirectSecretError{Tool: id, Field: "url", Param: name}
 		}
 	}
 	return nil
-}
-
-func secretHeader(name string) bool {
-	n := strings.ToLower(strings.TrimSpace(name))
-	if slices.Contains(secretHeaders, n) {
-		return true
-	}
-	for _, part := range secretNameParts {
-		if strings.Contains(n, part) {
-			return true
-		}
-	}
-	return false
 }
 
 // ValidateHTTPURL allows trusted HTTPS endpoints and explicit local HTTP endpoints only.

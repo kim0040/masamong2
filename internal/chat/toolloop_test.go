@@ -77,7 +77,7 @@ func loopTools() Toolset {
 	}
 	add(ToolInfo{ID: "memory.search", Description: "memory"})
 	add(ToolInfo{ID: "weather.query", Description: "weather", Params: []ToolParam{{Name: "region", Hint: "city"}, {Name: "day_offset", Type: "integer", Min: ptr(0), Max: ptr(13)}}})
-	add(ToolInfo{ID: "search.web", Description: "search", Web: true, Required: []string{"query"}, Params: []ToolParam{{Name: "query", Required: true}}})
+	add(ToolInfo{ID: "search.web", Description: "search", Web: true, Required: []string{"query"}, Params: []ToolParam{{Name: "query", Required: true}, {Name: "depth"}}})
 	add(ToolInfo{ID: "finance.quote", Description: "quote", Required: []string{"symbol"}, Params: []ToolParam{{Name: "symbol", Required: true}, {Name: "channel_id"}}})
 	add(ToolInfo{ID: "polls.create", Description: "poll", Writes: true, Required: []string{"question"}, Params: []ToolParam{{Name: "question", Required: true}}})
 	return ts

@@ -119,7 +119,9 @@ func TestChatTurnWritesCallLedgers(t *testing.T) {
 	if len(tc) != 1 || tc[0]["tool"] != "weather.query" || tc[0]["guard"] != "allowed" || tc[0]["status"] == "" || tc[0]["class"] == "" {
 		t.Fatalf("tool calls: %+v", ledger["tool_calls"])
 	}
-	if keys, _ := tc[0]["param_keys"].([]any); len(keys) != 2 || keys[0] != "_other" || keys[1] != "region" { // "source" is not a declared input of weather.query
+	// "source" is not a declared input of weather.query: the planner's assessment strips it before
+	// the call, so only the declared key reaches the tool and the ledger.
+	if keys, _ := tc[0]["param_keys"].([]any); len(keys) != 1 || keys[0] != "region" {
 		t.Fatalf("param keys: %+v", tc[0])
 	}
 	if src, _ := tc[0]["param_sources"].(map[string]any); len(src) != 0 {
