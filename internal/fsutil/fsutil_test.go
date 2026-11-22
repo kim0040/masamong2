@@ -123,3 +123,48 @@ func TestPrivateDirTightensNestedChildrenKeepsOwnerBitsAndSkipsLinks(t *testing.
 		}
 	}
 }
+
+// A failed write leaves no temporary file behind (the rename target here is a folder, so the last
+// step fails on every system).
+func TestWriteAtomicFailureLeavesNoTemporaryFile(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "web-token")
+	if err := os.MkdirAll(filepath.Join(target, "occupied"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteAtomic(target, []byte("value\n"), 0o600); err == nil {
+		t.Fatal("rename over a folder reported success")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "web-token" {
+			t.Fatalf("failed write left %q", e.Name())
+		}
+	}
+}
+
+// The temporary file is never a fixed, guessable name: a link planted at the old "<path>.tmp" name is
+// not followed.
+func TestWriteAtomicDoesNotFollowAPlantedTemporaryName(t *testing.T) {
+	dir := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside")
+	if err := os.WriteFile(outside, []byte("untouched"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(dir, "web-token")
+	if err := os.Symlink(outside, target+".tmp"); err != nil {
+		t.Skipf("symbolic links unavailable: %v", err)
+	}
+	if err := WriteAtomic(target, []byte("value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.ReadFile(outside); err != nil || string(got) != "untouched" {
+		t.Fatalf("planted link was followed: %q %v", got, err)
+	}
+	if got, err := os.ReadFile(target); err != nil || string(got) != "value\n" {
+		t.Fatalf("%q %v", got, err)
+	}
+}
