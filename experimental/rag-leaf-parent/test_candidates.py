@@ -6,6 +6,7 @@ import random
 import unittest
 
 import engine as E
+import engine_retrieve as ER
 from candidates import fuse, guarantee_pool, per_source_hit, pool_necessary_sources, source_family, unique_contribution
 from candidates_assess import assess, signals_for
 from test_engine_retrieval import ROOM_NEW, ROOM_OLD, _FakeClient, _FakeRerankResult, _unit, build_index
@@ -222,10 +223,10 @@ class EngineGuaranteePoolTests(unittest.TestCase):
             def rerank(self, query, docs, top_n=None):  # noqa: ANN001
                 return _FakeRerankResult(list(range(len(docs))), [0.9] * len(docs))
 
-        saved = (E.RerankClient, E.load_secrets, E._rerank_available)
-        E.RerankClient = _Rerank
-        E.load_secrets = lambda *a, **k: {}
-        E._rerank_available = lambda: True
+        saved = (ER.RerankClient, ER.load_secrets, ER._rerank_available)
+        ER.RerankClient = _Rerank
+        ER.load_secrets = lambda *a, **k: {}
+        ER._rerank_available = lambda: True
         try:
             q = _unit(9)
             trace: dict = {}
@@ -234,7 +235,7 @@ class EngineGuaranteePoolTests(unittest.TestCase):
                        intent={"targets": ["병수"], "kind": "person_fact", "recent": False, "intro": False,
                                "politics": False, "prefer_missing_over_guess": False, "source": "test"})
         finally:
-            E.RerankClient, E.load_secrets, E._rerank_available = saved
+            ER.RerankClient, ER.load_secrets, ER._rerank_available = saved
         pool = set(trace["candidate_pool_ids"])
         self.assertEqual(pool, set(trace["hybrid_ids"]))
         self.assertEqual(trace["pool_ids"], trace["candidate_pool_ids"])

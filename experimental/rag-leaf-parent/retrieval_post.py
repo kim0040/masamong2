@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Any, Iterable, Mapping
 
+from timeparse import normalize_iso
+
 # Hybrid rank-list length defaults (overridable via config / _hybrid_rank args).
 LEXICAL_LIMIT = 200
 DENSE_LIMIT = 150
@@ -222,9 +224,7 @@ def _parse_iso_dt(value: Any) -> tuple[datetime, bool] | None:
 
     if not isinstance(value, str) or not value.strip():
         return None
-    text = value.strip()
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
+    text = normalize_iso(value)
     try:
         if len(text) == 10:
             return datetime.strptime(text, "%Y-%m-%d"), True

@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 
 import engine as E
+import engine_index as EI
 from index_artifacts import MANIFEST_NAME, wanted_layers, write_manifest
 
 CFG = {
@@ -55,15 +56,15 @@ class PrepareIndexTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.data = Path(self.tmp.name)
         self.cfg = dict(CFG, data_dir=str(self.data))
-        self.prev_cfg_fn = E.load_config
-        self.prev_data = E.DATA
+        self.prev_cfg_fn = EI.load_config
+        self.prev_data = EI.context().paths.data
         self.prev_env = {k: os.environ.get(k) for k in ("MASAMONG_SANDBOX_DATA", "MASAMONG_SANDBOX_CONFIG")}
         os.environ.pop("MASAMONG_SANDBOX_DATA", None)
         os.environ.pop("MASAMONG_SANDBOX_CONFIG", None)
-        E.load_config = lambda: dict(self.cfg)
+        EI.load_config = lambda: dict(self.cfg)
 
     def tearDown(self) -> None:
-        E.load_config = self.prev_cfg_fn
+        EI.load_config = self.prev_cfg_fn
         E._bind_data_dir(self.prev_data)
         for k, v in self.prev_env.items():
             if v is None:

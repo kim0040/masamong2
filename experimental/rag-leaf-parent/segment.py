@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import heapq
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Iterator, Mapping
+
+from timeparse import parse_epoch
 
 
 class _MaxTimeItem:
@@ -19,6 +21,45 @@ class _MaxTimeItem:
 
     def __lt__(self, other: _MaxTimeItem) -> bool:
         return (self.time, self.orig, self.oid) > (other.time, other.orig, other.oid)
+
+
+def is_candidate(obs: Any) -> bool:
+    """Human text with a body. The one rule for who enters the index.
+
+    The Go port's `Observation.Eligible()` also requires a parsed time. The sandbox reads only the dated corpus, where
+    every human-text row has one, so it does not check it here."""
+
+    return bool(getattr(obs, "semantic_eligible", False)) and bool((getattr(obs, "content", None) or "").strip())
+
+
+def _message_row(obs: Any, *, logical: str, original: str) -> dict[str, Any]:
+    return {
+        "observation_id": str(obs.observation_id),
+        "source_room_id": logical,
+        "source_room_original": original,
+        "actor_label": obs.actor_label or "?",
+        "actor_account": obs.actor_account,
+        "content": (getattr(obs, "content", None) or "").strip(),
+        "parsed_time": obs.parsed_time,
+    }
+
+
+def _candidate_rows(observations: Iterable[Any], merge: Mapping[str, str]) -> Iterator[dict[str, Any]]:
+    """The candidates in stream order, each as an index row; a room in `merge` is joined to its logical room."""
+
+    for obs in observations:
+        if not is_candidate(obs):
+            continue
+        original = str(obs.source_room_id)
+        yield _message_row(obs, logical=merge.get(original, original), original=original)
+
+
+def _time_key(row: Mapping[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(row.get("parsed_time") or ""),
+        str(row.get("source_room_original") or ""),
+        str(row.get("observation_id") or ""),
+    )
 
 
 def collect_messages(
@@ -45,79 +86,29 @@ def collect_messages(
                     f"{src} → {dst}"
                 )
 
-    def _row(obs: Any, *, logical: str, original: str) -> dict[str, Any]:
-        return {
-            "observation_id": str(obs.observation_id),
-            "source_room_id": logical,
-            "source_room_original": original,
-            "actor_label": obs.actor_label or "?",
-            "actor_account": obs.actor_account,
-            "content": (getattr(obs, "content", None) or "").strip(),
-            "parsed_time": obs.parsed_time,
-        }
-
+    rows = _candidate_rows(observations, merge)
     if not merge:
+        # no merge: the first `limit` candidates of the stream, without reading further
         out: list[dict[str, Any]] = []
-        for obs in observations:
-            if not getattr(obs, "semantic_eligible", False):
-                continue
-            content = (getattr(obs, "content", None) or "").strip()
-            if not content:
-                continue
-            room = str(obs.source_room_id)
-            out.append(_row(obs, logical=room, original=room))
+        for row in rows:
+            out.append(row)
             if limit > 0 and len(out) >= limit:
                 break
         return order_messages_by_room(out)
 
     if limit <= 0:
-        out = []
-        for obs in observations:
-            if not getattr(obs, "semantic_eligible", False):
-                continue
-            content = (getattr(obs, "content", None) or "").strip()
-            if not content:
-                continue
-            original = str(obs.source_room_id)
-            out.append(
-                _row(obs, logical=merge.get(original, original), original=original)
-            )
-        out.sort(
-            key=lambda m: (
-                str(m.get("parsed_time") or ""),
-                str(m.get("source_room_original") or ""),
-                str(m.get("observation_id") or ""),
-            )
-        )
-        return order_messages_by_room(out)
+        return order_messages_by_room(sorted(rows, key=_time_key))
 
+    # merge with a limit: keep the earliest `limit` by (time, original room, id) without loading the rest
     heap: list[_MaxTimeItem] = []
-    for obs in observations:
-        if not getattr(obs, "semantic_eligible", False):
-            continue
-        content = (getattr(obs, "content", None) or "").strip()
-        if not content:
-            continue
-        original = str(obs.source_room_id)
-        logical = merge.get(original, original)
-        row = _row(obs, logical=logical, original=original)
-        time = str(obs.parsed_time or "")
-        oid = str(obs.observation_id)
-        item = _MaxTimeItem(time, original, oid, row)
+    for row in rows:
+        time, orig, oid = _time_key(row)
+        item = _MaxTimeItem(time, orig, oid, row)
         if len(heap) < limit:
             heapq.heappush(heap, item)
-        elif (time, original, oid) < (heap[0].time, heap[0].orig, heap[0].oid):
+        elif (time, orig, oid) < (heap[0].time, heap[0].orig, heap[0].oid):
             heapq.heapreplace(heap, item)
-
-    out = [item.row for item in heap]
-    out.sort(
-        key=lambda m: (
-            str(m.get("parsed_time") or ""),
-            str(m.get("source_room_original") or ""),
-            str(m.get("observation_id") or ""),
-        )
-    )
-    return order_messages_by_room(out)
+    return order_messages_by_room(sorted((item.row for item in heap), key=_time_key))
 
 
 def order_messages_by_room(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -246,17 +237,7 @@ def slice_segments(
 
 
 def _parse_msg_ts(row: Mapping[str, Any]) -> float | None:
-    raw = str(row.get("parsed_time") or "").strip()
-    if not raw:
-        return None
-    try:
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        from datetime import datetime
-
-        return datetime.fromisoformat(raw).timestamp()
-    except ValueError:
-        return None
+    return parse_epoch(str(row.get("parsed_time") or ""))
 
 
 def slice_segments_time_aware(

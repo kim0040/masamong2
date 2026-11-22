@@ -13,9 +13,12 @@ import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
 import app
 import engine as E
+import engine_index as EI
+import engine_turn as ET
 
 CFG = {
     "experiment": "synthetic-http",
@@ -51,18 +54,20 @@ class AppHttpTests(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         cls.data = Path(cls.tmp.name)
         cls.cfg = dict(CFG, data_dir=str(cls.data))
-        cls.prev_cfg_fn = E.load_config
-        cls.prev_data = E.DATA
-        cls.prev_index = app.INDEX
+        cls.prev_cfg_fn = EI.load_config
+        cls.prev_data = EI.context().paths.data
+        cls.prev_index = app.STATE.index
         cls.prev_env = {k: os.environ.get(k) for k in ("MASAMONG_SANDBOX_DATA", "MASAMONG_SANDBOX_CONFIG", "EVAL_SECRETS")}
         os.environ.pop("MASAMONG_SANDBOX_DATA", None)
-        os.environ.pop("MASAMONG_SANDBOX_CONFIG", None)
+        # the handlers that read the config through app.load_config() read this file, not the patched function
+        (cls.data / "config.json").write_text(json.dumps(cls.cfg), encoding="utf-8")
+        os.environ["MASAMONG_SANDBOX_CONFIG"] = str(cls.data / "config.json")
         # Keep secrets lookup inside the temp dir: the ambient EVAL_SECRETS path is never read.
         (cls.data / "secrets.env").write_text("OPENROUTER_API_KEY=synthetic\n", encoding="utf-8")
         os.environ["EVAL_SECRETS"] = str(cls.data / "secrets.env")
-        E.load_config = lambda: dict(cls.cfg)
+        EI.load_config = ET.load_config = lambda: dict(cls.cfg)  # status_payload lives in engine_turn
         E._bind_data_dir(cls.data)
-        app.INDEX = None
+        app.STATE.index = None
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
         cls.base = f"http://127.0.0.1:{cls.server.server_address[1]}"
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
@@ -73,9 +78,9 @@ class AppHttpTests(unittest.TestCase):
         cls.server.shutdown()
         cls.thread.join(timeout=5)
         cls.server.server_close()
-        E.load_config = cls.prev_cfg_fn
+        EI.load_config = ET.load_config = cls.prev_cfg_fn
         E._bind_data_dir(cls.prev_data)
-        app.INDEX = cls.prev_index
+        app.STATE.index = cls.prev_index
         for k, v in cls.prev_env.items():
             if v is None:
                 os.environ.pop(k, None)
@@ -125,6 +130,79 @@ class AppHttpTests(unittest.TestCase):
         code, body = self._post("/api/chat", b"{not json")
         self.assertEqual(code, 400)
         self.assertIn("error", body)
+
+
+    def _get_status_code(self, path: str) -> int:
+        try:
+            with urllib.request.urlopen(self.base + path, timeout=10) as res:
+                return res.status
+        except urllib.error.HTTPError as exc:
+            return exc.code
+
+    def test_the_route_tables_name_every_endpoint(self) -> None:
+        self.assertEqual(
+            sorted(app.GET_ROUTES),
+            sorted([
+                "/api/status", "/api/prepare/progress", "/api/lab/inventory", "/api/lab/export", "/api/lab/config",
+                "/api/debug/turns", "/api/debug/run", "/api/review/sets", "/api/review/items", "/api/debug/turn",
+                "/api/blocks", "/api/bot", "/api/conversations",
+            ]),
+        )
+        self.assertEqual(
+            sorted(app.POST_ROUTES),
+            sorted([
+                "/api/chat", "/api/chat/stream", "/api/debug/flag", "/api/debug/client", "/api/review/verdict",
+                "/api/lab/estimate", "/api/lab/config", "/api/lab/import", "/api/conversations", "/api/bot",
+            ]),
+        )
+
+    def test_read_endpoints_answer_without_an_index(self) -> None:
+        for path in ("/api/blocks", "/api/debug/turns", "/api/bot", "/api/conversations", "/api/lab/config"):
+            code, body = self._get(path)
+            self.assertEqual(code, 200, path)
+            self.assertIsInstance(body, dict, path)
+        self.assertEqual(self._get("/api/blocks")[1], {"blocks": []})
+        self.assertEqual(self._get_status_code("/api/debug/turn?id=missing"), 404)
+
+    def test_unknown_paths_are_404_after_the_body_is_checked(self) -> None:
+        self.assertEqual(self._get_status_code("/api/nope"), 404)
+        self.assertEqual(self._get_status_code("/../app.py"), 404)
+        self.assertEqual(self._post("/api/nope", b"{}")[0], 404)
+        self.assertEqual(self._post("/api/nope", b"{broken")[0], 400)
+
+    def test_status_carries_the_room_catalog_state(self) -> None:
+        code, body = self._get("/api/status")
+        self.assertEqual(code, 200)
+        self.assertEqual(body["room_catalog"], {"state": "idle", "error": ""})
+
+
+class AppStateTests(unittest.TestCase):
+    def test_the_catalog_thread_is_owned_and_a_failure_is_kept(self) -> None:
+        state = app.AppState()
+        with mock.patch.object(app, "room_catalog", side_effect=RuntimeError("synthetic scan failure")), \
+                mock.patch("traceback.print_exc"):
+            state.start_catalog_refresh()
+            state.start_catalog_refresh()  # a second call does not start a second thread
+            state.stop()
+        status = state.catalog_status()
+        self.assertEqual(status["state"], "error")
+        self.assertIn("synthetic scan failure", status["error"])
+
+    def test_a_stopped_state_does_not_start_the_scan(self) -> None:
+        state = app.AppState()
+        state.stop()
+        with mock.patch.object(app, "room_catalog") as scan:
+            state.start_catalog_refresh()
+            state._catalog_thread.join(2)
+        scan.assert_not_called()
+        self.assertEqual(state.catalog_status()["state"], "idle")
+
+    def test_a_finished_scan_is_ready(self) -> None:
+        state = app.AppState()
+        with mock.patch.object(app, "room_catalog", return_value={}):
+            state.start_catalog_refresh()
+            state._catalog_thread.join(2)
+        self.assertEqual(state.catalog_status(), {"state": "ready", "error": ""})
 
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
 """Small, source-preserving context chunking helpers for the RAG experiment.
 
+SANDBOX EXPERIMENT, OUTSIDE THE GO PORT CONTRACT (used only by compare_windows.py; the engine does not call it).
+
 This module deliberately has no dependency on the playground engine.  It works
 on the original message rows and keeps source-room/sample-block boundaries
 explicit.  Adaptive compaction changes only the presentation body; the raw

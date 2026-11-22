@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Bounded, retrieval-only comparison of fixed and adaptive context windows.
 
+SANDBOX EXPERIMENT, OUTSIDE THE GO PORT CONTRACT. It carries its own copy of the packing and budget rules, so it
+can drift from engine_retrieve.retrieve(); treat its numbers as a snapshot, not as the engine's behavior.
+
 This is an intentionally small experiment runner.  The input is an explicit
 JSON list of original messages and every generated artifact is written below
 the caller supplied ``--out`` directory.  It does not discover a corpus, read

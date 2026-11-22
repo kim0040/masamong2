@@ -37,3 +37,18 @@ prepare가 돌면 CLI와 샌드박스 상단에 퍼센트·남은 개수·대략
 검색 버전은 UI에서 고른다. 기본 **auto**(v2: R0 후보 풀을 만들고 평가한 뒤 R0로 끝내거나 R2/복구, [설계](../../docs/rag/retrieval-v2.md)). R1은 ablation 전용이라 auto가 고르지 않는다. 고정 R2·auto 모두 리랭크 실패 시 R0. 모델은 `config.json` `models`(llm/planner/summary/embed/rerank)로 교체 — [TEST_SANDBOX](../../docs/TEST_SANDBOX.md#모델-교체-configjson-models). 턴 로그는 데이터 디렉터리 `debug_turns.jsonl` (커밋 금지).
 
 Discord 토큰 없음. 인덱스가 있는 채널만 AI.
+
+## 엔진 구성과 포팅 계약 밖 실험
+
+`engine.py`는 아래 모듈을 다시 내보내는 얇은 입구다(`import engine as E`가 그대로 동작한다). 이름을 바꿔 쓰는 테스트는 그 이름을 **쓰는 모듈**을 바꿔야 한다(`engine_retrieve.RerankClient`, `engine_turn.retrieve`처럼).
+
+| 모듈 | 내용 |
+|---|---|
+| `engine_context.py`, `sandbox_env.py` | 경로·준비 상태를 담는 컨텍스트, `sys.path`·환경 기본값을 한곳에서 설정 |
+| `engine_index.py` | 설정, 장부, `prepare_index`, `load_index`, `IndexBundle` |
+| `engine_query.py` | 의도, 사람 대상·별칭, 밀집/어휘 검색 기본 함수 |
+| `engine_retrieve.py` | 융합, 순위, 후보 생성, `retrieve()` |
+| `engine_turn.py` | 프롬프트 조립, 세션, `chat()`·`chat_stream()`(`_run_turn` 하나) |
+| `engine_experiments.py` | **포팅 계약 밖**: R1 휴리스틱 재순위, soft event 후보. Go는 일부러 포팅하지 않았다(`internal/memory/search/config.go`). parity 테스트가 비교하지 않는다 |
+| `compare_windows.py`, `adaptive_context.py` | **포팅 계약 밖**: 창 크기 비교 실험. 엔진의 검색·패킹 규칙을 복사해 가진 독립 실행 스냅샷이라 엔진과 어긋날 수 있다 |
+

@@ -22,6 +22,8 @@ from pathlib import Path
 import numpy as np
 
 import engine as E
+import engine_index as EI
+import engine_retrieve as ER
 from segment import slice_segments_per_room
 
 ROOM_OLD = "discord:1:100"  # ended ~200 days before ROOM_NEW
@@ -274,8 +276,8 @@ class LexicalRoomFilterTests(unittest.TestCase):
         with index.lock:
             in_room = [d for d, _ in index.leaf_fts.search("영화 볼래", limit=100_000) if d in old_ids]
         self.assertGreaterEqual(len(in_room), 2)
-        saved = E.LEXICAL_LIMIT
-        E.LEXICAL_LIMIT = 2
+        saved = ER.LEXICAL_LIMIT
+        ER.LEXICAL_LIMIT = 2
         try:
             trace: dict = {}
             E._hybrid_rank(
@@ -284,7 +286,7 @@ class LexicalRoomFilterTests(unittest.TestCase):
                 trace=trace, allowed_ids=old_ids,
             )
         finally:
-            E.LEXICAL_LIMIT = saved
+            ER.LEXICAL_LIMIT = saved
         got = [row["doc_id"] for row in trace["leaf_lexical"]]
         self.assertEqual(len(got), 2)
         self.assertTrue(set(got) <= old_ids)
@@ -295,7 +297,7 @@ class EmbedModelBindingTests(unittest.TestCase):
         index = build_index(with_summaries=False)
         with tempfile.TemporaryDirectory() as td:
             data = Path(td)
-            saved = (E.DATA, dict(E.__dict__))
+            saved = (EI.context().paths.data, dict(E.__dict__))
             try:
                 E._bind_data_dir(data)
                 (data / "meta.json").write_text(
@@ -306,19 +308,19 @@ class EmbedModelBindingTests(unittest.TestCase):
                 (data / "baseline_windows.json").write_text(json.dumps(index.baseline), encoding="utf-8")
                 np.save(data / "leaf_vecs.npy", index.leaf_vectors)
                 np.save(data / "baseline_vecs.npy", index.baseline_vectors)
-                orig_cfg, orig_model = E.load_config, E._configured_embed_model
-                E.load_config = lambda: dict(index.cfg)
-                E._configured_embed_model = lambda: "qwen/qwen3-embedding-8b"
+                orig_cfg, orig_model = EI.load_config, EI._configured_embed_model
+                EI.load_config = lambda: dict(index.cfg)
+                EI._configured_embed_model = lambda: "qwen/qwen3-embedding-8b"
                 try:
                     with self.assertRaises(E.PlaygroundError) as ctx:
                         E.load_index()
                     self.assertIn("임베딩 모델", str(ctx.exception))
                     # same model → loads
-                    E._configured_embed_model = lambda: "other/embed-model"
+                    EI._configured_embed_model = lambda: "other/embed-model"
                     loaded = E.load_index()
                     self.assertEqual(len(loaded.leaves), len(index.leaves))
                 finally:
-                    E.load_config, E._configured_embed_model = orig_cfg, orig_model
+                    EI.load_config, EI._configured_embed_model = orig_cfg, orig_model
             finally:
                 E._bind_data_dir(saved[0])
 
@@ -351,9 +353,9 @@ class RelevanceFloorTests(unittest.TestCase):
             def rerank(self, query, docs, top_n=None):  # noqa: ANN001
                 return _FakeRerankResult(order, [scores[i] for i in order])
 
-        saved = (E.RerankClient, E.load_secrets)
-        E.RerankClient = _Client
-        E.load_secrets = lambda *a, **k: {}
+        saved = (ER.RerankClient, ER.load_secrets)
+        ER.RerankClient = _Client
+        ER.load_secrets = lambda *a, **k: {}
         try:
             trace: dict = {}
             picked = E._rank_leaf_ids(
@@ -361,7 +363,7 @@ class RelevanceFloorTests(unittest.TestCase):
                 remaining_budget=1.0, trace=trace,
             )
         finally:
-            E.RerankClient, E.load_secrets = saved
+            ER.RerankClient, ER.load_secrets = saved
         return picked, trace
 
     def test_all_below_floor_abstains(self) -> None:
@@ -572,12 +574,12 @@ class AutoRankingTests(unittest.TestCase):
 
     def test_retrieve_auto_without_rerank_key_lands_on_r0(self) -> None:
         index = build_index()
-        saved = (E._rerank_available, E.assess)
-        E._rerank_available = lambda: False
+        saved = (ER._rerank_available, ER.assess)
+        ER._rerank_available = lambda: False
         try:
             q = _unit(5)
             for level, want_reason in (("high", "r0_confident"), ("medium", "no_rerank"), ("low", "recovery_no_rerank")):
-                E.assess = self._with_fixed_level(level)
+                ER.assess = self._with_fixed_level(level)
                 trace: dict = {}
                 E.retrieve(index, _FakeClient(q), "요즘 가명 뭐해", top_k=3, q_vec=q, ranking="auto", trace=trace,
                            source_room_id=ROOM_NEW, intent=self._intent(recent=True, targets=["가명"]))
@@ -589,7 +591,7 @@ class AutoRankingTests(unittest.TestCase):
                 self.assertEqual(trace["recovery_performed"], level == "low")
                 self.assertFalse(trace["rerank_performed"])
         finally:
-            E._rerank_available, E.assess = saved
+            ER._rerank_available, ER.assess = saved
 
     def test_retrieve_auto_cascade_with_reranker(self) -> None:
         index = build_index(with_summaries=False)
@@ -604,28 +606,28 @@ class AutoRankingTests(unittest.TestCase):
                 order = list(range(len(docs)))
                 return _FakeRerankResult(order, [0.9 - 0.01 * i for i in order])
 
-        saved = (E._rerank_available, E.RerankClient, E.load_secrets, E.assess)
-        E._rerank_available = lambda: True
-        E.RerankClient = _Rerank
-        E.load_secrets = lambda *a, **k: {}
+        saved = (ER._rerank_available, ER.RerankClient, ER.load_secrets, ER.assess)
+        ER._rerank_available = lambda: True
+        ER.RerankClient = _Rerank
+        ER.load_secrets = lambda *a, **k: {}
         try:
             q = _unit(6)
             # high → finish on R0, reranker never called
-            E.assess = self._with_fixed_level("high")
+            ER.assess = self._with_fixed_level("high")
             t1: dict = {}
             E.retrieve(index, _FakeClient(q), "그때 무슨 얘기", top_k=3, q_vec=q, ranking="auto", remaining_budget=1.0,
                        trace=t1, source_room_id=ROOM_OLD)
             self.assertEqual((t1["ranking"], t1["ranking_auto_reason"], calls), ("hybrid", "r0_confident", []))
             self.assertFalse(t1["rerank_performed"])
             # medium → R2
-            E.assess = self._with_fixed_level("medium")
+            ER.assess = self._with_fixed_level("medium")
             t2: dict = {}
             E.retrieve(index, _FakeClient(q), "그때 무슨 얘기", top_k=3, q_vec=q, ranking="auto", remaining_budget=1.0,
                        trace=t2, source_room_id=ROOM_OLD)
             self.assertEqual((t2["ranking"], t2["ranking_auto_reason"], t2["applied"]), ("rerank", "rerank_uncertain", "rerank"))
             self.assertEqual(len(calls), 1); self.assertFalse(t2["recovery_performed"])
             # low → one recovery pass (bigger pool/limits), then R2
-            E.assess = self._with_fixed_level("low")
+            ER.assess = self._with_fixed_level("low")
             t3: dict = {}
             E.retrieve(index, _FakeClient(q), "그때 무슨 얘기", top_k=3, q_vec=q, ranking="auto", remaining_budget=1.0,
                        trace=t3, source_room_id=ROOM_OLD)
@@ -640,7 +642,7 @@ class AutoRankingTests(unittest.TestCase):
                        trace=t4, source_room_id=ROOM_OLD)
             self.assertEqual((t4["ranking_auto_reason"], t4["recovery_performed"]), ("rerank_low_confidence", False))
         finally:
-            E._rerank_available, E.RerankClient, E.load_secrets, E.assess = saved
+            ER._rerank_available, ER.RerankClient, ER.load_secrets, ER.assess = saved
 
     def test_retrieve_auto_rerank_failure_lands_on_r0(self) -> None:
         index = build_index(with_summaries=False)
@@ -652,11 +654,11 @@ class AutoRankingTests(unittest.TestCase):
             def rerank(self, *a, **k):  # noqa: ANN002, ANN003
                 raise E.RerankError("down")
 
-        saved = (E._rerank_available, E.RerankClient, E.load_secrets, E.assess)
-        E._rerank_available = lambda: True
-        E.RerankClient = _Boom
-        E.load_secrets = lambda *a, **k: {}
-        E.assess = self._with_fixed_level("medium")
+        saved = (ER._rerank_available, ER.RerankClient, ER.load_secrets, ER.assess)
+        ER._rerank_available = lambda: True
+        ER.RerankClient = _Boom
+        ER.load_secrets = lambda *a, **k: {}
+        ER.assess = self._with_fixed_level("medium")
         try:
             q = _unit(6)
             trace: dict = {}
@@ -671,14 +673,14 @@ class AutoRankingTests(unittest.TestCase):
             self.assertNotIn("rerank_error_text", trace)                # privacy: no error body
             self.assertNotIn("heuristic", trace)
         finally:
-            E._rerank_available, E.RerankClient, E.load_secrets, E.assess = saved
+            ER._rerank_available, ER.RerankClient, ER.load_secrets, ER.assess = saved
 
     def test_natural_assessment_levels_from_thresholds(self) -> None:
         """No monkeypatch: extreme thresholds must move the same pool between levels."""
 
         index = build_index()
-        saved = E._rerank_available
-        E._rerank_available = lambda: False
+        saved = ER._rerank_available
+        ER._rerank_available = lambda: False
         try:
             q = _unit(7)
             index.cfg["retrieval"] = {"auto": {"high_agreement": 0.0, "high_margin": 0.0, "low_agreement": 0.0}}
@@ -693,7 +695,7 @@ class AutoRankingTests(unittest.TestCase):
             for key in ("agreement", "top_margin", "candidate_count", "lexical_dense_overlap", "source_diversity"):
                 self.assertIn(key, t2["auto_confidence"])
         finally:
-            E._rerank_available = saved
+            ER._rerank_available = saved
 
 
 class SearchLimitsAndAliasTests(unittest.TestCase):
@@ -800,7 +802,7 @@ class ConfigEnvTests(unittest.TestCase):
             prev = os.environ.get("MASAMONG_SANDBOX_CONFIG")
             os.environ["MASAMONG_SANDBOX_CONFIG"] = str(path)
             try:
-                self.assertEqual(E.load_config().get("experiment"), "from-env")
+                self.assertEqual(EI.load_config().get("experiment"), "from-env")
             finally:
                 if prev is None:
                     os.environ.pop("MASAMONG_SANDBOX_CONFIG", None)
@@ -958,7 +960,7 @@ class SoftEventRetrievalTests(unittest.TestCase):
                     counts_for_confidence=counts,
                 )
             }
-            fusion, _allowed, _trace, meta = E._generate_candidates(
+            fusion, _allowed, _trace, meta = ER._generate_candidates(
                 index,
                 _FakeClient(q),
                 "점심 뭐 먹을까",
@@ -971,7 +973,7 @@ class SoftEventRetrievalTests(unittest.TestCase):
                 den_lim=150,
             )
             confidence = meta.get("confidence_fusion") or fusion
-            return fusion, E.assess(
+            return fusion, ER.assess(
                 confidence,
                 thresholds=E.retrieval_config(index.cfg)["auto"],
                 targets_requested=False,
@@ -1140,14 +1142,14 @@ class RerankInputTests(unittest.TestCase):
                 seen["docs"] = docs
                 return _FakeRerankResult(list(range(len(docs))), [0.9] * len(docs))
 
-        saved = (E.RerankClient, E.load_secrets)
-        E.RerankClient, E.load_secrets = _Client, (lambda *a, **k: {})
+        saved = (ER.RerankClient, ER.load_secrets)
+        ER.RerankClient, ER.load_secrets = _Client, (lambda *a, **k: {})
         try:
             pool = [d for d in index.leaf_ids if index.leaf_by_id[d]["source_room_id"] == ROOM_OLD][:6]
             trace: dict = {}
             E._rank_leaf_ids(index, pool, query="q", pool=6, top_k=3, ranking="rerank", remaining_budget=1.0, trace=trace)
         finally:
-            E.RerankClient, E.load_secrets = saved
+            ER.RerankClient, ER.load_secrets = saved
         self.assertEqual(trace["rerank_doc_format"], "speaker_body")
         self.assertEqual(trace["rerank_pre_dedup_dropped"], 3)
         self.assertEqual(len(seen["docs"]), 3)
