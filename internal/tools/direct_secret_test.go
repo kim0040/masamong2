@@ -72,3 +72,28 @@ func TestDirectSecretErrorNamesToolAndField(t *testing.T) {
 		t.Fatalf("header: %#v", err)
 	}
 }
+
+// A cookie whose value is the reference alone inside quotes (session="{credential}") is still the
+// reference, as it is without the quotes. A literal beside the reference — in the quotes or after them —
+// keeps a key in the configuration and is refused.
+func TestQuotedCredentialAloneIsAllowed(t *testing.T) {
+	tool := func(cookie string) Settings {
+		return Settings{Description: "d", HTTP: &HTTP{URL: "https://api.example/v1", Headers: map[string]string{"Cookie": cookie}, CredentialRef: "env:K"}}
+	}
+	literal := "synthetic" + "-direct-value"
+	for _, ok := range []string{`session="{credential}"`, `session='{credential}'`, `session="{credential}"; theme="{credential}"`} {
+		if err := Validate("ops.lookup", tool(ok)); err != nil {
+			t.Fatalf("%s: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{
+		`session="{credential}"; fallback=` + literal,
+		`session="{credential}"; fallback="` + literal + `"`,
+		`session="` + literal + `{credential}"`,
+		`session="{credential}` + literal + `"`,
+	} {
+		if err := Validate("ops.lookup", tool(bad)); err == nil || !strings.Contains(err.Error(), "headers.Cookie") {
+			t.Fatalf("%s: %v", bad, err)
+		}
+	}
+}

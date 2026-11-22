@@ -357,6 +357,7 @@ var (
 		"servicekey", "secret", "clientsecret", "password", "passwd", "signature", "sig", "appkey", "appsecret"}
 	wholePlaceRE  = regexp.MustCompile(`^\{[a-z][a-z0-9_]*\}$`)
 	credPlaceRE   = regexp.MustCompile(`\{credential\}`)
+	credQuotedRE  = regexp.MustCompile(`"\{credential\}"|'\{credential\}'`)
 	literalPairRE = regexp.MustCompile(`=[^\s=;&]+`)
 )
 
@@ -387,8 +388,9 @@ func SecretQueryName(name string) bool {
 
 // DirectHeaderValue reports whether a header value holds a key itself. Any literal is one; a
 // {credential} placeholder alone (Bearer {credential}, a cookie's session={credential}) is the
-// reference it should be. A placeholder mixed with a second literal value — a name=literal beside it
-// (session={credential}; fallback=x) — keeps a key in the configuration.
+// reference it should be, with or without quotes around it (session="{credential}"). A placeholder mixed
+// with a second literal value — a name=literal beside it (session={credential}; fallback=x), or text
+// inside its quotes — keeps a key in the configuration.
 func DirectHeaderValue(value string) bool {
 	v := strings.TrimSpace(value)
 	if v == "" {
@@ -397,6 +399,7 @@ func DirectHeaderValue(value string) bool {
 	if !strings.Contains(v, "{credential}") {
 		return true
 	}
+	v = credQuotedRE.ReplaceAllString(v, "{credential}") // the quotes around the reference alone hold nothing
 	return literalPairRE.MatchString(credPlaceRE.ReplaceAllString(v, ""))
 }
 
