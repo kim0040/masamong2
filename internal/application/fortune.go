@@ -386,6 +386,8 @@ type zodiacState struct {
 	cooldown     *ttlCache[struct{}] // each person's last zodiac request (zodiacCooldown)
 	flightMu     sync.Mutex
 	flights      map[string]*zodiacFlight // the generations running, by cache key (zodiacText)
+	slotOnce     sync.Once
+	slots        chan struct{} // the model calls running at once (zodiacSlots)
 }
 
 // zodiacCooldown remembers each person's last zodiac request. Only the cooldown (seconds) matters, so a day
@@ -404,24 +406,20 @@ func (s *Service) zodiacCooldown() *ttlCache[struct{}] {
 // calls run at once: more would only queue at the provider on a small machine.
 // zodiacMaxGenerations is the medium tier (today's cap). The channel is sized from the host
 // profile on first use, after the daemon has installed it; tests that never install a profile
-// still see this cap.
+// still see this cap. The practice instance answers with the offline model and keeps its own slots.
 const zodiacMaxGenerations = 2
 
-var (
-	zodiacSlotOnce sync.Once
-	zodiacSlots    chan struct{}
-)
-
-func ensureZodiacSlots() chan struct{} {
-	zodiacSlotOnce.Do(func() {
+func (s *Service) zodiacSlots() chan struct{} {
+	z := &s.zodiacs
+	z.slotOnce.Do(func() {
 		n := hostprofile.Current().FortuneGenerations
 		// WHY: a zero cap would block every generation. Medium, the unset profile, is two.
 		if n < 1 {
 			n = zodiacMaxGenerations
 		}
-		zodiacSlots = make(chan struct{}, n)
+		z.slots = make(chan struct{}, n)
 	})
-	return zodiacSlots
+	return z.slots
 }
 
 // zodiacTestHooks let a test stop a request at the points where another one can slip in; they are nil
@@ -507,7 +505,7 @@ func (s *Service) generateZodiac(ctx context.Context, db *storage.Store, key str
 		return text, true, nil
 	}
 	zodiacHook(&zodiacTestHooks.beforeSlot, key)
-	slots := ensureZodiacSlots()
+	slots := s.zodiacSlots()
 	select {
 	case slots <- struct{}{}:
 		defer func() { <-slots }()

@@ -50,19 +50,13 @@ func zodiacWorkers(t *testing.T, release func()) (context.Context, *sync.WaitGro
 // The slot channel is created from the host profile, not from the medium constant alone.
 func TestZodiacSlotCountFollowsHostProfile(t *testing.T) {
 	prev := hostprofile.Current()
-	t.Cleanup(func() {
-		hostprofile.Apply(prev)
-		zodiacSlotOnce = sync.Once{}
-		zodiacSlots = nil
-	})
+	t.Cleanup(func() { hostprofile.Apply(prev) })
 	for _, n := range []int{1, 2, 4} {
 		p := prev
 		p.FortuneGenerations = n
 		hostprofile.Apply(p)
-		zodiacSlotOnce = sync.Once{}
-		zodiacSlots = nil
-		if cap(ensureZodiacSlots()) != n {
-			t.Fatalf("generations %d: cap %d", n, cap(zodiacSlots))
+		if got := cap((&Service{}).zodiacSlots()); got != n {
+			t.Fatalf("generations %d: cap %d", n, got)
 		}
 	}
 }
