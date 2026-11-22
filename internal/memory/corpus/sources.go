@@ -111,24 +111,83 @@ func ReadRawCorpus(path string, rooms map[string]bool, fn func(Observation) erro
 }
 
 func ReadRawCorpusContext(ctx context.Context, path string, rooms map[string]bool, fn func(Observation) error) error {
+	return readRawCorpus(ctx, path, rooms, MaxImportBytes, fn)
+}
+
+// openRegular opens path for an import: only an ordinary file. A pipe or a device would block the open
+// or never end, so the kind is checked before opening and again on the open file (the path may have
+// been swapped in between).
+func openRegular(path string) (*os.File, os.FileInfo, error) {
+	if st, err := os.Stat(path); err != nil {
+		return nil, nil, err
+	} else if !st.Mode().IsRegular() {
+		return nil, nil, ErrNotRegularFile
+	}
 	f, err := os.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	st, err := f.Stat()
+	if err != nil {
+		_ = f.Close() // the stat error is the one that matters
+		return nil, nil, err
+	}
+	if !st.Mode().IsRegular() {
+		_ = f.Close() // refused for its kind
+		return nil, nil, ErrNotRegularFile
+	}
+	return f, st, nil
+}
+
+// limitReader hands out at most remaining bytes; if the source still has more after that it fails with
+// ErrImportTooLarge (io.LimitReader would end quietly, and a cut-off file would pass for a whole one).
+// hit tells the caller the stop was the limit, so a line cut in half there is not read as bad JSON.
+type limitReader struct {
+	r         io.Reader
+	remaining int64
+	hit       bool
+}
+
+func (l *limitReader) Read(p []byte) (int, error) {
+	if l.remaining <= 0 {
+		var one [1]byte
+		n, err := l.r.Read(one[:])
+		if n > 0 {
+			l.hit = true
+			return 0, ErrImportTooLarge
+		}
+		return 0, err
+	}
+	if int64(len(p)) > l.remaining {
+		p = p[:l.remaining]
+	}
+	n, err := l.r.Read(p)
+	l.remaining -= int64(n)
+	return n, err
+}
+
+// readRawCorpus is ReadRawCorpusContext with the size limit as a parameter. The limit applies to the
+// file as stored and, for .gz, to the bytes it unpacks to: a small archive can unpack to far more.
+func readRawCorpus(ctx context.Context, path string, rooms map[string]bool, limit int64, fn func(Observation) error) error {
+	f, st, err := openRegular(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	if st, err := f.Stat(); err != nil {
-		return err
-	} else if st.Size() > MaxImportBytes {
+	if st.Size() > limit {
 		return ErrImportTooLarge
 	}
-	var r io.Reader = &contextReader{ctx: ctx, r: io.LimitReader(f, MaxImportBytes+1)}
+	stored := &limitReader{r: f, remaining: limit}
+	unpacked := stored
+	var r io.Reader = &contextReader{ctx: ctx, r: stored}
 	if strings.HasSuffix(path, ".gz") {
 		gz, err := gzip.NewReader(r)
 		if err != nil {
 			return err
 		}
 		defer gz.Close()
-		r = gz
+		unpacked = &limitReader{r: gz, remaining: limit}
+		r = &contextReader{ctx: ctx, r: unpacked}
 	}
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 4096), MaxRowBytes)
@@ -136,6 +195,9 @@ func ReadRawCorpusContext(ctx context.Context, path string, rooms map[string]boo
 	counts := NewKakaoOccurrences()
 	for sc.Scan() {
 		line++
+		if stored.hit || unpacked.hit {
+			return ErrImportTooLarge // the last line is cut off at the limit
+		}
 		raw := bytes.TrimSpace(sc.Bytes())
 		if len(raw) == 0 {
 			continue
@@ -275,6 +337,7 @@ const (
 
 var ErrFieldTooLarge = errors.New("import field exceeds 64 KiB")
 var ErrRowTooLarge = errors.New("import row exceeds 256 KiB")
+var ErrNotRegularFile = errors.New("import path is not an ordinary file")
 var ErrImportTooLarge = errors.New("import exceeds 1 GiB: split the export into parts (for example by year) and import them one by one")
 
 type contextReader struct {
@@ -315,7 +378,7 @@ func ReadKakaoCSVContext(ctx context.Context, path, collection, room, markerLoca
 	if !ok {
 		return "", 0, fmt.Errorf("no KakaoTalk marker file for export locale %q (have %v)", markerLocale, MarkerLocales())
 	}
-	f, err := os.Open(path)
+	f, _, err := openRegular(path)
 	if err != nil {
 		return "", 0, err
 	}
