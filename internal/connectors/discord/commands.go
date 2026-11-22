@@ -411,7 +411,7 @@ func Commands() []Command {
 				choiceOption("language", "Language of my cards and DMs", false, "ko", "en", "default"),
 			},
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return "preferences.set", settingsInput(o)
+				return "preferences.set", settingsInput(o, c.Typed)
 			},
 		},
 		{
@@ -613,9 +613,11 @@ func fortuneRequest(verb, rest string) (string, map[string]any) {
 }
 
 // settingsInput turns /mysettings options (or "!내설정 지역 서울" words) into preferences.set input.
-func settingsInput(o map[string]string) map[string]any {
+func settingsInput(o map[string]string, typed bool) map[string]any {
 	in := map[string]any{}
-	if o["timezone"] == "" && o["quiet"] == "" && o["language"] == "" {
+	// only typed words ("!내설정 초기화") carry a verb: the slash command's region option is a place, so
+	// region:"초기화" is not a reset of every setting
+	if typed && o["timezone"] == "" && o["quiet"] == "" && o["language"] == "" {
 		// prefix form: everything is in the first option
 		verb, rest := splitVerb(o["region"], "", wordsFor("mysettings", "verb", "region", "timezone", "quiet", "language", "reset"))
 		switch verb {
@@ -977,15 +979,12 @@ func requestFor(cmd Command, opts map[string]string, ctx InvokeContext, requestI
 		Invoker: &action.Invoker{Via: "command", GuildID: ctx.GuildID, ChannelID: ctx.ChannelID, UserID: ctx.UserID, Manager: ctx.Manager, Private: ctx.Private, Name: ctx.UserName}}
 }
 
-// rankingPeriod reads the period people type after !랭킹 (오늘, 이번주, 이번달, 전체 …).
+// rankingPeriod reads the period people type after !랭킹 (오늘, 이번주, 이번달, 전체 …): the words of every
+// language are discord.command.ranking.period.<period>. Spaces and case do not count; anything else is the
+// default week (the option's description says so).
 func rankingPeriod(v string) string {
-	switch strings.ReplaceAll(strings.ToLower(strings.TrimSpace(v)), " ", "") {
-	case "오늘", "today", "day":
-		return "today"
-	case "이번달", "한달", "month", "이달":
-		return "month"
-	case "전체", "all", "누적":
-		return "all"
+	if p, ok := wordsFor("ranking", "period", "today", "week", "month", "all")[strings.ReplaceAll(strings.ToLower(strings.TrimSpace(v)), " ", "")]; ok {
+		return p
 	}
 	return "week"
 }
