@@ -353,6 +353,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, webBuild,
 	if strings.HasPrefix(act, "admin.") {
 		return adminCommand(ctx, act, opt, stdout, stderr, webBuild)
 	}
+	input, err = configFileInput(act, input)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
 	input, err = commandPaths(act, input)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
@@ -395,6 +400,33 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, webBuild,
 		}
 	}
 	return WriteResult(stdout, opt, res)
+}
+
+// configFileInput reads `config diff|validate|apply --file` here, in the invoking shell, and sends the
+// document as yaml: the config Actions take no path, so neither the console nor this command makes the
+// service open a file.
+func configFileInput(act string, input json.RawMessage) (json.RawMessage, error) {
+	if !strings.HasPrefix(act, "config.") {
+		return input, nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(input, &fields); err != nil {
+		return nil, err
+	}
+	var path string
+	if raw, ok := fields["file"]; !ok || json.Unmarshal(raw, &path) != nil || path == "" {
+		return input, nil
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("--file: %w", err)
+	}
+	if body, err = decodeTextFile(body); err != nil {
+		return nil, fmt.Errorf("--file: %w", err)
+	}
+	delete(fields, "file")
+	fields["yaml"], _ = json.Marshal(string(body))
+	return json.Marshal(fields)
 }
 
 // interactiveMode maps the Actions that have a live screen; everything else ignores -i.

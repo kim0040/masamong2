@@ -3,7 +3,6 @@ package application
 import (
 	"fmt"
 	"net/url"
-	"os"
 	"sort"
 	"strings"
 
@@ -207,9 +206,14 @@ func (s *Service) configApply(req action.Request) action.Result {
 	return s.applyCandidate(req, candidate, base)
 }
 
-// candidateBytes reads the replacement document from "file" (CLI), "yaml" (GUI textarea),
-// or the operator form fields (limits / model / locale / feature flags).
+// candidateBytes reads the replacement document from "yaml" (the console's editor and import, and the
+// CLI, which reads --file itself) or the operator form fields (limits / model / locale / feature flags).
+// It never opens a file: a path in the input would let the console read any file the service can.
 func (s *Service) candidateBytes(req action.Request, in map[string]any) ([]byte, *action.Result) {
+	if _, ok := in["file"]; ok {
+		r := action.Fail(req, errcode.InvalidInput, "generic.error", "file is read by the masamong command; send the document as yaml", nil)
+		return nil, &r
+	}
 	if y, ok := in["yaml"].(string); ok && strings.TrimSpace(y) != "" {
 		return []byte(y), nil // preserve CRLF and the final newline; Hash canonicalizes line endings
 	}
@@ -221,17 +225,8 @@ func (s *Service) candidateBytes(req action.Request, in map[string]any) ([]byte,
 		}
 		return raw, nil
 	}
-	path := strVal(in, "file", "")
-	if path == "" {
-		r := action.Fail(req, errcode.InvalidInput, "generic.error", "file or yaml required", nil)
-		return nil, &r
-	}
-	candidate, err := os.ReadFile(path)
-	if err != nil {
-		r := action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
-		return nil, &r
-	}
-	return candidate, nil
+	r := action.Fail(req, errcode.InvalidInput, "generic.error", "yaml required", nil)
+	return nil, &r
 }
 
 func (s *Service) marshalOperatorForm(in map[string]any) ([]byte, error) {
