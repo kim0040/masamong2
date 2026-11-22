@@ -27,6 +27,14 @@ func TestRedactSecrets(t *testing.T) {
 		{"GET https://api.example.com/v1?key=AIzaSyFAKE&alt=json", "AIzaSyFAKE"},
 		{"GET https://x.example/?q=1&api_key=abc123def", "abc123def"},
 		{"https://x.example/p?access_token=tok123456&x=1", "tok123456"},
+		// key names and key shapes the first rules missed (found by an audit probe)
+		{"GET https://apihub.example/x?authKey=KMASECRET123&tm=1 failed", "KMASECRET123"},
+		{"GET https://x.example/y?serviceKey=SVCSECRET123 failed", "SVCSECRET123"},
+		{"tavily key tvly-dev-ABCDEFGHIJKLMNOPQRSTUV rejected", "ABCDEFGHIJKLMNOPQRSTUV"},
+		{"gemini key AIzaSyA1234567890abcdefghijklmnopqrstuv rejected", "SyA1234567890abcdefghijklmnopqrstuv"},
+		{"x-goog-api-key: AIzaSyA1234567890abcdefghijklmnopqrstuv", "SyA1234567890abcdefghijklmnopqrstuv"},
+		{"serviceKey: SVCSECRET123 refused", "SVCSECRET123"},
+		{"Authorization: Bearer abcdefghijklmnop12345", "abcdefghijklmnop12345"},
 	} {
 		got := Redact(c.in)
 		if strings.Contains(got, c.secret) {
@@ -54,6 +62,10 @@ func TestRedactLeavesOrdinaryTextAlone(t *testing.T) {
 		"keyboard key pressed; monkey=happy",
 		"internal/memory/retrieve.go:120 rank.fuse took 35ms",
 		"version 1.2.3 built on 2026-10-11T09:00:00Z",
+		// counts of tokens are numbers, not secrets
+		"input_token=5 max_tokens=500",
+		"output_token: 12 prompt_token=7 total_token=19",
+		"a tvly- prefix alone and AIza are not keys",
 	} {
 		if got := Redact(s); got != s {
 			t.Errorf("Redact(%q) = %q", s, got)
@@ -65,5 +77,15 @@ func TestHealthSeparatesLayers(t *testing.T) {
 	h := Health(true, true, true)
 	if h["readiness"] != true || h["feature_degraded"] != true {
 		t.Fatalf("%+v", h)
+	}
+}
+
+func TestRedactKeepsTheLineAroundNewKeyShapes(t *testing.T) {
+	got := Redact("GET https://apihub.example/x?authKey=KMASECRET123&tm=1 failed")
+	if got != "GET https://apihub.example/x?authKey=***&tm=1 failed" {
+		t.Fatalf("%s", got)
+	}
+	if got := Redact("input_token=5 token=abcdef123456"); got != "input_token=5 token=***" {
+		t.Fatalf("a count and a token on one line: %s", got)
 	}
 }

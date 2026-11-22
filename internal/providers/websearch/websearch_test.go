@@ -97,6 +97,13 @@ func TestPublicURL(t *testing.T) {
 		"http://[::1]/": false, "http://169.254.169.254/latest/meta-data": false, "https://intranet/": false,
 		"https://printer.local/": false, "https://user:pw@example.com/": false, "ftp://example.com/": false,
 		"https://example.com:8443/": false, "file:///etc/passwd": false, "https://db.internal/": false,
+		// a root dot reads as the same host
+		"http://localhost./": false, "http://LOCALHOST.:80/x": false, "http://localhost../": false, "http://app.localhost./": false,
+		"http://127.0.0.1./": false, "http://printer.local./": false, "http://db.internal./": false, "http://.": false,
+		"http://[::1]./": false, "https://news.example.com./a": true,
+		// short and number forms of an address
+		"http://127.1/": false, "http://0x7f.0.0.1/": false, "http://10.1/": false, "http://2130706433/": false,
+		"https://example.com1/": true, "https://v1.example.co.kr/": true,
 	} {
 		got, err := PublicURL(raw)
 		if (err == nil) != ok {
