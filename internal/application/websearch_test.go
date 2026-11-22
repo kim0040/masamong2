@@ -46,8 +46,8 @@ func TestSearchFallsBackAndNamesTheService(t *testing.T) {
 	if r := exec(svc, "search.web", map[string]any{"query": "캠핑"}); !r.OK || r.Output["status"] != "unconfigured" || !strings.Contains(r.Output["message"].(string), "Tavily") {
 		t.Fatalf("no key anywhere: %+v", r)
 	}
-	pointAt(t, svc, "tavily", tavily.URL, "T_KEY", "bad")
-	pointAt(t, svc, "serper", serper.URL, "S_KEY", "good")
+	pointAt(t, svc, "tavily", tavily.URL, "T_KEY", "bad-key")
+	pointAt(t, svc, "serper", serper.URL, "S_KEY", "good-key")
 	feats := out(t, svc, "runtime.doctor", nil)["features"].(map[string]any)
 	if feats["search"].(map[string]any)["status"] != "ready" {
 		t.Fatalf("doctor: any search service with a key: %v", feats["search"])
@@ -170,7 +170,7 @@ func TestQuoteFallsBackToSearchOutsideTheQuotePlan(t *testing.T) {
 	if r := exec(svc, "finance.quote", map[string]any{"symbol": "005930.KS"}); r.OK {
 		t.Fatalf("no search service: the plan refusal stays an error: %+v", r)
 	}
-	pointAt(t, svc, "serper", serper.URL, "S_KEY", "s")
+	pointAt(t, svc, "serper", serper.URL, "S_KEY", "key-s1")
 	res := out(t, svc, "finance.quote", map[string]any{"symbol": "005930.KS"})
 	if res["source"] != "search" || res["live"] != false || res["reason"] != "symbol_not_on_plan" || query != "005930 주가" || len(res["results"].([]any)) != 1 {
 		t.Fatalf("Korean listing from search: %v (query %q)", res, query)
@@ -200,8 +200,8 @@ func TestSlowSearchServiceIsPassedOver(t *testing.T) {
 	}))
 	defer fast.Close()
 	svc := setupSvc(t)
-	pointAt(t, svc, "tavily", slow.URL, "T_KEY", "k")
-	pointAt(t, svc, "serper", fast.URL, "S_KEY", "k")
+	pointAt(t, svc, "tavily", slow.URL, "T_KEY", "key-k1")
+	pointAt(t, svc, "serper", fast.URL, "S_KEY", "key-k1")
 	for _, c := range []struct{ asked, limit string }{{"quick", "quick"}, {"", "standard"}, {"deep", "deep"}} {
 		restore := application.SetSearchDeadlineForTest(c.limit, 150*time.Millisecond)
 		before := slowHits.Load()
@@ -231,7 +231,7 @@ func TestSearchNarrowsFreshnessWordsWithinTheDay(t *testing.T) {
 	}))
 	defer tavily.Close()
 	svc := setupSvc(t)
-	pointAt(t, svc, "tavily", tavily.URL, "T_KEY", "k")
+	pointAt(t, svc, "tavily", tavily.URL, "T_KEY", "key-k1")
 	for fresh, want := range map[string]any{"hour": "day", "today": "day", "24h": "day", "now": "day", "recent": "day", " Recent ": "day",
 		"": nil, "year": nil, "yesterday": nil, "Week": "week", "day": "day", "month": "month"} {
 		out(t, svc, "search.web", map[string]any{"query": "캠핑", "fresh": fresh})
@@ -261,8 +261,8 @@ func TestSearchStopsWithTheTurnAndBlamesNoServiceForOurLimits(t *testing.T) {
 	}))
 	defer next.Close()
 	svc := setupSvc(t)
-	pointAt(t, svc, "tavily", slow.URL, "T_KEY", "k")
-	pointAt(t, svc, "serper", next.URL, "S_KEY", "k")
+	pointAt(t, svc, "tavily", slow.URL, "T_KEY", "key-k1")
+	pointAt(t, svc, "serper", next.URL, "S_KEY", "key-k1")
 	lastError := func(id string) any {
 		h, _ := out(t, svc, "providers.list", nil)["health"].(map[string]any)[id].(map[string]any)
 		return h["last_error"]
@@ -296,7 +296,7 @@ func TestSearchStopsWithTheTurnAndBlamesNoServiceForOurLimits(t *testing.T) {
 		t.Fatalf("our own time limit went into the service's health: %v", e)
 	}
 	// both services cut off by our limit: the last one's timeout is not recorded either
-	pointAt(t, svc, "serper", slow.URL, "S_KEY", "k")
+	pointAt(t, svc, "serper", slow.URL, "S_KEY", "key-k1")
 	if res = run(context.Background()); res.OK {
 		t.Fatalf("both services timed out: %+v", res)
 	}
@@ -308,8 +308,8 @@ func TestSearchStopsWithTheTurnAndBlamesNoServiceForOurLimits(t *testing.T) {
 	restore()
 	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }))
 	defer broken.Close()
-	pointAt(t, svc, "tavily", broken.URL, "T_KEY", "k")
-	pointAt(t, svc, "serper", next.URL, "S_KEY", "k")
+	pointAt(t, svc, "tavily", broken.URL, "T_KEY", "key-k1")
+	pointAt(t, svc, "serper", next.URL, "S_KEY", "key-k1")
 	if res = run(context.Background()); !res.OK || res.Output["provider"] != "serper" {
 		t.Fatalf("an erroring service hands over: %+v", res)
 	}

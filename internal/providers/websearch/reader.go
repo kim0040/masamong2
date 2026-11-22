@@ -89,6 +89,9 @@ func numericTLD(host string) bool {
 
 // Read fetches pageURL as text, cut to maxChars runes.
 func (r *Reader) Read(ctx context.Context, pageURL string, maxChars int) (Page, error) {
+	if !scrubbable(r.cred) {
+		return Page{}, ErrCredentialTooShort
+	}
 	target, err := PublicURL(pageURL)
 	if err != nil {
 		return Page{}, err
@@ -101,7 +104,7 @@ func (r *Reader) Read(ctx context.Context, pageURL string, maxChars int) (Page, 
 	if err != nil {
 		var pe *providers.Error
 		if errors.As(err, &pe) && (pe.Status == 401 || pe.Status == 403) && r.cred.Present() {
-			return Page{}, fmt.Errorf("%w: %s", ErrAuth, serviceMessage(resp, r.cred.Value()))
+			return Page{}, &authError{pe: pe, msg: serviceMessage(resp, r.cred.Value())}
 		}
 		if msg := serviceMessage(resp, r.cred.Value()); msg != "" {
 			return Page{}, fmt.Errorf("%w: %s", err, msg)

@@ -52,11 +52,17 @@ func (s *Service) countActivity(m ObservedMessage) {
 	}
 	day := at.In(s.instanceZone()).Format("2006-01-02")
 	stamp := at.UTC().Format(time.RFC3339)
+	// Every observation counts, but the row keeps the newest one's name and time: messages can arrive
+	// out of order (a relayed or retried one lands after a later one), and arrival order is not time.
 	q := `INSERT INTO activity_counts(day, guild_id, channel_id, user_id, name, n, last_at) VALUES(?,?,?,?,?,1,?)
-		ON CONFLICT(day, guild_id, channel_id, user_id) DO UPDATE SET n=activity_counts.n+1, name=excluded.name, last_at=excluded.last_at`
+		ON CONFLICT(day, guild_id, channel_id, user_id) DO UPDATE SET n=activity_counts.n+1,
+		name=CASE WHEN excluded.last_at>=activity_counts.last_at THEN excluded.name ELSE activity_counts.name END,
+		last_at=MAX(activity_counts.last_at, excluded.last_at)`
 	if !db.IsSQLite() {
 		q = `INSERT INTO activity_counts(day, guild_id, channel_id, user_id, name, n, last_at) VALUES(?,?,?,?,?,1,?)
-		ON DUPLICATE KEY UPDATE n=n+1, name=VALUES(name), last_at=VALUES(last_at)`
+		ON DUPLICATE KEY UPDATE n=n+1,
+		name=IF(VALUES(last_at)>=last_at, VALUES(name), name),
+		last_at=GREATEST(last_at, VALUES(last_at))`
 	}
 	if _, err := db.DB.Exec(q, day, m.GuildID, m.ChannelID, m.AuthorID, clip(m.AuthorName, 120), stamp); err != nil {
 		s.Log.Debug("activity count failed", "err", err)

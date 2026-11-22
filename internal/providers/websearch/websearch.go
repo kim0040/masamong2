@@ -217,6 +217,49 @@ type Searcher interface {
 // ErrAuth means the service refused the key.
 var ErrAuth = errors.New("websearch: key refused")
 
+// ErrCredentialTooShort refuses a credential shorter than minScrubbed before any call: the service's
+// answer can repeat the key where scrub cannot cut it, so the call is not made. It is an ErrAuth —
+// the key is refused as unusable, not answered by the service.
+var ErrCredentialTooShort = fmt.Errorf("%w: shorter than %d bytes", ErrAuth, minScrubbed)
+
+// authError is a refused key: ErrAuth to errors.Is, and it keeps the HTTP status as a
+// *providers.Error to errors.As, so the console can show "refused (401)" without the body's text.
+type authError struct {
+	pe  *providers.Error
+	msg string // the service's own words, scrubbed; "" for none
+}
+
+func (e *authError) Error() string {
+	if e.msg == "" {
+		return ErrAuth.Error()
+	}
+	return ErrAuth.Error() + ": " + e.msg
+}
+
+func (e *authError) Unwrap() []error {
+	if e.pe == nil {
+		return []error{ErrAuth}
+	}
+	return []error{ErrAuth, e.pe}
+}
+
+// shortCred is the searcher for a key too short to send: every search refuses before the wire.
+type shortCred struct{ kind string }
+
+func (s shortCred) Kind() string     { return s.kind }
+func (s shortCred) Configured() bool { return true }
+func (s shortCred) Search(context.Context, Query) (Response, error) {
+	return Response{}, ErrCredentialTooShort
+}
+
+// shortFetch is the page fetcher for the same key.
+type shortFetch struct{}
+
+func (shortFetch) Kind() string { return "tinyfish_fetch" }
+func (shortFetch) Fetch(context.Context, []string, int) ([]Fetched, error) {
+	return nil, ErrCredentialTooShort
+}
+
 // snippetRunes bounds one result's text: enough for a model to answer from, small enough that five
 // results stay well inside a prompt.
 const snippetRunes = 700
@@ -227,23 +270,31 @@ func New(kind string, client *providers.Client, baseURL string, cred providers.C
 		baseURL = DefaultBaseURL[kind]
 	}
 	base := strings.TrimRight(baseURL, "/")
+	var out Searcher
 	switch kind {
 	case "tavily":
-		return &tavily{c: client, base: base, cred: cred}, nil
+		out = &tavily{c: client, base: base, cred: cred}
 	case "linkup":
-		return &linkup{c: client, base: base, cred: cred}, nil
+		out = &linkup{c: client, base: base, cred: cred}
 	case "exa":
-		return &exa{c: client, base: base, cred: cred}, nil
+		out = &exa{c: client, base: base, cred: cred}
 	case "serper":
-		return &serper{c: client, base: base, cred: cred}, nil
+		out = &serper{c: client, base: base, cred: cred}
 	case "brave":
-		return &brave{c: client, base: base, cred: cred}, nil
+		out = &brave{c: client, base: base, cred: cred}
 	case "tinyfish":
-		return &tinyfish{c: client, base: base, cred: cred}, nil
+		out = &tinyfish{c: client, base: base, cred: cred}
 	case "kakao_search":
-		return &daum{a: kakao.New(client, base, cred)}, nil
+		out = &daum{a: kakao.New(client, base, cred)}
+	default:
+		return nil, fmt.Errorf("websearch: unknown kind %q", kind)
 	}
-	return nil, fmt.Errorf("websearch: unknown kind %q", kind)
+	// A key shorter than minScrubbed cannot be cut back out of the service's answer, so it is refused
+	// here rather than sent once and echoed where scrub cannot reach.
+	if !scrubbable(cred) {
+		return shortCred{kind: kind}, nil
+	}
+	return out, nil
 }
 
 // size is how many results to ask for: 1–10, 5 when none is given; more than ten is ten (the schema's
@@ -318,7 +369,7 @@ func post(ctx context.Context, c *providers.Client, url string, headers map[stri
 		var pe *providers.Error
 		secrets := headerSecrets(headers)
 		if errors.As(err, &pe) && (pe.Status == 401 || pe.Status == 403) {
-			return nil, fmt.Errorf("%w: %s", ErrAuth, serviceMessage(resp, secrets...))
+			return nil, &authError{pe: pe, msg: serviceMessage(resp, secrets...)}
 		}
 		if msg := serviceMessage(resp, secrets...); msg != "" {
 			return nil, fmt.Errorf("%w: %s", err, msg)
@@ -346,6 +397,12 @@ func headerSecrets(headers map[string]string) []string {
 		}
 	}
 	return out
+}
+
+// scrubbable reports whether a key can be sent: absent, or long enough for scrub to cut it back out
+// of the service's answer. A shorter one is refused as ErrCredentialTooShort instead of sent.
+func scrubbable(cred providers.Credential) bool {
+	return !cred.Present() || len(cred.Value()) >= minScrubbed
 }
 
 // scrub removes every given secret value, and anything that looks like a key, from text a service sent

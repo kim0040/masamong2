@@ -89,3 +89,19 @@ func TestRedactKeepsTheLineAroundNewKeyShapes(t *testing.T) {
 		t.Fatalf("a count and a token on one line: %s", got)
 	}
 }
+
+// The token-count exemption covers numbers only: input_token=5 is usage, input_token=text is a token
+// with a counting prefix in its name, and it must still be masked.
+func TestRedactMasksNonNumericTokenCounts(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"input_token=5 output_token: 12", "input_token=5 output_token: 12"},
+		{"prompt_token=7 total_token=19 max_token=500", "prompt_token=7 total_token=19 max_token=500"},
+		{"input_token=synthetic-fixture", "input_token=***"},
+		{"output_token: asecretvalue", "output_token=***"},
+		{"request=[prompt_token=token=tokvalue9]", "request=[prompt_token=***"},
+	} {
+		if got := Redact(c.in); got != c.want {
+			t.Errorf("Redact(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

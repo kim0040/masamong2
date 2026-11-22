@@ -73,8 +73,8 @@ func TestScheduledTaskReadsNoPagesAndClipsItsRecord(t *testing.T) {
 	plan := `{"memory_requirement":"none","question_kind":"other","tool_plan":[{"tool_name":"search.web","parameters":{"query":"가평 캠핑장 요금"}}]}`
 	var fake *fetchFake
 	body := taskWithSearch(t, plan, func(svc *application.Service) {
-		pointAt(t, svc, "serper", serperServer(t, 5, hostOf).URL, "S_KEY", "k")
-		pointAt(t, svc, "tinyfish", "http://127.0.0.1:1", "TF_KEY", "tf")
+		pointAt(t, svc, "serper", serperServer(t, 5, hostOf).URL, "S_KEY", "key-k1")
+		pointAt(t, svc, "tinyfish", "http://127.0.0.1:1", "TF_KEY", "key-tf")
 		fake = newFetchFake(t, func(string) (int, string, time.Duration) { return 200, okPage(campPage), 0 })
 	})
 	if fake.count() != 0 {
@@ -96,7 +96,7 @@ func TestScheduledTaskReadsNoPagesAndClipsItsRecord(t *testing.T) {
 	}))
 	defer exa.Close()
 	plan = `{"memory_requirement":"none","question_kind":"other","tool_plan":[{"tool_name":"search.web","parameters":{"query":"가평 캠핑장 요금","pages":2}}]}`
-	body = taskWithSearch(t, plan, func(svc *application.Service) { pointAt(t, svc, "exa", exa.URL, "E_KEY", "k") })
+	body = taskWithSearch(t, plan, func(svc *application.Service) { pointAt(t, svc, "exa", exa.URL, "E_KEY", "key-k1") })
 	item := recordedSearch(t, body)[0].(map[string]any)
 	if item["passage"] != nil || item["read"] != nil {
 		t.Fatalf("a task read pages although the planner asked: %v", item)

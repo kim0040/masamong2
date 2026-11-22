@@ -27,6 +27,9 @@ type tinyfishFetch struct {
 
 // NewTinyFishFetcher reads pages through TinyFish Fetch; baseURL "" is FetchBaseURL.
 func NewTinyFishFetcher(c *providers.Client, baseURL string, cred providers.Credential) Fetcher {
+	if !scrubbable(cred) {
+		return shortFetch{}
+	}
 	if baseURL == "" {
 		baseURL = FetchBaseURL
 	}
@@ -140,7 +143,7 @@ func (t *tinyfishFetch) one(ctx context.Context, raw string, maxChars int) (Fetc
 			switch {
 			case pe.Status == 401 || pe.Status == 403:
 				page.Err = "service"
-				return page, fmt.Errorf("%w: tinyfish fetch", ErrAuth)
+				return page, &authError{pe: pe, msg: "tinyfish fetch"}
 			case pe.Status == 402 || pe.Status == 429 || pe.Status >= 500:
 				page.Err = "service"
 				return page, err // 402: the day's allowance is used; 429: the rate limit

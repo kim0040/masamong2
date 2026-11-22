@@ -37,12 +37,13 @@ func Redact(s string) string {
 	s = botToken.ReplaceAllString(s, "${1}***")
 	s = urlSecret.ReplaceAllString(s, "${1}***")
 	s = secretish.ReplaceAllStringFunc(s, func(m string) string {
+		i := strings.IndexAny(m, ":=")
 		// a value an earlier rule already masked keeps the rest of its line (the next query parameter)
-		if i := strings.IndexAny(m, ":="); i >= 0 && strings.HasPrefix(strings.TrimLeft(m[i+1:], " \t"), "***") {
+		if i >= 0 && strings.HasPrefix(strings.TrimLeft(m[i+1:], " \t"), "***") {
 			return m
 		}
-		if sub := secretish.FindStringSubmatch(m); sub[1] != "" && strings.EqualFold(sub[2], "token") {
-			return m
+		if sub := secretish.FindStringSubmatch(m); sub[1] != "" && strings.EqualFold(sub[2], "token") && numericValue(m[i+1:]) {
+			return m // a count of tokens ("input_token=5"), not a token
 		}
 		return m[:strings.IndexAny(m, ":=")] + "=***"
 	})
@@ -51,6 +52,21 @@ func Redact(s string) string {
 	s = tavilyKey.ReplaceAllString(s, "tvly-***")
 	s = googleKey.ReplaceAllString(s, "AIza***")
 	return s
+}
+
+// numericValue reports whether a key:value fragment's value is a plain number, which makes a
+// counting prefix ("input_token") mean a count rather than the token itself.
+func numericValue(v string) bool {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return false
+	}
+	for _, r := range v {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 func Health(liveness, dbOK, featureDegraded bool) map[string]any {

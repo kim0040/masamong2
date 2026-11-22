@@ -107,8 +107,8 @@ func hostOf(i int) string { return fmt.Sprintf("https://site%d.example.com/page"
 func withFetch(t *testing.T, n int, urlOf func(int) string, reply func(string) (int, string, time.Duration)) (*application.Service, *fetchFake) {
 	t.Helper()
 	svc := setupSvc(t)
-	pointAt(t, svc, "serper", serperServer(t, n, urlOf).URL, "S_KEY", "k")
-	pointAt(t, svc, "tinyfish", "http://127.0.0.1:1", "TF_KEY", "tf")
+	pointAt(t, svc, "serper", serperServer(t, n, urlOf).URL, "S_KEY", "key-k1")
+	pointAt(t, svc, "tinyfish", "http://127.0.0.1:1", "TF_KEY", "key-tf")
 	return svc, newFetchFake(t, reply)
 }
 
@@ -162,7 +162,7 @@ func TestSearchPagesByCaller(t *testing.T) {
 // Without pages the answer is exactly what it was before: no new keys anywhere.
 func TestSearchWithoutPagesIsByteIdentical(t *testing.T) {
 	svc := setupSvc(t)
-	pointAt(t, svc, "serper", serperServer(t, 1, func(int) string { return "https://camp.example/1" }).URL, "S_KEY", "k")
+	pointAt(t, svc, "serper", serperServer(t, 1, func(int) string { return "https://camp.example/1" }).URL, "S_KEY", "key-k1")
 	want := `{"live":true,"paid_provider_call":true,"provider":"serper","query":"캠핑","results":[{"datetime":"","snippet":"스니펫 0","title":"R0","url":"https://camp.example/1"}],"source":"serper","status":"ok"}`
 	for _, via := range []string{"command", ""} {
 		got, _ := json.Marshal(runVia(svc, via, map[string]any{"query": "캠핑"}).Output)
@@ -318,8 +318,8 @@ func TestSearchUsesServiceTextBeforeFetching(t *testing.T) {
 	}))
 	defer exa.Close()
 	svc := setupSvc(t)
-	pointAt(t, svc, "exa", exa.URL, "E_KEY", "k")
-	pointAt(t, svc, "tinyfish", "http://127.0.0.1:1", "TF_KEY", "tf")
+	pointAt(t, svc, "exa", exa.URL, "E_KEY", "key-k1")
+	pointAt(t, svc, "tinyfish", "http://127.0.0.1:1", "TF_KEY", "key-tf")
 	fake := newFetchFake(t, func(string) (int, string, time.Duration) { return 200, okPage(campPage), 0 })
 	res := runVia(svc, "chat", map[string]any{"query": "가평 캠핑장 요금"})
 	items := res.Output["results"].([]any)
@@ -386,8 +386,8 @@ func TestDeepSearchUsesOneServiceAtATime(t *testing.T) {
 	first := newSlowSearch(t, 0, 200, "A", "https://a.example/1")
 	second := newSlowSearch(t, 0, 200, "B", "https://b.example/1")
 	svc := setupSvc(t)
-	pointAt(t, svc, "tavily", first.srv.URL, "T_KEY", "k")
-	pointAt(t, svc, "serper", second.srv.URL, "S_KEY", "k")
+	pointAt(t, svc, "tavily", first.srv.URL, "T_KEY", "key-k1")
+	pointAt(t, svc, "serper", second.srv.URL, "S_KEY", "key-k1")
 	var body atomic.Value
 	first.set(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -422,7 +422,7 @@ func TestSearchPageReaderFollowsTheProvider(t *testing.T) {
 	}))
 	defer tf.Close()
 	svc := setupSvc(t)
-	pointAt(t, svc, "tinyfish", tf.URL, "TF_KEY", "tf")
+	pointAt(t, svc, "tinyfish", tf.URL, "TF_KEY", "key-tf")
 	fake := newFetchFake(t, func(string) (int, string, time.Duration) { return 200, okPage(campPage), 0 })
 	res := runVia(svc, "chat", map[string]any{"query": "가평 캠핑장 요금"})
 	if res.Output["provider"] != "tinyfish" || res.Output["pages_read"] != 2 || fake.count() != 2 {
@@ -435,8 +435,8 @@ func TestSearchPageReaderFollowsTheProvider(t *testing.T) {
 	}))
 	defer exa.Close()
 	svc = setupSvc(t)
-	pointAt(t, svc, "exa", exa.URL, "E_KEY", "k")
-	pointAt(t, svc, "tinyfish", "http://127.0.0.1:1", "TF_KEY", "tf")
+	pointAt(t, svc, "exa", exa.URL, "E_KEY", "key-k1")
+	pointAt(t, svc, "tinyfish", "http://127.0.0.1:1", "TF_KEY", "key-tf")
 	before := fake.count()
 	res = runVia(svc, "chat", map[string]any{"query": "가평 캠핑장 요금"})
 	if r := res.Output["results"].([]any)[0].(map[string]any); res.Output["provider"] != "exa" || r["read"] != "skipped" || fake.count() != before {
@@ -466,7 +466,7 @@ func TestWebReadThroughTinyFishFetchThenJina(t *testing.T) {
 		t.Fatalf("add reader: %+v", r)
 	}
 	pointAt(t, svc, "jina", jina.URL, "J_KEY", "")
-	pointAt(t, svc, "tinyfish", "http://127.0.0.1:1", "TF_KEY", "tf")
+	pointAt(t, svc, "tinyfish", "http://127.0.0.1:1", "TF_KEY", "key-tf")
 	fake := newFetchFake(t, func(u string) (int, string, time.Duration) {
 		if failing.Load() {
 			return 200, `{"results":[],"errors":[{"url":"` + u + `","error":"timeout"}]}`, 0

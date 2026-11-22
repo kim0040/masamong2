@@ -87,7 +87,7 @@ func newSearcher(t *testing.T, kind, base string) Searcher {
 	t.Helper()
 	c := providers.NewClient(5*time.Second, nil)
 	c.MaxRetries = 0
-	t.Setenv("K", "k")
+	t.Setenv("K", "test-key-1")
 	cred, _ := providers.Resolve("env:K")
 	s, err := New(kind, c, base, cred)
 	if err != nil {

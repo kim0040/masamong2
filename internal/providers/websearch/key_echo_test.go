@@ -2,9 +2,11 @@ package websearch
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -93,6 +95,61 @@ func TestReaderErrorsDoNotCarryTheKey(t *testing.T) {
 		if strings.Contains(err.Error(), echoedKey) {
 			t.Errorf("%s: the error carries the key: %v", name, err)
 		}
+	}
+}
+
+// A refused key error is ErrAuth and keeps the HTTP status, so the console can say "refused (401)"
+// without ever needing the body's text or the address.
+func TestAuthErrorKeepsTheStatus(t *testing.T) {
+	for _, kind := range []string{"tavily", "brave", "kakao_search"} {
+		srv := keyEchoServer(401, `{"message":"service-says the key was refused"}`)
+		t.Setenv("ECHO_KEY", echoedKey)
+		cred, _ := providers.Resolve("env:ECHO_KEY")
+		s, err := New(kind, echoClient(), srv.URL, cred)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.Search(context.Background(), Query{Text: "q", Max: 3})
+		srv.Close()
+		var pe *providers.Error
+		if !errors.Is(err, ErrAuth) || !errors.As(err, &pe) || pe.Status != 401 {
+			t.Fatalf("%s: the refusal stays ErrAuth and keeps status 401, got %v", kind, err)
+		}
+	}
+}
+
+// A key shorter than minScrubbed cannot be cut back out of the service's answer, so it is refused
+// before the wire: no request goes out, the error names the refusal and never the key.
+func TestShortCredentialNeverLeavesTheProcess(t *testing.T) {
+	const shortKey = "abcde" // under minScrubbed
+	var hits int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(401)
+		_, _ = w.Write([]byte(`{"message":"the key ` + shortKey + ` is wrong"}`))
+	}))
+	defer srv.Close()
+	t.Setenv("SHORT_KEY", shortKey)
+	cred, _ := providers.Resolve("env:SHORT_KEY")
+	for _, kind := range []string{"tavily", "brave", "kakao_search"} {
+		s, err := New(kind, echoClient(), srv.URL, cred)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = s.Search(context.Background(), Query{Text: "q", Max: 3})
+		if err == nil || !errors.Is(err, ErrCredentialTooShort) || !errors.Is(err, ErrAuth) || strings.Contains(err.Error(), shortKey) {
+			t.Fatalf("%s: want a refusal naming no key, got %v", kind, err)
+		}
+	}
+	if _, err := NewReader(echoClient(), srv.URL, cred).Read(context.Background(), "https://news.example.com/a", 100); err == nil || !errors.Is(err, ErrCredentialTooShort) || strings.Contains(err.Error(), shortKey) {
+		t.Fatalf("reader: want a refusal naming no key, got %v", err)
+	}
+	if _, err := NewTinyFishFetcher(echoClient(), srv.URL, cred).Fetch(context.Background(), []string{"https://news.example.com/a"}, 100); err == nil || !errors.Is(err, ErrCredentialTooShort) || strings.Contains(err.Error(), shortKey) {
+		t.Fatalf("tinyfish fetch: want a refusal naming no key, got %v", err)
+	}
+	if n := atomic.LoadInt32(&hits); n != 0 {
+		t.Fatalf("the short key was sent %d times", n)
 	}
 }
 

@@ -46,7 +46,7 @@ func measureSvc(t *testing.T, f *loopServer, searchURL string, mutate func(d *co
 			mutate(d, host.URL)
 		}
 	})
-	pointAt(t, svc, "exa", searchURL, "FAKE_EXA_KEY", "k")
+	pointAt(t, svc, "exa", searchURL, "FAKE_EXA_KEY", "key-k1")
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"web_search", "order"}, "value": []any{"exa"}}}}); !r.OK {
 		t.Fatalf("order: %+v", r.Error)
 	}

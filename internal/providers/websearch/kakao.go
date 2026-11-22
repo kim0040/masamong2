@@ -3,7 +3,6 @@ package websearch
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -118,7 +117,7 @@ func (d *daum) response(res kakao.Result, err error) (Response, error) {
 	if err != nil {
 		var pe *providers.Error
 		if errors.As(err, &pe) && (pe.Status == 401 || pe.Status == 403) {
-			return Response{}, fmt.Errorf("%w: %v", ErrAuth, err)
+			return Response{}, &authError{pe: pe}
 		}
 		return Response{}, err
 	}
