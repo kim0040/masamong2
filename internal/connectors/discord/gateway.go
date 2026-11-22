@@ -56,6 +56,7 @@ type Gateway struct {
 	workCtx           context.Context // replies and commands; cancelled after the shutdown grace
 	cancelWork        context.CancelFunc
 	stopping          atomic.Bool
+	grace             shutdownGrace   // how long replies get at shutdown; zero = turnGrace and afterGrace
 	more              moreStore       // the rest of trimmed replies (shape.go)
 	interims          interimRegistry // the bot's "still looking" lines: never captured, their delete never reconciled (interim.go)
 	interimHook       func(*interim)  // tests: sees each turn's line as it is made
@@ -313,7 +314,8 @@ func waitContext(ctx context.Context, delay time.Duration) bool {
 
 // Replies in progress at shutdown get turnGrace to finish (the session stays open meanwhile); then they
 // are cancelled, and a turn that did not make it tells its caller the bot is restarting (LIVE-20).
-var (
+// A test shortens them for its own gateway (Gateway.grace).
+const (
 	turnGrace  = 12 * time.Second
 	afterGrace = 3 * time.Second
 )
@@ -335,13 +337,13 @@ func (g *Gateway) shutdown(sess *discordgo.Session) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(turnGrace):
+	case <-time.After(g.grace.turnLimit()):
 		if g.cancelWork != nil {
 			g.cancelWork()
 		}
 		select {
 		case <-done:
-		case <-time.After(afterGrace):
+		case <-time.After(g.grace.afterLimit()):
 		}
 	}
 	if g.cancelWork != nil {

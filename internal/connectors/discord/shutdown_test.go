@@ -11,11 +11,8 @@ import (
 // LIVE-20: at shutdown a reply in progress keeps its context for the grace period and is cancelled after
 // it; new work is refused at once.
 func TestShutdownLetsRepliesFinish(t *testing.T) {
-	oldGrace, oldAfter := turnGrace, afterGrace
-	turnGrace, afterGrace = 150*time.Millisecond, 50*time.Millisecond
-	t.Cleanup(func() { turnGrace, afterGrace = oldGrace, oldAfter })
 	run, stop := context.WithCancel(context.Background())
-	g := &Gateway{ctx: run}
+	g := &Gateway{ctx: run, grace: shutdownGrace{turn: 150 * time.Millisecond, after: 50 * time.Millisecond}}
 	g.workCtx, g.cancelWork = context.WithCancel(context.WithoutCancel(run))
 	quick := make(chan error, 1)
 	slow := make(chan time.Duration, 1)
@@ -34,7 +31,7 @@ func TestShutdownLetsRepliesFinish(t *testing.T) {
 	if err := <-quick; err != nil {
 		t.Fatalf("a reply finishing within the grace was cancelled: %v", err)
 	}
-	if d := <-slow; d < turnGrace {
+	if d := <-slow; d < g.grace.turn {
 		t.Fatalf("cancelled before the grace: %v", d)
 	}
 	ran := false
