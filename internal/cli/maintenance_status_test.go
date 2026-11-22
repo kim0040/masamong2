@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"masamong/internal/action"
@@ -74,5 +75,36 @@ func TestStatusCommandsReportMaintenance(t *testing.T) {
 	}
 	if got := strings.TrimSpace(human.String()); got != "masamong is stopped for maintenance" {
 		t.Fatalf("human runtime status should be one line, got %q", got)
+	}
+}
+
+// `masamong open` and `start` do not build a sign-in link for a recorded address that is not this data
+// folder's console: a stale daemon.json that names another program gets nothing but the health check, and
+// the command says the service did not become ready.
+func TestOpenAndStartSendNoLinkToAnUnprovenRecordedAddress(t *testing.T) {
+	t.Setenv("MASAMONG_NO_BROWSER", "1")
+	t.Setenv("PATH", t.TempDir()) // no masamongd to start
+	for _, args := range [][]string{{"open", "--no-browser", "--no-tray"}, {"start", "--no-tray"}} {
+		root := t.TempDir()
+		var others atomic.Int32
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/health" {
+				others.Add(1)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"ok":true,"ready":true}`))
+		}))
+		if err := launcher.WriteInfo(root, launcher.DaemonInfo{PID: 1, Bind: strings.TrimPrefix(srv.URL, "http://")}); err != nil {
+			t.Fatal(err)
+		}
+		var out strings.Builder
+		code := run(context.Background(), append([]string{"--data-root", root, "--output", "json"}, args...), &out, ioDiscard(), false, false)
+		srv.Close()
+		if code == 0 || strings.Contains(out.String(), "once=") {
+			t.Fatalf("%v: exit %d, out %s", args, code, out.String())
+		}
+		if others.Load() != 0 {
+			t.Fatalf("%v: %d requests other than the health check reached the stale address", args, others.Load())
+		}
 	}
 }

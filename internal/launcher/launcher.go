@@ -124,6 +124,9 @@ type Options struct {
 	Wait      time.Duration
 	Log       io.Writer                         // progress lines for a terminal; nil = silent
 	OnceURL   func(bind string) (string, error) // builds the one-time sign-in link
+	// Token reads the console token. It is how Open proves that the recorded address is this data folder's
+	// console before OnceURL builds a link for it; required whenever OnceURL is set.
+	Token func() (string, error)
 }
 
 // Result says what Open did.
@@ -154,12 +157,49 @@ func Open(ctx context.Context, o Options) (Result, error) {
 	if o.Wait == 0 {
 		o.Wait = 25 * time.Second
 	}
+	// A sign-in link is built only for a console that proved it belongs to this installation (see
+	// verifyEndpoint); the maintenance page has no link, so it needs no proof and no token.
+	var token string
+	haveToken := false
+	proofToken := func() (string, error) {
+		if haveToken {
+			return token, nil
+		}
+		if o.Token == nil {
+			return "", errors.New("no token to prove the console with; the sign-in link was not built")
+		}
+		tok, err := o.Token()
+		if err != nil {
+			return "", fmt.Errorf("read the console token: %w", err)
+		}
+		token, haveToken = tok, true
+		return tok, nil
+	}
 	bind := ""
 	if info, ok := ReadInfo(o.DataRoot); ok {
 		if h, err := Health(ctx, info.Bind); err == nil {
-			bind = info.Bind
-			res.Maintenance = InMaintenance(h)
-			o.say("masamong is already running (%s)", hostPort(bind))
+			found, maintenance := info.Bind, InMaintenance(h)
+			if o.OnceURL != nil && !maintenance {
+				// a record that does not prove itself is a stale one: while this folder's daemon holds its
+				// lock it is starting and writes a fresh record, so provenBind waits for it; with no daemon
+				// the record is dropped here and the daemon is started below
+				tok, err := proofToken()
+				if err != nil {
+					return res, err
+				}
+				switch proven, err := provenBind(ctx, found, tok, o.DataRoot); {
+				case err == nil:
+					found = proven
+				case ctx.Err() != nil || lockHeld(o.DataRoot, "daemon.lock"):
+					return res, err
+				default:
+					found = ""
+				}
+			}
+			if found != "" {
+				bind, res.Maintenance = found, maintenance
+				o.say("masamong is already running (%s)", hostPort(bind))
+			}
 		}
 	}
 	if bind == "" {
@@ -199,13 +239,26 @@ func Open(ctx context.Context, o Options) (Result, error) {
 		_ = lf.Close()
 		_ = cmd.Process.Release()
 		res.Started = true
+		// The record may still be the stale one until the daemon replaces it: a console that answers but
+		// does not prove itself is not used, and the record is read again until Wait passes.
+		var unproven error
 		deadline := time.Now().Add(o.Wait)
 		for time.Now().Before(deadline) {
 			if info, ok := ReadInfo(o.DataRoot); ok {
 				if h, err := Health(ctx, info.Bind); err == nil {
-					bind = info.Bind
-					res.Maintenance = InMaintenance(h)
-					break
+					maintenance := InMaintenance(h)
+					if o.OnceURL == nil || maintenance {
+						bind, res.Maintenance = info.Bind, maintenance
+						break
+					}
+					tok, err := proofToken()
+					if err != nil {
+						return res, err
+					}
+					if unproven = verifyEndpoint(ctx, info.Bind, tok); unproven == nil {
+						bind = info.Bind
+						break
+					}
 				}
 			}
 			select {
@@ -215,6 +268,9 @@ func Open(ctx context.Context, o Options) (Result, error) {
 			}
 		}
 		if bind == "" {
+			if unproven != nil {
+				return res, fmt.Errorf("masamong did not become ready in %s; see %s: %w", o.Wait, res.LogFile, unproven)
+			}
 			return res, fmt.Errorf("masamong did not become ready in %s; see %s", o.Wait, res.LogFile)
 		}
 	}
