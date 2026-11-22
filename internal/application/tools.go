@@ -234,6 +234,11 @@ func (s *Service) runHTTPTool(ctx context.Context, req action.Request, r tools.R
 	if len(missing) > 0 {
 		return action.Fail(req, errcode.InvalidInput, "tool.missing_params", s.msg(req, "tool.missing_params", "tool", r.ID, "params", strings.Join(missing, ", ")), map[string]any{"missing": missing})
 	}
+	if err := tools.DirectSecret(r.ID, h); err != nil {
+		// a configuration an earlier release accepted: it still runs, and the operator is told (the message
+		// names the field, never the value); saving a change refuses it (tools.Validate)
+		s.Log.WarnContext(ctx, "operator tool keeps a key in its configuration", "tool", r.ID, "problem", err.Error())
+	}
 	secret := ""
 	if h.CredentialRef != "" {
 		cred, err := providers.Resolve(h.CredentialRef)

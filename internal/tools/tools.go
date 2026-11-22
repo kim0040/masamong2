@@ -9,6 +9,7 @@ package tools
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"net/url"
 	"regexp"
@@ -234,10 +235,21 @@ var (
 	placeRE    = regexp.MustCompile(`\{([a-z][a-z0-9_]*)\}`)
 )
 
-// Validate checks one `tools.<id>` entry.
-func Validate(id string, s Settings) error { return validate(id, s, false) }
+// Validate checks one `tools.<id>` entry. It also refuses a key written into an operator tool's headers or
+// web address (DirectSecret): a change must put it in credential_ref.
+func Validate(id string, s Settings) error {
+	if err := validate(id, s, false); err != nil {
+		return err
+	}
+	if s.HTTP != nil {
+		return DirectSecret(id, s.HTTP)
+	}
+	return nil
+}
 
-// validate checks an entry; skipURL leaves the web address policy to ValidateLenient.
+// validate checks an entry; skipURL leaves the web address policy to ValidateLenient. It does not look for
+// keys written into the entry (DirectSecret): a configuration an earlier release accepted may hold one, and
+// it still loads (the tool warns when it runs).
 func validate(id string, s Settings, skipURL bool) error {
 	skipURL = skipURL || s.Enabled != nil && !*s.Enabled // a tool that is switched off calls nothing
 	if s.HTTP == nil {
@@ -331,6 +343,57 @@ func validateHTTP(id string, s Settings, skipURL bool) error {
 		}
 	}
 	return nil
+}
+
+// Header and query names that carry a key. A header is one when its lowercased name is listed or holds
+// one of secretNameParts; a query parameter when its lowercased name is listed.
+var (
+	secretHeaders   = []string{"authorization", "proxy-authorization", "cookie"}
+	secretNameParts = []string{"api-key", "api_key", "apikey", "token", "secret", "password", "signature"}
+	secretQuery     = []string{"key", "apikey", "api_key", "api-key", "appkey", "app_key", "servicekey", "service_key",
+		"access_token", "token", "auth", "auth_token", "secret", "client_secret", "password", "passwd", "signature", "sig"}
+	wholePlaceRE = regexp.MustCompile(`^\{[a-z][a-z0-9_]*\}$`)
+)
+
+// DirectSecret refuses a key written straight into an operator tool's headers or web address: such a value
+// is exported and backed up as if it were not a secret. A header that carries a key must hold {credential}
+// (the value of credential_ref); a query parameter that carries one must be {credential} or a declared
+// parameter's placeholder. The error names the tool and the field.
+func DirectSecret(id string, h *HTTP) error {
+	if h == nil {
+		return nil
+	}
+	for _, name := range slices.Sorted(maps.Keys(h.Headers)) {
+		v := strings.TrimSpace(h.Headers[name])
+		if v == "" || strings.Contains(v, "{credential}") || !secretHeader(name) {
+			continue
+		}
+		return fmt.Errorf("tools.%s.http.headers.%s: holds a key written into the configuration; put the key in credential_ref and write {credential} here", id, name)
+	}
+	if _, query, ok := strings.Cut(h.URL, "?"); ok {
+		query, _, _ = strings.Cut(query, "#")
+		for _, pair := range strings.Split(query, "&") {
+			name, v, _ := strings.Cut(pair, "=")
+			if v == "" || v == "{credential}" || wholePlaceRE.MatchString(v) || !slices.Contains(secretQuery, strings.ToLower(name)) {
+				continue
+			}
+			return fmt.Errorf("tools.%s.http.url: the %s parameter holds a key written into the configuration; put the key in credential_ref and write %s={credential}", id, name, name)
+		}
+	}
+	return nil
+}
+
+func secretHeader(name string) bool {
+	n := strings.ToLower(strings.TrimSpace(name))
+	if slices.Contains(secretHeaders, n) {
+		return true
+	}
+	for _, part := range secretNameParts {
+		if strings.Contains(n, part) {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidateHTTPURL allows trusted HTTPS endpoints and explicit local HTTP endpoints only.

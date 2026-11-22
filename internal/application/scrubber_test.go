@@ -58,3 +58,25 @@ func TestShortCredentialIsNotSent(t *testing.T) {
 		t.Fatalf("no warning logged: %s", logs.String())
 	}
 }
+
+// An operator tool whose stored configuration has a key written into a header (accepted by an earlier
+// release) still runs, and each call warns the operator without logging the value.
+func TestDirectKeyInAStoredToolWarns(t *testing.T) {
+	direct := "synthetic" + "-direct-value"
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	var logs bytes.Buffer
+	s := &Service{Log: slog.New(slog.NewTextHandler(&logs, nil))}
+	h := &tools.HTTP{URL: srv.URL, Headers: map[string]string{"X-API-Key": direct}}
+	r := s.runHTTPTool(context.Background(), action.Request{Locale: "en"}, tools.Resolved{ID: "ops.lookup", HTTP: h})
+	if !r.OK || hits != 1 {
+		t.Fatalf("the stored tool stopped working: %+v hits %d", r, hits)
+	}
+	if out := logs.String(); !strings.Contains(out, "keeps a key in its configuration") || !strings.Contains(out, "headers.X-API-Key") || strings.Contains(out, direct) {
+		t.Fatalf("log: %s", out)
+	}
+}
