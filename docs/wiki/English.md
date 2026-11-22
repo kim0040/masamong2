@@ -39,6 +39,7 @@ Version `1.0.0` · License: MIT · Repository: [kim0040/masamong2](https://githu
 - [Storage and backup](https://github.com/kim0040/masamong2/wiki/Storage-and-Backup) — SQLite, backup and restore, why it is built this way
 - [CLI commands](https://github.com/kim0040/masamong2/wiki/CLI-Commands) — every command and the JSON output for scripts
 - [Languages](https://github.com/kim0040/masamong2/wiki/Languages) — reply and memory language packs, adding a language
+- [Statistics](https://github.com/kim0040/masamong2/wiki/Statistics) — what this install collects, turning it off, what an export contains, how to send it
 - [Security and privacy](https://github.com/kim0040/masamong2/wiki/Security-and-Privacy) — keys, loopback binding, conversation data
 - [Troubleshooting](https://github.com/kim0040/masamong2/wiki/Troubleshooting) — when the bot does not answer, and FAQ
 

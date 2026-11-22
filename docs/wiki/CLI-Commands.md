@@ -135,6 +135,7 @@ The file or input must hold one JSON object. `--input-file` accepts UTF-8 with o
 | `models list` · `models select` · `models embed-width` | Models, embedding width (same model: 1024, 2048, 0 = full width) |
 | `usage` | Monthly budget and usage |
 | `stats query` · `stats series` · `dashboard` | Statistics |
+| `stats export [--from DATE] [--to DATE] --file PATH [--reset-id]` | Write the weekly statistics file to share by hand (see [Statistics](https://github.com/kim0040/masamong2/wiki/Statistics)); nothing is sent |
 
 ## Operations
 
