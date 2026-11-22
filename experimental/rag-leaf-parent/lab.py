@@ -13,43 +13,18 @@ from corpus import collection_names, iter_observations  # noqa: E402
 from engine import DATA, HERE, load_config, PlaygroundError
 from memory_blocks import display_room_label
 
-SAFE_CONFIG_KEYS = (
-    "ranking",
-    "rerank_model",
-    "models",
-    "session_budget_usd",
-    "prepare_budget_usd",
-    "turn_budget_usd",
-    "max_request_cost_usd",
-    "eval_budget_usd",
-    "leaf_size",
-    "leaf_overlap",
-    "leaf_limit",
-    "message_limit",
-    "summary_enabled",
-    "top_k",
-    "retrieve_pool",
-    "lexical_limit",
-    "dense_limit",
-    "embed_query_instruction",
-    "alias_expand_lexical",
-    "dedup_mode",
-    "rerank_min_score",
-    "hybrid_min_cos",
-    "recent_window_days",
-    "recent_window_leaves",
-    "recency_anchor",
-    "leaf_split",
-    "gap_minutes",
-    "baseline_enabled",
-    "recency_half_life_days",
-    "document_char_limit",
-    "baseline_window_size",
-    "baseline_window_limit",
-    "collection",
-    "rooms",
-    "room_merge",
-)
+# 실험실에서 바꿀 수 있는 키는 예시 설정에서 만든다. 새 검색·설정 키를 예시에
+# 넣으면 자동으로 실험실에서 바꿀 수 있다. 프로세스 바인딩과 파일 경로 키만 뺀다.
+_LAB_FORBIDDEN = frozenset({"data_dir", "eval_questions", "experiment", "host", "port"})
+
+
+def _example_config_keys() -> tuple[str, ...]:
+    example_path = Path(__file__).resolve().parent / "config.example.json"
+    example = json.loads(example_path.read_text(encoding="utf-8"))
+    return tuple(key for key in example if key not in _LAB_FORBIDDEN)
+
+
+SAFE_CONFIG_KEYS = _example_config_keys()
 
 def config_path() -> Path:
     return HERE / "config.json"
