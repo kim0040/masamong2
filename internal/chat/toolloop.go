@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode"
 
+	"masamong/internal/crash"
 	"masamong/internal/errclass"
 	"masamong/internal/lang"
 )
@@ -1050,6 +1051,12 @@ func (rt *Runtime) startLoop(ctx context.Context, req Request, msg, timeRef stri
 		}
 		go func() {
 			defer close(lr.done)
+			defer func() {
+				if p := recover(); p != nil { // the loop runs on its own goroutine, out of reach of the turn's recover
+					lr.results, lr.err = nil, crash.Error(nil, "chat tool loop", p)
+					lr.trace = &LoopTrace{Mode: mode, Stop: "fallback", Fallback: fallbackReason(lr.err)}
+				}
+			}()
 			lr.results, lr.trace, lr.err = l.Do(ctx, others, req.History, msg, timeRef)
 		}()
 	}
