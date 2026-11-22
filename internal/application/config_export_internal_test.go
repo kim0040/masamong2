@@ -79,6 +79,52 @@ func TestDirectToolKeysAreMaskedInTheExportAndDeclaredInBackups(t *testing.T) {
 	if manifest["secrets_included"] != true {
 		t.Fatalf("a backup holding a typed key says secrets_included=%v", manifest["secrets_included"])
 	}
+
+	// The same classifier must mask the names a legacy save could write in other spellings: the
+	// validator's passwd, and a percent-encoded api_key.
+	for _, queryName := range []string{"passwd", "api%5Fkey"} {
+		d := s.Doc()
+		d.Tools = maps.Clone(d.Tools)
+		d.Tools["acme.lookup"] = tools.Settings{HTTP: &tools.HTTP{
+			URL:           "https://example.com/lookup?q={q}&" + queryName + "=" + queryKey,
+			CredentialRef: "env:SYNTHETIC_TOOL_KEY",
+		}, Params: []tools.Param{{Name: "q"}}, Description: "Looks up a synthetic record."}
+		stored, err := config.Marshal(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Store.DB.Exec(`UPDATE config_revisions SET content=?, content_hash=? WHERE revision=?`, string(stored), config.Hash(stored), s.Revision()); err != nil {
+			t.Fatal(err)
+		}
+		s.setDoc(d, s.Revision())
+		show := s.Execute(context.Background(), action.Request{Action: "config.show", Locale: "en"})
+		yaml, _ := show.Output["yaml"].(string)
+		if !show.OK || strings.Contains(yaml, queryKey) {
+			t.Fatalf("%s: the export carries a key:\n%s", queryName, yaml)
+		}
+		if u := s.Doc().Tools["acme.lookup"].HTTP.URL; !strings.Contains(u, queryKey) {
+			t.Fatal("the stored settings were changed")
+		}
+		b := s.Execute(context.Background(), action.Request{Action: "backup.create", Locale: "en"})
+		if !b.OK {
+			t.Fatalf("%s: backup %+v", queryName, b.Error)
+		}
+		target, err := s.backupPath(b.Output["name"].(string))
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, err := os.ReadFile(filepath.Join(target, "manifest.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var manifest map[string]any
+		if err := json.Unmarshal(raw, &manifest); err != nil {
+			t.Fatal(err)
+		}
+		if manifest["secrets_included"] != true {
+			t.Fatalf("%s: a backup holding a typed key says secrets_included=%v", queryName, manifest["secrets_included"])
+		}
+	}
 }
 
 func TestBackupWithoutTypedKeysSaysNoSecrets(t *testing.T) {

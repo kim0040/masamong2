@@ -398,6 +398,10 @@ func DirectSecret(id string, h *HTTP) error {
 		query, _, _ = strings.Cut(query, "#")
 		for _, pair := range strings.Split(query, "&") {
 			name, v, _ := strings.Cut(pair, "=")
+			// a parameter name can be percent-encoded (api%5Fkey); classify what it decodes to
+			if unescaped, err := url.QueryUnescape(name); err == nil {
+				name = unescaped
+			}
 			if v == "" || v == "{credential}" || wholePlaceRE.MatchString(v) || !slices.Contains(secretQuery, strings.ToLower(name)) {
 				continue
 			}
