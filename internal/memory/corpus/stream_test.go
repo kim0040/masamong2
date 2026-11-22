@@ -67,7 +67,12 @@ func TestKakaoRejectsHugeSingleFieldBeforeAccumulatingIt(t *testing.T) {
 	}
 }
 
+// TestKakaoStreamingHeapStaysBounded reads a 32 MiB file and bounds the heap it retains. The bound
+// depends on the machine's GC and load, so it runs only with MASAMONG_PERF=1 (one CI job sets it).
 func TestKakaoStreamingHeapStaysBounded(t *testing.T) {
+	if os.Getenv("MASAMONG_PERF") == "" {
+		t.Skip("set MASAMONG_PERF=1: heap bounds over a 32 MiB file depend on the machine")
+	}
 	p := writeCSV(t, 32768, 1024) // over 32 MiB; parsing retains one row, never the file/corpus
 	runtime.GC()
 	var before runtime.MemStats

@@ -64,7 +64,13 @@ func TestImportBatchesCancelAndResume(t *testing.T) {
 	}
 }
 
+// TestImportGeneratedFileHeapBounded imports a 24 MiB file and bounds the heap it grows by. The bound
+// depends on the machine's GC and load, and the import takes a minute, so it runs only with
+// MASAMONG_PERF=1 (one CI job sets it).
 func TestImportGeneratedFileHeapBounded(t *testing.T) {
+	if os.Getenv("MASAMONG_PERF") == "" {
+		t.Skip("set MASAMONG_PERF=1: heap bounds over a 24 MiB import depend on the machine")
+	}
 	e, _ := newEngine(t, false)
 	t.Cleanup(e.Close)
 	p := filepath.Join(t.TempDir(), "large.csv")
