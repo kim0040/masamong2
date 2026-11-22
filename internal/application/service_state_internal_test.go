@@ -64,6 +64,18 @@ func TestTwoServicesKeepTheirOwnState(t *testing.T) {
 		}
 	})
 
+	t.Run("restart requests", func(t *testing.T) {
+		a.requestLifecycle(lifecycleRestart)
+		select {
+		case l := <-b.LifecycleRequests():
+			t.Fatalf("one service's %s request reached the other", l)
+		default:
+		}
+		if l := <-a.LifecycleRequests(); l != lifecycleRestart {
+			t.Fatalf("the request read back as %q", l)
+		}
+	})
+
 	t.Run("tool usage", func(t *testing.T) {
 		if a.toolUsage() == nil || a.toolUsage() == b.toolUsage() || a.toolUsage() != a.toolUsage() {
 			t.Fatal("each service opens and keeps its own tool usage counter")

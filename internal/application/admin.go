@@ -528,11 +528,17 @@ const (
 	lifecycleStop    Lifecycle = "stop"
 )
 
-var lifecycles sync.Map // *Service → chan Lifecycle
+// lifecycleQueue holds the operator's latest restart/stop request until the daemon reads it
+// (Service.lifeReqs).
+type lifecycleQueue struct {
+	once sync.Once
+	ch   chan Lifecycle
+}
 
 func (s *Service) lifecycleChan() chan Lifecycle {
-	v, _ := lifecycles.LoadOrStore(s, make(chan Lifecycle, 1))
-	return v.(chan Lifecycle)
+	q := &s.lifeReqs
+	q.once.Do(func() { q.ch = make(chan Lifecycle, 1) })
+	return q.ch
 }
 
 // LifecycleRequests delivers operator restart/stop requests to the daemon.
