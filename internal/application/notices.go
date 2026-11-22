@@ -194,7 +194,7 @@ func b2i(b bool) int {
 // Collecting
 // ---------------------------------------------------------------------------
 
-var noticesRunning, noticesTicking atomic.Bool
+var noticesTicking atomic.Bool
 
 // neededSources are the boards someone subscribed to (active, with consent).
 func (s *Service) neededSources(c *notices.Catalog) map[string]bool {
@@ -252,10 +252,10 @@ type CollectReport struct {
 // collectNotices reads the boards (the ones given, else the ones someone needs) and stores what is new.
 func (s *Service) collectNotices(ctx context.Context, only []string) (CollectReport, error) {
 	rep := CollectReport{At: s.Clock.Now().UTC().Format(time.RFC3339), Failures: map[string]string{}}
-	if !noticesRunning.CompareAndSwap(false, true) {
+	if !s.runs.notices.CompareAndSwap(false, true) {
 		return rep, errors.New("a collection is already running")
 	}
-	defer noticesRunning.Store(false)
+	defer s.runs.notices.Store(false)
 	c, _, err := s.noticeCatalog()
 	if err != nil {
 		return rep, err

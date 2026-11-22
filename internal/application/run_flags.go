@@ -12,4 +12,5 @@ type runFlags struct {
 	reminders   atomic.Bool // the reminder pass is running (reminders.go)
 	styles      atomic.Bool // the room style refresh is running (roomstyle.go)
 	idleThreads atomic.Bool // closing idle threads is running (threads.go)
+	notices     atomic.Bool // the notice pass is running (notices.go)
 }
