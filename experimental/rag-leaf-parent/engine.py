@@ -1548,6 +1548,10 @@ class IndexBundle:
     # leaf row each belongs to. Loaded only when the run is enabled and the artifacts exist.
     message_vectors: np.ndarray | None = None
     message_leaf: np.ndarray | None = None
+    # Lazily built runtime caches, never serialized. `_identity_for` fills
+    # `_identity_table`; retrieval_post fills `_t04_msg_index_by_obs`.
+    _identity_table: Any = None
+    _t04_msg_index_by_obs: dict[str, int] | None = None
 
     @property
     def docs(self) -> list[dict[str, Any]]:
