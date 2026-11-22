@@ -103,6 +103,18 @@ func TestTwoServicesKeepTheirOwnState(t *testing.T) {
 		}
 	})
 
+	t.Run("one-at-a-time marks", func(t *testing.T) {
+		// a usage_gc pass running in one service does not keep the other's from starting
+		a.runs.retention.Store(true)
+		defer a.runs.retention.Store(false)
+		if !b.startRetentionPass(context.Background()) {
+			t.Fatal("one service's running pass blocked the other's")
+		}
+		if a.startRetentionPass(context.Background()) {
+			t.Fatal("a service started a second pass beside its running one")
+		}
+	})
+
 	t.Run("tool usage", func(t *testing.T) {
 		if a.toolUsage() == nil || a.toolUsage() == b.toolUsage() || a.toolUsage() != a.toolUsage() {
 			t.Fatal("each service opens and keeps its own tool usage counter")
