@@ -449,7 +449,7 @@ func (s *Service) remindersUpdate(req action.Request) action.Result {
 		id = picked
 	}
 	r, ok := s.reminderByID(id)
-	if !ok {
+	if !ok || !inReminderScope(req.Invoker, r) {
 		return action.WithCard(action.OK(req, map[string]any{"status": "not_found"}),
 			action.Card{Title: title, Text: s.msg(req, "reminders.not_found"), Tone: "neutral", Ephemeral: true})
 	}
@@ -656,13 +656,8 @@ func (s *Service) reminderStateCard(req action.Request, r reminder) action.Resul
 }
 
 func (s *Service) myReminders(req action.Request, userID string) action.Result {
-	where, args := `owner_id=? AND `+reminderLive, []any{userID}
-	if inv := req.Invoker; inv != nil && inv.Via == viaChat && !inv.Private {
-		// a chat turn in a room answers in that room: the model is given that room's reminders only, not
-		// the ones the person made in other rooms or in DMs (the command's card is shown to them alone)
-		where, args = where+` AND channel_id=?`, append(args, inv.ChannelID)
-	}
-	list, err := s.listReminders(where, args, 25)
+	scope, args := reminderScope(req.Invoker) // a model turn in a room: that room's only (reminders_scope.go)
+	list, err := s.listReminders(`owner_id=? AND `+reminderLive+scope, append([]any{userID}, args...), 25)
 	if err != nil {
 		s.Log.Error("reminders: list read failed", "err", err)
 		return action.Fail(req, errcode.IO, "generic.error", s.msg(req, "generic.error"), nil)

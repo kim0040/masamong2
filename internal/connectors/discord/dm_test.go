@@ -126,7 +126,7 @@ func TestDMGatewayPlainMessageAnsweredAndFragmentsMerged(t *testing.T) {
 	if !call.addressed || call.nameOnly || call.followUp {
 		t.Fatal("DM entered name/follow-up gate")
 	}
-	g.capture(first, config.ChannelPolicy{Capture: true})
+	g.capture(first, application.ChannelPlace{Known: true})
 	if err := g.svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM memory_observations WHERE room='discord:0:dm-fixture'`).Scan(&captured); err != nil || captured != 0 {
 		t.Fatal("direct capture admitted DM")
 	}

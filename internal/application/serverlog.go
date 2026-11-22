@@ -10,6 +10,7 @@ import (
 
 	"masamong/internal/action"
 	"masamong/internal/config"
+	"masamong/internal/crash"
 	"masamong/internal/errclass"
 	"masamong/internal/errcode"
 )
@@ -399,20 +400,30 @@ func (s *Service) serverLogPost(e serverLogEntry) {
 }
 
 // serverLogWorker posts the queued entries one at a time until the service stops; what still waits then is
-// not posted.
+// not posted, and Close cancels the post under way.
 func (s *Service) serverLogWorker(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case e := <-s.serverLog.queue:
-			s.serverLogSend(e)
+			if ctx.Err() != nil {
+				return // both were ready: Close began, so the entry is not started
+			}
+			s.serverLogOne(ctx, e)
 		}
 	}
 }
 
+// serverLogOne posts one entry. A post that panics is recovered here, so the worker (started once) goes on
+// with the next entry.
+func (s *Service) serverLogOne(ctx context.Context, e serverLogEntry) {
+	defer crash.Recover(s.Log, "server log post")
+	s.serverLogSend(ctx, e)
+}
+
 // serverLogSend posts one entry within the server's burst limit, noting entries left out before it.
-func (s *Service) serverLogSend(e serverLogEntry) {
+func (s *Service) serverLogSend(ctx context.Context, e serverLogEntry) {
 	st := &s.serverLog
 	now := s.Clock.Now()
 	st.mu.Lock()
@@ -456,8 +467,10 @@ func (s *Service) serverLogSend(e serverLogEntry) {
 		}
 		card.Text += note
 	}
-	ctx, cancel := context.WithTimeout(s.serverLogContext(), 20*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second) // ends at Close (the worker's) or with the daemon run
+	stop := context.AfterFunc(s.serverLogContext(), cancel)
 	_, err := poster.PostChannel(ctx, e.channel, "", "", &card)
+	stop()
 	cancel()
 	res := serverLogResult{At: now.UTC().Format(time.RFC3339), OK: err == nil, Channel: e.channel}
 	st.mu.Lock()

@@ -62,6 +62,16 @@ func dmButtons(rows []discordgo.MessageComponent, guildID string) []discordgo.Me
 	return out
 }
 
+// dmRefresh keeps the server on the buttons of a card that a press in a DM brings back (a fresh forget
+// preview after memory changed): the next press in the DM must name the server again, and the Action still
+// checks it. A press in a server, or a DM button of no server, gets the components as rendered.
+func dmRefresh(components []discordgo.MessageComponent, pressedIn string, ictx InvokeContext) *[]discordgo.MessageComponent {
+	if pressedIn == "" {
+		components = dmButtons(components, ictx.GuildID)
+	}
+	return &components
+}
+
 // dmButtonGuild reads the server dmButtons added to a memory button pressed in a DM, and gives the parts
 // back as the button family expects them. Elsewhere it changes nothing.
 func dmButtonGuild(parts []string, ictx InvokeContext) ([]string, InvokeContext) {

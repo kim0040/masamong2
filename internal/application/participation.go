@@ -463,7 +463,7 @@ func (s *Service) considerCandidate(cand *partCandidate) {
 		return
 	}
 	defer done()
-	gone := s.BlockedIn(cand.guild, cand.msg.author) || !s.ConsentAllows(cand.msg.author, privacy.Participation) || s.Paused(cand.guild, cand.channel) // may change in the wait; asks the store, so before the lock
+	gone := !s.partAllowed(cand) // may change in the wait; asks the store, so before the lock
 	// what the channel and the person allow for collecting may have changed during the wait; read for every
 	// mode, since the mode is read under the lock (a switch away from collect during the wait still counts)
 	collectWhy := s.collectSkip(cand.guild, cand.channel, cand.msg.author)
@@ -564,7 +564,7 @@ func (s *Service) considerCandidate(cand *partCandidate) {
 		if mode == "conservative" {
 			in.Deliver = func(ctx context.Context, res chat.Result) string {
 				text := strings.TrimSpace(res.Answer)
-				if text == "" || !s.stillCurrent(cand) {
+				if text == "" || !s.stillCurrent(cand) || !s.partAllowed(cand) {
 					return ""
 				}
 				poster, ok := s.Discord().(ChannelPoster)
@@ -601,6 +601,7 @@ func (s *Service) considerCandidate(cand *partCandidate) {
 		s.logParticipation(cand, mode, partSpoken, clip(j.Reason, 200), j.Score, draft, cost)
 	case postErr != nil:
 		s.logParticipation(cand, mode, partError, clip(postErr.Error(), 200), j.Score, draft, cost)
+	case !s.partAllowed(cand): // withdrawn, blocked or paused since the wait: nothing is kept (partFinal)
 	case !s.stillCurrent(cand) || mode == "conservative":
 		s.logParticipation(cand, mode, partCancelled, "conversation_moved", j.Score, draft, cost)
 	default:
@@ -634,8 +635,7 @@ func (s *Service) offerPlan(ctx context.Context, cand *partCandidate, mode strin
 		card.Fields[0].Value = s.whenText(req.Locale, w.Candidates[0].At, loc) + " / " + s.whenText(req.Locale, w.Candidates[1].At, loc)
 	}
 	draft := card.Title + " — " + card.Text + " (" + card.Fields[0].Value + ")"
-	if !s.stillCurrent(cand) {
-		s.logParticipation(cand, mode, partCancelled, "conversation_moved", j.Score, draft, cost)
+	if !s.partFinal(cand, mode, j.Score, draft, cost) {
 		return
 	}
 	if mode != "conservative" {

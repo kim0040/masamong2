@@ -184,6 +184,10 @@ func (s *Service) channelPolicy(guildID, channelID string) config.ChannelPolicy 
 		if parent := s.threadParent(channelID); parent != "" {
 			return s.ownChannelPolicy(guildID, parent)
 		}
+	} else if pol := s.ownChannelPolicy(guildID, channelID); pol.Capture && s.captureOffInGuild(guildID) {
+		// an entry of its own never turns capture back on under a parent that turned it off (capture_policy.go)
+		pol.Capture = s.captureAllowed(guildID, channelID, s.threadParent(channelID))
+		return pol
 	}
 	return s.ownChannelPolicy(guildID, channelID)
 }

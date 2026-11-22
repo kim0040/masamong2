@@ -72,6 +72,7 @@ type Gateway struct {
 	cancelPictures    func(channelID string, messageIDs []string) // tests; nil means the service's queue
 	reactForTest      func(context.Context, string, string, string) error
 	recon             messageReconciler // edits and deletes that could not be applied yet (reconciliation.go)
+	changes           changeHandlers    // edit and delete handlers running now; Wait joins them (change_handlers.go)
 	noticeMu          sync.Mutex
 	notices           map[string]time.Time // "user:channel" and "channel" -> last refusal notice
 	// timeout for one Action execution. The reply that follows (the result, or the error card after a
@@ -403,6 +404,7 @@ func (g *Gateway) Wait(timeout time.Duration) bool {
 		if drainDone != nil {
 			<-drainDone
 		}
+		<-g.changes.done() // a delivered edit or delete is applied or queued before the database closes
 		close(done)
 	}()
 	select {
@@ -1116,7 +1118,7 @@ func (g *Gateway) handleComponent(s *discordgo.Session, i *discordgo.Interaction
 		r := g.renderInvoked(res, Command{Name: parts[0], Action: req.Action}, ictx)
 		edit := &discordgo.WebhookEdit{Embeds: ptrEmbeds(r.Embeds()), AllowedMentions: noMentions}
 		if r.Components != nil {
-			edit.Components = &r.Components
+			edit.Components = dmRefresh(r.Components, i.GuildID, ictx) // a DM press keeps the server (private_cards.go)
 		}
 		final, cancelFinal := g.finalContext(base)
 		defer cancelFinal()
@@ -1478,9 +1480,9 @@ func (g *Gateway) onDirectMessage(s *discordgo.Session, m *discordgo.MessageCrea
 // onServerMessage handles a person's message in an approved server: capture and observe it, then run the
 // command, hold the call, or let the follow-up window decide.
 func (g *Gateway) onServerMessage(s *discordgo.Session, m *discordgo.MessageCreate, cmd Command, opts map[string]string, isCmd bool) {
-	g.noteThread(s, m.GuildID, m.ChannelID) // before the policy: a thread follows its parent's
+	place := g.noteThread(s, m.GuildID, m.ChannelID) // before the policy: a thread follows its parent's
 	pol := g.svc.ChannelPolicyFor(m.GuildID, m.ChannelID)
-	g.capture(m, pol)
+	g.capture(m, place)
 	answer, follows := g.classifyServerMessage(m, pol, isCmd)
 	o := application.ObservedMessage{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID, AuthorID: m.Author.ID,
 		AuthorName: displayName(m), Content: bodyOf(m.Message), At: m.Timestamp, Addressed: isCmd || answer || follows || pol.Respond == "always", ToSomeone: g.toSomeone(m), BotCall: g.botCallKind(m)}
@@ -1820,6 +1822,7 @@ func (g *Gateway) toSomeone(m *discordgo.MessageCreate) bool {
 // message-content intent). Discord also sends updates when a link preview loads; only real edits
 // (EditedTimestamp set) change anything.
 func (g *Gateway) onMessageUpdate(s *discordgo.Session, m *discordgo.MessageUpdate) {
+	defer g.changes.enter()() // counted even while draining: Wait joins it (change_handlers.go)
 	defer crash.Recover(g.log, "discord message update")
 	if m.Message == nil || (!g.cfg.MessageContent && m.GuildID != "") || m.EditedTimestamp == nil || (m.Author != nil && m.Author.Bot) {
 		return
@@ -1856,6 +1859,7 @@ const stateMessages = 100
 // channel's capture setting is now: a message stored while capture was on is still removed. The server
 // log hears of them first, while the stored message still has its author and text.
 func (g *Gateway) onMessageDelete(s *discordgo.Session, m *discordgo.MessageDelete) {
+	defer g.changes.enter()() // counted even while draining: Wait joins it (change_handlers.go)
 	defer recoverReconciliationPanic(g.log, "delete handler", nil)
 	if m.Message == nil || m.ID == "" {
 		return
@@ -1898,6 +1902,7 @@ func (g *Gateway) cancelPictureJobs(channelID string, messageIDs []string) {
 }
 
 func (g *Gateway) onMessageDeleteBulk(s *discordgo.Session, m *discordgo.MessageDeleteBulk) {
+	defer g.changes.enter()()
 	defer recoverReconciliationPanic(g.log, "bulk delete handler", nil)
 	if kept := g.interims.withoutInterims(m.Messages); len(kept) != len(m.Messages) {
 		if len(kept) == 0 {
@@ -1951,13 +1956,10 @@ func messageAuthorName(m *discordgo.Message) string {
 	return m.Author.Username
 }
 
-// capture stores the message as channel memory when both the instance and the channel allow it.
-func (g *Gateway) capture(m *discordgo.MessageCreate, pol config.ChannelPolicy) {
-	if m.GuildID == "" {
-		return
-	}
+// capture stores the message as channel memory when the instance, the channel and its parent allow it.
+func (g *Gateway) capture(m *discordgo.MessageCreate, place application.ChannelPlace) {
 	body := bodyOf(m.Message)
-	if !g.svc.Doc().Memory.Capture || !pol.Capture || body == "" || !g.svc.MemoryAllowed(m.Author.ID) {
+	if body == "" || !g.svc.CapturesIn(m.GuildID, m.ChannelID, place) || !g.svc.MemoryAllowed(m.Author.ID) { // CapturesIn: never a DM
 		return
 	}
 	eng, err := g.svc.MemoryEngine()
@@ -2045,7 +2047,7 @@ func (g *Gateway) runCommand(s *discordgo.Session, m *discordgo.MessageCreate, c
 	defer cancel()
 	mark := g.svc.SettledMark() // before the command reads anything: its result may go on into a chat turn
 	res := g.svc.Execute(ctx, requestFor(cmd, opts, ictx, "dc:"+m.ID))
-	if application.Unanswered(res) && (!ictx.Private || m.GuildID == "") { // a DM: CommandToChat checks DM chat is open
+	if application.Unanswered(res) && (!cmd.Private || m.GuildID == "") { // a personal command's room failure stays its DM card; a DM: CommandToChat checks DM chat
 		// no answer from the tool: carry on as a conversation, off the event loop
 		g.work(func(base context.Context) {
 			// the reply is posted inside the turn: the conversation keeps only what reached Discord

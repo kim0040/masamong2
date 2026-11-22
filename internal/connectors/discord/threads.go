@@ -21,11 +21,12 @@ import (
 // channels are threads of which parent, put the thread offer under a reply, make the thread when the
 // caller accepts, and answer untagged messages in the bot's own threads.
 
-// channelKind is what the gateway has learned about a channel: whether it is a thread. Entries are made for
-// every channel and thread the bot reads in, so they expire (sweepChannelKinds) instead of growing with
-// every thread ever seen.
+// channelKind is what the gateway has learned about a channel: whether it is a thread, and of which parent.
+// Entries are made for every channel and thread the bot reads in, so they expire (sweepChannelKinds) instead
+// of growing with every thread ever seen.
 type channelKind struct {
 	thread bool
+	parent string       // a thread's parent channel, when Discord said it
 	seen   atomic.Int64 // unix nanoseconds of the last message that looked it up
 }
 
@@ -38,21 +39,36 @@ const (
 )
 
 func (g *Gateway) storeChannelKind(id string, thread bool) {
-	k := &channelKind{thread: thread}
+	g.storeThreadKind(id, thread, "")
+}
+
+// storeThreadKind remembers a channel's kind with a thread's parent ("" when not known).
+func (g *Gateway) storeThreadKind(id string, thread bool, parent string) {
+	k := &channelKind{thread: thread, parent: parent}
 	k.seen.Store(time.Now().UnixNano())
 	g.channelKinds.Store(id, k)
 }
 
 // channelKnown reports whether the channel's kind is known, and marks it used now.
 func (g *Gateway) channelKnown(id string) bool {
+	_, ok := g.knownPlace(id)
+	return ok
+}
+
+// knownPlace is what the gateway has learned of a channel (application.ChannelPlace), and marks it used now.
+func (g *Gateway) knownPlace(id string) (application.ChannelPlace, bool) {
 	v, ok := g.channelKinds.Load(id)
 	if !ok {
-		return false
+		return application.ChannelPlace{}, false
 	}
+	place := application.ChannelPlace{Known: true}
 	if k, isKind := v.(*channelKind); isKind {
 		k.seen.Store(time.Now().UnixNano())
+		if k.thread {
+			place.Parent = k.parent
+		}
 	}
-	return true
+	return place, true
 }
 
 // sweepChannelKinds forgets the channels not heard from for channelKindIdle, then the longest unheard beyond
@@ -82,17 +98,18 @@ func (g *Gateway) sweepChannelKinds(now time.Time) {
 }
 
 // noteThread tells the application when a channel is a thread. It reads the gateway's channel cache and,
-// for a thread the cache has not seen (one made while the bot was away), asks Discord once.
-func (g *Gateway) noteThread(s *discordgo.Session, guildID, channelID string) {
+// for a thread the cache has not seen (one made while the bot was away), asks Discord once. It returns what
+// it learned, for the capture check (an unknown place when Discord could not be asked).
+func (g *Gateway) noteThread(s *discordgo.Session, guildID, channelID string) application.ChannelPlace {
 	if guildID == "" || channelID == "" {
-		return
+		return application.ChannelPlace{}
 	}
 	// the gateway has no timer of its own for this; the message path sweeps at most once an hour
 	if last := g.kindSweptAt.Load(); time.Since(time.Unix(0, last)) > channelKindSweepEvery && g.kindSweptAt.CompareAndSwap(last, time.Now().UnixNano()) {
 		g.sweepChannelKinds(time.Now())
 	}
-	if g.channelKnown(channelID) {
-		return
+	if place, ok := g.knownPlace(channelID); ok {
+		return place
 	}
 	var ch *discordgo.Channel
 	if s.State != nil {
@@ -104,14 +121,20 @@ func (g *Gateway) noteThread(s *discordgo.Session, guildID, channelID string) {
 		ch, _ = s.Channel(channelID, discordgo.WithContext(ctx))
 	}
 	if ch == nil {
-		return // asked again with the next message
+		return application.ChannelPlace{} // asked again with the next message
 	}
-	g.storeChannelKind(channelID, ch.IsThread())
+	place := application.ChannelPlace{Known: true}
+	if ch.IsThread() {
+		place.Parent = ch.ParentID
+	}
+	g.storeThreadKind(channelID, ch.IsThread(), place.Parent)
 	// a private thread is not the parent's room: only the people in it may read what is said there,
-	// so it neither inherits the parent's capture nor joins its memory rooms (it is a channel of its own)
+	// so it does not join its memory rooms (it is a channel of its own); the parent's capture off still
+	// applies to it, through the place returned (application.CapturesIn)
 	if ch.IsThread() && ch.Type != discordgo.ChannelTypeGuildPrivateThread {
 		g.svc.NoteThread(guildID, channelID, ch.ParentID, ch.OwnerID != "" && ch.OwnerID == g.botUserID())
 	}
+	return place
 }
 
 func (g *Gateway) onThreadCreate(s *discordgo.Session, t *discordgo.ThreadCreate) {
@@ -119,7 +142,7 @@ func (g *Gateway) onThreadCreate(s *discordgo.Session, t *discordgo.ThreadCreate
 	if t.Channel == nil || !t.IsThread() {
 		return
 	}
-	g.storeChannelKind(t.ID, true)
+	g.storeThreadKind(t.ID, true, t.ParentID)
 	if t.Type == discordgo.ChannelTypeGuildPrivateThread {
 		return // see noteThread
 	}
@@ -279,7 +302,7 @@ func (g *Gateway) openThread(ctx context.Context, s *discordgo.Session, guildID,
 		g.svc.ThreadOfferDropped(guildID, channelID, "create_failed")
 		return false
 	}
-	g.storeChannelKind(th.ID, true)
+	g.storeThreadKind(th.ID, true, channelID)
 	first := g.svc.ThreadOpened(ctx, guildID, channelID, th.ID, callerID, turnID)
 	if joiner != "" && joiner != callerID {
 		g.svc.NoteThreadParticipant(th.ID, joiner)
