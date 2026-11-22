@@ -9,11 +9,13 @@ import (
 	"time"
 
 	"masamong/internal/action"
+	"masamong/internal/observability"
 )
 
 // The daemon's structured log is teed into a bounded in-memory ring so the console can follow it
 // live and search recent entries without reading log files. Attribute values under sensitive keys
-// are replaced before they enter the ring; the log itself already avoids message bodies and secrets.
+// are replaced before they enter the ring, and the message and every other value go through the same
+// observability.Redact as the file log (the console must not show what the file log masks).
 
 const logRingSize = 3000
 
@@ -63,6 +65,7 @@ func redactAttr(k, v string) string {
 			return "[redacted]"
 		}
 	}
+	v = observability.Redact(v) // before the cut, so a secret is never split past recognition
 	if len(v) > 500 {
 		return v[:500] + "…"
 	}
@@ -94,7 +97,7 @@ func (h *ringHandler) Handle(ctx context.Context, r slog.Record) error {
 			add(a)
 		}
 		r.Attrs(func(a slog.Attr) bool { add(a); return true })
-		h.ring.add(logEntry{At: r.Time.UTC().Format(time.RFC3339Nano), Level: strings.ToLower(r.Level.String()), Msg: r.Message, Attrs: attrs})
+		h.ring.add(logEntry{At: r.Time.UTC().Format(time.RFC3339Nano), Level: strings.ToLower(r.Level.String()), Msg: observability.Redact(r.Message), Attrs: attrs})
 	}
 	if h.next.Enabled(ctx, r.Level) {
 		return h.next.Handle(ctx, r)
