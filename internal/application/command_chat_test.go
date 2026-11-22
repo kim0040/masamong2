@@ -43,6 +43,10 @@ func TestCommandWithoutAnswerCarriesOnAsConversation(t *testing.T) {
 		d.Models["response"] = config.Model{Provider: "openrouter", Model: "fake/response"}
 		d.Memory.Retrieve = "off"
 	})
+	// the default room answers commands only; carrying on needs a room that talks
+	if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g", "id": "c", "respond": "mention"}); !r.OK {
+		t.Fatalf("configure: %+v", r.Error)
+	}
 	quote := exec(svc, "finance.quote", map[string]any{"symbol": "AAPL"})
 	if !application.Unanswered(quote) {
 		t.Fatalf("an unconfigured quote is no answer: %+v", quote.Output)
@@ -80,5 +84,15 @@ func TestCommandWithoutAnswerCarriesOnAsConversation(t *testing.T) {
 	quiet.ChannelID = "quiet"
 	if _, ok := svc.CommandToChat(context.Background(), quote, quiet); ok {
 		t.Fatal("a channel that does not chat keeps the card")
+	}
+	// A room set to answer commands only keeps the command's card: the same message must not
+	// start a model turn there.
+	if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g", "id": "cmdroom", "respond": "command"}); !r.OK {
+		t.Fatalf("configure: %+v", r.Error)
+	}
+	cmdRoom := in
+	cmdRoom.ChannelID = "cmdroom"
+	if _, ok := svc.CommandToChat(context.Background(), quote, cmdRoom); ok {
+		t.Fatal("a commands-only room keeps the card")
 	}
 }

@@ -106,13 +106,23 @@ func disasterGuildAllowed(doc config.Document, guildID string) bool {
 	return guildID == "" || !doc.Access.ApprovalRequired() || slices.Contains(doc.Access.Servers, guildID) || guildConfigured(doc, guildID)
 }
 
+// disasterAlertsOn is whether the bot posts disaster alerts on its own: the instance's alert switch
+// and the features.disasters switch (off on installs outside Korea) must both be on. The watcher and the
+// status Action read it the same way.
+func disasterAlertsOn(doc config.Document) bool {
+	if on, set := doc.Features["disasters"]; set && !on {
+		return false
+	}
+	return doc.DisasterAlerts.On()
+}
+
 // disasterTick is one scheduler minute: earthquakes, and warnings when five minutes have passed.
 func (s *Service) disasterTick(ctx context.Context) {
 	// one configuration snapshot for the whole check: the rooms' levels and the instance switches
 	// (warnings, marine, magnitudes) always come from the same revision
 	doc := s.Doc()
 	cfg := doc.DisasterAlerts
-	if s.practice || s.Store == nil || !cfg.On() {
+	if s.practice || s.Store == nil || !disasterAlertsOn(doc) {
 		return
 	}
 	r := s.Registry()
@@ -733,8 +743,9 @@ func (s *Service) disasterAlertsStatus(req action.Request) action.Result {
 	channels := len(s.disasterChannels(doc))
 	r := s.Registry()
 	reason := ""
+	on := disasterAlertsOn(doc)
 	switch {
-	case !cfg.On():
+	case !on:
 		reason = "off"
 	case r == nil || r.KMA == nil || !r.KMA.Configured():
 		reason = "no_kma_key"
@@ -747,7 +758,7 @@ func (s *Service) disasterAlertsStatus(req action.Request) action.Result {
 	if regions == nil {
 		regions = []string{}
 	}
-	return action.OK(req, map[string]any{"enabled": cfg.On(), "warnings": cfg.WarningsOn(), "marine": cfg.Marine,
+	return action.OK(req, map[string]any{"enabled": on, "warnings": on && cfg.WarningsOn(), "marine": cfg.Marine,
 		"earthquake_min_domestic": cfg.MinMagnitude(true), "earthquake_min_overseas": cfg.MinMagnitude(false),
 		"warning_regions": regions, "channels": channels, "waiting": reason, "state": st})
 }

@@ -58,3 +58,44 @@ func TestActivityRankingCountsPeoplePerChannel(t *testing.T) {
 		t.Fatal("unknown period accepted")
 	}
 }
+
+// The ranking shows the name a person used last (the row with the latest time, not the name that sorts
+// last), and a person who withdrew is in neither the list, the total nor the head count, even if a row
+// of theirs is still in the table.
+func TestActivityRankingShowsLastNameAndLeavesOutWithdrawn(t *testing.T) {
+	svc := setupSvc(t)
+	if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "c1", "respond": "mention"}); !r.OK {
+		t.Fatal(r.Error)
+	}
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	svc.Clock = clock.Fixed{T: now}
+	say := func(user, name string, at time.Time) {
+		svc.Observe(application.ObservedMessage{GuildID: "g1", ChannelID: "c1", MessageID: user + name + at.String(), AuthorID: user, AuthorName: name, Content: "x", At: at})
+	}
+	say("1001", "Zed", now.Add(-48*time.Hour)) // the older name sorts last in the alphabet
+	say("1001", "Amy", now)                    // renamed, the latest
+	for i := 0; i < 3; i++ {
+		say("1002", "Bob", now.Add(-time.Duration(i)*time.Minute))
+	}
+	_ = asUser(svc, "1002", "privacy.consent", map[string]any{"scope": "memory", "decision": "withdraw"})
+	svc.MemoryAllowed("warm") // load the opt-out cache before the ranking reads
+	waitFor(t, "the withdrawn person's rows to go", func() bool {
+		var n int
+		return svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM activity_counts WHERE user_id='1002'`).Scan(&n) == nil && n == 0
+	})
+	// a row of the withdrawn person that the deletion has not reached (or that was written before it)
+	if _, err := svc.Store.DB.Exec(`INSERT INTO activity_counts(day, guild_id, channel_id, user_id, name, n, last_at) VALUES('2026-10-01','g1','c1','1002','Bob',7,'2026-10-01T11:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"period": "all", "scope": "discord:c1"})
+	r := svc.Execute(t.Context(), action.Request{Action: "activity.ranking", Input: raw, Invoker: &action.Invoker{Via: "command", GuildID: "g1", ChannelID: "c1", UserID: "1001"}})
+	if !r.OK {
+		t.Fatalf("%+v", r.Error)
+	}
+	m, _ := jsonRoundTrip(r.Output)
+	top := m["top"].([]any)
+	first := top[0].(map[string]any)
+	if len(top) != 1 || first["name"] != "Amy" || first["count"].(float64) != 2 || first["share"] != "100.0" || m["total_messages"].(float64) != 2 || m["people"].(float64) != 1 {
+		t.Fatalf("last name, withdrawn person left out of list, total and head count: %v", m)
+	}
+}

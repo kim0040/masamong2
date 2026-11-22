@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -47,5 +48,19 @@ func TestDirectSecretsAreRefusedOnChangeOnly(t *testing.T) {
 		if err := Validate("ops.lookup", s); err != nil {
 			t.Fatalf("allowed %d: %v", i, err)
 		}
+	}
+}
+
+// The refusal is a typed error, so the caller can say it in the person's language from the tool and the
+// field without parsing the English text.
+func TestDirectSecretErrorNamesToolAndField(t *testing.T) {
+	var direct *DirectSecretError
+	err := DirectSecret("ops.lookup", &HTTP{URL: "https://api.example/v1?serviceKey=synthetic-value", CredentialRef: "env:K"})
+	if !errors.As(err, &direct) || direct.Tool != "ops.lookup" || direct.Where() != "url: serviceKey" {
+		t.Fatalf("query: %#v", err)
+	}
+	err = DirectSecret("ops.lookup", &HTTP{URL: "https://api.example/v1", Headers: map[string]string{"X-API-Key": "synthetic-value"}})
+	if !errors.As(err, &direct) || direct.Where() != "headers.X-API-Key" {
+		t.Fatalf("header: %#v", err)
 	}
 }

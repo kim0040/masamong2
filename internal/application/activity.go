@@ -2,10 +2,12 @@ package application
 
 import (
 	"fmt"
+	"sort"
 	"time"
 
 	"masamong/internal/action"
 	"masamong/internal/errcode"
+	"masamong/internal/storage"
 )
 
 // Activity ranking ("수다왕"): how many messages each person sent in a channel, for /랭킹. The previous
@@ -108,10 +110,7 @@ func (s *Service) activityRanking(req action.Request) action.Result {
 		where += " AND day>=?"
 		args = append(args, from)
 	}
-	var total, people int
-	_ = db.DB.QueryRow(`SELECT COALESCE(SUM(n),0), COUNT(DISTINCT user_id) FROM activity_counts WHERE `+where, args...).Scan(&total, &people)
-	rows, err := db.DB.Query(`SELECT user_id, MAX(name), SUM(n) AS c, MAX(last_at) AS l FROM activity_counts WHERE `+where+
-		` GROUP BY user_id ORDER BY c DESC, l DESC LIMIT 10`, args...)
+	rows, err := db.DB.Query(`SELECT user_id, SUM(n), MAX(last_at) FROM activity_counts WHERE `+where+` GROUP BY user_id`, args...)
 	if err != nil {
 		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
 	}
@@ -119,34 +118,65 @@ func (s *Service) activityRanking(req action.Request) action.Result {
 	// Read every row and close the cursor before MemoryAllowed: on SQLite the writer and reader share one
 	// connection, and a cold opt-out cache queries it again, so checking inside the loop waits forever.
 	type ranked struct {
-		id, name string
-		n        int
+		id, name, last string
+		n              int
 	}
 	var found []ranked
 	for rows.Next() {
 		var r ranked
-		var last string
-		if rows.Scan(&r.id, &r.name, &r.n, &last) != nil {
+		if rows.Scan(&r.id, &r.n, &r.last) != nil {
 			continue
 		}
 		found = append(found, r)
 	}
 	_ = rows.Close()
-	top := []map[string]any{}
+	// The total and the head count come from the same set as the list: someone who withdrew after being
+	// counted is in neither (their rows are deleted on withdrawal; this covers the moments before that finishes).
+	counted := found[:0]
+	total := 0
 	for _, r := range found {
-		id, name, n := r.id, r.name, r.n
-		if !s.MemoryAllowed(id) {
-			continue // withdrew after being counted
+		if !s.MemoryAllowed(r.id) {
+			continue
 		}
+		counted = append(counted, r)
+		total += r.n
+	}
+	people := len(counted)
+	sort.Slice(counted, func(i, j int) bool {
+		a, b := counted[i], counted[j]
+		if a.n != b.n {
+			return a.n > b.n
+		}
+		if a.last != b.last {
+			return a.last > b.last
+		}
+		return a.id < b.id
+	})
+	if len(counted) > 10 {
+		counted = counted[:10]
+	}
+	top := []map[string]any{}
+	for _, r := range counted {
 		share := 0.0
 		if total > 0 {
-			share = float64(n) * 100 / float64(total)
+			share = float64(r.n) * 100 / float64(total)
 		}
-		top = append(top, map[string]any{"rank": len(top) + 1, "name": name, "count": n, "share": fmt.Sprintf("%.1f", share)})
+		top = append(top, map[string]any{"rank": len(top) + 1, "name": s.activityName(db, r.id, where, args), "count": r.n, "share": fmt.Sprintf("%.1f", share)})
 	}
 	status := "ok"
 	if len(top) == 0 {
 		status = "no_activity"
 	}
 	return action.OK(req, map[string]any{"status": status, "period": period, "from": from, "total_messages": total, "people": people, "top": top})
+}
+
+// activityName is the name a person used last in the period: the row with the latest last_at, not the
+// alphabetically greatest name. where and args are the ranking's filter (channel and period).
+func (s *Service) activityName(db *storage.Store, userID, where string, args []any) string {
+	var name string
+	q := `SELECT name FROM activity_counts WHERE ` + where + ` AND user_id=? ORDER BY last_at DESC, day DESC LIMIT 1`
+	if err := db.DB.QueryRow(q, append(append([]any{}, args...), userID)...).Scan(&name); err != nil {
+		return ""
+	}
+	return name
 }

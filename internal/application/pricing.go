@@ -354,7 +354,7 @@ func (s *Service) priceAdapters(reg *Registry, doc config.Document) {
 	}
 }
 
-// unpricedRoles are the model roles in use whose price is unknown: their calls count as free, so the
+// unpricedRoles are the model roles in use (the model or one of its fallbacks) whose price is unknown: their calls count as free, so the
 // monthly budget cannot stop them. The dashboard says so rather than letting the budget look safe.
 func (s *Service) unpricedRoles() []string {
 	if s.practice {
@@ -366,11 +366,18 @@ func (s *Service) unpricedRoles() []string {
 		if !ok || m.Model == "" || role == "rerank" {
 			continue
 		}
-		if a := s.Registry().LLM[m.Provider]; a == nil || !a.Configured() {
-			continue // not in use without a key; the key is its own alert
-		}
-		if _, _, ok := s.modelPrice(m.Provider, m.Model); !ok {
-			out = append(out, role)
+		// the role's own model and every stand-in it may fall back to: a call that lands on an unpriced
+		// fallback counts as free just the same
+		candidates := []config.ModelFallback{{Provider: m.Provider, Model: m.Model}}
+		candidates = append(candidates, m.Fallbacks...)
+		for _, c := range candidates {
+			if a := s.Registry().LLM[c.Provider]; a == nil || !a.Configured() {
+				continue // not in use without a key; the key is its own alert
+			}
+			if _, _, ok := s.modelPrice(c.Provider, c.Model); !ok {
+				out = append(out, role)
+				break
+			}
 		}
 	}
 	return out

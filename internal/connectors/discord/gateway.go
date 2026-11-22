@@ -1112,6 +1112,11 @@ func (g *Gateway) handleComponent(s *discordgo.Session, i *discordgo.Interaction
 		}
 		ctx, cancel := context.WithTimeout(g.runCtx(), 2500*time.Millisecond) // the interaction must be answered within 3s
 		defer cancel()
+		// the request carries no Invoker (the poll's own scope names the room), so a blocked person is
+		// refused here, as on the thread and "more" buttons
+		if g.refuseBlocked(ctx, s, i) {
+			return
+		}
 		res := g.svc.Execute(ctx, req)
 		r := Render(res, cmd, ictx.Locale)
 		flags := discordgo.MessageFlags(0)

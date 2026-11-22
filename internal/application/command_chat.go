@@ -30,7 +30,7 @@ func Unanswered(res action.Result) bool {
 
 // CommandToChat carries on a command that had no answer as a conversation. "!시세 삼성전자" without a
 // quote service used to end on an error card; now, when the command ran a tool the chat may use and
-// the channel answers people, the same message becomes a chat turn that starts from the result: the
+// the channel answers people (not "off", not "command" only), the same message becomes a chat turn that starts from the result: the
 // failed tool is not tried again, the planner may pick another (a web search), and the reply is a real
 // one, not a canned notice. ok is false when the card stays: the command answered, it is not a chat
 // tool, the channel does not chat, or the turn itself could not run (budget, limits, model down).
@@ -45,7 +45,8 @@ func (s *Service) CommandToChat(ctx context.Context, res action.Result, in ChatI
 	if !found || !t.CanChat {
 		return chat.Result{}, false
 	}
-	if s.ChannelPolicyFor(in.GuildID, in.ChannelID).Respond == "off" {
+	// "off" answers nobody and "command" answers only commands: in both the command's own card stays.
+	if r := s.ChannelPolicyFor(in.GuildID, in.ChannelID).Respond; r == "off" || r == "command" {
 		return chat.Result{}, false
 	}
 	in.Earlier = append(in.Earlier, chatView(res))

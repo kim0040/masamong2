@@ -753,7 +753,7 @@ func (s *Service) mutateConfig(req action.Request, fn func(*config.Document) err
 		doc.Personas[k] = v
 	}
 	if err := fn(&doc); err != nil {
-		return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+		return s.configFail(req, errcode.InvalidInput, err, nil)
 	}
 	raw, err := config.Marshal(doc)
 	if err != nil {
