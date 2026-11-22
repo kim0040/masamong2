@@ -407,10 +407,11 @@ func (s *Service) createBackupLockedContext(ctx context.Context, kind string) (s
 	}
 	cfgSum := sha256.Sum256(cfg)
 	// keys are kept outside the settings (credential_ref), except a key typed directly into an HTTP
-	// tool: then the copied settings hold it, and the manifest says so
-	secretsIncluded := false
-	if doc, _, err := config.ParseCommitted(cfg); err == nil {
-		secretsIncluded = hasDirectSecrets(doc)
+	// tool: then the copied settings hold it, and the manifest says so. The database copy keeps the
+	// whole revision history, so every stored revision is checked, not only the latest committed one.
+	secretsIncluded, err := snapshotSecretsContext(ctx, dbCopy, dbFile)
+	if err != nil {
+		return fail(err)
 	}
 	manifest := map[string]any{
 		"name": name, "kind": kind, "instance": s.Doc().Instance.ID, "schema": 1, "config_revision": revision,
@@ -639,6 +640,60 @@ func snapshotConfigContext(ctx context.Context, path, dbFile string, checkIntegr
 		return nil, 0, err
 	}
 	return []byte(content), rev, nil
+}
+
+// snapshotSecretsContext reports whether any stored config revision in the snapshot holds a key
+// typed directly into an HTTP tool: the backup keeps the whole history, so a key the current
+// settings no longer carry still marks the manifest. A revision that no longer parses cannot be
+// inspected and is counted as holding a secret.
+func snapshotSecretsContext(ctx context.Context, path, dbFile string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if dbFile == "dump.json" {
+		dir, err := os.MkdirTemp("", "masamong-validate-*")
+		if err != nil {
+			return false, err
+		}
+		defer os.RemoveAll(dir)
+		dst := filepath.Join(dir, "snapshot.db")
+		if _, err := importSnapshot(path, dst); err != nil {
+			return false, err
+		}
+		return snapshotSecretsContext(ctx, dst, "masamong.db")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return false, err
+	}
+	u := url.URL{Scheme: "file", Path: filepath.ToSlash(abs), RawQuery: "mode=ro&immutable=1"}
+	if !strings.HasPrefix(u.Path, "/") {
+		u.Path = "/" + u.Path
+	}
+	db, err := sql.Open("sqlite", u.String())
+	if err != nil {
+		return false, err
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(ctx, "SELECT content FROM config_revisions")
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		var content string
+		if err := rows.Scan(&content); err != nil {
+			return false, err
+		}
+		doc, _, err := config.ParseCommitted([]byte(content))
+		if err != nil || hasDirectSecrets(doc) {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
 }
 
 // Legacy TiDB dumps are imported into an isolated SQLite file and checked before

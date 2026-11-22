@@ -2,12 +2,15 @@ package application
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"maps"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"masamong/internal/action"
 	"masamong/internal/config"
@@ -124,6 +127,56 @@ func TestDirectToolKeysAreMaskedInTheExportAndDeclaredInBackups(t *testing.T) {
 		if manifest["secrets_included"] != true {
 			t.Fatalf("%s: a backup holding a typed key says secrets_included=%v", queryName, manifest["secrets_included"])
 		}
+	}
+}
+
+// The database copy in a backup keeps the whole configuration history: a key typed into an HTTP
+// tool in an older committed revision marks the backup even after the latest revision dropped it.
+func TestBackupSecretsIncludedScansEveryStoredRevision(t *testing.T) {
+	s, clk := deliveryService(t)
+	const marker = "synthetic-old-revision-key-value"
+	d := s.Doc()
+	d.Tools = maps.Clone(d.Tools)
+	if d.Tools == nil {
+		d.Tools = map[string]tools.Settings{}
+	}
+	d.Tools["acme.legacy"] = tools.Settings{HTTP: &tools.HTTP{
+		URL:           "https://example.com/lookup?apikey=" + marker,
+		CredentialRef: "env:SYNTHETIC_TOOL_KEY",
+	}, Description: "Looks up a synthetic record."}
+	stored, err := config.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the marker lives only in an older committed row; the current revision and settings stay clean
+	if _, err := s.Store.DB.Exec(`INSERT INTO config_revisions(revision,status,content_hash,content,base_revision,created_at) VALUES(?,?,?,?,?,?)`,
+		0, "committed", config.Hash(stored), string(stored), 0, clk.Now().UTC().Format(time.RFC3339)); err != nil {
+		t.Fatal(err)
+	}
+	b := s.Execute(context.Background(), action.Request{Action: "backup.create", Locale: "en"})
+	if !b.OK {
+		t.Fatalf("backup %+v", b.Error)
+	}
+	target, err := s.backupPath(b.Output["name"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := url.URL{Scheme: "file", Path: filepath.ToSlash(filepath.Join(target, "masamong.db")), RawQuery: "mode=ro&immutable=1"}
+	db, err := sql.Open("sqlite", u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var older int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM config_revisions WHERE revision=0`).Scan(&older); err != nil || older != 1 {
+		t.Fatalf("the snapshot must hold the older revision: %v %d", err, older)
+	}
+	raw, err := os.ReadFile(filepath.Join(target, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"secrets_included": true`) {
+		t.Fatalf("a backup whose history holds a typed key says %s", raw)
 	}
 }
 
