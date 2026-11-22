@@ -196,12 +196,12 @@ func (s *Service) gateTool(req action.Request) (action.Request, *action.Result) 
 	if r.ID == "images.generate" && s.imageQueueRefuses(req) {
 		return req, nil // the queue answers a repeat or a full line without drawing: not a use of the tool
 	}
+	// the switches above and the caller's access come first, then the input: a request refused for who asks
+	// (a blocked member, a server waiting for approval) or as malformed uses none of the tool's allowance
+	if refused := s.gateDiscord(req); refused != nil {
+		return req, refused
+	}
 	if check := toolInputChecks[r.ID]; check != nil {
-		// the switches above and the caller's access come first, then the input: a request the tool would
-		// refuse as malformed uses none of the caller's allowance
-		if refused := s.gateDiscord(req); refused != nil {
-			return req, refused
-		}
 		if refused := check(s, req); refused != nil {
 			return req, refused
 		}
