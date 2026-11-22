@@ -12,7 +12,9 @@ package chat
 
 import (
 	"encoding/json"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -731,6 +733,36 @@ func isPlaceholder(re *regexp.Regexp, v any) bool {
 	return t == "" || re.MatchString(t)
 }
 
+// declaredOnly keeps a planned step's parameters to the ones its tool declares, as the tool loop does
+// (prepare): a key the tool does not take (a poll's id) and a value outside a closed choice are removed
+// and named in stripped. A tool that declares no parameters keeps what the planner gave.
+func declaredOnly(tool string, info ToolInfo, params map[string]any, stripped *[]string) {
+	declared := allowedParams(info)
+	if len(declared) == 0 {
+		return
+	}
+	byName := map[string]ToolParam{}
+	for _, p := range declared {
+		byName[p.Name] = p
+	}
+	for _, k := range slices.Sorted(maps.Keys(params)) {
+		p, ok := byName[k]
+		if !ok {
+			delete(params, k)
+			*stripped = append(*stripped, tool+"."+k)
+			continue
+		}
+		if len(p.Enum) > 0 {
+			if choice, ok := enumChoice(params[k], p.Enum); ok {
+				params[k] = choice
+			} else {
+				delete(params, k)
+				*stripped = append(*stripped, tool+"."+k)
+			}
+		}
+	}
+}
+
 // Assessment is what the caller may do with a plan (planner_context.assess_plan).
 type Assessment struct {
 	MemoryState string           `json:"memory_state"` // search | skip | optional_unplanned | blocked_disabled | unparsed
@@ -782,6 +814,7 @@ func Assess(v Voice, p Plan, ts Toolset, memoryOn, hasTimeRef bool) Assessment {
 		case !enabled:
 			st.State = "disabled"
 		default:
+			declaredOnly(s.Tool, info, params, &a.Stripped)
 			for _, k := range info.Required {
 				if isPlaceholder(ph, params[k]) {
 					st.Missing = append(st.Missing, k)
