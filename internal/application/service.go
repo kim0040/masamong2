@@ -215,6 +215,7 @@ type Service struct {
 	lifeReqs    lifecycleQueue                // restart/stop requests for the daemon (admin.go)
 	logs        logRing                       // the console's live log (logring.go)
 	mem         memoryState                   // the memory engine of the live configuration (memory_engine.go)
+	resync      resyncQueue                   // rooms to resync after edits and deletions (revisions.go)
 	// leftovers are files of a finished restore or an interrupted backup that could not be removed
 	// (CleanDataLeftovers); doctor lists them and the scheduler retries.
 	leftovers atomic.Pointer[[]string]
@@ -351,14 +352,7 @@ func (s *Service) Close() error {
 		}
 		s.lifeMu.Unlock()
 		s.pendingMsgs.close()
-		if v, ok := resyncQueues.LoadAndDelete(s); ok {
-			q := v.(*resyncQueue)
-			q.mu.Lock()
-			if q.timer != nil {
-				q.timer.Stop()
-			}
-			q.mu.Unlock()
-		}
+		s.resync.stop()
 		if s.practice {
 			openPractices.remove(s)
 		}
