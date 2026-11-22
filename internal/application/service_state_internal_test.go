@@ -57,6 +57,13 @@ func TestTwoServicesKeepTheirOwnState(t *testing.T) {
 		}
 	})
 
+	t.Run("room revisions", func(t *testing.T) {
+		a.summariesRevised([]string{"discord:g:c"})
+		if a.roomRevision("discord:g:c") != 1 || b.roomRevision("discord:g:c") != 0 {
+			t.Fatal("an edit seen by one service counts in the other")
+		}
+	})
+
 	t.Run("tool usage", func(t *testing.T) {
 		if a.toolUsage() == nil || a.toolUsage() == b.toolUsage() || a.toolUsage() != a.toolUsage() {
 			t.Fatal("each service opens and keeps its own tool usage counter")

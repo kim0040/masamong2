@@ -211,6 +211,7 @@ type Service struct {
 	priceLists  priceState                    // the providers' price lists (pricing.go)
 	optOutIDs   optOutCache                   // who withdrew consent to being remembered (privacy.go)
 	toolUses    atomic.Pointer[tools.Usage]   // the tools' usage counter, opened on first use (tools.go)
+	summaryRevs roomRevisions                 // edits and deletions seen per room (summaries.go)
 	// leftovers are files of a finished restore or an interrupted backup that could not be removed
 	// (CleanDataLeftovers); doctor lists them and the scheduler retries.
 	leftovers atomic.Pointer[[]string]
@@ -388,7 +389,7 @@ func (s *Service) Close() error {
 			r.entries = nil
 			r.mu.Unlock()
 		}
-		for _, m := range []*sync.Map{&lifecycles, &summaryRevs} {
+		for _, m := range []*sync.Map{&lifecycles} {
 			m.Delete(s)
 		}
 		s.mu.Lock()

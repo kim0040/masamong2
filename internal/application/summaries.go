@@ -51,19 +51,14 @@ func init() {
 	)`)
 }
 
-// summaryRevs counts, per room, the edits and deletions seen (engine.OnRevised), so a summary can
-// tell whether its messages changed while the model was writing it.
-var summaryRevs sync.Map // *Service → *roomRevisions
-
+// roomRevisions counts, per room, the edits and deletions seen (engine.OnRevised), so a summary can
+// tell whether its messages changed while the model was writing it (Service.summaryRevs).
 type roomRevisions struct {
 	mu sync.Mutex
 	n  map[string]uint64
 }
 
-func (s *Service) roomRevisions() *roomRevisions {
-	v, _ := summaryRevs.LoadOrStore(s, &roomRevisions{n: map[string]uint64{}})
-	return v.(*roomRevisions)
-}
+func (s *Service) roomRevisions() *roomRevisions { return &s.summaryRevs }
 
 func (s *Service) roomRevision(room string) uint64 {
 	r := s.roomRevisions()
@@ -77,6 +72,9 @@ func (s *Service) roomRevision(room string) uint64 {
 func (s *Service) summariesRevised(rooms []string) {
 	r := s.roomRevisions()
 	r.mu.Lock()
+	if r.n == nil {
+		r.n = map[string]uint64{}
+	}
 	for _, room := range rooms {
 		r.n[room]++
 	}
