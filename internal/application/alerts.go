@@ -25,6 +25,10 @@ import (
 // alertFlap is not sent again; a danger item still open after alertRepeat is sent once more. Things that
 // happen once (the service restarting after a crash) are queued (alerts:queue) and go out with the next
 // message, after Discord connects. Nothing is sent in practice mode or while alerts.discord is off.
+//
+// No process lock is held while the store or Discord works: the queue is changed in write transactions
+// (kvUpdate), and a tick removes from it only the events its message carried, so an event queued while
+// it sends goes out with the next one.
 
 const (
 	alertEvery      = 5 * time.Minute
@@ -73,22 +77,57 @@ type alertDelivery struct {
 	Test   bool   `json:"test,omitempty"`
 }
 
-var alertMu sync.Mutex
+const alertQueueKey = "alerts:queue"
+
+// alertTicks holds the stores whose alert tick is running: two ticks of one instance at once would send
+// the same new items twice. The scheduler never overlaps them; an entry lives only while its tick runs.
+var alertTicks sync.Map // *storage.Store → struct{}
 
 // queueAlert keeps a one-time event for the next message.
 func (s *Service) queueAlert(key string, args map[string]any) {
 	if s.Store == nil || s.practice {
 		return
 	}
-	alertMu.Lock()
-	defer alertMu.Unlock()
-	var q []alertEvent
-	_, _ = s.kvGet("alerts:queue", &q)
-	q = append(q, alertEvent{Key: key, Args: args, At: s.Clock.Now().UTC().Format(time.RFC3339)})
-	if len(q) > alertMaxQueued {
-		q = q[len(q)-alertMaxQueued:]
+	e := alertEvent{Key: key, Args: args, At: s.Clock.Now().UTC().Format(time.RFC3339)}
+	err := kvUpdate(s, alertQueueKey, func(q []alertEvent) []alertEvent {
+		q = append(q, e)
+		if len(q) > alertMaxQueued {
+			q = q[len(q)-alertMaxQueued:]
+		}
+		return q
+	})
+	if err != nil && s.Log != nil {
+		s.Log.Warn("alert not queued", "key", key, "err", err)
 	}
-	_ = s.kvSet("alerts:queue", q)
+}
+
+// dropSentAlerts removes from the queue the events one message carried. They were its first events; what
+// was queued while the message went out stays for the next one. (Were an event cut by the cap meanwhile
+// and an identical one queued after it, that one goes instead: the operators read the same line.)
+func (s *Service) dropSentAlerts(sent []alertEvent) error {
+	if len(sent) == 0 {
+		return nil
+	}
+	left := map[string]int{}
+	for _, e := range sent {
+		left[alertIdentity(e)]++
+	}
+	return kvUpdate(s, alertQueueKey, func(q []alertEvent) []alertEvent {
+		kept := []alertEvent{}
+		for _, e := range q {
+			if id := alertIdentity(e); left[id] > 0 {
+				left[id]--
+				continue
+			}
+			kept = append(kept, e)
+		}
+		return kept
+	})
+}
+
+func alertIdentity(e alertEvent) string {
+	b, _ := json.Marshal(e) // map keys are sorted: equal events give equal text
+	return string(b)
 }
 
 // uiCatalog holds the console strings, where the attention sentences live.
@@ -183,11 +222,14 @@ func (s *Service) alertTick(ctx context.Context) {
 	if s.Store == nil {
 		return
 	}
-	alertMu.Lock()
-	defer alertMu.Unlock()
+	if _, running := alertTicks.LoadOrStore(s.Store, struct{}{}); running {
+		return // the running tick sends what is new; the next one sends what it missed
+	}
+	defer alertTicks.Delete(s.Store)
 	dm, why := s.alertsReady()
 	if why == "off" || why == "no_operators" || why == "practice" {
-		_ = s.kvSet("alerts:queue", []alertEvent{}) // nobody to tell; do not send a stale backlog later
+		// nobody to tell; do not send a stale backlog later
+		_ = kvUpdate(s, alertQueueKey, func([]alertEvent) []alertEvent { return []alertEvent{} })
 		return
 	}
 	if dm == nil {
@@ -203,7 +245,7 @@ func (s *Service) alertTick(ctx context.Context) {
 	sent := map[string]alertSent{}
 	_, _ = s.kvGet("alerts:sent", &sent)
 	var queue []alertEvent
-	_, _ = s.kvGet("alerts:queue", &queue)
+	_, _ = s.kvGet(alertQueueKey, &queue)
 
 	var lines []string
 	danger := false
@@ -262,7 +304,9 @@ func (s *Service) alertTick(ctx context.Context) {
 		return // nobody reached for a passing reason: the same items go out next time
 	}
 	_ = s.kvSet("alerts:sent", sent)
-	_ = s.kvSet("alerts:queue", []alertEvent{})
+	if err := s.dropSentAlerts(queue); err != nil && s.Log != nil {
+		s.Log.Warn("sent alerts left in the queue", "err", err) // they go out once more with the next message
+	}
 }
 
 // sendAlert sends one message with lines to every operator and records the attempt.
@@ -335,8 +379,6 @@ func (s *Service) alertsAction(ctx context.Context, req action.Request) action.R
 	if req.Action == "alerts.status" {
 		return action.OK(req, status)
 	}
-	alertMu.Lock()
-	defer alertMu.Unlock()
 	// a test works with alerts off: it checks that the operators can be reached
 	var dm DiscordSender
 	switch d, ok := s.Discord().(DiscordSender); {

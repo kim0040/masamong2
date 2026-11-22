@@ -302,11 +302,7 @@ func (s *Service) kvSet(key string, v any) error {
 		return err
 	}
 	now := s.Clock.Now().UTC().Format(time.RFC3339)
-	q := `INSERT INTO admin_state(k, v, updated_at) VALUES(?,?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v, updated_at=excluded.updated_at`
-	if db.Backend == storage.BackendTiDB {
-		q = `INSERT INTO admin_state(k, v, updated_at) VALUES(?,?,?) ON DUPLICATE KEY UPDATE v=VALUES(v), updated_at=VALUES(updated_at)`
-	}
-	_, err = db.DB.Exec(q, key, string(raw), now) // one atomic statement: no transaction needed
+	_, err = db.DB.Exec(kvUpsertSQL(db.Backend), key, string(raw), now) // one atomic statement: no transaction needed
 	if err == nil {
 		s.kv.put(key, kvEntry{raw: string(raw), ok: true})
 	}

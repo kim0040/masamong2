@@ -36,25 +36,27 @@ const (
 )
 
 // restorePartMute derives the current cooldown from the durable decision log. Both events that start
-// this mute (a quiet cue and a dislike) are already recorded there without message text.
-func (s *Service) restorePartMute(guildID, channelID string, c *partChannel) bool {
+// this mute (a quiet cue and a dislike) are already recorded there without message text. ok is false when
+// the log could not be read; until is zero when no mute was recorded. It reads the store: the caller does
+// not hold s.part.mu (lockPartChannel).
+func (s *Service) restorePartMute(guildID, channelID string) (until time.Time, ok bool) {
 	db, err := s.adminDB()
 	if err != nil {
-		return false
+		return time.Time{}, false
 	}
 	var stamp string
 	err = db.Reader().QueryRow(`SELECT created_at FROM conversation_log WHERE guild_id=? AND channel_id=? AND kind=?
 		AND decision IN ('quiet_cue','disliked') ORDER BY rowid DESC LIMIT 1`, guildID, channelID, convBackoff).Scan(&stamp)
 	if err == sql.ErrNoRows {
-		return true
+		return time.Time{}, true
 	}
 	if err != nil {
-		return false
+		return time.Time{}, false
 	}
 	if at, parseErr := time.Parse(time.RFC3339Nano, stamp); parseErr == nil {
-		c.mutedUntil = at.Add(partMute)
+		until = at.Add(partMute)
 	}
-	return true
+	return until, true
 }
 
 // partSpoke is one remark the bot made on its own in a channel.
@@ -194,18 +196,18 @@ func (s *Service) ignoredBump(c *partChannel, kind string, now time.Time) float6
 	return min(partIgnoredMax, float64(n)*partIgnoredStep)
 }
 
-// noteSpoke records a remark the bot posted (for the reactions, replies and 👎 that may follow).
+// noteSpoke records a remark the bot posted (for the reactions, replies and 👎 that may follow). Its turn
+// is stored after the lock is released: rows of different turns do not depend on each other's order.
 func (s *Service) noteSpoke(cand *partCandidate, msgID, turnID string) {
-	s.part.mu.Lock()
-	defer s.part.mu.Unlock()
-	c := s.partChannel(cand.key)
+	c := s.lockPartChannel(cand.key)
 	now := s.Clock.Now().UTC()
 	c.spokes = append(c.spokes, partSpoke{msgID: msgID, turnID: turnID, kind: cand.kind, at: now})
 	if len(c.spokes) > partSpokesKept {
 		c.spokes = c.spokes[len(c.spokes)-partSpokesKept:]
 	}
+	s.part.mu.Unlock()
 	if turnID != "" {
-		s.persistPartSpokeTurnLocked(turnID, cand.guild, cand.channel, now)
+		s.persistPartSpokeTurn(turnID, cand.guild, cand.channel, now)
 	}
 }
 
@@ -233,8 +235,7 @@ func (s *Service) partFeedback(turnID string, good bool) {
 	if !good && channel == "" {
 		if restoredGuild, restoredChannel, ok := s.persistedPartSpoke(turnID); ok {
 			guild, channel = restoredGuild, restoredChannel
-			s.part.mu.Lock()
-			c := s.partChannel(guild + ":" + channel)
+			c := s.lockPartChannel(guild + ":" + channel)
 			c.mutedUntil = s.Clock.Now().Add(partMute)
 			s.part.mu.Unlock()
 		}
@@ -244,7 +245,8 @@ func (s *Service) partFeedback(turnID string, good bool) {
 	}
 }
 
-func (s *Service) persistPartSpokeTurnLocked(turnID, guildID, channelID string, now time.Time) {
+// persistPartSpokeTurn stores a remark's turn for a 👎 after a restart (a day at most, 200 at most).
+func (s *Service) persistPartSpokeTurn(turnID, guildID, channelID string, now time.Time) {
 	db, err := s.adminDB()
 	if err != nil {
 		return
