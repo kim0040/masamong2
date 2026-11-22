@@ -19,13 +19,14 @@ import (
 
 // Line is one message of a channel, as the live window or the store knows it.
 type Line struct {
-	ID          string // the platform message ID (Discord snowflake)
-	AuthorID    string // the account; "" when the platform has none (Kakao imports)
-	Author      string // the name people see
-	Bot         bool   // the bot itself
-	Withdrawn   bool   // its answer is unavailable, not merely a post delivered without text
-	RegistryGap bool   // raw post is ineligible unless its delivery can be verified
-	ReplyTo     string // the message this one replies to ("" for none)
+	ID            string // the platform message ID (Discord snowflake)
+	AuthorID      string // the account; "" when the platform has none (Kakao imports)
+	Author        string // the name people see
+	Bot           bool   // the bot itself
+	Withdrawn     bool   // its answer is unavailable, not merely a post delivered without text
+	RegistryGap   bool   // raw post is ineligible unless its delivery can be verified
+	ReplyTo       string // the message this one replies to ("" for none)
+	ReplyAuthorID string `json:"-"` // live Discord reference, even if the original was not captured
 	// Mentions are the accounts the message mentions (people and the bot). MentionsOthers marks a role or
 	// @everyone mention, which is directed at people in general.
 	Mentions       []string

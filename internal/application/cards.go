@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"masamong/internal/chat"
 	"masamong/internal/conversation"
-	"masamong/internal/features/privacy"
 	"masamong/internal/lang"
 	"masamong/internal/memory/corpus"
 	"masamong/internal/memory/episodes"
@@ -475,6 +475,14 @@ func (s *Service) invalidateCards(ctx context.Context, db *storage.Store, jobs [
 				op = "withdraw"
 			}
 			if (op == "withdraw" || op == "withdraw_batch") && j.Ref != "" {
+				if tableExists(tx, "person_alias") {
+					if _, err := tx.Exec(`DELETE FROM person_alias_source WHERE person_ref=?`, j.Ref); err != nil {
+						return err
+					}
+					if _, err := tx.Exec(`DELETE FROM person_alias WHERE person_ref=?`, j.Ref); err != nil {
+						return err
+					}
+				}
 				if _, err := deleteCardsOf(tx, "", j.Ref); err != nil {
 					return err
 				}
@@ -520,104 +528,225 @@ func (s *Service) cardIn(db *storage.Store, guild, ref string, labelOf func(stri
 
 var mentionPattern = regexp.MustCompile(`<@!?(\d+)>`)
 
-// turnCards are the caller's card and those of up to two other people of the caller's conversation (its
-// speakers and the people the message mentions), when memory.cards is on.
-func (s *Service) turnCards(db *storage.Store, in ChatInput, recent []corpus.Message, sources []string) []chat.RoomCard {
-	if in.GuildID == "" || !s.MemoryAllowed(in.SpeakerID) {
-		return nil
+// Only the gateway's ordinary text channels and positively known public threads
+// can supply statements outside the current group. A private thread deliberately
+// has no parent record, so an unknown room is never assumed to be public.
+// It must be the first read on tx: the thread deletion boundary below relies on it.
+func (s *Service) personRooms(tx *sql.Tx, guild, channel string, localOnly bool) map[string]bool {
+	rooms := map[string]bool{} // value = local to this channel group
+	gw, ok := s.Discord.(interface{ PersonMemoryChannels(string) map[string]bool })
+	if !ok || channel == "" {
+		return rooms
 	}
-	var check int
-	if db.Reader().QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE name='person_card_item'`).Scan(&check) != nil || check == 0 {
-		return nil
+	// A deleted thread leaves memory before its tombstone commits (threadRooms).
+	// The generation is read before this snapshot starts and checked after it.
+	t := s.threadsLoaded()
+	t.mu.Lock()
+	gen, gone := t.scopeGen, t.deleted[channel]
+	t.mu.Unlock()
+	if gone {
+		return rooms
 	}
-	room := roomOf(in.GuildID, in.ChannelID)
-	labels := s.refLabels(db, room)
-	caller := personRef(in.SpeakerID)
+	var deleted bool
+	if tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM thread_tombstones WHERE thread_id=?)`, channel).Scan(&deleted) != nil || deleted {
+		return rooms
+	}
+	channels := gw.PersonMemoryChannels(guild)
+	parent := channel
+	threads := map[string]string{}
+	rows, err := tx.Query(`SELECT thread_id,parent_id FROM channel_threads WHERE guild_id=? AND `+threadVisibleSQL("channel_threads"), guild)
+	if err != nil {
+		return rooms
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, p string
+		if rows.Scan(&id, &p) != nil {
+			return rooms
+		}
+		threads[id] = p
+	}
+	if rows.Err() != nil {
+		return rooms
+	}
+	t.mu.Lock()
+	settled := gen == t.scopeGen
+	for id := range threads {
+		// After a lifecycle change during the read, only the in-memory table (which
+		// never holds a deleted thread) vouches for a stored row.
+		if _, live := t.threads[id]; t.deleted[id] || !settled && !live {
+			delete(threads, id)
+		}
+	}
+	gone = t.deleted[channel]
+	t.mu.Unlock()
+	if gone {
+		return rooms
+	}
+	if p := threads[channel]; p != "" {
+		parent = p
+	}
+	if public, known := channels[parent]; !known || !public {
+		if !known {
+			return rooms
+		}
+		// A private/restricted room is its own group: its statements and hearsay
+		// stay local, while a person's own public statements remain usable here.
+		rooms[roomOf(guild, channel)] = true
+		if localOnly {
+			return rooms
+		}
+		parent = ""
+	}
+	add := func(id, p string) {
+		capture := s.ownChannelPolicy(guild, p).Capture
+		if id != p && s.hasChannelPolicy(guild, id) {
+			capture = s.ownChannelPolicy(guild, id).Capture
+		}
+		if capture && channels[p] && (!localOnly || p == parent) {
+			rooms[roomOf(guild, id)] = p == parent
+		}
+	}
+	for id := range channels {
+		add(id, id)
+	}
+	for id, p := range threads {
+		add(id, p)
+	}
+	return rooms
+}
+
+// turnCards renders existing records; it never promotes an item or creates a
+// fact. Keep the citation checks, scope checks and active-item reads on one snapshot.
+func (s *Service) turnCards(ctx context.Context, db *storage.Store, in ChatInput, used *[]string) ([]chat.RoomCard, personEpisodeScope) {
+	tx, err := db.Reader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, personEpisodeScope{}
+	}
+	defer tx.Rollback()
 	strict := s.guildPrivacy(in.GuildID)
-	var rooms []string // card_channel_only: the items from this channel and its threads
-	if strict.CardChannelOnly {
-		rooms = []string{}
-		for _, r := range s.channelRooms(in.GuildID, in.ChannelID) {
-			if !strings.HasPrefix(r, "kakao:") {
-				rooms = append(rooms, r)
-			}
+	rooms := s.personRooms(tx, in.GuildID, in.ChannelID, strict.CardChannelOnly)
+	people, names := s.resolvePeople(tx, in, rooms)
+	scope := personEpisodeScope{guild: in.GuildID, rooms: rooms}
+	if len(people) == 0 {
+		return nil, scope
+	}
+	var available, local []string
+	for r, here := range rooms {
+		available = append(available, r)
+		if here {
+			local = append(local, r)
 		}
 	}
-	labelOf := func(ref string) string {
-		if ref == caller && in.Speaker != "" {
-			return in.Speaker
-		}
-		return labels(ref)
-	}
+	rawRooms, _ := json.Marshal(available)
+	rawLocal, _ := json.Marshal(local)
+	cfg := s.Doc().Memory
 	var out []chat.RoomCard
-	if !s.ConsentAllows(in.SpeakerID, privacy.Profile) {
-		// "don't analyze me": no card of theirs (withdrawing deleted it; this covers the time in between)
-	} else if facts := s.cardIn(db, in.GuildID, caller, labelOf, rooms); len(facts) > 0 {
-		name := in.Speaker
-		if name == "" {
-			name = labels(caller)
+	distinguishNames(people, names.current)
+	for _, p := range people {
+		if names.current[p.ref] == "" || names.denied[p.ref] || strict.OwnCardOnly && !p.caller {
+			continue
 		}
-		out = append(out, chat.RoomCard{Name: name, Facts: facts, Caller: true})
-	}
-	// other people of the conversation, newest first
-	type person struct{ account, label string }
-	var people []person
-	seen := map[string]bool{in.SpeakerID: true, "": true}
-	for _, m := range mentionPattern.FindAllStringSubmatch(in.Message, -1) {
-		if !seen[m[1]] {
-			seen[m[1]] = true
-			people = append(people, person{account: m[1]})
-		}
-	}
-	for i := len(recent) - 1; i >= 0; i-- {
-		if a := recent[i].ActorAccount; !seen[a] {
-			seen[a] = true
-			people = append(people, person{account: a, label: recent[i].ActorLabel})
-		}
-	}
-	if len(sources) > 0 {
-		raw, _ := json.Marshal(sources)
-		rows, err := db.Reader().Query(`SELECT actor_account, actor_label FROM memory_observations WHERE observation_id IN (SELECT value FROM json_each(?))
-			AND actor_account<>'' AND record_kind=? ORDER BY parsed_time DESC LIMIT 40`, string(raw), corpus.HumanText)
-		if err == nil {
-			for rows.Next() {
-				var a, l string
-				if rows.Scan(&a, &l) == nil && !seen[a] {
-					seen[a] = true
-					people = append(people, person{account: a, label: l})
+		var facts []string
+		read := func(rows *sql.Rows, err error) {
+			if err != nil {
+				return
+			}
+			defer rows.Close()
+			for rows.Next() && len(facts) < 12 {
+				var it itemRow
+				var room, ev, by, saved string
+				if rows.Scan(&room, &it.text, &ev, &by, &saved) != nil || json.Unmarshal([]byte(ev), &it.evidence) != nil || json.Unmarshal([]byte(by), &it.by) != nil {
+					continue
+				}
+				fact, refs := personFact(tx, it, room, saved, p.ref, names, rooms, strict.NoHearsay)
+				if fact != "" && !slices.Contains(facts, fact) {
+					facts = append(facts, fact)
+					if used != nil {
+						*used = append(*used, refs...)
+					}
 				}
 			}
-			rows.Close()
+		}
+		if cfg.CardsOn() {
+			read(tx.Query(`SELECT '',text,evidence,json_array(person_ref),updated_at FROM person_card_item
+				WHERE guild_id=? AND person_ref=? AND state='active' ORDER BY CASE origin WHEN 'explicit' THEN 0 ELSE 1 END,updated_at DESC`, in.GuildID, p.ref))
+		}
+		if cfg.EpisodesOn() && !strict.NoSensitive {
+			read(tx.Query(`SELECT e.room,i.text,i.evidence,i.by_refs,i.created_at FROM channel_episode e JOIN episode_item i ON i.episode_id=e.id
+				WHERE e.guild_id=? AND e.room IN (SELECT value FROM json_each(?)) AND i.state='active'
+				AND (instr(i.text,?)>0 OR EXISTS(SELECT 1 FROM json_each(i.by_refs) WHERE value=?))
+				AND (e.room IN (SELECT value FROM json_each(?)) OR (json_array_length(i.by_refs)=1 AND json_extract(i.by_refs,'$[0]')=?))
+				ORDER BY e.last_seen DESC,i.created_at DESC,i.id LIMIT 100`, in.GuildID, string(rawRooms), "{@"+p.ref+"}", p.ref, string(rawLocal), p.ref))
+		}
+		if len(facts) > 0 {
+			out = append(out, chat.RoomCard{Name: names.current[p.ref], Facts: facts, Caller: p.caller})
+			scope.people = append(scope.people, p)
 		}
 	}
-	others := 0
-	botID := s.botAccount(nil)
-	if strict.OwnCardOnly {
-		people = nil // own_card_only: only the caller's card
+	return out, scope
+}
+
+func personFact(tx *sql.Tx, it itemRow, episodeRoom, saved, target string, names turnNames, rooms map[string]bool, noHearsay bool) (string, []string) {
+	subjects := episodes.TextRefs(it.text)
+	// Older items may name a third person in plain text and carry only the
+	// speaker's by_ref. With no subject token, keep them in their source group.
+	self := len(it.by) == 1 && it.by[0] == target && (episodeRoom == "" || slices.Contains(subjects, target)) && !namesOthers(it.text, []string{target})
+	if len(it.evidence) == 0 || len(it.by) == 0 || noHearsay && (it.hearsay() || episodeRoom != "" && len(subjects) == 0) {
+		return "", nil
 	}
-	for _, p := range people {
-		if others == chat.MaxOtherCards {
-			break
+	refs := uniqueStrings(append(append(slices.Clone(subjects), it.by...), target))
+	for _, ref := range refs {
+		if names.denied[ref] {
+			return "", nil
 		}
-		if p.account == botID || !s.MemoryAllowed(p.account) || !s.ConsentAllows(p.account, privacy.Profile) {
-			continue
+		if blocked, err := store.SourceBlocked(tx, ref); err != nil || blocked {
+			return "", nil
 		}
-		ref := personRef(p.account)
-		facts := s.cardIn(db, in.GuildID, ref, labelOf, rooms)
-		if len(facts) == 0 {
-			continue
-		}
-		name := p.label
-		if name == "" {
-			name = labels(ref)
-		}
-		if name == "" {
-			continue
-		}
-		out = append(out, chat.RoomCard{Name: name, Facts: facts})
-		others++
 	}
-	return out
+	authors := map[string]bool{}
+	for _, id := range it.evidence {
+		var room, account, edited, kind string
+		if tx.QueryRow(`SELECT room,actor_account,edited_at,record_kind FROM memory_observations WHERE observation_id=? AND platform='discord' AND source_room=room AND deleted_at='' AND trim(content)<>''`, id).
+			Scan(&room, &account, &edited, &kind) != nil || account == "" || kind != corpus.HumanText {
+			return "", nil
+		}
+		local, allowed := rooms[room]
+		ref := personRef(account)
+		if !allowed || episodeRoom != "" && room != episodeRoom || !local && (!self || ref != target) || names.denied[ref] {
+			return "", nil
+		}
+		if current, err := store.ObservationCurrent(tx, id); err != nil || !current {
+			return "", nil
+		}
+		if edited != "" {
+			editTime, e1 := time.Parse(time.RFC3339Nano, edited)
+			savedTime, e2 := time.Parse(time.RFC3339Nano, saved)
+			if e1 != nil || e2 != nil || editTime.After(savedTime) {
+				return "", nil
+			}
+		}
+		authors[ref] = true
+	}
+	var speakers []string
+	for _, ref := range it.by {
+		label := names.label(ref)
+		if !authors[ref] || label == "" {
+			return "", nil
+		}
+		speakers = append(speakers, clip(label, 24))
+	}
+	fact := episodes.StoredText(it.text, names.label, "?")
+	if !self {
+		fact = "[" + strings.Join(speakers, ", ") + "] " + fact
+	}
+	sources := slices.Clone(it.evidence)
+	for _, ref := range refs {
+		if id := names.sources[ref]; id != "" {
+			sources = append(sources, id)
+		}
+	}
+	return fact, append(refs, sources...)
 }
 
 // relationKey is the stored pair, in a fixed order.

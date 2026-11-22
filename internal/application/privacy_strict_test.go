@@ -42,24 +42,28 @@ func TestStrictPrivacyCards(t *testing.T) {
 	svc, m, eng := memorySvc(t)
 	climbCard(t, svc, m, eng)
 	turn(t, svc, "u2", "영희", "주말에 뭐 할까")
+	if strings.Contains(m.last("answer"), cardOpen) {
+		t.Fatal("an unrelated recent speaker's card was shown")
+	}
+	turn(t, svc, "u2", "영희", "철수는 어떤 사람?")
 	if b := block(m.last("answer"), cardOpen, cardClose); !strings.Contains(b, "클라이밍") {
-		t.Fatalf("default: the other speaker's card is shown:\n%s", m.last("answer"))
+		t.Fatalf("default: the named person's card is shown:\n%s", m.last("answer"))
 	}
 	strict(t, svc, config.GuildPrivacy{OwnCardOnly: true})
-	turn(t, svc, "u2", "영희", "주말에 뭐 할까")
-	if strings.Contains(m.last("answer"), "클라이밍 배우는 중") {
+	turn(t, svc, "u2", "영희", "철수는 어떤 사람?")
+	if strings.Contains(m.last("answer"), cardOpen) {
 		t.Fatal("own_card_only showed another person's card")
 	}
-	turn(t, svc, "u1", "철수", "주말에 뭐 할까")
+	turn(t, svc, "u1", "철수", "나에 대해 뭐 알아?")
 	if b := block(m.last("answer"), cardOpen, cardClose); !strings.Contains(b, "클라이밍") {
 		t.Fatal("own_card_only keeps the caller's own card")
 	}
 	strict(t, svc, config.GuildPrivacy{CardChannelOnly: true})
-	turn(t, svc, "u1", "철수", "주말에 뭐 할까", func(in *application.ChatInput) { in.ChannelID = "c3" })
+	turn(t, svc, "u1", "철수", "나에 대해 뭐 알아?", func(in *application.ChatInput) { in.ChannelID = "c3" })
 	if strings.Contains(m.last("answer"), cardOpen) {
 		t.Fatal("card_channel_only used the card in another channel")
 	}
-	turn(t, svc, "u1", "철수", "주말에 뭐 할까")
+	turn(t, svc, "u1", "철수", "나에 대해 뭐 알아?")
 	if !strings.Contains(m.last("answer"), cardOpen) {
 		t.Fatal("card_channel_only keeps it where it was said")
 	}
@@ -79,7 +83,7 @@ func TestProfileWithdrawalDeletesCards(t *testing.T) {
 	if items, c := mine(t, svc, inChannel("u1")); len(c) != 0 || len(items) == 0 {
 		t.Fatalf("cards gone, room memory kept: %v %v", items, c)
 	}
-	turn(t, svc, "u1", "철수", "주말에 뭐 할까")
+	turn(t, svc, "u1", "철수", "나에 대해 뭐 알아?")
 	if strings.Contains(m.last("answer"), cardOpen) {
 		t.Fatal("a card for someone who opted out")
 	}
@@ -118,7 +122,7 @@ func TestCardChannelOnlyNeedsAllEvidenceHere(t *testing.T) {
 	svc, m, eng := memorySvc(t)
 	strict(t, svc, config.GuildPrivacy{CardChannelOnly: true})
 	climbCard(t, svc, m, eng)
-	turn(t, svc, "u1", "철수", "주말에 뭐 할까")
+	turn(t, svc, "u1", "철수", "나에 대해 뭐 알아?")
 	if !strings.Contains(m.last("answer"), cardOpen) {
 		t.Fatal("the card is used where all its evidence was said")
 	}
@@ -133,7 +137,8 @@ func TestCardChannelOnlyNeedsAllEvidenceHere(t *testing.T) {
 		WHERE p.state='active' AND o.room='discord:g:c3'`).Scan(&inC3); err != nil || inC3 == 0 {
 		t.Fatalf("the card item has no evidence from #c3 (%d, %v)", inC3, err)
 	}
-	turn(t, svc, "u1", "철수", "주말에 뭐 할까", func(in *application.ChatInput) { in.ChannelID = "c3" })
+	applyDoc(t, svc, func(d *config.Document) { d.Memory.Episodes = "off" }) // isolate the promoted, merged card
+	turn(t, svc, "u1", "철수", "나에 대해 뭐 알아?", func(in *application.ChatInput) { in.ChannelID = "c3" })
 	if strings.Contains(m.last("answer"), cardOpen) {
 		t.Fatal("card_channel_only used an item partly said in another channel")
 	}

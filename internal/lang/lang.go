@@ -327,7 +327,14 @@ type Memory struct {
 	// bot; a fact containing one is not stored (memory never carries instructions).
 	ExplicitCues    []string `json:"explicit_cues,omitempty"`
 	InstructionCues []string `json:"instruction_cues,omitempty"`
-	ExplicitSystem  string   `json:"explicit_system"` // {bot}
+	// SelfRequests are whole requests about the speaker ("날 기억해?", "who am I"). The speaker's own
+	// person memory goes into a reply only when the message's last sentence is one of them, compared by
+	// its letters and digits after SelfTrim words and endings ("요", "please") are dropped from both
+	// ends. "{a|b}" lists alternatives; an entry ending in "?" counts only as a question. Every pack's
+	// lists apply, since a request can mix languages. A missing request is better than a false one.
+	SelfRequests   []string `json:"self_requests,omitempty"`
+	SelfTrim       []string `json:"self_trim,omitempty"`
+	ExplicitSystem string   `json:"explicit_system"` // {bot}
 	// Sensitive asks which facts are sensitive, for guilds.<g>.privacy.no_sensitive (card promotion):
 	// {facts} as "[fN] text" lines → {"sensitive": ["f2"]}.
 	SensitiveSystem string `json:"sensitive_system"`
@@ -420,7 +427,48 @@ func Parse(tag string, raw []byte) (*Pack, error) {
 	if err := validateTranslation(&p); err != nil {
 		return nil, fmt.Errorf("lang %s: %w", tag, err)
 	}
+	for _, entry := range p.Memory.SelfRequests {
+		if _, err := Expand(entry); err != nil {
+			return nil, fmt.Errorf("lang %s: memory.self_requests %q: %w", tag, entry, err)
+		}
+	}
 	return &p, nil
+}
+
+const maxExpanded = 1024
+
+// Expand lists the phrases an entry with "{a|b}" alternatives stands for: "{날|나를} 기억해" is
+// "날 기억해" and "나를 기억해". An empty alternative ("{아직 |}") leaves the part out.
+func Expand(entry string) ([]string, error) {
+	out := []string{""}
+	for entry != "" {
+		open := strings.IndexByte(entry, '{')
+		if open < 0 {
+			if strings.ContainsAny(entry, "|}") {
+				return nil, fmt.Errorf("unbalanced alternatives")
+			}
+			for i := range out {
+				out[i] += entry
+			}
+			break
+		}
+		end := strings.IndexByte(entry[open:], '}')
+		if end < 0 || strings.ContainsAny(entry[:open], "|}") || strings.ContainsRune(entry[open+1:open+end], '{') {
+			return nil, fmt.Errorf("unbalanced alternatives")
+		}
+		alts := strings.Split(entry[open+1:open+end], "|")
+		if len(out)*len(alts) > maxExpanded {
+			return nil, fmt.Errorf("more than %d phrases", maxExpanded)
+		}
+		next := make([]string, 0, len(out)*len(alts))
+		for _, prefix := range out {
+			for _, alt := range alts {
+				next = append(next, prefix+entry[:open]+alt)
+			}
+		}
+		out, entry = next, entry[open+end+1:]
+	}
+	return out, nil
 }
 
 func (p *Pack) missing() []string {

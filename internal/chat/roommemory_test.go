@@ -2,8 +2,10 @@ package chat
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"masamong/internal/memory/engine"
@@ -93,6 +95,39 @@ func (f fixedMemory) Search(context.Context, engine.SearchRequest) (search.Resul
 }
 
 type recordLLM struct{ msgs [][]Msg }
+
+type personPromptLLM struct {
+	loopLLM
+	chats [][]Msg
+}
+
+func (l *personPromptLLM) Chat(ctx context.Context, role string, msgs []Msg, n int, temp float64) (string, float64, error) {
+	l.chats = append(l.chats, msgs)
+	return l.loopLLM.Chat(ctx, role, msgs, n, temp)
+}
+
+func TestEmptyPersonHookKeepsAllPrompts(t *testing.T) {
+	record := func(people func([]string) *RoomMemory) *personPromptLLM {
+		req := loopRequest("weather today?", ToolModeLoop)
+		req.Now = time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+		req.People = people
+		llm := &personPromptLLM{}
+		rt := Runtime{LLM: llm, Tools: (&recorder{}).run}
+		if _, err := rt.Answer(t.Context(), req); err != nil {
+			t.Fatal(err)
+		}
+		return llm
+	}
+	before := record(nil)
+	called := false
+	after := record(func(targets []string) *RoomMemory {
+		called = true
+		return nil
+	})
+	if !called || len(before.chats) < 2 || len(before.loopMsgs) == 0 || !reflect.DeepEqual(before.chats, after.chats) || !reflect.DeepEqual(before.loopMsgs, after.loopMsgs) {
+		t.Fatal("a turn without a person block must send identical planner, loop and answer messages")
+	}
+}
 
 func (r *recordLLM) Chat(_ context.Context, model string, msgs []Msg, _ int, _ float64) (string, float64, error) {
 	r.msgs = append(r.msgs, msgs)

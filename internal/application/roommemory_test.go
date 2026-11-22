@@ -90,6 +90,7 @@ func memorySvc(t *testing.T) (*application.Service, *turnModel, *engine.Engine) 
 	}))
 	t.Cleanup(srv.Close)
 	svc := routedSvc(t, srv.URL, srv.URL)
+	svc.Discord = &personGateway{}
 	serveAnyServer(t, svc)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Memory.Capture = true
@@ -518,11 +519,11 @@ func TestPersonCardThresholdIsolationAndForget(t *testing.T) {
 		t.Fatalf("two days, two episodes: %v", cardItems)
 	}
 	// the card reaches the caller's turn, in this server only
-	turn(t, svc, "u1", "철수", "나 주말에 뭐 하지")
+	turn(t, svc, "u1", "철수", "나에 대해 뭐 알아?")
 	if b := block(m.last("answer"), cardOpen, cardClose); !strings.Contains(b, "클라이밍") || !strings.Contains(b, readHeader) {
 		t.Fatalf("card block:\n%s", m.last("answer"))
 	}
-	turn(t, svc, "u1", "철수", "나 주말에 뭐 하지", func(in *application.ChatInput) { in.GuildID, in.ChannelID = "g2", "c2" })
+	turn(t, svc, "u1", "철수", "나에 대해 뭐 알아?", func(in *application.ChatInput) { in.GuildID, in.ChannelID = "g2", "c2" })
 	if strings.Contains(m.last("answer"), cardOpen) {
 		t.Fatal("a card crossed servers")
 	}
@@ -530,8 +531,8 @@ func TestPersonCardThresholdIsolationAndForget(t *testing.T) {
 		t.Fatalf("another server's card: %v", cardItems)
 	}
 	// off: nothing is read
-	applyDoc(t, svc, func(d *config.Document) { d.Memory.Cards = "off" })
-	turn(t, svc, "u1", "철수", "나 주말에 뭐 하지")
+	applyDoc(t, svc, func(d *config.Document) { d.Memory.Cards, d.Memory.Episodes = "off", "off" })
+	turn(t, svc, "u1", "철수", "나에 대해 뭐 알아?")
 	if strings.Contains(m.last("answer"), cardOpen) {
 		t.Fatal("memory.cards off still shows the card")
 	}

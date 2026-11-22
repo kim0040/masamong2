@@ -36,17 +36,17 @@ const (
 )
 
 // turnRoomMemory gathers the room memory of one chat turn; nil when there is none or reading is off.
-func (s *Service) turnRoomMemory(ctx context.Context, in ChatInput, pol config.ChannelPolicy, voice chat.Voice, history []chat.Turn, recent []corpus.Message) *chat.RoomMemory {
+func (s *Service) turnRoomMemory(ctx context.Context, in ChatInput, pol config.ChannelPolicy, voice chat.Voice, history []chat.Turn, recent []corpus.Message, used *[]string) (*chat.RoomMemory, func([]string) *chat.RoomMemory) {
 	doc := s.Doc()
 	if pol.MemoryUse == "off" || in.ChannelID == "" || s.Store == nil {
-		return nil
+		return nil, nil
 	}
 	if !doc.Memory.EpisodesOn() && !doc.Memory.StateOn() && !doc.Memory.CardsOn() {
-		return nil
+		return nil, nil
 	}
 	db, err := s.adminDB()
 	if err != nil || !db.IsSQLite() || !roomMemoryTables(db) {
-		return nil
+		return nil, nil
 	}
 	var contextText []string
 	for i := max(0, len(history)-contextLines); i < len(history); i++ {
@@ -69,21 +69,41 @@ func (s *Service) turnRoomMemory(ctx context.Context, in ChatInput, pol config.C
 	for _, m := range recent {
 		shown[m.ObservationID] = true
 	}
-	rm := &chat.RoomMemory{Packs: s.explicitPacks(voice)} // their instruction cues keep instructions out of the reply
 	rooms := s.channelRooms(in.GuildID, in.ChannelID)
+	rm := chat.RoomMemory{Packs: s.explicitPacks(voice)}
+	var candidates []episodeCandidate
+	pick := func(bonus ...personEpisodeScope) []chat.RoomEpisode {
+		return s.rankEpisodes(ctx, db, slices.Clone(candidates), q, voice.Pack, planTalk(voice.Pack, in.Message), shown, s.guildPrivacy(in.GuildID).NoHearsay, bonus...)
+	}
 	if doc.Memory.EpisodesOn() {
-		rm.Episodes = s.relatedEpisodes(ctx, db, rooms, q, voice.Pack, planTalk(voice.Pack, in.Message), shown, s.guildPrivacy(in.GuildID).NoHearsay)
+		candidates = loadEpisodeCandidates(db, rooms)
+		rm.Episodes = pick()
 	}
 	if doc.Memory.StateOn() {
 		rm.Topics = s.linkedTopics(db, in, q, sources, s.guildPrivacy(in.GuildID).NoHearsay)
 	}
-	if doc.Memory.CardsOn() {
-		rm.Cards = s.turnCards(db, in, recent, sources)
+	var base *chat.RoomMemory
+	if len(rm.Episodes) != 0 || len(rm.Topics) != 0 {
+		base = &rm
 	}
-	if len(rm.Episodes) == 0 && len(rm.Topics) == 0 && len(rm.Cards) == 0 {
-		return nil
+	if !doc.Memory.EpisodesOn() && !doc.Memory.CardsOn() {
+		return base, nil
 	}
-	return rm
+	return base, func(_ []string) *chat.RoomMemory {
+		if len(rooms) == 0 {
+			return nil
+		}
+		updated := rm
+		var scope personEpisodeScope
+		updated.Cards, scope = s.turnCards(ctx, db, in, used)
+		if !updated.HasPersonBlock(voice) {
+			return nil // keep the original episodes, topics and prompt bytes
+		}
+		if doc.Memory.EpisodesOn() && !s.guildPrivacy(in.GuildID).NoSensitive {
+			updated.Episodes = pick(scope)
+		}
+		return &updated
+	}
 }
 
 func roomMemoryTables(db *storage.Store) bool {
@@ -115,12 +135,56 @@ func planTalk(p *lang.Pack, message string) bool {
 }
 
 type episodeCandidate struct {
-	id, room, source, kind, title, status, due, when string
-	importance                                       int
-	lastSeen                                         string
-	items                                            []itemRow
-	score                                            int
-	openPlan                                         bool
+	id, guild, room, source, kind, title, status, due, when string
+	importance                                              int
+	revision                                                int64
+	lastSeen                                                string
+	items                                                   []itemRow
+	participants                                            []string
+	score                                                   int
+	boosted                                                 bool
+	openPlan                                                bool
+}
+
+type personEpisodeScope struct {
+	guild  string
+	rooms  map[string]bool
+	people []turnPerson
+}
+
+// A person boost may surface the whole episode, not just the matching item.
+// Screen every subject, speaker and raw evidence author on the rendering snapshot.
+func (c episodeCandidate) canBoost(tx *sql.Tx, denied map[string]bool) bool {
+	check := func(refs []string) bool {
+		for _, ref := range refs {
+			if denied[ref] {
+				return false
+			}
+		}
+		return true
+	}
+	if !check(c.participants) || !check(episodes.TextRefs(c.title)) {
+		return false
+	}
+	for _, it := range c.items {
+		var active bool
+		if tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM episode_item WHERE id=? AND episode_id=? AND state='active')`, it.id, c.id).Scan(&active) != nil || !active {
+			return false
+		}
+		if !check(it.by) || !check(episodes.TextRefs(it.text)) {
+			return false
+		}
+		for _, id := range it.evidence {
+			var account string
+			if tx.QueryRow(`SELECT actor_account FROM memory_observations WHERE observation_id=? AND platform='discord' AND source_room=room AND room=? AND record_kind=? AND edited_at=''`, id, c.room, corpus.HumanText).Scan(&account) != nil || account == "" || denied[personRef(account)] {
+				return false
+			}
+			if current, err := store.ObservationCurrent(tx, id); err != nil || !current {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 type itemRow struct {
@@ -153,14 +217,14 @@ func namesOthers(text string, people []string) bool {
 // relatedEpisodes picks up to chat.MaxEpisodes episodes of the rooms related to the conversation, with
 // their live evidence, best first. Evidence in shown is not repeated.
 func (s *Service) relatedEpisodes(ctx context.Context, db *storage.Store, rooms []string, q episodes.Query, pack *lang.Pack, plans bool, shown map[string]bool, noHearsay bool) []chat.RoomEpisode {
-	if len(rooms) == 0 {
-		return nil
-	}
-	cands := loadEpisodeCandidates(db, rooms)
+	return s.rankEpisodes(ctx, db, loadEpisodeCandidates(db, rooms), q, pack, plans, shown, noHearsay)
+}
+
+func (s *Service) rankEpisodes(ctx context.Context, db *storage.Store, cands []episodeCandidate, q episodes.Query, pack *lang.Pack, plans bool, shown map[string]bool, noHearsay bool, bonus ...personEpisodeScope) []chat.RoomEpisode {
 	if noHearsay {
 		kept := cands[:0]
 		for _, c := range cands {
-			items := c.items[:0]
+			var items []itemRow
 			var speakers []string
 			for _, it := range c.items {
 				if !it.hearsay() {
@@ -205,6 +269,18 @@ func (s *Service) relatedEpisodes(ctx context.Context, db *storage.Store, rooms 
 	// only in a room with many episodes: in a small one (a hiking club's five hikes) the shared word is
 	// what the talk is about, and the best few by importance and recency are the right ones
 	common := len(cands) >= 10
+	tx, err := db.Reader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil
+	}
+	defer tx.Rollback()
+	var denied map[string]bool
+	if len(bonus) > 0 {
+		denied, err = s.deniedPeople(tx, bonus[0].guild)
+		if err != nil {
+			bonus = nil
+		}
+	}
 	for i := range cands {
 		c := &cands[i]
 		for _, w := range matches[i] {
@@ -218,6 +294,20 @@ func (s *Service) relatedEpisodes(ctx context.Context, db *storage.Store, rooms 
 			}
 		}
 		c.openPlan = plans && c.kind == "plan" && (c.status == episodes.Open || c.status == episodes.Decided)
+		if len(bonus) == 0 || c.guild != bonus[0].guild || !bonus[0].rooms[c.room] {
+			continue
+		}
+		for _, p := range bonus[0].people {
+			involved := !noHearsay && slices.Contains(c.participants, p.ref)
+			for _, it := range c.items {
+				involved = involved || slices.Contains(it.by, p.ref) || strings.Contains(it.text, "{@"+p.ref+"}")
+			}
+			if involved && !denied[p.ref] && c.canBoost(tx, denied) {
+				c.score += 2
+				c.boosted = true
+				break
+			}
+		}
 	}
 	var picked []*episodeCandidate
 	for i := range cands {
@@ -235,21 +325,28 @@ func (s *Service) relatedEpisodes(ctx context.Context, db *storage.Store, rooms 
 		}
 		return a.lastSeen > b.lastSeen
 	})
-	tx, err := db.Reader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return nil
-	}
-	defer func() { _ = tx.Rollback() }()
 	var out []chat.RoomEpisode
 	for _, c := range picked {
 		if len(out) == chat.MaxEpisodes {
 			break
 		}
+		if len(bonus) > 0 {
+			var revision int64
+			if tx.QueryRow(`SELECT revision FROM channel_episode WHERE id=?`, c.id).Scan(&revision) != nil || revision != c.revision {
+				continue
+			}
+		}
 		ev := s.evidenceNow(tx, c.items, chat.MaxEvidenceLines, shown)
 		if len(ev) == 0 {
 			continue // nothing it rests on stands any more, or all of it is in the prompt already
 		}
-		e := chat.RoomEpisode{ID: c.id, Title: episodes.StoredText(c.title, labelOf(c.room), "?"), Evidence: ev, Leaves: episodeLeaves(tx, c.id)}
+		renderLabel := labelOf(c.room)
+		if c.boosted {
+			raw, _ := json.Marshal(map[string]bool{c.room: true})
+			names := turnNames{tx: tx, guild: c.guild, rooms: string(raw), current: map[string]string{}, sources: map[string]string{}}
+			renderLabel = names.label
+		}
+		e := chat.RoomEpisode{ID: c.id, Title: episodes.StoredText(c.title, renderLabel, "?"), Evidence: ev, Leaves: episodeLeaves(tx, c.id)}
 		if c.kind == "plan" || c.kind == "decision" {
 			e.Status = pack.Memory.Statuses[c.status]
 		}
@@ -270,8 +367,11 @@ func (s *Service) relatedEpisodes(ctx context.Context, db *storage.Store, rooms 
 }
 
 func loadEpisodeCandidates(db *storage.Store, rooms []string) []episodeCandidate {
+	if len(rooms) == 0 {
+		return nil
+	}
 	raw, _ := json.Marshal(rooms)
-	rows, err := db.Reader().Query(`SELECT id, room, source, kind, title, status, due_at, when_text, importance, last_seen FROM channel_episode
+	rows, err := db.Reader().Query(`SELECT id, guild_id, room, source, kind, title, status, due_at, when_text, importance, last_seen, participants,revision FROM channel_episode
 		WHERE room IN (SELECT value FROM json_each(?)) ORDER BY last_seen DESC LIMIT ?`, string(raw), episodeCandidates)
 	if err != nil {
 		return nil
@@ -280,7 +380,9 @@ func loadEpisodeCandidates(db *storage.Store, rooms []string) []episodeCandidate
 	byID := map[string]int{}
 	for rows.Next() {
 		var c episodeCandidate
-		if rows.Scan(&c.id, &c.room, &c.source, &c.kind, &c.title, &c.status, &c.due, &c.when, &c.importance, &c.lastSeen) == nil {
+		var participants string
+		if rows.Scan(&c.id, &c.guild, &c.room, &c.source, &c.kind, &c.title, &c.status, &c.due, &c.when, &c.importance, &c.lastSeen, &participants, &c.revision) == nil {
+			_ = json.Unmarshal([]byte(participants), &c.participants)
 			byID[c.id] = len(cands)
 			cands = append(cands, c)
 		}

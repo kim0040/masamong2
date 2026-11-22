@@ -90,6 +90,8 @@ type Request struct {
 	LoopFinal string
 	// RoomMemory is what the room remembers that bears on this turn (roommemory.go); nil for none.
 	RoomMemory *RoomMemory
+	// People resolves the turn's room memory after the planner has named its targets.
+	People func(targets []string) *RoomMemory
 	// Images are the pictures the member called the bot with, for an answer model that takes them.
 	// They go with the answer's last user message only: the planner and the tool loop read the text,
 	// where the caller put a tag saying a picture came with it.
@@ -379,7 +381,13 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 		maxHistory = HistoryShown
 	}
 	searched, searchedState := res.Hits, res.RagState
-	roomBlock, kept, roomTrace := renderRoomMemory(v, req.RoomMemory, res.Hits)
+	room := req.RoomMemory
+	if req.People != nil {
+		if resolved := req.People(plan.PersonTargets); resolved != nil {
+			room = resolved
+		}
+	}
+	roomBlock, kept, roomTrace := renderRoomMemory(v, room, res.Hits)
 	if roomTrace.DroppedHits > 0 {
 		res.Hits = kept
 		if len(kept) == 0 {

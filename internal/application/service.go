@@ -26,6 +26,7 @@ import (
 	"masamong/internal/fsutil"
 	"masamong/internal/i18n"
 	"masamong/internal/lang"
+	memstore "masamong/internal/memory/store"
 	"masamong/internal/observability"
 	"masamong/internal/providers"
 	"masamong/internal/providers/openai"
@@ -308,6 +309,12 @@ func Open(dataRoot string, clk clock.Clock, webBuild bool) (*Service, error) {
 			return nil, err
 		}
 		s.startEventWorker()
+		db := s.Store
+		s.ownedGo("person alias fill", func(ctx context.Context) {
+			if err := memstore.FillPersonAliases(ctx, db); err != nil && ctx.Err() == nil {
+				s.Log.Warn("display-name fill paused; will resume on restart")
+			}
+		})
 	}
 	opened = true
 	return s, nil
