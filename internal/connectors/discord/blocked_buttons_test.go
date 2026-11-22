@@ -12,7 +12,7 @@ import (
 	"masamong/internal/action"
 )
 
-// A person blocked in a server cannot use the reply's thread buttons or its "more" button there: the press
+// A person blocked in a server cannot use the reply's thread buttons, its "more" button or a poll's buttons there: the press
 // gets the refusal only they see, and nothing else happens.
 func TestBlockedPersonsThreadAndMoreButtonsAreRefused(t *testing.T) {
 	g, fake := privateCardGateway(t)
@@ -31,7 +31,7 @@ func TestBlockedPersonsThreadAndMoreButtonsAreRefused(t *testing.T) {
 			Data:    discordgo.MessageComponentInteractionData{CustomID: customID, ComponentType: discordgo.ButtonComponent}}}
 	}
 	want := messages.T(g.svc.LocaleFor(blocked, g.locale(guild)), "access.blocked")
-	for _, id := range []string{"thr:open:turn1:" + blocked, "thr:stay:turn1:" + blocked, "thr:stop:thread1", "more:reply"} {
+	for _, id := range []string{"thr:open:turn1:" + blocked, "thr:stay:turn1:" + blocked, "thr:stop:thread1", "more:reply", "poll:vote:p1:o1", "poll:result:p1", "poll:close:p1"} {
 		before := len(fake.calls)
 		g.handleComponent(g.sess, press(id))
 		g.inflight.Wait()
