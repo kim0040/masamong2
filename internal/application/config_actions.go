@@ -2,6 +2,7 @@ package application
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -11,10 +12,11 @@ import (
 	"masamong/internal/action"
 	"masamong/internal/config"
 	"masamong/internal/errcode"
+	"masamong/internal/tools"
 )
 
 func (s *Service) configShow(req action.Request) action.Result {
-	raw, _ := config.Marshal(s.Doc())
+	raw, _ := config.Marshal(redactDirectSecrets(s.Doc()))
 	response := s.Doc().Models["response"]
 	return action.OK(req, map[string]any{
 		"revision":               s.Revision(),
@@ -32,6 +34,114 @@ func (s *Service) configShow(req action.Request) action.Result {
 		"timezone":               s.Doc().I18n.Timezone,
 		"features":               s.Doc().Features,
 	})
+}
+
+// redactedValue replaces a key typed directly into an HTTP tool in the exported settings. It is not a
+// key, so a re-imported export does not send it anywhere as one.
+const redactedValue = "<redacted: use credential_ref>"
+
+// redactDirectSecrets returns a copy of d without keys typed directly into an HTTP tool's headers or
+// URL query (where {credential} with credential_ref belongs). config.show says the settings it returns
+// are redacted, and the console's export downloads them; the stored settings keep the values.
+func redactDirectSecrets(d config.Document) config.Document {
+	if len(d.Tools) == 0 {
+		return d
+	}
+	out := make(map[string]tools.Settings, len(d.Tools))
+	for id, t := range d.Tools {
+		if t.HTTP != nil {
+			h := *t.HTTP
+			h.URL = redactSecretQuery(h.URL)
+			if len(h.Headers) > 0 {
+				h.Headers = make(map[string]string, len(t.HTTP.Headers))
+				for name, v := range t.HTTP.Headers {
+					if directSecretHeader(name, v) {
+						v = redactedValue
+					}
+					h.Headers[name] = v
+				}
+			}
+			t.HTTP = &h
+		}
+		out[id] = t
+	}
+	d.Tools = out
+	return d
+}
+
+// hasDirectSecrets reports whether d holds a key typed directly into an HTTP tool (a backup that
+// copies these settings then contains a secret).
+func hasDirectSecrets(d config.Document) bool {
+	for _, t := range d.Tools {
+		if t.HTTP == nil {
+			continue
+		}
+		if redactSecretQuery(t.HTTP.URL) != t.HTTP.URL {
+			return true
+		}
+		for name, v := range t.HTTP.Headers {
+			if directSecretHeader(name, v) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// directSecretHeader reports whether a header carries a key itself: an authorization or key-like
+// header whose value does not come from {credential}.
+func directSecretHeader(name, value string) bool {
+	if strings.TrimSpace(value) == "" || strings.Contains(value, "{credential}") {
+		return false
+	}
+	n := strings.ToLower(name)
+	switch n {
+	case "authorization", "proxy-authorization", "cookie":
+		return true
+	}
+	for _, part := range []string{"key", "token", "secret", "auth", "signature", "password"} {
+		if strings.Contains(n, part) {
+			return true
+		}
+	}
+	return false
+}
+
+// secretQueryNames are URL query names that carry a key (lowercase, with - and _ removed).
+var secretQueryNames = map[string]bool{
+	"key": true, "apikey": true, "token": true, "accesstoken": true, "authtoken": true, "auth": true,
+	"authkey": true, "servicekey": true, "secret": true, "clientsecret": true, "password": true,
+	"signature": true, "sig": true, "appkey": true, "appsecret": true,
+}
+
+// redactSecretQuery masks the values of key-carrying query parameters that are written directly
+// (not a {placeholder}). A URL it cannot read is returned unchanged.
+func redactSecretQuery(raw string) string {
+	base, query, ok := strings.Cut(raw, "?")
+	if !ok || query == "" {
+		return raw
+	}
+	frag := ""
+	if i := strings.IndexByte(query, '#'); i >= 0 {
+		query, frag = query[:i], query[i:]
+	}
+	parts := strings.Split(query, "&")
+	changed := false
+	for i, p := range parts {
+		name, value, has := strings.Cut(p, "=")
+		if !has || value == "" || (strings.HasPrefix(value, "{") && strings.HasSuffix(value, "}")) {
+			continue
+		}
+		key := strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(name))
+		if secretQueryNames[key] {
+			parts[i] = name + "=" + url.QueryEscape(redactedValue)
+			changed = true
+		}
+	}
+	if !changed {
+		return raw
+	}
+	return base + "?" + strings.Join(parts, "&") + frag
 }
 
 func (s *Service) configDiff(req action.Request) action.Result {
