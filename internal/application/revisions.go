@@ -19,6 +19,10 @@ import (
 // console's turn history drops the text of a deleted message the bot answered, and the rooms are
 // resynced shortly after so search stops showing the old text.
 
+// ErrServiceClosing reports an edit or deletion that arrived after shutdown began: nothing was applied, so the
+// caller keeps it (the Discord gateway writes it to its reconciliation queue, applied on the next start).
+var ErrServiceClosing = errors.New("application: service is closing; the change was not applied")
+
 // resyncDelay gathers a burst of edits or deletions (a bulk delete, a user tidying up) into one resync.
 var resyncDelay = 2 * time.Second
 
@@ -75,7 +79,7 @@ func (s *Service) SettledMark() int64 { return store.SettledMark(s.Store) }
 func (s *Service) MessageEdited(guildID, channelID, messageID, content string, at time.Time) error {
 	ctx, done, ok := s.beginWork(context.Background())
 	if !ok {
-		return nil
+		return ErrServiceClosing
 	}
 	defer done()
 	if s.Store == nil || messageID == "" {
@@ -136,7 +140,7 @@ func (s *Service) MessageEdited(guildID, channelID, messageID, content string, a
 func (s *Service) MessageKeptItsWords(guildID, channelID, messageID, content string, at time.Time) (bool, error) {
 	_, done, ok := s.beginWork(context.Background())
 	if !ok {
-		return false, nil
+		return false, ErrServiceClosing
 	}
 	defer done()
 	content = strings.TrimSpace(content) // as the copies hold it (connectors' bodyOf)
@@ -175,7 +179,7 @@ func (s *Service) MessageKeptItsWords(guildID, channelID, messageID, content str
 func (s *Service) MessagesDeleted(guildID, channelID string, messageIDs []string) error {
 	ctx, done, ok := s.beginWork(context.Background())
 	if !ok {
-		return nil
+		return ErrServiceClosing
 	}
 	defer done()
 	if s.Store == nil || len(messageIDs) == 0 {
@@ -310,10 +314,16 @@ func (s *Service) commitSourceChange(ctx context.Context, guildID, channelID str
 	}
 	s.kickRedaction()
 	return s.applyPracticePrivacy(func(p *Service) error {
+		var err error
 		if operation == "edit" && len(messageIDs) > 0 {
-			return p.MessageEdited(guildID, channelID, messageIDs[0], content, at)
+			err = p.MessageEdited(guildID, channelID, messageIDs[0], content, at)
+		} else {
+			err = p.MessagesDeleted(guildID, channelID, messageIDs)
 		}
-		return p.MessagesDeleted(guildID, channelID, messageIDs)
+		if errors.Is(err, ErrServiceClosing) {
+			return nil // the practice copy is closing on its own; the change here is committed (as before)
+		}
+		return err
 	})
 }
 
