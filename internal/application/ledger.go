@@ -607,6 +607,17 @@ func (s *Service) withLoggingLevel(level, outcome string, turnErr error, body ma
 		}
 	})
 	each("plan", func(p map[string]any) { delete(p, "parameters") })
+	// the tool loop's trace keeps the model's arguments per call (addToolLoop): drop them, keep the calls
+	for _, key := range []string{"tool_loop", "tool_shadow"} {
+		if trace, ok := m[key].(map[string]any); ok {
+			calls, _ := trace["calls"].([]any)
+			for _, it := range calls {
+				if c, ok := it.(map[string]any); ok {
+					delete(c, "params")
+				}
+			}
+		}
+	}
 	// provider and tool error texts can echo what the member wrote: keep the failure class instead
 	if _, ok := m["error"]; ok {
 		class := errclass.Of(turnErr)
