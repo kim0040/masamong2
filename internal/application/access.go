@@ -251,6 +251,14 @@ func (s *Service) discordAdmin(req action.Request) action.Result {
 		if r := sub("channels.configure", map[string]any{"guild_id": g, "channel_id": c, "capture": mode == "on"}); !r.OK {
 			return r
 		}
+	case "news":
+		mode := strVal(in, "mode", "")
+		if mode != "on" && mode != "off" {
+			return action.Fail(req, errcode.InvalidInput, "access.bad_mode", s.msg(req, "access.bad_mode"), nil)
+		}
+		if r := sub("channels.configure", map[string]any{"guild_id": g, "channel_id": c, "update_news": mode}); !r.OK {
+			return r
+		}
 	case "chime":
 		mode := strVal(in, "mode", "")
 		if !stringIn(mode, config.ParticipationModes) {
@@ -309,6 +317,7 @@ func (s *Service) discordAdmin(req action.Request) action.Result {
 		{Name: s.msg(req, "access.memory"), Value: onOff(pol.MemoryUse == "on"), Inline: true},
 		{Name: s.msg(req, "access.capture"), Value: onOff(pol.Capture && s.Doc().Memory.Capture), Inline: true},
 		{Name: s.msg(req, "access.chime"), Value: s.msg(req, "access.chime."+chime), Inline: true},
+		{Name: s.msg(req, "access.news"), Value: onOff(pol.UpdateNews == "on"), Inline: true},
 		{Name: s.msg(req, "access.blocked_here"), Value: fmt.Sprint(len(s.Doc().Guilds[g].BlockedUsers)), Inline: true},
 	}
 	if target != "" {

@@ -384,3 +384,10 @@ func SetSearchDeadlineForTest(depth string, d time.Duration) func() {
 	searchDeadline[depth] = d
 	return func() { searchDeadline[depth] = old }
 }
+
+// UseVersionForTest sets the running version for a test (the update-news notes follow it).
+func UseVersionForTest(version string) (restore func()) {
+	old := Version
+	Version = version
+	return func() { Version = old }
+}

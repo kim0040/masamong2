@@ -415,21 +415,33 @@ func Commands() []Command {
 			},
 		},
 		{
+			Name: "updates", Desc: "What's new in this version; your update news by DM", Action: "updates.notes",
+			Ephemeral: true, DiscordOnly: true,
+			Options: []*discordgo.ApplicationCommandOption{
+				choiceOption("what", "What to see or do", false, "now", "previous", "subscribe", "unsubscribe", "status"),
+				option(str, "value", "A version, e.g. v1.4.0", false),
+			},
+			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
+				verb, rest := splitVerb(o["what"], o["value"], wordsFor("updates", "verb", "now", "previous", "subscribe", "unsubscribe", "status"))
+				return updatesRequest(verb, rest)
+			},
+		},
+		{
 			Name: "admin", Desc: "Run the bot in this channel: pause, replies, memory, chiming in, blocking (server managers)",
 			Action: "access.policy", Ephemeral: true, DiscordOnly: true, ManagersOnly: true,
 			Options: []*discordgo.ApplicationCommandOption{
-				choiceOption("op", "What to do", false, "status", "pause", "resume", "respond", "memory", "chime", "block", "unblock"),
+				choiceOption("op", "What to do", false, "status", "pause", "resume", "respond", "memory", "chime", "news", "block", "unblock"),
 				choiceOption("mode", "Setting (reply mode, memory on/off, chiming in)", false, "always", "mention", "command", "off", "on", "collect", "shadow", "conservative"),
 				option(discordgo.ApplicationCommandOptionUser, "user", "Who to block or unblock in this server", false),
 			},
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				verb, rest := splitVerb(o["op"], o["mode"], wordsFor("admin", "verb", "status", "pause", "resume", "respond", "memory", "chime", "block", "unblock"))
+				verb, rest := splitVerb(o["op"], o["mode"], wordsFor("admin", "verb", "status", "pause", "resume", "respond", "memory", "chime", "news", "block", "unblock"))
 				if verb == "" {
 					verb = "status"
 				}
 				in := map[string]any{"op": verb}
 				switch verb {
-				case "respond", "memory", "chime":
+				case "respond", "memory", "chime", "news":
 					mode := wordsFor("admin", "mode", "always", "mention", "command", "off", "on", "collect", "shadow", "conservative")[strings.ToLower(rest)]
 					if mode == "" {
 						mode = rest
@@ -523,6 +535,31 @@ func Commands() []Command {
 		cmds[i].Aliases = aliasesFor(cmds[i].Name)
 	}
 	return cmds
+}
+
+// updatesRequest maps an updates verb (and what follows it) to its Action: the notes of this version,
+// of the one before it, or of one named; and the person's own DM subscription.
+func updatesRequest(verb, rest string) (string, map[string]any) {
+	rest = strings.TrimSpace(rest)
+	switch verb {
+	case "subscribe":
+		return "updates.subscribe", map[string]any{"op": "on"}
+	case "unsubscribe":
+		return "updates.subscribe", map[string]any{"op": "off"}
+	case "status":
+		return "updates.subscribe", map[string]any{"op": "status"}
+	case "previous":
+		in := map[string]any{"previous": true}
+		if rest != "" {
+			in["version"] = rest // the one before the version named
+		}
+		return "updates.notes", in
+	}
+	in := map[string]any{}
+	if rest != "" {
+		in["version"] = rest
+	}
+	return "updates.notes", in
 }
 
 // noticeRequest maps a notices or transfer verb (and what follows it) to its Action.

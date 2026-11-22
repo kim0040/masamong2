@@ -32,6 +32,9 @@ var consoleUnreachable = map[string]string{
 	"usage.budgets":      "equivalent: the Usage page shows the month's spend, budget and per-kind spend (dashboard.overview month), each provider's calls today against its daily limit (providers.list, from the same registry statuses) and each tool's calls today (tools.list used_today); usage.budgets is those three joined for the CLI, while the page calls usage.reset and reads its active reset from dashboard.overview",
 	"channels.view.show": "equivalent: the Room page lists a channel's attached blocks from memory.blocks.list (channels[].attached, the same RAGView.Blocks this Action returns) and Block shows the reverse",
 
+	"updates.notes":     "temporary: the Home card that reads it comes in the next commit",
+	"updates.subscribe": "temporary: the People switch that calls it comes in the next commit",
+
 	"channels.attachments.add":    "dormant: attachments are stored in config (RAGAttachments) but nothing in answering reads them yet, so a console control would look like it works while doing nothing",
 	"channels.attachments.remove": "dormant: attachments are stored in config (RAGAttachments) but nothing in answering reads them yet, so a console control would look like it works while doing nothing",
 }

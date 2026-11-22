@@ -798,6 +798,10 @@ func (s *Service) execute(ctx context.Context, req action.Request) action.Result
 		return s.instanceReset(req)
 	case "updates.status", "updates.check", "updates.apply":
 		return s.updatesAction(ctx, req)
+	case "updates.notes":
+		return s.updatesNotes(req)
+	case "updates.subscribe":
+		return s.updatesSubscribe(req)
 	case "runtime.history":
 		if _, err := s.adminDB(); err != nil {
 			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)

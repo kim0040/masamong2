@@ -147,6 +147,7 @@ func (s *Service) channelView(guildID, channelID, name, typ string, live bool) m
 		"disaster_alerts": pol.DisasterAlerts != "off",
 		"watch_level":     pol.WatchLevel,
 		"watch_areas":     s.watchLevelCheck(pol.WatchLevel),
+		"update_news":     pol.UpdateNews == "on",
 		"rules_set":       pol.Rules != "",
 		"proactive":       false,
 		"rag_attachments": atts,
@@ -261,6 +262,7 @@ func (s *Service) channelsConfigure(req action.Request, in map[string]any) actio
 	_, hasRules := in["rules"]
 	rules := strVal(in, "rules", "")
 	disaster := strVal(in, "disaster_alerts", "")
+	news := strVal(in, "update_news", "")
 
 	res := s.mutateConfig(req, func(d *config.Document) error {
 		ensureGuildChannelMaps(d, guildID)
@@ -304,6 +306,15 @@ func (s *Service) channelsConfigure(req action.Request, in map[string]any) actio
 				p.DisasterAlerts = "" // on is the default
 			}
 		}
+		if news != "" {
+			if news != "on" && news != "off" {
+				return fmt.Errorf("update_news must be on or off")
+			}
+			p.UpdateNews = news
+			if news == "off" {
+				p.UpdateNews = "" // off is the default
+			}
+		}
 		if hasRules {
 			if len([]rune(rules)) > 2000 {
 				return fmt.Errorf("rules must be at most 2000 characters")
@@ -337,6 +348,7 @@ func (s *Service) channelsConfigure(req action.Request, in map[string]any) actio
 	res.Output["persona_ref"] = pol.PersonaRef
 	res.Output["capture"] = pol.Capture
 	res.Output["disaster_alerts"] = pol.DisasterAlerts != "off"
+	res.Output["update_news"] = pol.UpdateNews == "on"
 	res.Output["watch_level"] = pol.WatchLevel
 	res.Output["watch_areas"] = s.watchLevelCheck(pol.WatchLevel)
 	res.Output["logging_level"] = pol.Logging.Level

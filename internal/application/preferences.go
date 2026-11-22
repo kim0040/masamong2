@@ -31,6 +31,7 @@ func init() {
 		quiet_start TEXT NOT NULL DEFAULT '',
 		quiet_end TEXT NOT NULL DEFAULT '',
 		weather_region TEXT NOT NULL DEFAULT '',
+		update_news INTEGER NOT NULL DEFAULT 0,
 		updated_at TEXT NOT NULL
 	)`)
 }
@@ -43,7 +44,9 @@ type UserPrefs struct {
 	QuietStart    string `json:"quiet_start"`
 	QuietEnd      string `json:"quiet_end"`
 	WeatherRegion string `json:"weather_region"`
-	UpdatedAt     string `json:"updated_at,omitempty"`
+	// UpdateNews is the person's own opt-in to a DM when the bot moves to a new release (updatenews.go).
+	UpdateNews bool   `json:"update_news"`
+	UpdatedAt  string `json:"updated_at,omitempty"`
 }
 
 var hhmm = regexp.MustCompile(`^([01]?\d|2[0-3]):([0-5]\d)$`)
@@ -64,8 +67,8 @@ func (s *Service) userPrefs(userID string) UserPrefs {
 	if err != nil || userID == "" {
 		return p
 	}
-	_ = db.DB.QueryRow(`SELECT locale, timezone, quiet_start, quiet_end, weather_region, updated_at FROM user_prefs WHERE user_id=?`, userID).
-		Scan(&p.Locale, &p.Timezone, &p.QuietStart, &p.QuietEnd, &p.WeatherRegion, &p.UpdatedAt)
+	_ = db.DB.QueryRow(`SELECT locale, timezone, quiet_start, quiet_end, weather_region, update_news, updated_at FROM user_prefs WHERE user_id=?`, userID).
+		Scan(&p.Locale, &p.Timezone, &p.QuietStart, &p.QuietEnd, &p.WeatherRegion, &p.UpdateNews, &p.UpdatedAt)
 	return p
 }
 
@@ -168,7 +171,7 @@ func (s *Service) preferencesAction(req action.Request) action.Result {
 		return nil
 	}
 	if boolVal(in, "reset") {
-		p = UserPrefs{UserID: userID}
+		p = UserPrefs{UserID: userID, UpdateNews: p.UpdateNews} // the news subscription has its own command
 		changed = true
 	}
 	for _, f := range []struct {
@@ -210,10 +213,10 @@ func (s *Service) preferencesAction(req action.Request) action.Result {
 				_, err := tx.Exec(`DELETE FROM user_prefs WHERE user_id=?`, userID)
 				return err
 			}
-			_, err := tx.Exec(`INSERT INTO user_prefs(user_id, locale, timezone, quiet_start, quiet_end, weather_region, updated_at) VALUES(?,?,?,?,?,?,?)
+			_, err := tx.Exec(`INSERT INTO user_prefs(user_id, locale, timezone, quiet_start, quiet_end, weather_region, update_news, updated_at) VALUES(?,?,?,?,?,?,?,?)
 				ON CONFLICT(user_id) DO UPDATE SET locale=excluded.locale, timezone=excluded.timezone, quiet_start=excluded.quiet_start,
-				quiet_end=excluded.quiet_end, weather_region=excluded.weather_region, updated_at=excluded.updated_at`,
-				userID, p.Locale, p.Timezone, p.QuietStart, p.QuietEnd, p.WeatherRegion, p.UpdatedAt)
+				quiet_end=excluded.quiet_end, weather_region=excluded.weather_region, update_news=excluded.update_news, updated_at=excluded.updated_at`,
+				userID, p.Locale, p.Timezone, p.QuietStart, p.QuietEnd, p.WeatherRegion, p.UpdateNews, p.UpdatedAt)
 			return err
 		})
 		if err != nil {
@@ -256,7 +259,7 @@ func (s *Service) preferencesList(req action.Request) action.Result {
 	if err != nil {
 		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
 	}
-	rows, err := db.DB.Query(`SELECT user_id, locale, timezone, quiet_start, quiet_end, weather_region, updated_at FROM user_prefs ORDER BY updated_at DESC LIMIT 500`)
+	rows, err := db.DB.Query(`SELECT user_id, locale, timezone, quiet_start, quiet_end, weather_region, update_news, updated_at FROM user_prefs ORDER BY updated_at DESC LIMIT 500`)
 	if err != nil {
 		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
 	}
@@ -264,7 +267,7 @@ func (s *Service) preferencesList(req action.Request) action.Result {
 	list := []UserPrefs{}
 	for rows.Next() {
 		var p UserPrefs
-		if rows.Scan(&p.UserID, &p.Locale, &p.Timezone, &p.QuietStart, &p.QuietEnd, &p.WeatherRegion, &p.UpdatedAt) == nil {
+		if rows.Scan(&p.UserID, &p.Locale, &p.Timezone, &p.QuietStart, &p.QuietEnd, &p.WeatherRegion, &p.UpdateNews, &p.UpdatedAt) == nil {
 			list = append(list, p)
 		}
 	}

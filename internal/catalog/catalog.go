@@ -161,6 +161,8 @@ func All() []Descriptor {
 		exec("updates.status", "updates status", "/maintenance", "read"),
 		exec("updates.check", "updates check", "/maintenance", "read"),
 		exec("updates.apply", "updates apply", "/maintenance", "internal_write"),
+		exec("updates.notes", "updates notes", "/maintenance", "read"),
+		exec("updates.subscribe", "updates subscribe", "/people", "internal_write"),
 		exec("instance.reset", "reset", "/maintenance", "internal_write"),
 		exec("feedback.summary", "feedback summary", "/turns", "read"),
 		exec("config.changes", "config changes", "/settings", "read"),
