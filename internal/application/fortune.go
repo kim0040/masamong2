@@ -20,6 +20,7 @@ import (
 	"masamong/internal/features/privacy"
 	"masamong/internal/hostprofile"
 	"masamong/internal/lang"
+	"masamong/internal/providers/kma"
 	"masamong/internal/storage"
 	"masamong/internal/tools"
 )
@@ -186,7 +187,7 @@ func (s *Service) birthZone() *time.Location {
 	if loc, err := time.LoadLocation("Asia/Seoul"); err == nil {
 		return loc
 	}
-	return time.FixedZone("KST", 9*3600) // a system without tzdata
+	return kma.KST // a system without tzdata
 }
 
 // Uncertain natal pillars: no birth time, and a 절기 falls on the birth date (fortuneChart.uncertain).

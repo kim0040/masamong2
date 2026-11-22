@@ -3,6 +3,8 @@
 // Capability/agent registry is separate: backup and secret Actions stay agent_exposure=none.
 package catalog
 
+import "slices"
+
 const (
 	Executable = "executable"
 	Deferred   = "deferred"
@@ -32,7 +34,22 @@ type Descriptor struct {
 	Permission     string
 }
 
+var allDescriptors = buildAll()
+
+var descriptorsByID = func() map[string]Descriptor {
+	m := make(map[string]Descriptor, len(allDescriptors))
+	for _, d := range allDescriptors {
+		m[d.ID] = d
+	}
+	return m
+}()
+
+// All returns the product Action registry. Each call gets a fresh slice, so callers may reorder it.
 func All() []Descriptor {
+	return slices.Clone(allDescriptors)
+}
+
+func buildAll() []Descriptor {
 	exec := func(id, cli, route, effects string) Descriptor {
 		return Descriptor{ID: id, CLI: cli, GUIRoute: route, Availability: Executable, Effects: effects, AgentExposure: "none", Permission: id}
 	}
@@ -207,12 +224,8 @@ func All() []Descriptor {
 }
 
 func Lookup(id string) (Descriptor, bool) {
-	for _, d := range All() {
-		if d.ID == id {
-			return d, true
-		}
-	}
-	return Descriptor{}, false
+	d, ok := descriptorsByID[id]
+	return d, ok
 }
 
 func IsExecutable(id string) bool {

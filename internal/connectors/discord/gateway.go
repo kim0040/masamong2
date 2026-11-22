@@ -333,15 +333,9 @@ func jittered(delay time.Duration) time.Duration {
 	return time.Duration(rand.Int63n(int64(delay/2)+1)) + delay/2
 }
 
+// waitContext is sleepCtx under the name the retry hooks take.
 func waitContext(ctx context.Context, delay time.Duration) bool {
-	t := time.NewTimer(delay)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-		return false
-	case <-t.C:
-		return true
-	}
+	return sleepCtx(ctx, delay)
 }
 
 // Replies in progress at shutdown get turnGrace to finish (the session stays open meanwhile); then they
