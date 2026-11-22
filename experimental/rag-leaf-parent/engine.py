@@ -7,6 +7,7 @@ import math
 import os
 import re
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -44,8 +45,6 @@ from retrieval_post import (  # noqa: E402
     TimeReference as RetrievalTimeReference,
     narrow_time_ids,
     resolve_time_scope,
-    DENSE_LIMIT as _DEFAULT_DENSE_LIMIT,
-    LEXICAL_LIMIT as _DEFAULT_LEXICAL_LIMIT,
     RERANK_MIN_SCORE,
     finalize_ranked_ids,
     merged_span,
@@ -174,15 +173,13 @@ LEDGER_PATH = DATA / "session_ledger.json"
 CKPT_DIR = DATA / "ckpt"
 CKPT_STATE_PATH = CKPT_DIR / "state.json"
 PROGRESS_PATH = DATA / "prepare_progress.json"
-WINDOWS_PATH = LEAVES_PATH
-VECS_PATH = LEAF_VECS_PATH
 
 
 def _bind_data_dir(data: Path) -> None:
     """RAG-ified artifacts live under test-sandbox/data, not the product DB."""
     global DATA, MESSAGES_PATH, LEAVES_PATH, BASELINE_PATH, LEAF_VECS_PATH
     global BASELINE_VECS_PATH, SUMMARIES_PATH, SUMMARY_VECS_PATH, META_PATH
-    global LEDGER_PATH, CKPT_DIR, CKPT_STATE_PATH, WINDOWS_PATH, VECS_PATH, PROGRESS_PATH
+    global LEDGER_PATH, CKPT_DIR, CKPT_STATE_PATH, PROGRESS_PATH
     DATA = Path(data)
     MESSAGES_PATH = DATA / "messages.json"
     LEAVES_PATH = DATA / "leaves.json"
@@ -195,8 +192,6 @@ def _bind_data_dir(data: Path) -> None:
     LEDGER_PATH = DATA / "session_ledger.json"
     CKPT_DIR = DATA / "ckpt"
     CKPT_STATE_PATH = CKPT_DIR / "state.json"
-    WINDOWS_PATH = LEAVES_PATH
-    VECS_PATH = LEAF_VECS_PATH
     PROGRESS_PATH = DATA / "prepare_progress.json"
 
 
@@ -228,11 +223,6 @@ class PlaygroundError(RuntimeError):
     pass
 
 
-# 테스트가 모듈 상수를 잠시 덮어쓰므로 retrieval_post 기본값을 여기서 재바인딩한다.
-LEXICAL_LIMIT = _DEFAULT_LEXICAL_LIMIT
-DENSE_LIMIT = _DEFAULT_DENSE_LIMIT
-
-
 def load_config() -> dict[str, Any]:
     return json.loads(local_config_path().read_text(encoding="utf-8"))
 
@@ -252,6 +242,8 @@ def weighted_rrf(
     *,
     k: int = 60,
 ) -> list[str]:
+    """테스트 기준 구현. 검색 경로는 candidates.py를 쓰고, 이 함수는
+    test_candidates.py가 순서가 같은지 확인하는 oracle로만 남아 있다."""
     scores: dict[str, float] = {}
     for ranks, weight in zip(rank_lists, weights):
         for pos, doc_id in enumerate(ranks):
@@ -418,9 +410,17 @@ def index_fingerprint(cfg: dict[str, Any]) -> dict[str, Any]:
 
 def _atomic_write_json(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(payload, ensure_ascii=False, indent=2))
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _load_vecs(path: Path) -> np.ndarray:
@@ -1555,6 +1555,10 @@ class IndexBundle:
     # leaf row each belongs to. Loaded only when the run is enabled and the artifacts exist.
     message_vectors: np.ndarray | None = None
     message_leaf: np.ndarray | None = None
+    # Lazily built runtime caches, never serialized. `_identity_for` fills
+    # `_identity_table`; retrieval_post fills `_t04_msg_index_by_obs`.
+    _identity_table: Any = None
+    _t04_msg_index_by_obs: dict[str, int] | None = None
 
     @property
     def docs(self) -> list[dict[str, Any]]:
@@ -1831,6 +1835,8 @@ def _hit_provenance(index: IndexBundle, doc: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# 테스트가 이 모듈 상수를 잠시 덮어쓴다(test_engine_retrieval). retrieval_post의
+# 기본값(200/150)과 다른 풀 한도다.
 LEXICAL_LIMIT = 80
 DENSE_LIMIT = 50
 
@@ -2113,7 +2119,9 @@ def _rerank_leaves(
             continue
         if allowed_ids is not None and doc_id not in allowed_ids:
             continue
-        rank = rrf_rank.get(doc_id, LEXICAL_LIMIT + cand_i)
+        # rrf_rank에 없는 후보는 가져온 목록 바로 뒤의 순위로 둔다.
+        unranked_rank = LEXICAL_LIMIT + cand_i
+        rank = rrf_rank.get(doc_id, unranked_rank)
         # hybrid 1위 → 1.0, 풀 마지막 → 0에 가깝게. 주입된 후보(hybrid에 없음)는 0.
         base = max(0.0, 1.0 - rank / n_consider)
         person, meta = _person_signal(index, leaf, tokens=tokens, labels=labels)
