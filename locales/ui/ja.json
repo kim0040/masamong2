@@ -4013,5 +4013,6 @@
   "token_rotate.confirm_title": "アクセストークンを新しく発行しますか？",
   "token_rotate.confirm_body": "他のブラウザや端末はもう一度サインインが必要です。新しいトークンは、このコンピューターのターミナルで {cmd} を実行して確認します。",
   "token_rotate.done": "新しいトークンを発行しました。古いトークンはもう使えません。",
-  "token_rotate.failed": "トークンを再発行できませんでした"
+  "token_rotate.failed": "トークンを再発行できませんでした",
+  "feature.tool_keys": "ツールのキー"
 }

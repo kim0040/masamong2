@@ -4013,5 +4013,6 @@
   "token_rotate.confirm_title": "要重新签发访问令牌吗？",
   "token_rotate.confirm_body": "其他浏览器和设备需要重新登录。在这台电脑的终端中运行 {cmd} 查看新令牌。",
   "token_rotate.done": "已签发新令牌，旧令牌已不能使用。",
-  "token_rotate.failed": "未能重新签发令牌"
+  "token_rotate.failed": "未能重新签发令牌",
+  "feature.tool_keys": "工具密钥"
 }

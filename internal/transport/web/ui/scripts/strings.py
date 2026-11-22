@@ -2696,6 +2696,7 @@ add("", {
     "attention.discord_reconciliation": ("복구를 기다리는 Discord 편집·삭제 파일이 {n}개 있어요. 처리하기 전까지 Discord 편집 반영이 멈춰 있어요. 방법은 docs/memory-operations.md §17에 있어요.", "{n} saved Discord edit/delete files are waiting for recovery. Edits from Discord stay paused until they are handled. See docs/memory-operations.md §17."),
     "attention.fix.discord_reconciliation": ("처리 방법 보기", "See what to do"),
     "feature.discord_reconciliation": ("Discord 복구 대기 파일", "Discord recovery queue"),
+    "feature.tool_keys": ("도구 키", "Tool keys"),
     "turns.fbs.title": ("답변 평가", "Reply ratings"),
     "turns.fbs.period": ("집계 기간", "Period"),
     "turns.fbs.days": ("{n}일", "{n} days"),

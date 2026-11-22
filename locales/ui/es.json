@@ -4013,5 +4013,6 @@
   "token_rotate.confirm_title": "¿Emitir un nuevo token de acceso?",
   "token_rotate.confirm_body": "Los demás navegadores y dispositivos tendrán que iniciar sesión de nuevo. Muestra el nuevo token en un terminal de este equipo con {cmd}.",
   "token_rotate.done": "Token nuevo emitido. El anterior ya no funciona.",
-  "token_rotate.failed": "No se pudo emitir un token nuevo"
+  "token_rotate.failed": "No se pudo emitir un token nuevo",
+  "feature.tool_keys": "Claves de herramientas"
 }
