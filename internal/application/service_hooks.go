@@ -1,6 +1,11 @@
 package application
 
-import "time"
+import (
+	"context"
+	"time"
+
+	"masamong/internal/memory/engine"
+)
 
 // serviceHooks are what a test injects into one service: shorter intervals, a function run at a point
 // worth watching. Production leaves every field zero. They are given to the constructor (openHooked) or
@@ -12,6 +17,8 @@ type serviceHooks struct {
 	pendingPollMin, pendingPollMax time.Duration
 	// pendingStep runs at the start of every pending-event worker pass.
 	pendingStep func()
+	// pendingCount replaces the console's count of messages waiting for a vector (pending_count.go).
+	pendingCount func(ctx context.Context, eng *engine.Engine, space string) (int, error)
 	// oldEditsAtOnce settles old edits at the first idle pass instead of oldEditsDelay after the start.
 	oldEditsAtOnce bool
 }

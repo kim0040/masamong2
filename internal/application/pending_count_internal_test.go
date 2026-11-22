@@ -13,11 +13,10 @@ import (
 
 // countHook replaces the count with one that waits for release and returns its value (or panics on a
 // negative one), and counts the calls.
-func countHook(t *testing.T) (release chan int, calls *atomic.Int32) {
+func countHook(t *testing.T, s *Service) (release chan int, calls *atomic.Int32) {
 	t.Helper()
 	release, calls = make(chan int), new(atomic.Int32)
-	old := pendingCountHook
-	pendingCountHook = func(ctx context.Context, _ *engine.Engine, _ string) (int, error) {
+	s.hooks.pendingCount = func(ctx context.Context, _ *engine.Engine, _ string) (int, error) {
 		calls.Add(1)
 		select {
 		case n := <-release:
@@ -29,7 +28,6 @@ func countHook(t *testing.T) (release chan int, calls *atomic.Int32) {
 			return 0, ctx.Err()
 		}
 	}
-	t.Cleanup(func() { pendingCountHook = old })
 	return release, calls
 }
 
@@ -83,7 +81,7 @@ func TestPendingCountAdmission(t *testing.T) {
 	s, _ := deliveryService(t)
 	c := &s.pendingMsgs
 	c.gap = time.Hour // the reminder never fires during the test
-	release, calls := countHook(t)
+	release, calls := countHook(t, s)
 	bg := context.Background()
 
 	run, started := s.admit("A", "k", false)
