@@ -173,15 +173,13 @@ LEDGER_PATH = DATA / "session_ledger.json"
 CKPT_DIR = DATA / "ckpt"
 CKPT_STATE_PATH = CKPT_DIR / "state.json"
 PROGRESS_PATH = DATA / "prepare_progress.json"
-WINDOWS_PATH = LEAVES_PATH
-VECS_PATH = LEAF_VECS_PATH
 
 
 def _bind_data_dir(data: Path) -> None:
     """RAG-ified artifacts live under test-sandbox/data, not the product DB."""
     global DATA, MESSAGES_PATH, LEAVES_PATH, BASELINE_PATH, LEAF_VECS_PATH
     global BASELINE_VECS_PATH, SUMMARIES_PATH, SUMMARY_VECS_PATH, META_PATH
-    global LEDGER_PATH, CKPT_DIR, CKPT_STATE_PATH, WINDOWS_PATH, VECS_PATH, PROGRESS_PATH
+    global LEDGER_PATH, CKPT_DIR, CKPT_STATE_PATH, PROGRESS_PATH
     DATA = Path(data)
     MESSAGES_PATH = DATA / "messages.json"
     LEAVES_PATH = DATA / "leaves.json"
@@ -194,8 +192,6 @@ def _bind_data_dir(data: Path) -> None:
     LEDGER_PATH = DATA / "session_ledger.json"
     CKPT_DIR = DATA / "ckpt"
     CKPT_STATE_PATH = CKPT_DIR / "state.json"
-    WINDOWS_PATH = LEAVES_PATH
-    VECS_PATH = LEAF_VECS_PATH
     PROGRESS_PATH = DATA / "prepare_progress.json"
 
 
@@ -246,6 +242,8 @@ def weighted_rrf(
     *,
     k: int = 60,
 ) -> list[str]:
+    """테스트 기준 구현. 검색 경로는 candidates.py를 쓰고, 이 함수는
+    test_candidates.py가 순서가 같은지 확인하는 oracle로만 남아 있다."""
     scores: dict[str, float] = {}
     for ranks, weight in zip(rank_lists, weights):
         for pos, doc_id in enumerate(ranks):
