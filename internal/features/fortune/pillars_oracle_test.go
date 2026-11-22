@@ -86,7 +86,7 @@ func TestPillarsAtSameInstantInAnyZone(t *testing.T) {
 	term := termMoments(2026, 2026)[0]
 	madrid, err := time.LoadLocation("Europe/Madrid")
 	if err != nil {
-		t.Skip("no tzdata")
+		t.Fatalf("time zone data: %v", err)
 	}
 	_, a, _, _, _ := PillarsAt(term.Add(time.Minute).In(kst), false)
 	_, b, _, _, _ := PillarsAt(term.Add(time.Minute).In(madrid), false)

@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"masamong/internal/action"
 	"masamong/internal/application"
 )
 
@@ -255,8 +254,6 @@ func jsonShape(v any) map[string]any {
 	return m
 }
 
-var _ = action.Request{}
-
 // A service stop while a job runs records "interrupted" (never a closed-database error), and the next
 // start offers the job for retry.
 func TestPrepareJobInterruptedByShutdown(t *testing.T) {
@@ -265,18 +262,17 @@ func TestPrepareJobInterruptedByShutdown(t *testing.T) {
 	if r := exec(svc, "imports.start", map[string]any{"source": "kakao_csv", "path": csv, "room": "kakao:stop"}); !r.OK {
 		t.Fatal(r.Error)
 	}
+	// the stop is already in force when the job is queued, so its outcome never depends on how fast the
+	// offline model finishes: whichever step it reaches, it sees the stopped daemon
 	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 	svc.ResumeJobs(ctx)
 	started := exec(svc, "memory.blocks.prepare", map[string]any{"source_room": "kakao:stop", "background": true})
 	if !started.OK {
 		t.Fatal(started.Error)
 	}
-	cancel()
 	svc.WaitJobs(10 * time.Second)
 	got := jsonShape(exec(svc, "jobs.get", map[string]any{"id": started.JobID}).Output)
-	if got["status"] == "succeeded" {
-		t.Skip("the offline model finished before the stop landed")
-	}
 	if got["status"] != "failed" || got["error_code"] != "INTERRUPTED" || !strings.Contains(fmt.Sprint(got["result"]), `"stopped_by":"interrupted"`) {
 		t.Fatalf("interrupted job %+v", got)
 	}

@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"fmt"
+	"log/slog"
 	"runtime"
 	"strings"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"masamong/internal/action"
+	"masamong/internal/application"
 	"masamong/internal/clock"
 	"masamong/internal/config"
 )
@@ -89,13 +91,42 @@ func TestFortuneAnimalsChannelCooldown(t *testing.T) {
 	}
 }
 
-// barrierClock is a fixed clock whose Now, when called from the animals card, makes the callers of one
-// round wait for each other (spinning, so they leave together): it lines the asks up at the entrance of
-// the cooldown check, where a check-then-set gap would let more than one through.
+// askBarrier makes the callers of one round wait for each other: the asks are lined up at the entrance of
+// the cooldown check, where a check-then-set gap would let more than one through. A closed channel
+// releases them together, so it needs no spare CPU (a spin would) and no skip on a one-CPU machine.
+type askBarrier struct {
+	mu      sync.Mutex
+	want    int
+	arrived int
+	open    chan struct{}
+}
+
+// next starts a round of want callers. Call it only while no ask is running.
+func (b *askBarrier) next(want int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.want, b.arrived, b.open = want, 0, make(chan struct{})
+}
+
+func (b *askBarrier) arrive() {
+	b.mu.Lock()
+	b.arrived++
+	open := b.open
+	if b.arrived == b.want {
+		close(open)
+	}
+	b.mu.Unlock()
+	select {
+	case <-open:
+	case <-time.After(10 * time.Second): // an ask that never arrives fails the round's count, not a hang
+	}
+}
+
+// barrierClock is a fixed clock whose Now, when called from the animals card, waits at the barrier. It is
+// installed before the service starts its workers and never replaced: they read Service.Clock.
 type barrierClock struct {
 	t       time.Time
-	arrived *atomic.Int32
-	want    int32
+	barrier *askBarrier
 }
 
 func (c barrierClock) Now() time.Time {
@@ -104,9 +135,7 @@ func (c barrierClock) Now() time.Time {
 	for {
 		f, more := frames.Next()
 		if strings.HasSuffix(f.Function, "(*Service).animals") {
-			c.arrived.Add(1)
-			for deadline := time.Now().Add(time.Second); c.arrived.Load() < c.want && time.Now().Before(deadline); {
-			}
+			c.barrier.arrive()
 			break
 		}
 		if !more {
@@ -119,19 +148,22 @@ func (c barrierClock) Now() time.Time {
 // The cooldown check and its set are one step: N asks that reach the check together in a fresh channel
 // post exactly one card, however the goroutines interleave (repeated, so a check-then-set gap shows).
 func TestFortuneAnimalsCooldownIsAtomic(t *testing.T) {
-	var calls atomic.Int32
-	svc := fortuneSvc(t, &calls)
-	applyDoc(t, svc, func(d *config.Document) { d.I18n.Timezone = "Asia/Seoul" })
-	serveAnyServer(t, svc)
-	seoul, _ := time.LoadLocation("Asia/Seoul")
-	asks := min(8, runtime.GOMAXPROCS(0))
-	if asks < 2 {
-		t.Skip("one CPU: the asks cannot overlap")
+	seoul, err := time.LoadLocation("Asia/Seoul")
+	if err != nil {
+		t.Fatal(err)
 	}
-	const rounds = 300
+	const asks, rounds = 8, 300
+	barrier := &askBarrier{}
+	// the clock goes in before setup starts the service's workers (setupSvcLog runs this first), so no
+	// worker reads Service.Clock while the test replaces it
+	svc := setupSvcLog(t, func(s *application.Service) *slog.Logger {
+		s.Clock = barrierClock{t: time.Date(2026, 10, 15, 21, 0, 0, 0, seoul), barrier: barrier}
+		return s.Log
+	})
+	applyDoc(t, svc, func(d *config.Document) { d.Discord.Enabled = true; d.I18n.Timezone = "Asia/Seoul" })
+	serveAnyServer(t, svc)
 	for round := 0; round < rounds; round++ {
-		var arrived atomic.Int32
-		svc.Clock = barrierClock{t: time.Date(2026, 10, 15, 21, 0, 0, 0, seoul), arrived: &arrived, want: int32(asks)}
+		barrier.next(asks)
 		var wg sync.WaitGroup
 		var cards, notes atomic.Int32
 		for i := 0; i < asks; i++ {

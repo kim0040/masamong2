@@ -154,7 +154,7 @@ func TestNatalIgnoresTheDisplayZone(t *testing.T) {
 	p := fortuneProfile{BirthDate: "1990-02-04", BirthTime: "09:30"}
 	ny, err := time.LoadLocation("America/New_York")
 	if err != nil {
-		t.Skip("no tzdata")
+		t.Fatalf("time zone data: %v", err)
 	}
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	for _, at := range []time.Time{time.Date(2026, 11, 3, 8, 0, 0, 0, seoul), time.Date(2026, 11, 3, 8, 0, 0, 0, ny)} {

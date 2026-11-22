@@ -11,7 +11,7 @@ import (
 func TestBriefingSlotBoundaries(t *testing.T) {
 	seoul, err := time.LoadLocation("Asia/Seoul")
 	if err != nil {
-		t.Skip("no tzdata")
+		t.Fatalf("time zone data: %v", err)
 	}
 	for _, c := range []struct {
 		at, slot, target string
