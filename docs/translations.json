@@ -2,23 +2,23 @@
   "note": "Translation record checked by tools/doccheck. When a file of a group changes, bring the other languages along, then run: go run ./tools/doccheck -write",
   "groups": {
     "README": {
-      "README.es.md": "77220bbcb607a10e",
-      "README.ja.md": "cdb9d0f2b30f8f22",
-      "README.ko.md": "ac7b67abdad3af0f",
-      "README.md": "4e2624c1ebb38b95",
-      "README.zh-Hans.md": "49362eeac60098b6"
+      "README.es.md": "8d57ecf35f7c2b15",
+      "README.ja.md": "d509196e40374fb8",
+      "README.ko.md": "04009080773c3d6f",
+      "README.md": "503ed11515d4a040",
+      "README.zh-Hans.md": "e2c2d1fbde865a37"
     },
     "wiki/CLI-명령어": {
-      "docs/wiki/CLI-Commands.md": "c0d205a4e14d475e",
-      "docs/wiki/CLI-명령어.md": "a8d4e193857ee78b"
+      "docs/wiki/CLI-Commands.md": "c18cfcb9365ee475",
+      "docs/wiki/CLI-명령어.md": "ee635c44e4ecd399"
     },
     "wiki/Discord-연결": {
-      "docs/wiki/Connecting-Discord.md": "6a7a85ab500c1dea",
-      "docs/wiki/Discord-연결.md": "bb47c2f888b29ba1"
+      "docs/wiki/Connecting-Discord.md": "2a38fb674d6f5e35",
+      "docs/wiki/Discord-연결.md": "7884d20bb94a02fe"
     },
     "wiki/Home": {
-      "docs/wiki/English.md": "13dc78f38fd8eb88",
-      "docs/wiki/Home.md": "7144d17d4f4fdc04"
+      "docs/wiki/English.md": "6a95516872dcfcfb",
+      "docs/wiki/Home.md": "fe1e9c64f0cc3523"
     },
     "wiki/개발-가이드": {
       "docs/wiki/Development-Guide.md": "66e9cef19b3f2e01",
@@ -29,16 +29,16 @@
       "docs/wiki/관리-콘솔.md": "507b72503c07cf64"
     },
     "wiki/기억-블록": {
-      "docs/wiki/Memory-Blocks.md": "9e53c1c0ac67387b",
-      "docs/wiki/기억-블록.md": "e95fa65c1945bf2c"
+      "docs/wiki/Memory-Blocks.md": "cb1e1ffb5c7f6bd9",
+      "docs/wiki/기억-블록.md": "70b03a045c01028f"
     },
     "wiki/도구와-한도": {
-      "docs/wiki/Tools-and-Limits.md": "3f4518c5cb738a14",
-      "docs/wiki/도구와-한도.md": "749ba488689aa585"
+      "docs/wiki/Tools-and-Limits.md": "b51844ca9f7f2764",
+      "docs/wiki/도구와-한도.md": "ec477b2a19ca8af2"
     },
     "wiki/동시-처리와-성능": {
-      "docs/wiki/Concurrency-and-Performance.md": "fe42487fb484f48c",
-      "docs/wiki/동시-처리와-성능.md": "afdae2b9943667b7"
+      "docs/wiki/Concurrency-and-Performance.md": "18b67a936d16a6a3",
+      "docs/wiki/동시-처리와-성능.md": "ee31bcdaa52e3ba6"
     },
     "wiki/릴리스-체크리스트": {
       "docs/wiki/Release-Checklist.md": "c3fd8ee3d4aa0b3e",
@@ -53,20 +53,20 @@
       "docs/wiki/보류-중인-결정.md": "82e4b3bec4270bcd"
     },
     "wiki/보안과-개인정보": {
-      "docs/wiki/Security-and-Privacy.md": "db9c9e66e6bd0ea5",
-      "docs/wiki/보안과-개인정보.md": "019d3ab4e562b73d"
+      "docs/wiki/Security-and-Privacy.md": "20114aa0a51a213f",
+      "docs/wiki/보안과-개인정보.md": "51eb7e916d4817b1"
     },
     "wiki/부하-테스트와-장기-운영": {
       "docs/wiki/Load-Testing-and-Long-Running.md": "5c947bb91af06284",
       "docs/wiki/부하-테스트와-장기-운영.md": "5125974eefe775a4"
     },
     "wiki/빠른-시작": {
-      "docs/wiki/Quick-Start.md": "fea97b81ad0e291b",
-      "docs/wiki/빠른-시작.md": "8f97bbe7ac9959e6"
+      "docs/wiki/Quick-Start.md": "d2729c07c7af66d5",
+      "docs/wiki/빠른-시작.md": "03a4489d1fe42530"
     },
     "wiki/설정-레퍼런스": {
-      "docs/wiki/Configuration-Reference.md": "aa16bcc979b99eaf",
-      "docs/wiki/설정-레퍼런스.md": "cbc277a200a4c6bb"
+      "docs/wiki/Configuration-Reference.md": "853deffc3e53aab5",
+      "docs/wiki/설정-레퍼런스.md": "c21544a259ed91fd"
     },
     "wiki/설치": {
       "docs/wiki/Installation.md": "0fadd96bae14101a",

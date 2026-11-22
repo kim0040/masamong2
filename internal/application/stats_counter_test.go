@@ -192,7 +192,7 @@ func TestStatsActionCloseFlushes(t *testing.T) {
 func TestStatsActionFlushTickThrottles(t *testing.T) {
 	s, clk := deliveryService(t)
 	ctx := context.Background()
-	s.statsFlush(ctx) // clear the setup calls; flushed is still zero
+	s.statsFlush(ctx)     // clear the setup calls; flushed is still zero
 	s.statsFlushTick(ctx) // nothing to write: no flush, flushed stays zero
 	s.statsCount(action.Request{Action: "help.version", RequestID: "cli"}, action.Result{OK: true})
 	s.statsFlushTick(ctx) // first dirty tick flushes (flushed is still zero)
