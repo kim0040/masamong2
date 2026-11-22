@@ -10,7 +10,7 @@ import (
 
 // The slash command's amount is a Discord number option; it reaches the card as the amount typed.
 func TestFXSlashAmountOption(t *testing.T) {
-	d := newFXDelivery(t, nil)
+	d := newFXDelivery(t, svcForTest(t), nil)
 	d.slash(t, strOption("currency", "엔"),
 		&discordgo.ApplicationCommandInteractionDataOption{Name: "amount", Type: discordgo.ApplicationCommandOptionNumber, Value: float64(50000)})
 	if flags := d.deferredFlags(t); flags != 0 {
@@ -30,7 +30,7 @@ func TestFXSlashAmountOption(t *testing.T) {
 
 // A very large number option must not turn into scientific notation on the way in.
 func TestFXSlashLargeAmountOption(t *testing.T) {
-	d := newFXDelivery(t, nil)
+	d := newFXDelivery(t, svcForTest(t), nil)
 	d.slash(t, &discordgo.ApplicationCommandInteractionDataOption{Name: "amount", Type: discordgo.ApplicationCommandOptionNumber, Value: float64(1000000)})
 	edit, ok := d.fake.find(http.MethodPatch, "/messages/@original")
 	if !ok || !strings.Contains(edit.body, "1,000,000원 ≈ ") {

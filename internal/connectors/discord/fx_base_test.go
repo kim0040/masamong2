@@ -17,6 +17,7 @@ import (
 // it. It is the option the command had before 통화 (currency) was added, so an old definition still works.
 // Rates here: 1 USD = 148 JPY = 1,350 KRW = 0.9 EUR = 6.75 CNY = 0.75 GBP = 0.8 CHF.
 func TestFXCardShowsOneForeignUnitInSelectedCurrency(t *testing.T) {
+	e := newFXEnv(t)
 	for _, tc := range []struct {
 		locale, base, option string
 		rows                 int
@@ -34,7 +35,7 @@ func TestFXCardShowsOneForeignUnitInSelectedCurrency(t *testing.T) {
 			if tc.option != "" {
 				opts["base"] = tc.option
 			}
-			embed := fxEmbed(t, tc.locale, opts, false)
+			embed := fxEmbed(t, e, tc.locale, opts, false)
 			lines := strings.Split(embed.Description, "\n")
 			if !strings.HasSuffix(embed.Title, tc.base) {
 				t.Errorf("title %q does not name %s", embed.Title, tc.base)
@@ -60,6 +61,7 @@ func TestFXCardShowsOneForeignUnitInSelectedCurrency(t *testing.T) {
 // Every way to combine currency (통화), base (기준통화) and amount (금액), as a slash command and as the
 // words of a message, in Korean (home KRW) and English (home USD).
 func TestFXCurrencyBaseAmountCombinations(t *testing.T) {
+	e := newFXEnv(t)
 	// the board in each base, one unit of each (the unit that reads naturally); the home currency is a
 	// row first, then the other five managed currencies
 	koInJPY := []string{"1,000원 ≈ 109.6엔", "1달러 ≈ 148엔", "1유로 ≈ 164.4엔", "1위안 ≈ 21.93엔", "1파운드 ≈ 197.3엔"}
@@ -122,16 +124,17 @@ func TestFXCurrencyBaseAmountCombinations(t *testing.T) {
 			}
 		}
 		if tc.way.slash != nil {
-			t.Run(tc.name+" /", func(t *testing.T) { check(t, fxCard(t, tc.locale, tc.way.slash)) })
+			t.Run(tc.name+" /", func(t *testing.T) { check(t, fxCard(t, e, tc.locale, tc.way.slash)) })
 		}
 		if tc.way.prefix != "" {
-			t.Run(tc.name+" !", func(t *testing.T) { check(t, fxPrefixCard(t, tc.locale, tc.way.prefix)) })
+			t.Run(tc.name+" !", func(t *testing.T) { check(t, fxPrefixCard(t, e, tc.locale, tc.way.prefix)) })
 		}
 	}
 }
 
 // A base is checked like a currency: before anything is fetched or counted, and told to the member alone.
 func TestFXBaseIsRefusedLikeACurrency(t *testing.T) {
+	svc := svcForTest(t)
 	for _, tc := range []struct {
 		name  string
 		opts  []*discordgo.ApplicationCommandInteractionDataOption
@@ -143,7 +146,7 @@ func TestFXBaseIsRefusedLikeACurrency(t *testing.T) {
 		{"currency the service has no rates for", []*discordgo.ApplicationCommandInteractionDataOption{strOption("currency", "BTN"), strOption("base", "USD")}, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			d := newFXDelivery(t, nil)
+			d := newFXDelivery(t, svc, nil)
 			d.slash(t, tc.opts...)
 			if got := d.calls.Load(); got != tc.calls {
 				t.Errorf("provider calls = %d (%v), want %d", got, d.paths, tc.calls)
@@ -168,9 +171,10 @@ func TestFXBaseIsRefusedLikeACurrency(t *testing.T) {
 
 // Words that name no pair of currencies stay one name and fail as an invalid currency.
 func TestFXPrefixWordsThatDoNotSplitFailAsOneCurrency(t *testing.T) {
+	svc := svcForTest(t)
 	for _, text := range []string{"!환율 달러 foo", "!환율 foo bar", "!환율 foo 달러"} {
 		t.Run(text, func(t *testing.T) {
-			d := newFXDelivery(t, nil)
+			d := newFXDelivery(t, svc, nil)
 			cmd, o, _ := ParsePrefix("!", text)
 			r := d.g.svc.Execute(t.Context(), requestFor(cmd, o, InvokeContext{Locale: "ko", Typed: true}, "x"))
 			if r.OK || r.Error.MessageKey != "fx.invalid_currency" || d.calls.Load() != 0 {
@@ -201,6 +205,7 @@ func TestFXCommandOptions(t *testing.T) {
 // The home currency is the currency of the person's region: the region in the request's locale, else the
 // region Discord reports when it is the same language, else the likely region of the language.
 func TestFXHomeCurrencyFollowsTheRegion(t *testing.T) {
+	e := newFXEnv(t)
 	for _, tc := range []struct {
 		name, locale, tag string
 		home              string
@@ -231,7 +236,7 @@ func TestFXHomeCurrencyFollowsTheRegion(t *testing.T) {
 		{"en-US, Discord en-GB", "en-US", "en-GB", "GBP", 5},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			embed, out := fxRun(t, InvokeContext{Locale: tc.locale, Tag: tc.tag, UserID: "tester"}, nil)
+			embed, out := fxRun(t, e, InvokeContext{Locale: tc.locale, Tag: tc.tag, UserID: "tester"}, nil)
 			if out["base"] != tc.home {
 				t.Errorf("home = %v, want %s (%s)", out["base"], tc.home, embed.Description)
 			}
@@ -266,7 +271,7 @@ func TestFXBuildCarriesTheDiscordLocaleTag(t *testing.T) {
 
 // A message has no locale of its own: the server's preferred one stands in.
 func TestFXPrefixReadsTheServersPreferredLocale(t *testing.T) {
-	d := newFXDelivery(t, nil)
+	d := newFXDelivery(t, svcForTest(t), nil)
 	if err := d.g.sess.State.GuildAdd(&discordgo.Guild{ID: "g", PreferredLocale: "en-GB"}); err != nil {
 		t.Fatal(err)
 	}
@@ -281,11 +286,12 @@ func TestFXPrefixReadsTheServersPreferredLocale(t *testing.T) {
 // The board is the six managed currencies in every locale: an English board shows a won row too, and a
 // base among the six leaves itself out but keeps the rest.
 func TestFXBoardOffersTheSixEverywhere(t *testing.T) {
-	embed := fxEmbed(t, "en", nil, false)
+	e := newFXEnv(t)
+	embed := fxEmbed(t, e, "en", nil, false)
 	if !strings.Contains(embed.Description, "KRW ≈") {
 		t.Errorf("no won row on an English board: %v", embed.Description)
 	}
-	embed = fxEmbed(t, "en", map[string]string{"base": "KRW"}, false)
+	embed = fxEmbed(t, e, "en", map[string]string{"base": "KRW"}, false)
 	if !strings.Contains(embed.Description, "USD ≈") || !strings.Contains(embed.Title, "KRW") {
 		t.Errorf("base won: %v / %s", embed.Description, embed.Title)
 	}
