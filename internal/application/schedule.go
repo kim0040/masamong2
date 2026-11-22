@@ -57,8 +57,8 @@ func (s *Service) RunScheduler(ctx context.Context) {
 				s.statsFlushTick(ctx)
 				s.ownedGo("fortune briefings", func(ctx context.Context) { s.runFortuneMorning(ctx) })
 				s.ownedGo("reminders", func(ctx context.Context) { s.deliverReminders(ctx) })
-				if styleTicking.CompareAndSwap(false, true) {
-					s.ownedGo("room styles", func(ctx context.Context) { defer styleTicking.Store(false); s.refreshRoomStyles(ctx) })
+				if s.runs.styles.CompareAndSwap(false, true) {
+					s.ownedGo("room styles", func(ctx context.Context) { defer s.runs.styles.Store(false); s.refreshRoomStyles(ctx) })
 				}
 				s.sweepCollectNext() // collected moments whose follow-up window ended with nothing happening
 				if threadsTicking.CompareAndSwap(false, true) {

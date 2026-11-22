@@ -10,4 +10,5 @@ type runFlags struct {
 	statsRollup atomic.Bool // the statistics rollup is running (statsClaim, stats_rollup.go)
 	morning     atomic.Bool // the morning fortune post is running (fortune.go)
 	reminders   atomic.Bool // the reminder pass is running (reminders.go)
+	styles      atomic.Bool // the room style refresh is running (roomstyle.go)
 }
