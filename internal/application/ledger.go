@@ -254,13 +254,10 @@ func memoryJobContext(ctx context.Context, prefix string) context.Context {
 type toolCall struct {
 	Tool, Guard, Status string
 	ParamKeys           []string
-	// ParamSources is reserved: it is filled (parameter name → "message"|"conversation"|"default"|"setting"|"model")
-	// once tools report where each value came from. No tool does yet, so rows hold {}.
-	ParamSources map[string]string
-	Latency      time.Duration
-	CostUSD      float64
-	ResultChars  int
-	Class        errclass.Class
+	Latency             time.Duration
+	CostUSD             float64
+	ResultChars         int
+	Class               errclass.Class
 	// Provider is the configured service that answered (a web search: which of the services in
 	// web_search.order found the pages); "" when the tool has none.
 	Provider string
@@ -274,17 +271,14 @@ func (s *Service) noteToolCall(ctx context.Context, c toolCall) {
 	keys := append([]string{}, c.ParamKeys...)
 	sort.Strings(keys)
 	kj, _ := json.Marshal(keys)
-	src := c.ParamSources
-	if src == nil {
-		src = map[string]string{}
-	}
-	sj, _ := json.Marshal(src)
 	guard := c.Guard
 	if guard == "" {
 		guard = "allowed"
 	}
+	// param_sources stays {}: it is reserved for tools to report where each value came from
+	// ("message"|"conversation"|"default"|"setting"|"model"); no tool does yet.
 	s.ledger.add(s, `INSERT INTO tool_calls(turn_id, tool, param_keys, param_sources, guard, status, latency_ms, cost_usd, result_chars, class, provider, created_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, observability.TurnID(ctx), c.Tool, string(kj), string(sj), guard, c.Status, c.Latency.Milliseconds(),
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, observability.TurnID(ctx), c.Tool, string(kj), "{}", guard, c.Status, c.Latency.Milliseconds(),
 		c.CostUSD, c.ResultChars, string(c.Class), c.Provider, s.Clock.Now().UTC().Format(time.RFC3339))
 }
 
