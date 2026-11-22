@@ -384,6 +384,8 @@ func (s *Service) reserveFortune(userID string, now time.Time, limit int) (bool,
 type zodiacState struct {
 	cooldownOnce sync.Once
 	cooldown     *ttlCache[struct{}] // each person's last zodiac request (zodiacCooldown)
+	flightMu     sync.Mutex
+	flights      map[string]*zodiacFlight // the generations running, by cache key (zodiacText)
 }
 
 // zodiacCooldown remembers each person's last zodiac request. Only the cooldown (seconds) matters, so a day
@@ -406,8 +408,6 @@ func (s *Service) zodiacCooldown() *ttlCache[struct{}] {
 const zodiacMaxGenerations = 2
 
 var (
-	zodiacMu       sync.Mutex
-	zodiacFlights  = map[zodiacFlightKey]*zodiacFlight{}
 	zodiacSlotOnce sync.Once
 	zodiacSlots    chan struct{}
 )
@@ -438,11 +438,6 @@ func zodiacHook(h *atomic.Pointer[func(key string)], key string) {
 	}
 }
 
-type zodiacFlightKey struct {
-	svc *Service
-	key string
-}
-
 type zodiacFlight struct {
 	done chan struct{}
 	text string
@@ -453,7 +448,7 @@ type zodiacFlight struct {
 // request read it rather than made it. A waiter gives up with its own context; if the request that was
 // generating failed only because its own context ended, the waiter takes over instead of failing too.
 func (s *Service) zodiacText(ctx context.Context, db *storage.Store, key string, generate func(context.Context) (string, error)) (text string, cached bool, err error) {
-	fk := zodiacFlightKey{svc: s, key: key}
+	z := &s.zodiacs
 	for {
 		if text, ok := zodiacCached(ctx, db, key); ok {
 			return text, true, nil
@@ -462,13 +457,16 @@ func (s *Service) zodiacText(ctx context.Context, db *storage.Store, key string,
 			return "", false, err
 		}
 		zodiacHook(&zodiacTestHooks.afterMiss, key)
-		zodiacMu.Lock()
-		f, running := zodiacFlights[fk]
+		z.flightMu.Lock()
+		f, running := z.flights[key]
 		if !running {
+			if z.flights == nil {
+				z.flights = map[string]*zodiacFlight{}
+			}
 			f = &zodiacFlight{done: make(chan struct{})}
-			zodiacFlights[fk] = f
+			z.flights[key] = f
 		}
-		zodiacMu.Unlock()
+		z.flightMu.Unlock()
 		if running {
 			zodiacHook(&zodiacTestHooks.joined, key)
 			select {
@@ -486,9 +484,9 @@ func (s *Service) zodiacText(ctx context.Context, db *storage.Store, key string,
 		}
 		f.err = errors.New("fortune generation did not finish") // what waiters see if generate panics
 		defer func() {
-			zodiacMu.Lock()
-			delete(zodiacFlights, fk)
-			zodiacMu.Unlock()
+			z.flightMu.Lock()
+			delete(z.flights, key)
+			z.flightMu.Unlock()
 			close(f.done)
 		}()
 		f.text, cached, f.err = s.generateZodiac(ctx, db, key, generate)
