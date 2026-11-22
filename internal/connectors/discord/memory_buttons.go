@@ -3,11 +3,7 @@ package discord
 // The confirm button of /forgetme (memory.mine.forget): mem:forget:<scope>:<token>, scope p (the items a
 // chat "forget that" pointed at) or a (everything about the member in this server). The token is the
 // preview's fingerprint; the Action deletes only when what it would delete is still what was shown, and
-// always for the person pressing (featureButton makes them the invoker).
-func init() {
-	extraButtons["mem"] = memoryButton
-}
-
+// always for the person pressing (featureButton makes them the invoker). extraButtons lists it.
 func memoryButton(parts []string) (string, map[string]any, bool) {
 	if len(parts) != 4 || parts[1] != "forget" || parts[3] == "" {
 		return "", nil, false

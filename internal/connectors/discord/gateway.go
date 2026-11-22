@@ -1363,8 +1363,11 @@ func featureButton(parts []string, ictx InvokeContext, requestID string) (action
 		Invoker: &action.Invoker{Via: "command", GuildID: ictx.GuildID, ChannelID: ictx.ChannelID, UserID: ictx.UserID, Private: ictx.GuildID == "", Name: ictx.UserName}}, true
 }
 
-// extraButtons are feature button families registered next to their commands (feature -> parser).
-var extraButtons = map[string]func(parts []string) (string, map[string]any, bool){}
+// extraButtons are the feature button families (feature -> parser); the parsers live next to their
+// commands. The table is never changed.
+var extraButtons = map[string]func(parts []string) (string, map[string]any, bool){
+	"mem": memoryButton, // memory_buttons.go
+}
 
 // buttonRequest maps a poll button (poll:vote:<id>:<option>, poll:result:<id>, poll:close:<id>) to
 // its Action. Votes and closes apply to the poll as it is when the press arrives (latest), so people
