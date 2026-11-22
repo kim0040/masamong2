@@ -158,7 +158,7 @@ func (t *trayApp) conn() (string, *launcher.Client) {
 
 // newClient connects the icon to the console. It reads the token file again before each sign-in, so
 // the icon keeps working after the token is re-issued (from the console or `masamong admin token
-// rotate`), and it lets a console of an older version in only while this folder's daemon runs.
+// rotate`), and while this folder's daemon is starting it waits for the fresh daemon.json.
 func (t *trayApp) newClient(bind, token string) *launcher.Client {
 	c := launcher.NewClient(bind, token)
 	c.Via, c.DataRoot, c.Reload = "tray", t.o.DataRoot, t.o.Token
