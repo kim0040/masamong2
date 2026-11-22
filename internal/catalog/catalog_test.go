@@ -8,7 +8,7 @@ func TestDeferredActionsHaveNoExecutePath(t *testing.T) {
 	// goes through shadow mode, so nothing is left deferred on RAG
 	ragDeferred := []string{}
 	// statistics v1: the contract is in place, the export and the rollup are built by later parts
-	implementationDeferred := []string{"stats.export", "stats.rollup"}
+	implementationDeferred := []string{"stats.export"}
 	operatorDisabled := []string{"storage.migrate"}
 	want := make(map[string]bool, len(ragDeferred)+len(implementationDeferred)+len(operatorDisabled))
 	for _, id := range operatorDisabled {

@@ -139,7 +139,7 @@ internal/catalog의 모든 Action: CLI 명령, 콘솔 경로와 internal/applica
 | setup.resume | executable | internal_write | `setup` | `/setup` | [setup.go · setup](../../internal/application/setup.go) |
 | stats.export | deferred (implementation_deferred) | read | `stats export` | `/stats` | — |
 | stats.query | executable | read | `stats query` | `/stats` | [providers_persona.go · stats](../../internal/application/providers_persona.go) |
-| stats.rollup | deferred (implementation_deferred) | internal_write | `stats rollup` | `/jobs` | — |
+| stats.rollup | executable | internal_write | `stats rollup` | `/jobs` | [stats_rollup.go · statsRollupAction](../../internal/application/stats_rollup.go) |
 | stats.series | executable | read | `stats series` | `/stats` | [admin.go · statsSeries](../../internal/application/admin.go) |
 | storage.migrate | deferred (disabled_by_operator) | none | `storage migrate` | `/maintenance` | [storage_admin.go · storageMigrate](../../internal/application/storage_admin.go) |
 | storage.status | executable | read | `storage status` | `/maintenance` | [storage_admin.go · storageStatus](../../internal/application/storage_admin.go) |

@@ -784,6 +784,8 @@ func (s *Service) execute(ctx context.Context, req action.Request) action.Result
 		return s.backup(ctx, req)
 	case "schedules.list", "schedules.run":
 		return s.schedulesAction(ctx, req)
+	case "stats.rollup":
+		return s.statsRollupAction(ctx, req)
 	case "channels.permissions":
 		return s.channelsPermissions(req)
 	case "runtime.autostart", "runtime.autostart.set":

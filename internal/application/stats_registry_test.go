@@ -398,11 +398,11 @@ func TestStatsHistogramAndBuckets(t *testing.T) {
 	}
 }
 
-// The catalog entries exist ahead of their handlers: until a part builds them, both Actions fail with a
-// code and reason a caller (and the parts' own tests) can see.
+// The catalog entries exist ahead of their handlers: until a part builds one, its Action fails with a
+// code and reason a caller (and the parts' own tests) can see. stats.rollup is built (stats_rollup.go).
 func TestStatsActionsNotYetImplemented(t *testing.T) {
 	s, _ := deliveryService(t)
-	for _, id := range []string{"stats.export", "stats.rollup"} {
+	for _, id := range []string{"stats.export"} {
 		res := s.Execute(context.Background(), action.Request{Action: id})
 		if res.OK || res.Error == nil || res.Error.Code != errcode.ActionUnavailable || res.Error.Args["reason"] != catalog.ImplementationDeferred {
 			t.Fatalf("%s: %+v", id, res.Error)

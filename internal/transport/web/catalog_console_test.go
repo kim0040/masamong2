@@ -30,6 +30,7 @@ var consoleUnreachable = map[string]string{
 	"jobs.get":           "equivalent: the Jobs page lists jobs with jobs.list, whose rows carry the same job fields; a single-job fetch is a CLI convenience",
 	"jobs.watch":         "equivalent: jobs.watch is a one-shot read of the whole job list that the CLI polls repeatedly; the console reads the same list with jobs.list, refreshes it on the SSE job events and re-polls it every few seconds while jobs run",
 	"usage.budgets":      "equivalent: the Usage page shows the month's spend, budget and per-kind spend (dashboard.overview month), each provider's calls today against its daily limit (providers.list, from the same registry statuses) and each tool's calls today (tools.list used_today); usage.budgets is those three joined for the CLI, while the page calls usage.reset and reads its active reset from dashboard.overview",
+	"stats.rollup":       "equivalent: the daily statistics rollup runs inside the usage_gc schedule, which Jobs → Scheduled tasks shows and runs now (schedules.run); stats.rollup is the CLI's way to recompute chosen days (--since, --force)",
 	"channels.view.show": "equivalent: the Room page lists a channel's attached blocks from memory.blocks.list (channels[].attached, the same RAGView.Blocks this Action returns) and Block shows the reverse",
 
 	"channels.attachments.add":    "dormant: attachments are stored in config (RAGAttachments) but nothing in answering reads them yet, so a console control would look like it works while doing nothing",

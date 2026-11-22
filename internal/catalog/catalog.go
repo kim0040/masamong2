@@ -188,7 +188,7 @@ func All() []Descriptor {
 		// {group, since, force} (statsRollupInput), output {zone, finished, through, skipped}
 		// (statsRollupOutput); it finishes past days and never rewrites a finished one unless forced.
 		building("stats.export", "stats export", "/stats", "read"),
-		building("stats.rollup", "stats rollup", "/jobs", "internal_write"),
+		exec("stats.rollup", "stats rollup", "/jobs", "internal_write"),
 		exec("lab.reviews", "lab reviews", "/lab", "read"),
 		exec("lab.review", "lab review", "/lab", "internal_write"),
 		exec("config.document", "config document", "/settings", "read"),
