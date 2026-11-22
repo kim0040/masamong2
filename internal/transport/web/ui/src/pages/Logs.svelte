@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import { scrollable } from '../lib/scrollable'
+  import { latest } from '../lib/seqload'
   import { t } from '../lib/i18n.svelte'
   import { call, practice } from '../lib/api.svelte'
   import { resource } from '../lib/resource.svelte'
@@ -30,10 +31,10 @@
   let loadingLogs = $state(true)
   let unseen = $state(0)
   let bufferSize = $state(3000)
-  let requestSeq = 0
+  const requests = latest()
 
   async function poll(reset = false, timed = false) {
-    const seq = ++requestSeq
+    const live = requests.start()
     if (reset) {
       entries = []
       lastId = 0
@@ -42,7 +43,7 @@
     }
     const requestedAfter = lastId
     const r = await call('runtime.logs', { after_id: requestedAfter, level, q, limit: 400 }, { poll: timed })
-    if (seq !== requestSeq) return
+    if (!live()) return
     loadingLogs = false
     if (!r.ok) {
       logError = r.error?.message ?? t('logs.load_failed')

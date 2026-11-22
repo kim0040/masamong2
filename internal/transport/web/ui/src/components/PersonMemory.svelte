@@ -2,6 +2,7 @@
   import { untrack } from 'svelte'
   import { has, t } from '../lib/i18n.svelte'
   import { call } from '../lib/api.svelte'
+  import { latest } from '../lib/seqload'
   import { resource } from '../lib/resource.svelte'
   import { datetime, num } from '../lib/format'
   import { toast } from '../lib/toast.svelte'
@@ -32,13 +33,13 @@
   })
 
   let view = $state<{ loading: boolean; error: string; data: any } | null>(null)
-  let seq = 0
+  const loads = latest()
   async function load() {
-    const my = ++seq
+    const live = loads.start()
     if (!guild || !userId) return void (view = null)
     view = { loading: true, error: '', data: null }
     const r = await call('memory.mine.show', { guild_id: guild, user_id: userId })
-    if (my !== seq) return
+    if (!live()) return
     view = r.ok ? { loading: false, error: '', data: r.output } : { loading: false, error: r.error?.message ?? t('common.failed'), data: null }
   }
   $effect(() => {

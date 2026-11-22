@@ -1,6 +1,7 @@
 <script lang="ts">
   import { untrack } from 'svelte'
   import { has, t } from '../lib/i18n.svelte'
+  import { latest } from '../lib/seqload'
   import { call, can } from '../lib/api.svelte'
   import { resource } from '../lib/resource.svelte'
   import { relative, datetime, num, usd } from '../lib/format'
@@ -50,14 +51,14 @@
 
   // L1 state: Discord channels only
   let st = $state<{ loading: boolean; error: string; state: any; at: string } | null>(null)
-  let stSeq = 0
+  const stateLoads = latest()
   async function loadState() {
     const p = pick
     if (p?.kind !== 'discord') return void (st = null)
-    const my = ++stSeq
+    const live = stateLoads.start()
     st = { loading: true, error: '', state: st?.state ?? null, at: st?.at ?? '' }
     const r = await call('memory.state.show', { guild_id: p.guild_id, channel_id: p.channel_id })
-    if (my !== stSeq) return
+    if (!live()) return
     st = r.ok ? { loading: false, error: '', state: r.output.state ?? null, at: r.output.updated_at ?? '' } : { loading: false, error: r.error?.message ?? t('common.failed'), state: null, at: '' }
   }
   $effect(() => {
@@ -75,14 +76,14 @@
   // one episode open at a time, its items and evidence read live
   let open = $state('')
   let detail = $state<{ loading: boolean; error: string; items: any[] } | null>(null)
-  let dSeq = 0
+  const detailLoads = latest()
   async function toggle(id: string) {
     if (open === id) return void (open = '')
     open = id
     detail = { loading: true, error: '', items: [] }
-    const my = ++dSeq
+    const live = detailLoads.start()
     const r = await call('memory.episodes.show', { id })
-    if (my !== dSeq) return
+    if (!live()) return
     detail = r.ok ? { loading: false, error: '', items: r.output.items ?? [] } : { loading: false, error: r.error?.message ?? t('common.failed'), items: [] }
   }
 

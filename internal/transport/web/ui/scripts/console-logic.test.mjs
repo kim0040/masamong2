@@ -156,9 +156,11 @@ test('protected page resources wait for both sign-in and completed setup', async
     call: async () => { calls++; return { ok: true, output: {} } },
   }
   globalThis.$effect = (fn) => { fn() }
+  globalThis.__seqload = await load('seqload.ts', [])
   const resourceModule = await load('resource.svelte.ts', [
     ["import { call, canLoadProtectedActions, session, type ActionError } from './api.svelte'", 'const { call, canLoadProtectedActions, session } = globalThis.__firstLoad'],
     ["import { onLive } from './live.svelte'", 'const onLive = () => () => {}'],
+    ["import { latest } from './seqload'", 'const { latest } = globalThis.__seqload'],
   ])
   const res = resourceModule.resource('stats.series', () => ({ days: 14 }))
   await Promise.resolve()
