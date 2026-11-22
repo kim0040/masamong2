@@ -378,12 +378,7 @@ func (s *Service) Close() error {
 		if s.practice {
 			openPractices.remove(s)
 		}
-		// a memory rebuild stops at its next stage instead of holding Close
-		s.mem.mu.Lock()
-		if s.mem.eng != nil {
-			s.mem.eng.StopReload()
-		}
-		s.mem.mu.Unlock()
+		s.mem.stopReload() // a memory rebuild stops at its next stage instead of holding Close
 		s.workWG.Wait()
 		s.part.mu.Lock()
 		for _, c := range s.part.chans {
@@ -393,12 +388,7 @@ func (s *Service) Close() error {
 		}
 		s.part.chans = nil
 		s.part.mu.Unlock()
-		s.mem.mu.Lock()
-		if s.mem.eng != nil {
-			s.mem.eng.Close()
-			s.mem.eng = nil
-		}
-		s.mem.mu.Unlock()
+		s.mem.close()
 		s.logs.close()
 		s.mu.Lock()
 		for ch := range s.watchers {

@@ -64,6 +64,25 @@ func memoryConfigKey(doc config.Document) string {
 
 func (s *Service) memState() *memoryState { return &s.mem }
 
+// stopReload asks a running rebuild of the engine to stop at its next stage (Close).
+func (st *memoryState) stopReload() {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.eng != nil {
+		st.eng.StopReload()
+	}
+}
+
+// close closes the engine; it is built again only by a service that is not closing (MemoryEngine).
+func (st *memoryState) close() {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.eng != nil {
+		st.eng.Close()
+		st.eng = nil
+	}
+}
+
 func modelOf(d config.Document, role string) (config.Model, bool) {
 	m, ok := d.Models[role]
 	return m, ok && m.Model != ""
