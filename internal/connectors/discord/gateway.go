@@ -38,69 +38,42 @@ import (
 // Gateway is the live Discord connector (09). It is the single sender for this instance: every outbound
 // message goes through this session, with mentions disabled, and every command is an Application Action.
 type Gateway struct {
-	svc                        *application.Service
-	cfg                        config.Discord
-	log                        *slog.Logger
-	sess                       *discordgo.Session
-	connected                  atomic.Bool
-	botID                      atomic.Pointer[string]
-	dmMembers                  sync.Map // guild:user -> short-lived membership result
-	dmSweptAt                  atomic.Int64
-	followIDs                  sync.Map        // message IDs the follow-up window accepted, until their turn starts
-	pictureFollowIDs           sync.Map        // picture-only message ID → the words of the call it continues (lookback.go)
-	pictures                   recentPictures  // each channel's last few messages, for pictures sent apart from the words (lookback.go)
-	seen                       seenSet         // message IDs handled lately: a replayed MESSAGE_CREATE is dropped (inbound.go)
-	turns                      turnRegistry    // replies in flight, by channel and person, for a stop word (inbound.go)
-	channelKinds               sync.Map        // channel ID → *channelKind: is it a thread (threads.go)
-	kindSweptAt                atomic.Int64    // unix nanoseconds of the last channelKinds sweep
-	workCtx                    context.Context // replies and commands; cancelled after the shutdown grace
-	cancelWork                 context.CancelFunc
-	stopping                   atomic.Bool
-	more                       moreStore       // the rest of trimmed replies (shape.go)
-	interims                   interimRegistry // the bot's "still looking" lines: never captured, their delete never reconciled (interim.go)
-	interimHook                func(*interim)  // tests: sees each turn's line as it is made
-	botName                    atomic.Pointer[string]
-	mu                         sync.Mutex
-	lastSync                   string
-	startupMu                  sync.RWMutex
-	startup                    application.DiscordStartupStatus
-	open                       func() error
-	token                      string
-	retryWait                  func(context.Context, time.Duration) bool
-	retryJitter                func(time.Duration) time.Duration
-	messageEventApply          func(messageReconciliation) error
-	cancelPictures             func(channelID string, messageIDs []string) // tests; nil means the service's queue
-	reactForTest               func(context.Context, string, string, string) error
-	reconciliationWait         func(context.Context, time.Duration) bool
-	reconciliationMu           sync.Mutex
-	reconciliationRefreshMu    sync.Mutex                                // orders snapshots without holding up queue writes during legacy scans
-	legacyQuarantineCache      map[string]legacyQuarantineClassification // guarded by reconciliationRefreshMu
-	reconciliationRemove       func(string) error                        // tests; nil uses durable removal
-	reconciliationWrite        func(string, messageReconciliation) error // tests; nil uses atomic writes
-	reconciliationRead         func(string) ([]byte, error)              // tests; nil reads the queued file
-	legacyReconciliationStep   func(int)                                 // tests; pauses migration before a record is queued
-	legacyReconciliationReader func(io.Reader) io.Reader                 // tests; observes legacy scans and injects decoder read failures
-	// editOrderMu orders a live edit against the drain's apply of a queued one for the same bot: without
-	// it a queued older edit read just before a newer live edit went through could be applied after it
-	// and bring back the words the newer edit removed.
-	editOrderMu sync.Mutex
-	// reconciliationSeq names delete files; reconciliationPending is true while a deferred change may be
-	// on disk (so a delete that succeeds knows to look for edits it supersedes); reconciliationWake
-	// tells the background drain a delete or an idle queue needs work (nil in tests that drain by hand).
-	reconciliationSeq        atomic.Uint64
-	reconciliationPending    atomic.Bool
-	reconciliationBlocked    atomic.Int64
-	reconciliationDeletes    atomic.Bool
-	reconciliationLegacy     atomic.Bool
-	reconciliationStateReady bool      // guarded by reconciliationMu
-	reconciliationBlockedLog time.Time // guarded by reconciliationMu
-	reconciliationWake       chan struct{}
-	reconciliationBackingOff atomic.Bool
-	reconciliationCtx        context.Context
-	reconciliationCancel     context.CancelFunc
-	reconciliationDone       chan struct{}
-	noticeMu                 sync.Mutex
-	notices                  map[string]time.Time // "user:channel" and "channel" -> last refusal notice
+	svc               *application.Service
+	cfg               config.Discord
+	log               *slog.Logger
+	sess              *discordgo.Session
+	connected         atomic.Bool
+	botID             atomic.Pointer[string]
+	dmMembers         sync.Map // guild:user -> short-lived membership result
+	dmSweptAt         atomic.Int64
+	followIDs         sync.Map        // message IDs the follow-up window accepted, until their turn starts
+	pictureFollowIDs  sync.Map        // picture-only message ID → the words of the call it continues (lookback.go)
+	pictures          recentPictures  // each channel's last few messages, for pictures sent apart from the words (lookback.go)
+	seen              seenSet         // message IDs handled lately: a replayed MESSAGE_CREATE is dropped (inbound.go)
+	turns             turnRegistry    // replies in flight, by channel and person, for a stop word (inbound.go)
+	channelKinds      sync.Map        // channel ID → *channelKind: is it a thread (threads.go)
+	kindSweptAt       atomic.Int64    // unix nanoseconds of the last channelKinds sweep
+	workCtx           context.Context // replies and commands; cancelled after the shutdown grace
+	cancelWork        context.CancelFunc
+	stopping          atomic.Bool
+	more              moreStore       // the rest of trimmed replies (shape.go)
+	interims          interimRegistry // the bot's "still looking" lines: never captured, their delete never reconciled (interim.go)
+	interimHook       func(*interim)  // tests: sees each turn's line as it is made
+	botName           atomic.Pointer[string]
+	mu                sync.Mutex
+	lastSync          string
+	startupMu         sync.RWMutex
+	startup           application.DiscordStartupStatus
+	open              func() error
+	token             string
+	retryWait         func(context.Context, time.Duration) bool
+	retryJitter       func(time.Duration) time.Duration
+	messageEventApply func(messageReconciliation) error
+	cancelPictures    func(channelID string, messageIDs []string) // tests; nil means the service's queue
+	reactForTest      func(context.Context, string, string, string) error
+	recon             messageReconciler // edits and deletes that could not be applied yet (reconciliation.go)
+	noticeMu          sync.Mutex
+	notices           map[string]time.Time // "user:channel" and "channel" -> last refusal notice
 	// timeout for one Action execution. The reply that follows (the result, or the error card after a
 	// timeout) is sent with a fresh context of finalDeliveryTimeout, so a timed-out action still shows
 	// its failure.
@@ -165,8 +138,8 @@ func Start(ctx context.Context, svc *application.Service, cfg config.Discord, lo
 	g.workCtx, g.cancelWork = context.WithCancel(context.WithoutCancel(ctx))
 	// Changes deferred by an earlier run (or an older file format) are applied in the background: the
 	// gateway and the console must not wait on a store that may be slow or still failing.
-	g.reconciliationPending.Store(true)
-	g.reconciliationWake = make(chan struct{}, 1)
+	g.recon.pending.Store(true)
+	g.recon.wake = make(chan struct{}, 1)
 	g.startReconciliationDrain(ctx)
 	g.merge.fire = g.answerHeld
 	g.merge.forget = g.forgetFollow
@@ -349,7 +322,7 @@ var (
 func (g *Gateway) shutdown(sess *discordgo.Session) {
 	g.workMu.Lock()
 	g.draining = true
-	drainDone := g.reconciliationDone
+	drainDone := g.recon.done
 	g.workMu.Unlock()
 	g.stopping.Store(true)
 	done := make(chan struct{})
@@ -418,7 +391,7 @@ func (g *Gateway) runCtx() context.Context {
 func (g *Gateway) Wait(timeout time.Duration) bool {
 	g.workMu.Lock()
 	g.draining = true
-	drainDone, cancelDrain := g.reconciliationDone, g.reconciliationCancel
+	drainDone, cancelDrain := g.recon.done, g.recon.cancel
 	g.workMu.Unlock()
 	if cancelDrain != nil {
 		cancelDrain()
@@ -1848,14 +1821,14 @@ const stateMessages = 100
 // channel's capture setting is now: a message stored while capture was on is still removed. The server
 // log hears of them first, while the stored message still has its author and text.
 func (g *Gateway) onMessageDelete(s *discordgo.Session, m *discordgo.MessageDelete) {
-	defer g.recoverReconciliationPanic("delete handler", nil)
+	defer recoverReconciliationPanic(g.log, "delete handler", nil)
 	if m.Message == nil || m.ID == "" {
 		return
 	}
 	if g.interims.deleted(m.ID) {
 		return // the bot took its own "still looking" line back: nothing to log, forget or reconcile
 	}
-	_ = g.runReconciliationStep("server log", func() error {
+	_ = runReconciliationStep(g.log, "server log", func() error {
 		d := application.DeletedMessage{ID: m.ID}
 		if b := m.BeforeDelete; b != nil && b.Author != nil {
 			d.AuthorID, d.AuthorBot, d.Text = b.Author.ID, b.Author.Bot, b.Content
@@ -1871,8 +1844,8 @@ func (g *Gateway) onMessageDelete(s *discordgo.Session, m *discordgo.MessageDele
 	// Take the message out of a pending merged request first, or a merge window ending while the delete is
 	// being stored sends its words to the model. Each cleanup recovers on its own, so a panic there cannot
 	// skip storing the privacy intent.
-	_ = g.runReconciliationStep("merge cleanup", func() error { g.merge.remove(m.ID); return nil })
-	_ = g.runReconciliationStep("picture cleanup", func() error {
+	_ = runReconciliationStep(g.log, "merge cleanup", func() error { g.merge.remove(m.ID); return nil })
+	_ = runReconciliationStep(g.log, "picture cleanup", func() error {
 		g.pictures.forget(m.ChannelID, []string{m.ID})
 		g.cancelPictureJobs(m.ChannelID, []string{m.ID})
 		return nil
@@ -1890,7 +1863,7 @@ func (g *Gateway) cancelPictureJobs(channelID string, messageIDs []string) {
 }
 
 func (g *Gateway) onMessageDeleteBulk(s *discordgo.Session, m *discordgo.MessageDeleteBulk) {
-	defer g.recoverReconciliationPanic("bulk delete handler", nil)
+	defer recoverReconciliationPanic(g.log, "bulk delete handler", nil)
 	if kept := g.interims.withoutInterims(m.Messages); len(kept) != len(m.Messages) {
 		if len(kept) == 0 {
 			return
@@ -1899,7 +1872,7 @@ func (g *Gateway) onMessageDeleteBulk(s *discordgo.Session, m *discordgo.Message
 		copied.Messages = kept
 		m = &copied
 	}
-	_ = g.runReconciliationStep("server log", func() error {
+	_ = runReconciliationStep(g.log, "server log", func() error {
 		msgs := make([]application.DeletedMessage, len(m.Messages))
 		for i, id := range m.Messages {
 			msgs[i] = application.DeletedMessage{ID: id}
@@ -1910,9 +1883,9 @@ func (g *Gateway) onMessageDeleteBulk(s *discordgo.Session, m *discordgo.Message
 		return nil
 	})
 	for _, id := range m.Messages { // first, as in onMessageDelete
-		_ = g.runReconciliationStep("merge cleanup", func() error { g.merge.remove(id); return nil })
+		_ = runReconciliationStep(g.log, "merge cleanup", func() error { g.merge.remove(id); return nil })
 	}
-	_ = g.runReconciliationStep("picture cleanup", func() error {
+	_ = runReconciliationStep(g.log, "picture cleanup", func() error {
 		g.pictures.forget(m.ChannelID, m.Messages)
 		g.cancelPictureJobs(m.ChannelID, m.Messages)
 		return nil

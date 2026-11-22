@@ -29,7 +29,7 @@ func TestMessageHandlersRetryAndPersistReconciliation(t *testing.T) {
 	g := &Gateway{svc: svc, cfg: config.Discord{MessageContent: true}, ctx: context.Background(),
 		log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	var waits []time.Duration
-	g.reconciliationWait = func(_ context.Context, d time.Duration) bool {
+	g.recon.wait = func(_ context.Context, d time.Duration) bool {
 		waits = append(waits, d)
 		return true
 	}
@@ -79,14 +79,14 @@ func TestMessageHandlersRetryAndPersistReconciliation(t *testing.T) {
 	}
 	failing = true
 	calls = 0
-	if err := g.drainMessageReconciliation(); err == nil || calls == 0 {
+	if err := g.reconciler().drainMessageReconciliation(); err == nil || calls == 0 {
 		t.Fatalf("failed drain calls=%d err=%v", calls, err)
 	}
 	if after := reconciliationNames(t, dir); !reflect.DeepEqual(after, names) {
 		t.Fatalf("failed drain discarded work: %v -> %v", names, after)
 	}
 	failing = false
-	if err := g.drainMessageReconciliation(); err != nil {
+	if err := g.reconciler().drainMessageReconciliation(); err != nil {
 		t.Fatalf("drain reconciliation: %v", err)
 	}
 	if len(applied) != 3 {
@@ -121,7 +121,7 @@ func reconciliationTestGateway(t *testing.T) (*Gateway, string) {
 	t.Helper()
 	svc := svcForTest(t)
 	g := &Gateway{svc: svc, ctx: context.Background(), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	g.reconciliationWait = func(context.Context, time.Duration) bool { return true }
+	g.recon.wait = func(context.Context, time.Duration) bool { return true }
 	return g, filepath.Join(svc.DataRoot, messageReconciliationDir)
 }
 
@@ -131,16 +131,16 @@ func TestDeferredEditsKeepOnlyTheLatestPerMessage(t *testing.T) {
 	g, dir := reconciliationTestGateway(t)
 	base := time.Date(2026, 10, 5, 1, 0, 0, 0, time.UTC)
 	for i := 0; i < 1000; i++ {
-		if err := g.queueMessageReconciliation(messageReconciliation{Operation: "edit", GuildID: "g", ChannelID: "c",
+		if err := g.reconciler().queueMessageReconciliation(messageReconciliation{Operation: "edit", GuildID: "g", ChannelID: "c",
 			MessageIDs: []string{"m1"}, Content: fmt.Sprintf("v%d", i), At: base.Add(time.Duration(i) * time.Second)}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := g.queueMessageReconciliation(messageReconciliation{Operation: "edit", GuildID: "g", ChannelID: "c",
+	if err := g.reconciler().queueMessageReconciliation(messageReconciliation{Operation: "edit", GuildID: "g", ChannelID: "c",
 		MessageIDs: []string{"m1"}, Content: "stale", At: base}); err != nil {
 		t.Fatal(err)
 	}
-	if err := g.queueMessageReconciliation(messageReconciliation{Operation: "edit", GuildID: "g", ChannelID: "c",
+	if err := g.reconciler().queueMessageReconciliation(messageReconciliation{Operation: "edit", GuildID: "g", ChannelID: "c",
 		MessageIDs: []string{"m2"}, Content: "other", At: base}); err != nil {
 		t.Fatal(err)
 	}
@@ -149,7 +149,7 @@ func TestDeferredEditsKeepOnlyTheLatestPerMessage(t *testing.T) {
 	}
 	var applied []messageReconciliation
 	g.messageEventApply = func(e messageReconciliation) error { applied = append(applied, e); return nil }
-	if err := g.drainMessageReconciliation(); err != nil {
+	if err := g.reconciler().drainMessageReconciliation(); err != nil {
 		t.Fatal(err)
 	}
 	got := map[string]string{}
@@ -170,12 +170,12 @@ func TestDeleteSupersedesDeferredEditsAndIsKept(t *testing.T) {
 		return messageReconciliation{Operation: "edit", GuildID: "g", ChannelID: "c", MessageIDs: []string{id}, Content: "secret " + id, At: at}
 	}
 	for _, id := range []string{"m1", "m2", "m3"} {
-		if err := g.queueMessageReconciliation(edit(id)); err != nil {
+		if err := g.reconciler().queueMessageReconciliation(edit(id)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	// deferred delete of m1: written first, then the edit is removed
-	if err := g.queueMessageReconciliation(messageReconciliation{Operation: "delete", GuildID: "g", ChannelID: "c", MessageIDs: []string{"m1"}, At: at}); err != nil {
+	if err := g.reconciler().queueMessageReconciliation(messageReconciliation{Operation: "delete", GuildID: "g", ChannelID: "c", MessageIDs: []string{"m1"}, At: at}); err != nil {
 		t.Fatal(err)
 	}
 	// delete of m2 that goes through at once
@@ -184,7 +184,7 @@ func TestDeleteSupersedesDeferredEditsAndIsKept(t *testing.T) {
 
 	var applied []messageReconciliation
 	g.messageEventApply = func(e messageReconciliation) error { applied = append(applied, e); return nil }
-	if err := g.drainMessageReconciliation(); err != nil {
+	if err := g.reconciler().drainMessageReconciliation(); err != nil {
 		t.Fatal(err)
 	}
 	if len(applied) != 2 || applied[0].Operation != "delete" || applied[0].MessageIDs[0] != "m1" ||
@@ -200,18 +200,18 @@ func TestDeleteSupersedesDeferredEditsAndIsKept(t *testing.T) {
 func TestDrainKeepsAnEditThatChangedWhileItWasApplied(t *testing.T) {
 	g, dir := reconciliationTestGateway(t)
 	at := time.Date(2026, 10, 5, 1, 0, 0, 0, time.UTC)
-	if err := g.queueMessageReconciliation(messageReconciliation{Operation: "edit", GuildID: "g", ChannelID: "c", MessageIDs: []string{"m1"}, Content: "v1", At: at}); err != nil {
+	if err := g.reconciler().queueMessageReconciliation(messageReconciliation{Operation: "edit", GuildID: "g", ChannelID: "c", MessageIDs: []string{"m1"}, Content: "v1", At: at}); err != nil {
 		t.Fatal(err)
 	}
 	var applied []string
 	g.messageEventApply = func(e messageReconciliation) error {
 		applied = append(applied, e.Content)
 		if e.Content == "v1" {
-			return g.queueMessageReconciliation(messageReconciliation{Operation: "edit", GuildID: "g", ChannelID: "c", MessageIDs: []string{"m1"}, Content: "v2", At: at.Add(time.Second)})
+			return g.reconciler().queueMessageReconciliation(messageReconciliation{Operation: "edit", GuildID: "g", ChannelID: "c", MessageIDs: []string{"m1"}, Content: "v2", At: at.Add(time.Second)})
 		}
 		return nil
 	}
-	if err := g.drainMessageReconciliation(); err != nil {
+	if err := g.reconciler().drainMessageReconciliation(); err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(applied, []string{"v1", "v2"}) || len(reconciliationNames(t, dir)) != 0 {
@@ -238,7 +238,7 @@ func TestLegacyReconciliationArrayIsMigrated(t *testing.T) {
 	}
 	var applied []messageReconciliation
 	g.messageEventApply = func(e messageReconciliation) error { applied = append(applied, e); return nil }
-	if err := g.drainMessageReconciliation(); err != nil {
+	if err := g.reconciler().drainMessageReconciliation(); err != nil {
 		t.Fatal(err)
 	}
 	if len(applied) != 2 || applied[0].Operation != "delete" || len(applied[0].MessageIDs) != 2 || applied[1].Content != "new" {
@@ -262,7 +262,7 @@ func TestDamagedLegacyReconciliationIsSetAside(t *testing.T) {
 	}
 	var applied []messageReconciliation
 	g.messageEventApply = func(e messageReconciliation) error { applied = append(applied, e); return nil }
-	if err := g.drainMessageReconciliation(); !errors.Is(err, errReconciliationBlocked) {
+	if err := g.reconciler().drainMessageReconciliation(); !errors.Is(err, errReconciliationBlocked) {
 		t.Fatalf("damaged intent must remain blocked: %v", err)
 	}
 	if len(applied) != 1 || applied[0].MessageIDs[0] != "m1" {
@@ -279,7 +279,7 @@ func TestDamagedLegacyReconciliationIsSetAside(t *testing.T) {
 func TestReconciliationCorruptDeleteBlocksEditsAndSurvivesRestart(t *testing.T) {
 	g, dir := reconciliationTestGateway(t)
 	event := messageReconciliation{Operation: "edit", ChannelID: "c", MessageIDs: []string{"m1"}, Content: "pending", At: time.Date(2026, 10, 5, 1, 0, 0, 0, time.UTC)}
-	if err := g.queueMessageReconciliation(event); err != nil {
+	if err := g.reconciler().queueMessageReconciliation(event); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, "d-damaged.json")
@@ -292,10 +292,10 @@ func TestReconciliationCorruptDeleteBlocksEditsAndSurvivesRestart(t *testing.T) 
 	calls := 0
 	g.messageEventApply = func(messageReconciliation) error { calls++; return nil }
 	for pass := 0; pass < 2; pass++ {
-		if err := g.drainMessageReconciliation(); !errors.Is(err, errReconciliationBlocked) {
+		if err := g.reconciler().drainMessageReconciliation(); !errors.Is(err, errReconciliationBlocked) {
 			t.Fatalf("pass %d did not report blocked recovery", pass)
 		}
-		if calls != 0 || !g.reconciliationPending.Load() || g.reconciliationBlocked.Load() != 1 {
+		if calls != 0 || !g.recon.pending.Load() || g.recon.blocked.Load() != 1 {
 			t.Fatal("unreadable delete allowed an edit or completion")
 		}
 	}
@@ -306,8 +306,8 @@ func TestReconciliationCorruptDeleteBlocksEditsAndSurvivesRestart(t *testing.T) 
 		t.Fatal("quarantine did not preserve delete bytes")
 	}
 	restarted := &Gateway{svc: g.svc, ctx: context.Background(), log: g.log, messageEventApply: g.messageEventApply}
-	restarted.reconciliationPending.Store(true)
-	if err := restarted.drainMessageReconciliation(); !errors.Is(err, errReconciliationBlocked) || restarted.reconciliationBlocked.Load() != 1 {
+	restarted.recon.pending.Store(true)
+	if err := restarted.reconciler().drainMessageReconciliation(); !errors.Is(err, errReconciliationBlocked) || restarted.recon.blocked.Load() != 1 {
 		t.Fatal("restart forgot unresolved delete")
 	}
 	event.At = event.At.Add(time.Minute)
@@ -318,7 +318,7 @@ func TestReconciliationCorruptDeleteBlocksEditsAndSurvivesRestart(t *testing.T) 
 	if err := os.Remove(path + ".corrupt"); err != nil {
 		t.Fatal(err)
 	}
-	if err := restarted.drainMessageReconciliation(); err != nil || calls != 1 || restarted.reconciliationPending.Load() {
+	if err := restarted.reconciler().drainMessageReconciliation(); err != nil || calls != 1 || restarted.recon.pending.Load() {
 		t.Fatalf("recovered queue did not settle: %v", err)
 	}
 }
@@ -340,7 +340,7 @@ func TestReconciliationUnreadableLegacyArrayBlocksEdits(t *testing.T) {
 			calls := 0
 			g.messageEventApply = func(messageReconciliation) error { calls++; return nil }
 			for pass := 0; pass < 2; pass++ {
-				if err := g.drainMessageReconciliation(); !errors.Is(err, errReconciliationBlocked) || calls != 0 || !g.reconciliationPending.Load() {
+				if err := g.reconciler().drainMessageReconciliation(); !errors.Is(err, errReconciliationBlocked) || calls != 0 || !g.recon.pending.Load() {
 					t.Fatalf("unresolved array allowed an edit or completion: %v", err)
 				}
 			}
@@ -359,7 +359,7 @@ func TestReconciliationUnknownQueuedOperationIsBlocked(t *testing.T) {
 	calls := 0
 	g.messageEventApply = func(messageReconciliation) error { calls++; return nil }
 	for pass := 0; pass < 2; pass++ {
-		if err := g.drainMessageReconciliation(); !errors.Is(err, errReconciliationBlocked) || calls != 0 || g.reconciliationBlocked.Load() != 1 {
+		if err := g.reconciler().drainMessageReconciliation(); !errors.Is(err, errReconciliationBlocked) || calls != 0 || g.recon.blocked.Load() != 1 {
 			t.Fatalf("unknown operation was retried instead of blocked: %v", err)
 		}
 	}
@@ -385,7 +385,7 @@ func TestReconciliationLegacyMigrationRetriesAreIdempotent(t *testing.T) {
 	if err := os.Chtimes(path, fixed, fixed); err != nil {
 		t.Fatal(err)
 	}
-	g.reconciliationWrite = func(path string, item messageReconciliation) error {
+	g.recon.write = func(path string, item messageReconciliation) error {
 		if item.MessageIDs[0] == "m4" {
 			return errors.New("injected later write failure")
 		}
@@ -394,7 +394,7 @@ func TestReconciliationLegacyMigrationRetriesAreIdempotent(t *testing.T) {
 	var names []string
 	var snapshots [][]byte
 	for pass := 0; pass < 3; pass++ {
-		if err := g.migrateLegacyReconciliation(g.svc.DataRoot); err == nil {
+		if err := g.reconciler().migrateLegacyReconciliation(g.svc.DataRoot); err == nil {
 			t.Fatal("injected migration failure was ignored")
 		}
 		got := reconciliationNames(t, dir)
@@ -418,12 +418,12 @@ func TestReconciliationLegacyMigrationRetriesAreIdempotent(t *testing.T) {
 			}
 		}
 		// A process restart loses sequence counters but must preserve source names and timestamps.
-		g = &Gateway{svc: g.svc, ctx: context.Background(), log: g.log, reconciliationWrite: g.reconciliationWrite}
+		g = &Gateway{svc: g.svc, ctx: context.Background(), log: g.log, recon: messageReconciler{write: g.recon.write}}
 	}
-	g.reconciliationWrite = nil
+	g.recon.write = nil
 	calls := 0
 	g.messageEventApply = func(messageReconciliation) error { calls++; return nil }
-	if err := g.drainMessageReconciliation(); err != nil || calls != 4 || len(reconciliationNames(t, dir)) != 0 {
+	if err := g.reconciler().drainMessageReconciliation(); err != nil || calls != 4 || len(reconciliationNames(t, dir)) != 0 {
 		t.Fatalf("completed migration did not apply four unique records: calls=%d err=%v", calls, err)
 	}
 }
@@ -434,10 +434,10 @@ func TestReconciliationLegacyRemovalFailureDoesNotDuplicateRecords(t *testing.T)
 	if err := os.WriteFile(path, []byte(`[{"operation":"delete","message_ids":["m1"]}]`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	g.reconciliationRemove = func(string) error { return errors.New("injected legacy removal failure") }
+	g.recon.remove = func(string) error { return errors.New("injected legacy removal failure") }
 	var first []string
 	for pass := 0; pass < 3; pass++ {
-		if err := g.migrateLegacyReconciliation(g.svc.DataRoot); err == nil {
+		if err := g.reconciler().migrateLegacyReconciliation(g.svc.DataRoot); err == nil {
 			t.Fatal("source removal failure was ignored")
 		}
 		names := reconciliationNames(t, dir)
@@ -452,12 +452,12 @@ func TestReconciliationLegacyRemovalFailureDoesNotDuplicateRecords(t *testing.T)
 
 func TestReconciliationApplyPanicKeepsFileAndBackgroundDrainRetries(t *testing.T) {
 	g, dir := reconciliationTestGateway(t)
-	if err := g.queueMessageReconciliation(messageReconciliation{Operation: "delete", MessageIDs: []string{"m1"}}); err != nil {
+	if err := g.reconciler().queueMessageReconciliation(messageReconciliation{Operation: "delete", MessageIDs: []string{"m1"}}); err != nil {
 		t.Fatal(err)
 	}
 	waiting, retry := make(chan time.Duration, 1), make(chan struct{})
-	g.retryJitter = func(d time.Duration) time.Duration { return d }
-	g.reconciliationWait = func(ctx context.Context, delay time.Duration) bool {
+	g.recon.jitter = func(d time.Duration) time.Duration { return d }
+	g.recon.wait = func(ctx context.Context, delay time.Duration) bool {
 		waiting <- delay
 		select {
 		case <-retry:
@@ -505,7 +505,7 @@ func TestReconciliationApplyPanicKeepsFileAndBackgroundDrainRetries(t *testing.T
 		t.Fatal("shutdown did not join the recovered drain")
 	}
 	select {
-	case <-g.reconciliationDone:
+	case <-g.recon.done:
 	default:
 		t.Fatal("Wait reported completion before drain exit")
 	}
@@ -521,14 +521,14 @@ func TestReconciliationWaitJoinsAndCancelsPausedMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	paused, resume := make(chan struct{}), make(chan struct{})
-	g.legacyReconciliationStep = func(int) { close(paused); <-resume }
+	g.recon.legacyStep = func(int) { close(paused); <-resume }
 	g.startReconciliationDrain(context.Background())
 	t.Cleanup(func() { g.Wait(5 * time.Second) })
 	<-paused
 	returned := make(chan bool, 1)
 	go func() { returned <- g.Wait(5 * time.Second) }()
 	select {
-	case <-g.reconciliationCtx.Done():
+	case <-g.recon.ctx.Done():
 	case <-returned:
 		close(resume)
 		t.Fatal("Wait completed without cancelling or joining migration")
@@ -564,11 +564,11 @@ func TestBackgroundDrainRetriesWithGrowingWaitAndIsWokenByNewWork(t *testing.T) 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	g.ctx = ctx
-	g.reconciliationWake = make(chan struct{}, 1)
-	g.retryJitter = func(d time.Duration) time.Duration { return d }
+	g.recon.wake = make(chan struct{}, 1)
+	g.recon.jitter = func(d time.Duration) time.Duration { return d }
 	var mu sync.Mutex
 	var waits []time.Duration
-	g.reconciliationWait = func(_ context.Context, d time.Duration) bool {
+	g.recon.wait = func(_ context.Context, d time.Duration) bool {
 		mu.Lock()
 		waits = append(waits, d)
 		mu.Unlock()
@@ -583,11 +583,11 @@ func TestBackgroundDrainRetriesWithGrowingWaitAndIsWokenByNewWork(t *testing.T) 
 		applied <- e
 		return nil
 	}
-	if err := g.queueMessageReconciliation(messageReconciliation{Operation: "delete", GuildID: "g", ChannelID: "c", MessageIDs: []string{"m1"}, At: time.Now()}); err != nil {
+	if err := g.reconciler().queueMessageReconciliation(messageReconciliation{Operation: "delete", GuildID: "g", ChannelID: "c", MessageIDs: []string{"m1"}, At: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan struct{})
-	go func() { g.runReconciliationDrain(ctx); close(done) }()
+	go func() { g.reconciler().runReconciliationDrain(ctx); close(done) }()
 	select {
 	case e := <-applied:
 		if e.Operation != "delete" {
@@ -604,7 +604,7 @@ func TestBackgroundDrainRetriesWithGrowingWaitAndIsWokenByNewWork(t *testing.T) 
 		t.Fatalf("drain waits = %v, want %v", got, want)
 	}
 	// idle now: a new deferral wakes it
-	if err := g.queueMessageReconciliation(messageReconciliation{Operation: "delete", GuildID: "g", ChannelID: "c", MessageIDs: []string{"m2"}, At: time.Now()}); err != nil {
+	if err := g.reconciler().queueMessageReconciliation(messageReconciliation{Operation: "delete", GuildID: "g", ChannelID: "c", MessageIDs: []string{"m2"}, At: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -627,12 +627,12 @@ func TestFailedDrainNeverDropsADelete(t *testing.T) {
 	g, dir := reconciliationTestGateway(t)
 	g.messageEventApply = func(messageReconciliation) error { return errors.New("down") }
 	for i := 0; i < 50; i++ {
-		if err := g.queueMessageReconciliation(messageReconciliation{Operation: "delete", GuildID: "g", ChannelID: "c", MessageIDs: []string{fmt.Sprintf("m%d", i)}, At: time.Now()}); err != nil {
+		if err := g.reconciler().queueMessageReconciliation(messageReconciliation{Operation: "delete", GuildID: "g", ChannelID: "c", MessageIDs: []string{fmt.Sprintf("m%d", i)}, At: time.Now()}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for pass := 0; pass < 3; pass++ {
-		if err := g.drainMessageReconciliation(); err == nil {
+		if err := g.reconciler().drainMessageReconciliation(); err == nil {
 			t.Fatal("drain reported success while the store is down")
 		}
 	}
@@ -668,11 +668,11 @@ func TestMessageDeleteCancelsThePicturesOfTheDeletedRequests(t *testing.T) {
 func TestLiveEditSupersedesAnOlderQueuedEdit(t *testing.T) {
 	g, dir := reconciliationTestGateway(t)
 	at := time.Date(2026, 10, 5, 1, 0, 0, 0, time.UTC)
-	if err := g.queueMessageReconciliation(messageReconciliation{Operation: "edit", GuildID: "g", ChannelID: "c",
+	if err := g.reconciler().queueMessageReconciliation(messageReconciliation{Operation: "edit", GuildID: "g", ChannelID: "c",
 		MessageIDs: []string{"m1"}, Content: "old text with a secret", At: at}); err != nil {
 		t.Fatal(err)
 	}
-	if err := g.queueMessageReconciliation(messageReconciliation{Operation: "edit", GuildID: "g", ChannelID: "c",
+	if err := g.reconciler().queueMessageReconciliation(messageReconciliation{Operation: "edit", GuildID: "g", ChannelID: "c",
 		MessageIDs: []string{"m2"}, Content: "queued newer than live", At: at.Add(time.Hour)}); err != nil {
 		t.Fatal(err)
 	}
@@ -682,7 +682,7 @@ func TestLiveEditSupersedesAnOlderQueuedEdit(t *testing.T) {
 
 	var applied []messageReconciliation
 	g.messageEventApply = func(e messageReconciliation) error { applied = append(applied, e); return nil }
-	if err := g.drainMessageReconciliation(); err != nil {
+	if err := g.reconciler().drainMessageReconciliation(); err != nil {
 		t.Fatal(err)
 	}
 	if len(applied) != 1 || applied[0].MessageIDs[0] != "m2" || applied[0].Content != "queued newer than live" {
@@ -723,10 +723,10 @@ func assertReconciliationRevision(t *testing.T, g *Gateway, want string) {
 func TestReconciliationStaleEditCannotReturnAfterRemovalFailure(t *testing.T) {
 	g, dir := reconciliationTestGateway(t)
 	old := reconciliationCapturedEdit(t, g)
-	if err := g.queueMessageReconciliation(old); err != nil {
+	if err := g.reconciler().queueMessageReconciliation(old); err != nil {
 		t.Fatal(err)
 	}
-	g.reconciliationRemove = func(string) error { return errors.New("injected removal failure") }
+	g.recon.remove = func(string) error { return errors.New("injected removal failure") }
 	newer := old
 	newer.At, newer.Content = old.At.Add(time.Minute), "current"
 	g.applyMessageChange(newer)
@@ -734,12 +734,12 @@ func TestReconciliationStaleEditCannotReturnAfterRemovalFailure(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, editFileName("c", "m1"))); err != nil {
 		t.Fatal("fault injection did not keep the old file")
 	}
-	if err := g.drainMessageReconciliation(); err == nil {
+	if err := g.reconciler().drainMessageReconciliation(); err == nil {
 		t.Fatal("removal failure must remain pending")
 	}
 	assertReconciliationRevision(t, g, "current")
-	g.reconciliationRemove = nil
-	if err := g.drainMessageReconciliation(); err != nil {
+	g.recon.remove = nil
+	if err := g.reconciler().drainMessageReconciliation(); err != nil {
 		t.Fatal(err)
 	}
 	assertReconciliationRevision(t, g, "current")
@@ -756,9 +756,9 @@ func TestReconciliationStaleLegacyEditCannotReturnAfterLiveEdit(t *testing.T) {
 		t.Fatal(err)
 	}
 	paused, resume := make(chan struct{}), make(chan struct{})
-	g.legacyReconciliationStep = func(int) { close(paused); <-resume }
+	g.recon.legacyStep = func(int) { close(paused); <-resume }
 	done := make(chan error, 1)
-	go func() { done <- g.drainMessageReconciliation() }()
+	go func() { done <- g.reconciler().drainMessageReconciliation() }()
 	<-paused
 	newer := old
 	newer.At, newer.Content = old.At.Add(time.Minute), "current"
@@ -777,10 +777,10 @@ func TestReconciliationEqualRevisionCannotReplaceLiveText(t *testing.T) {
 	g.applyMessageChange(event)
 	assertReconciliationRevision(t, g, "original")
 	event.Content = "obsolete"
-	if err := g.queueMessageReconciliation(event); err != nil {
+	if err := g.reconciler().queueMessageReconciliation(event); err != nil {
 		t.Fatal(err)
 	}
-	if err := g.drainMessageReconciliation(); err != nil {
+	if err := g.reconciler().drainMessageReconciliation(); err != nil {
 		t.Fatal(err)
 	}
 	assertReconciliationRevision(t, g, "original")

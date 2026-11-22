@@ -17,7 +17,7 @@ func TestReconciliationCorruptDeletesDoNotExhaustStoreFailureBudget(t *testing.T
 	}
 	// Inject six corrupt reads followed by a healthy one, regardless of filesystem enumeration order.
 	reads, applied := 0, 0
-	g.reconciliationRead = func(path string) ([]byte, error) {
+	g.recon.read = func(path string) ([]byte, error) {
 		reads++
 		if reads <= reconciliationPassFailures+1 {
 			return []byte("{"), nil
@@ -25,8 +25,8 @@ func TestReconciliationCorruptDeletesDoNotExhaustStoreFailureBudget(t *testing.T
 		return os.ReadFile(path)
 	}
 	g.messageEventApply = func(messageReconciliation) error { applied++; return nil }
-	err := g.drainMessageReconciliation()
-	if !errors.Is(err, errReconciliationBlocked) || applied != 1 || reads != reconciliationPassFailures+2 || g.reconciliationBlocked.Load() != int64(reconciliationPassFailures+1) {
+	err := g.reconciler().drainMessageReconciliation()
+	if !errors.Is(err, errReconciliationBlocked) || applied != 1 || reads != reconciliationPassFailures+2 || g.recon.blocked.Load() != int64(reconciliationPassFailures+1) {
 		t.Fatal("corrupt deletes delayed a healthy delete until the next backoff")
 	}
 	if names, err := listReconciliation(dir, "d-", 1, nil); err != nil || len(names) != 0 {

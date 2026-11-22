@@ -4,21 +4,22 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"masamong/internal/application"
 	"masamong/internal/fsutil"
-	"masamong/internal/memory/store"
 )
 
 // messageReconciliationFile is the first format: one JSON array rewritten whole on every failed
@@ -65,38 +66,95 @@ type messageReconciliation struct {
 	SameFiles bool `json:"same_files,omitempty"`
 }
 
+// messageReconciler owns the durable queue of message changes that could not be applied when they
+// arrived: the files, their locks, the recovery state, and the background drain with its backoff. The
+// gateway only says where the data lives and how one change is applied (reconcilerHost). It applies a
+// change outside the queue lock: the lock guards the files, never a call into the store.
+type messageReconciler struct {
+	host     reconcilerHost
+	bindOnce sync.Once
+	mu       sync.Mutex
+	// refreshMu orders snapshots without holding up queue writes during legacy scans
+	refreshMu             sync.Mutex
+	legacyQuarantineCache map[string]legacyQuarantineClassification // guarded by refreshMu
+	// editOrderMu orders a live edit against the drain's apply of a queued one for the same bot: without
+	// it a queued older edit read just before a newer live edit went through could be applied after it
+	// and bring back the words the newer edit removed.
+	editOrderMu sync.Mutex
+	// seq names delete files; pending is true while a deferred change may be on disk (so a delete that
+	// succeeds knows to look for edits it supersedes); wake tells the background drain a delete or an idle
+	// queue needs work (nil in tests that drain by hand).
+	seq        atomic.Uint64
+	pending    atomic.Bool
+	blocked    atomic.Int64
+	deletes    atomic.Bool
+	legacy     atomic.Bool
+	stateReady bool      // guarded by mu
+	blockedLog time.Time // guarded by mu
+	wake       chan struct{}
+	backingOff atomic.Bool
+	// ctx, cancel and done belong to the background drain; the gateway sets and reads them under its
+	// work admission lock (startReconciliationDrain, Wait, shutdown).
+	ctx    context.Context
+	cancel context.CancelFunc
+	done   chan struct{}
+	// test hooks; nil means the real behaviour
+	wait         func(context.Context, time.Duration) bool // retry clock; nil waits on the context
+	jitter       func(time.Duration) time.Duration         // drain backoff; nil uses jittered
+	remove       func(string) error                        // nil uses durable removal
+	write        func(string, messageReconciliation) error // nil uses atomic writes
+	read         func(string) ([]byte, error)              // nil reads the queued file
+	legacyStep   func(int)                                 // pauses migration before a record is queued
+	legacyReader func(io.Reader) io.Reader                 // observes legacy scans and injects decoder read failures
+}
+
+// reconcilerHost is what the queue needs from the gateway.
+type reconcilerHost interface {
+	reconciliationRoot() (string, error)
+	// applyMessageEvent applies a live change; applyQueuedMessageEvent applies a queued one as gateway
+	// work, refusing once shutdown has begun.
+	applyMessageEvent(messageReconciliation) error
+	applyQueuedMessageEvent(messageReconciliation) error
+	runCtx() context.Context
+	logger() *slog.Logger
+}
+
+// bind attaches the host once. The reconciler is a field of the gateway, so a gateway built as a literal
+// (tests) gets a working queue on first use.
+func (r *messageReconciler) bind(host reconcilerHost) *messageReconciler {
+	r.bindOnce.Do(func() { r.host = host })
+	return r
+}
+
+func (r *messageReconciler) log() *slog.Logger {
+	return r.host.logger()
+}
+
 // Keep panic values out of diagnostics: callbacks can carry private message data.
-func (g *Gateway) recoverReconciliationPanic(stage string, err *error) {
+func recoverReconciliationPanic(log *slog.Logger, stage string, err *error) {
 	if recover() != nil {
 		failure := errors.New("discord: reconciliation " + stage + " panicked")
 		if err != nil {
 			*err = failure
 		}
-		g.log.Error(failure.Error(), "stack", string(debug.Stack()))
+		log.Error(failure.Error(), "stack", string(debug.Stack()))
 	}
 }
 
-func (g *Gateway) runReconciliationStep(stage string, step func() error) (err error) {
-	defer g.recoverReconciliationPanic(stage, &err)
+func runReconciliationStep(log *slog.Logger, stage string, step func() error) (err error) {
+	defer recoverReconciliationPanic(log, stage, &err)
 	return step()
 }
 
-func (g *Gateway) reconciliationRoot() (string, error) {
-	if g.svc == nil || g.svc.DataRoot == "" {
-		return "", errors.New("discord: message reconciliation has no data root")
-	}
-	return g.svc.DataRoot, nil
-}
-
-func (g *Gateway) reconciliationDirPath() (string, error) {
-	root, err := g.reconciliationRoot()
+func (r *messageReconciler) reconciliationDirPath() (string, error) {
+	root, err := r.host.reconciliationRoot()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(root, messageReconciliationDir), nil
 }
 
-func (g *Gateway) applyMessageChange(event messageReconciliation) {
+func (r *messageReconciler) applyMessageChange(event messageReconciliation) {
 	if len(event.MessageIDs) == 0 {
 		return
 	}
@@ -104,64 +162,64 @@ func (g *Gateway) applyMessageChange(event messageReconciliation) {
 		event.At = time.Now().UTC()
 	}
 	if event.Operation == "edit" {
-		g.editOrderMu.Lock()
-		defer g.editOrderMu.Unlock()
-		if g.reconciliationPending.Load() {
-			if err := g.ensureReconciliationState(); err != nil || g.reconciliationDeletes.Load() ||
-				g.reconciliationLegacy.Load() || g.reconciliationBlocked.Load() > 0 {
-				if persistErr := g.queueMessageReconciliation(event); persistErr == nil {
+		r.editOrderMu.Lock()
+		defer r.editOrderMu.Unlock()
+		if r.pending.Load() {
+			if err := r.ensureReconciliationState(); err != nil || r.deletes.Load() ||
+				r.legacy.Load() || r.blocked.Load() > 0 {
+				if persistErr := r.queueMessageReconciliation(event); persistErr == nil {
 					return
 				} else {
-					g.log.Error("discord: blocked edit could not be saved; attempting application", "err", persistErr)
+					r.log().Error("discord: blocked edit could not be saved; attempting application", "err", persistErr)
 				}
 			}
 		}
 	}
-	if err := g.retryMessageChange(event); err != nil {
-		if persistErr := g.queueMessageReconciliation(event); persistErr != nil {
-			g.log.Error("discord: message change failed and reconciliation could not be saved", "operation", event.Operation,
+	if err := r.retryMessageChange(event); err != nil {
+		if persistErr := r.queueMessageReconciliation(event); persistErr != nil {
+			r.log().Error("discord: message change failed and reconciliation could not be saved", "operation", event.Operation,
 				"messages", len(event.MessageIDs), "err", errors.Join(err, persistErr))
 			return
 		}
-		g.log.Warn("discord: message change deferred for reconciliation", "operation", event.Operation,
+		r.log().Warn("discord: message change deferred for reconciliation", "operation", event.Operation,
 			"messages", len(event.MessageIDs), "err", err)
 		return
 	}
 	switch event.Operation {
 	case "delete":
 		// Edits still waiting for these messages would only be applied to nothing; drop them now.
-		g.supersedeQueuedEdits(event)
+		r.supersedeQueuedEdits(event)
 	case "edit":
 		// A waiting edit older than this one is stale: applied later it would bring back what this edit
 		// changed (words a person took out of their message).
-		g.supersedeOlderEdit(event)
+		r.supersedeOlderEdit(event)
 	}
 }
 
 // supersedeOlderEdit removes the queued edit of event's message when it is not newer than event.
-func (g *Gateway) supersedeOlderEdit(event messageReconciliation) {
-	if !g.reconciliationPending.Load() || len(event.MessageIDs) != 1 {
+func (r *messageReconciler) supersedeOlderEdit(event messageReconciliation) {
+	if !r.pending.Load() || len(event.MessageIDs) != 1 {
 		return
 	}
-	dir, err := g.reconciliationDirPath()
+	dir, err := r.reconciliationDirPath()
 	if err != nil {
 		return
 	}
-	g.reconciliationMu.Lock()
-	defer g.reconciliationMu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	path := filepath.Join(dir, editFileName(event.ChannelID, event.MessageIDs[0]))
 	if old, err := readReconciliationItem(path); err == nil && !old.At.After(event.At) {
-		if err := g.removeReconciliation(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			g.log.Warn("discord: superseded edit could not be removed", "err", err)
+		if err := r.removeReconciliation(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			r.log().Warn("discord: superseded edit could not be removed", "err", err)
 		}
 	}
 }
 
-func (g *Gateway) retryMessageChange(event messageReconciliation) error {
-	ctx := g.runCtx()
+func (r *messageReconciler) retryMessageChange(event messageReconciliation) error {
+	ctx := r.host.runCtx()
 	var lastErr error
 	for attempt := 0; ; attempt++ {
-		if err := g.applyMessageEvent(event); err == nil {
+		if err := r.host.applyMessageEvent(event); err == nil {
 			return nil
 		} else {
 			lastErr = err
@@ -170,108 +228,22 @@ func (g *Gateway) retryMessageChange(event messageReconciliation) error {
 		if errors.Is(lastErr, application.ErrServiceClosing) || attempt == len(messageRetryBackoff) {
 			return lastErr
 		}
-		if !g.reconciliationWaiter()(ctx, messageRetryBackoff[attempt]) {
+		if !r.waiter()(ctx, messageRetryBackoff[attempt]) {
 			return errors.Join(lastErr, ctx.Err())
 		}
 	}
 }
 
-func (g *Gateway) reconciliationWaiter() func(context.Context, time.Duration) bool {
-	if g.reconciliationWait != nil {
-		return g.reconciliationWait
+func (r *messageReconciler) waiter() func(context.Context, time.Duration) bool {
+	if r.wait != nil {
+		return r.wait
 	}
 	return waitContext
 }
 
-func (g *Gateway) applyMessageEvent(event messageReconciliation) (err error) {
-	defer func() {
-		if recover() != nil {
-			// Panic values may contain private text. Keep only the category and call stack, and
-			// return through the normal retry/queue path for both live and deferred changes.
-			err = errors.New("discord: reconciliation apply panicked")
-			g.log.Error(err.Error(), "stack", string(debug.Stack()))
-		}
-	}()
-	if event.Operation == "edit" && len(event.MessageIDs) == 1 {
-		current, err := g.reconciliationEditCurrent(event)
-		if err != nil || !current {
-			return err
-		}
-	}
-	if g.messageEventApply != nil {
-		return g.messageEventApply(event)
-	}
-	if g.svc == nil {
-		return errors.New("discord: message change has no application service")
-	}
-	switch event.Operation {
-	case "edit":
-		if len(event.MessageIDs) != 1 {
-			return errors.New("discord: edit reconciliation must name one message")
-		}
-		if event.SameFiles {
-			kept, err := g.svc.MessageKeptItsWords(event.GuildID, event.ChannelID, event.MessageIDs[0], event.Content, event.At)
-			if err != nil || kept {
-				return err
-			}
-		}
-		return g.svc.MessageEdited(event.GuildID, event.ChannelID, event.MessageIDs[0], event.Content, event.At)
-	case "delete":
-		return g.svc.MessagesDeleted(event.GuildID, event.ChannelID, event.MessageIDs)
-	default:
-		return errors.New("discord: unknown message reconciliation operation")
-	}
-}
-
-// The committed revision, not removal of a queue file, decides whether an edit may reach the live
-// window. This also covers an old legacy record migrated after a newer live edit succeeded.
-func (g *Gateway) reconciliationEditCurrent(event messageReconciliation) (bool, error) {
-	if g.svc == nil || g.svc.Store == nil {
-		return true, nil
-	}
-	reader := g.svc.Store.Reader()
-	ctx, cancel := context.WithTimeout(g.reconciliationContext(), 5*time.Second)
-	defer cancel()
-	// an edit that kept the words leaves no tombstone, and is a revision all the same
-	if newer, err := store.KeptRevisionNewer(ctx, reader, event.MessageIDs[0], event.At); err != nil || newer {
-		return false, err
-	}
-	var raw string
-	err := reader.QueryRowContext(ctx, `SELECT at FROM privacy_tombstones WHERE kind='message' AND source_id=?`, event.MessageIDs[0]).Scan(&raw)
-	if errors.Is(err, sql.ErrNoRows) {
-		return true, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	latest, err := time.Parse(time.RFC3339Nano, raw)
-	if err == nil && !event.At.After(latest) {
-		// An equal intent already has durable application replay. Replaying it here must not
-		// overwrite live text with a different payload that happens to have the same timestamp.
-		return false, nil
-	}
-	// Match the store's revision policy: an unparseable timestamp is not a permanent retry
-	// error. Still check deletion and the observation revision before touching live effects.
-	var edited, deleted string
-	err = reader.QueryRowContext(ctx, `SELECT edited_at,deleted_at FROM memory_observations WHERE platform='discord' AND native_message_id=?`, event.MessageIDs[0]).Scan(&edited, &deleted)
-	if errors.Is(err, sql.ErrNoRows) {
-		return true, nil
-	}
-	if err != nil || deleted != "" {
-		return false, err
-	}
-	if edited != "" {
-		applied, err := time.Parse(time.RFC3339Nano, edited)
-		if err == nil && !event.At.After(applied) {
-			return false, nil
-		}
-	}
-	return true, nil
-}
-
-func (g *Gateway) removeReconciliation(path string) error {
-	if g.reconciliationRemove != nil {
-		return g.reconciliationRemove(path)
+func (r *messageReconciler) removeReconciliation(path string) error {
+	if r.remove != nil {
+		return r.remove(path)
 	}
 	return fsutil.RemoveDurable(path)
 }
@@ -283,31 +255,31 @@ func editFileName(channelID, messageID string) string {
 	return "e-" + hex.EncodeToString(sum[:16]) + ".json"
 }
 
-func (g *Gateway) nextDeleteFileName() string {
-	return fmt.Sprintf("d-%020d-%06d.json", time.Now().UnixNano(), g.reconciliationSeq.Add(1)%1_000_000)
+func (r *messageReconciler) nextDeleteFileName() string {
+	return fmt.Sprintf("d-%020d-%06d.json", time.Now().UnixNano(), r.seq.Add(1)%1_000_000)
 }
 
 // queueMessageReconciliation makes a failed change durable before the handler returns. A delete is
 // written first and only then are the edits it supersedes removed, so a crash between the two leaves
 // both and never neither.
-func (g *Gateway) queueMessageReconciliation(event messageReconciliation) error {
-	g.reconciliationMu.Lock()
-	defer g.reconciliationMu.Unlock()
-	return g.queueLocked(event)
+func (r *messageReconciler) queueMessageReconciliation(event messageReconciliation) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.queueLocked(event)
 }
 
-func (g *Gateway) queueLocked(event messageReconciliation) error {
-	err := g.queueNamedLocked(event, "")
-	if err == nil && (event.Operation == "delete" || !g.reconciliationBackingOff.Load()) {
+func (r *messageReconciler) queueLocked(event messageReconciliation) error {
+	err := r.queueNamedLocked(event, "")
+	if err == nil && (event.Operation == "delete" || !r.backingOff.Load()) {
 		// Deletes can make progress despite a privacy blocker. More edits cannot repair a failed
 		// store, but the first deferral must still wake a drain sleeping on an empty queue.
-		g.wakeReconciliation()
+		r.wakeReconciliation()
 	}
 	return err
 }
 
-func (g *Gateway) queueNamedLocked(event messageReconciliation, deleteName string) error {
-	dir, err := g.reconciliationDirPath()
+func (r *messageReconciler) queueNamedLocked(event messageReconciliation, deleteName string) error {
+	dir, err := r.reconciliationDirPath()
 	if err != nil {
 		return err
 	}
@@ -320,54 +292,54 @@ func (g *Gateway) queueNamedLocked(event messageReconciliation, deleteName strin
 		if old, err := readReconciliationItem(path); err == nil && old.At.After(event.At) {
 			return nil // a newer edit is already waiting
 		}
-		if err := g.writeReconciliation(path, event); err != nil {
+		if err := r.writeReconciliation(path, event); err != nil {
 			return err
 		}
 	case "delete":
 		if deleteName == "" {
-			deleteName = g.nextDeleteFileName()
+			deleteName = r.nextDeleteFileName()
 		}
-		if err := g.writeReconciliation(filepath.Join(dir, deleteName), event); err != nil {
+		if err := r.writeReconciliation(filepath.Join(dir, deleteName), event); err != nil {
 			return err
 		}
-		g.reconciliationDeletes.Store(true)
-		g.removeEditFilesLocked(dir, event)
+		r.deletes.Store(true)
+		r.removeEditFilesLocked(dir, event)
 	default:
 		return errors.New("discord: unknown message reconciliation operation")
 	}
-	g.reconciliationPending.Store(true)
+	r.pending.Store(true)
 	return nil
 }
 
-func (g *Gateway) removeEditFilesLocked(dir string, event messageReconciliation) {
+func (r *messageReconciler) removeEditFilesLocked(dir string, event messageReconciliation) {
 	for _, id := range event.MessageIDs {
 		if err := os.Remove(filepath.Join(dir, editFileName(event.ChannelID, id))); err != nil && !errors.Is(err, os.ErrNotExist) {
-			g.log.Warn("discord: superseded edit could not be removed", "err", err)
+			r.log().Warn("discord: superseded edit could not be removed", "err", err)
 		}
 	}
 }
 
 // supersedeQueuedEdits removes the waiting edits of messages that were just deleted. It costs nothing
 // while no change has ever been deferred.
-func (g *Gateway) supersedeQueuedEdits(event messageReconciliation) {
-	if !g.reconciliationPending.Load() {
+func (r *messageReconciler) supersedeQueuedEdits(event messageReconciliation) {
+	if !r.pending.Load() {
 		return
 	}
-	dir, err := g.reconciliationDirPath()
+	dir, err := r.reconciliationDirPath()
 	if err != nil {
 		return
 	}
-	g.reconciliationMu.Lock()
-	defer g.reconciliationMu.Unlock()
-	g.removeEditFilesLocked(dir, event)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.removeEditFilesLocked(dir, event)
 }
 
-func (g *Gateway) wakeReconciliation() {
-	if g.reconciliationWake == nil {
+func (r *messageReconciler) wakeReconciliation() {
+	if r.wake == nil {
 		return
 	}
 	select {
-	case g.reconciliationWake <- struct{}{}:
+	case r.wake <- struct{}{}:
 	default:
 	}
 }
@@ -392,9 +364,9 @@ func writeReconciliationItem(path string, event messageReconciliation) error {
 	return fsutil.WriteAtomic(path, b, 0o600)
 }
 
-func (g *Gateway) writeReconciliation(path string, event messageReconciliation) error {
-	if g.reconciliationWrite != nil {
-		return g.reconciliationWrite(path, event)
+func (r *messageReconciler) writeReconciliation(path string, event messageReconciliation) error {
+	if r.write != nil {
+		return r.write(path, event)
 	}
 	return writeReconciliationItem(path, event)
 }
@@ -435,35 +407,35 @@ func listReconciliation(dir, prefix string, limit int, skip map[string]bool) ([]
 // drainMessageReconciliation makes one pass over the queue: deletes first, so no edit is ever applied
 // before a delete that was waiting, then edits. It stops on the first sign that the store is still
 // down; whatever is left stays on disk for the next pass.
-func (g *Gateway) drainMessageReconciliation() error {
-	root, err := g.reconciliationRoot()
+func (r *messageReconciler) drainMessageReconciliation() error {
+	root, err := r.host.reconciliationRoot()
 	if err != nil {
 		return err
 	}
 	dir := filepath.Join(root, messageReconciliationDir)
-	migrationErr := g.migrateLegacyReconciliation(root)
+	migrationErr := r.migrateLegacyReconciliation(root)
 	// Already durable deletes do not depend on migrating or removing the legacy source. An
 	// unfinished migration can hide deletes, so only the edit phase waits for it to succeed.
-	if err := g.drainPrefix(dir, "d-"); err != nil {
+	if err := r.drainPrefix(dir, "d-"); err != nil {
 		return errors.Join(migrationErr, err) // deletes that did not apply hold the edits back
 	}
-	if err := g.refreshReconciliationBlocked(root, dir); err != nil {
+	if err := r.refreshReconciliationBlocked(root, dir); err != nil {
 		return errors.Join(migrationErr, err)
 	}
 	if migrationErr != nil {
 		return migrationErr
 	}
-	if g.reconciliationBlocked.Load() > 0 {
+	if r.blocked.Load() > 0 {
 		return errReconciliationBlocked
 	}
-	if err := g.drainPrefix(dir, "e-"); err != nil {
+	if err := r.drainPrefix(dir, "e-"); err != nil {
 		return err
 	}
-	g.settleReconciliation(dir)
+	r.settleReconciliation(dir)
 	return nil
 }
 
-func (g *Gateway) drainPrefix(dir, prefix string) error {
+func (r *messageReconciler) drainPrefix(dir, prefix string) error {
 	failed := map[string]bool{}
 	var firstErr error
 	consecutive := 0
@@ -476,10 +448,10 @@ func (g *Gateway) drainPrefix(dir, prefix string) error {
 			return firstErr
 		}
 		for _, name := range names {
-			if err := g.reconciliationContext().Err(); err != nil {
+			if err := r.reconciliationContext().Err(); err != nil {
 				return errors.Join(firstErr, err)
 			}
-			if err := g.drainOne(dir, name); err != nil {
+			if err := r.drainOne(dir, name); err != nil {
 				failed[name] = true
 				if errors.Is(err, errReconciliationBlocked) {
 					// Quarantine made progress. Its privacy blocker holds edits, but does not mean
@@ -500,21 +472,21 @@ func (g *Gateway) drainPrefix(dir, prefix string) error {
 
 // drainOne applies one queued change and removes its file. An edit is removed only if the file still
 // holds what was applied: a newer edit that replaced it meanwhile stays for the next pass.
-func (g *Gateway) drainOne(dir, name string) error {
+func (r *messageReconciler) drainOne(dir, name string) error {
 	path := filepath.Join(dir, name)
 	if strings.HasPrefix(name, "e-") {
 		// read and apply under the edit order lock, so a newer live edit either lands first and has
 		// removed this file, or waits until this older one is applied
-		g.editOrderMu.Lock()
-		defer g.editOrderMu.Unlock()
+		r.editOrderMu.Lock()
+		defer r.editOrderMu.Unlock()
 	}
 	b, err := func() ([]byte, error) {
 		// Windows readers can prevent rename-over while the handle is open. Share the queue
 		// mutex with atomic writers, releasing it before application can queue another event.
-		g.reconciliationMu.Lock()
-		defer g.reconciliationMu.Unlock()
-		if g.reconciliationRead != nil {
-			return g.reconciliationRead(path)
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if r.read != nil {
+			return r.read(path)
 		}
 		return os.ReadFile(path)
 	}()
@@ -526,36 +498,28 @@ func (g *Gateway) drainOne(dir, name string) error {
 	}
 	var item messageReconciliation
 	if err := json.Unmarshal(b, &item); err != nil || !validReconciliationItem(item) {
-		return g.quarantineReconciliation(path)
+		return r.quarantineReconciliation(path)
 	}
-	err = g.applyQueuedMessageEvent(item)
+	err = r.host.applyQueuedMessageEvent(item)
 	if err != nil {
 		return err
 	}
-	g.reconciliationMu.Lock()
-	defer g.reconciliationMu.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if strings.HasPrefix(name, "e-") {
 		if now, err := os.ReadFile(path); err == nil && !bytes.Equal(now, b) {
 			return nil
 		}
 	}
-	return g.removeReconciliation(path)
-}
-
-func (g *Gateway) applyQueuedMessageEvent(item messageReconciliation) error {
-	if _, ok := g.beginWork(); !ok {
-		return context.Canceled
-	}
-	defer g.inflight.Done()
-	return g.applyMessageEvent(item)
+	return r.removeReconciliation(path)
 }
 
 // settleReconciliation clears the pending flag once the queue is really empty, so deletes stop looking
 // for edit files to remove.
-func (g *Gateway) settleReconciliation(dir string) {
-	g.reconciliationMu.Lock()
-	defer g.reconciliationMu.Unlock()
-	if g.reconciliationBlocked.Load() > 0 {
+func (r *messageReconciler) settleReconciliation(dir string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.blocked.Load() > 0 {
 		return
 	}
 	for _, prefix := range []string{"d-", "e-"} {
@@ -563,7 +527,7 @@ func (g *Gateway) settleReconciliation(dir string) {
 			return
 		}
 	}
-	g.reconciliationPending.Store(false)
+	r.pending.Store(false)
 }
 
 func validReconciliationItem(item messageReconciliation) bool {
@@ -580,26 +544,26 @@ func validReconciliationItem(item messageReconciliation) bool {
 
 // A damaged edit is isolated to that intent. Unreadable deletes and newly damaged legacy arrays
 // can hide an unknown set of deletions, so they hold edits until an operator resolves them.
-func (g *Gateway) quarantineReconciliation(path string) error {
-	if err := g.renameReconciliationQuarantine(path); err != nil {
+func (r *messageReconciler) quarantineReconciliation(path string) error {
+	if err := r.renameReconciliationQuarantine(path); err != nil {
 		return err
 	}
-	dir, err := g.reconciliationDirPath()
+	root, err := r.host.reconciliationRoot()
 	if err != nil {
 		return err
 	}
-	if err := g.refreshReconciliationBlocked(g.svc.DataRoot, dir); err != nil {
+	if err := r.refreshReconciliationBlocked(root, filepath.Join(root, messageReconciliationDir)); err != nil {
 		return err
 	}
-	if g.reconciliationBlocked.Load() > 0 {
+	if r.blocked.Load() > 0 {
 		return errReconciliationBlocked
 	}
 	return nil
 }
 
-func (g *Gateway) renameReconciliationQuarantine(path string) error {
-	g.reconciliationMu.Lock()
-	defer g.reconciliationMu.Unlock()
+func (r *messageReconciler) renameReconciliationQuarantine(path string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	base := path
 	if filepath.Base(path) == messageReconciliationFile {
 		base += ".unresolved"
@@ -618,31 +582,31 @@ func (g *Gateway) renameReconciliationQuarantine(path string) error {
 
 // The live edit path initializes the snapshot once, then uses only atomics. Queue writes update
 // delete presence under the same mutex; drain passes refresh it, including operator recovery.
-func (g *Gateway) ensureReconciliationState() error {
-	g.reconciliationMu.Lock()
-	ready := g.reconciliationStateReady
-	g.reconciliationMu.Unlock()
+func (r *messageReconciler) ensureReconciliationState() error {
+	r.mu.Lock()
+	ready := r.stateReady
+	r.mu.Unlock()
 	if ready {
 		return nil
 	}
-	root, err := g.reconciliationRoot()
+	root, err := r.host.reconciliationRoot()
 	if err != nil {
 		return err
 	}
-	return g.refreshReconciliationBlocked(root, filepath.Join(root, messageReconciliationDir))
+	return r.refreshReconciliationBlocked(root, filepath.Join(root, messageReconciliationDir))
 }
 
-func (g *Gateway) refreshReconciliationBlocked(root, dir string) error {
+func (r *messageReconciler) refreshReconciliationBlocked(root, dir string) error {
 	// A legacy quarantine may be hundreds of MB. Classify outside the queue lock, then recount
 	// while excluding queue writers so this snapshot cannot erase a concurrently queued delete.
-	g.reconciliationRefreshMu.Lock()
-	defer g.reconciliationRefreshMu.Unlock()
-	if err := g.cacheLegacyQuarantines(root); err != nil {
+	r.refreshMu.Lock()
+	defer r.refreshMu.Unlock()
+	if err := r.cacheLegacyQuarantines(root); err != nil {
 		return err
 	}
-	g.reconciliationMu.Lock()
-	defer g.reconciliationMu.Unlock()
-	return g.refreshReconciliationBlockedLocked(root, dir)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.refreshReconciliationBlockedLocked(root, dir)
 }
 
 type legacyQuarantineClassification struct {
@@ -660,10 +624,10 @@ func oldLegacyQuarantine(name string) bool {
 		!strings.HasPrefix(name, messageReconciliationFile+".unresolved")
 }
 
-func (g *Gateway) cacheLegacyQuarantines(root string) error {
+func (r *messageReconciler) cacheLegacyQuarantines(root string) error {
 	f, err := os.Open(root)
 	if errors.Is(err, os.ErrNotExist) {
-		g.legacyQuarantineCache = nil
+		r.legacyQuarantineCache = nil
 		return nil
 	}
 	if err != nil {
@@ -685,9 +649,9 @@ func (g *Gateway) cacheLegacyQuarantines(root string) error {
 			if err != nil {
 				return err
 			}
-			cached, ok := g.legacyQuarantineCache[path]
+			cached, ok := r.legacyQuarantineCache[path]
 			if !ok || !cached.matches(info) {
-				hasDelete, err := g.legacyQuarantineHasDelete(path, g.reconciliationContext())
+				hasDelete, err := r.legacyQuarantineHasDelete(path, r.reconciliationContext())
 				if errors.Is(err, os.ErrNotExist) {
 					continue
 				}
@@ -706,21 +670,21 @@ func (g *Gateway) cacheLegacyQuarantines(root string) error {
 		}
 	}
 	// Removing resolved entries keeps memory proportional to the remaining old quarantines.
-	g.legacyQuarantineCache = current
+	r.legacyQuarantineCache = current
 	return nil
 }
 
 // Old legacy quarantines predate unresolved-intent tracking. Only an identifiable delete in such
 // a file is a blocker. Token scanning also recognizes a delete before a truncated object ends.
-func (g *Gateway) legacyQuarantineHasDelete(path string, ctx context.Context) (bool, error) {
+func (r *messageReconciler) legacyQuarantineHasDelete(path string, ctx context.Context) (bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return false, err
 	}
 	defer f.Close()
 	var source io.Reader = f
-	if g.legacyReconciliationReader != nil {
-		source = g.legacyReconciliationReader(source)
+	if r.legacyReader != nil {
+		source = r.legacyReader(source)
 	}
 	reader := &reconciliationReader{ctx: ctx, reader: source}
 	dec := json.NewDecoder(reader)
@@ -763,7 +727,7 @@ func (g *Gateway) legacyQuarantineHasDelete(path string, ctx context.Context) (b
 	}
 }
 
-func (g *Gateway) refreshReconciliationBlockedLocked(root, dir string) error {
+func (r *messageReconciler) refreshReconciliationBlockedLocked(root, dir string) error {
 	var count int64
 	var first string
 	var deletes, legacy bool
@@ -801,7 +765,7 @@ func (g *Gateway) refreshReconciliationBlockedLocked(root, dir string) error {
 							if err != nil {
 								return err
 							}
-							cached, ok := g.legacyQuarantineCache[filepath.Join(path, name)]
+							cached, ok := r.legacyQuarantineCache[filepath.Join(path, name)]
 							// An operator may change the file between classification and recounting.
 							// Keep edits blocked until the next pass classifies those new bytes.
 							blocked = !ok || !cached.matches(info) || cached.hasDelete
@@ -825,26 +789,26 @@ func (g *Gateway) refreshReconciliationBlockedLocked(root, dir string) error {
 			return err
 		}
 	}
-	old := g.reconciliationBlocked.Swap(count)
-	g.reconciliationDeletes.Store(deletes)
-	g.reconciliationLegacy.Store(legacy)
-	g.reconciliationStateReady = true
+	old := r.blocked.Swap(count)
+	r.deletes.Store(deletes)
+	r.legacy.Store(legacy)
+	r.stateReady = true
 	if count > 0 {
-		g.reconciliationPending.Store(true)
-		if old != count || time.Since(g.reconciliationBlockedLog) >= 6*time.Hour {
-			g.log.Error("discord: message reconciliation recovery state changed; inspect file, handle privacy intent, then move it to resolved/; see docs/memory-operations.md", "blocked", count, "file", first)
-			g.reconciliationBlockedLog = time.Now()
+		r.pending.Store(true)
+		if old != count || time.Since(r.blockedLog) >= 6*time.Hour {
+			r.log().Error("discord: message reconciliation recovery state changed; inspect file, handle privacy intent, then move it to resolved/; see docs/memory-operations.md", "blocked", count, "file", first)
+			r.blockedLog = time.Now()
 		}
 	} else if old != count {
-		g.log.Info("discord: message reconciliation recovery state changed", "blocked", count)
+		r.log().Info("discord: message reconciliation recovery state changed", "blocked", count)
 	}
 	return nil
 }
 
 // migrateLegacyReconciliation moves the events of the first file format into the directory, reading the
 // array element by element so a large file is never held whole. It runs in the background drain.
-func (g *Gateway) migrateLegacyReconciliation(root string) error {
-	ctx := g.reconciliationContext()
+func (r *messageReconciler) migrateLegacyReconciliation(root string) error {
+	ctx := r.reconciliationContext()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -864,7 +828,7 @@ func (g *Gateway) migrateLegacyReconciliation(root string) error {
 	}
 	if info.Size() == 0 && !info.IsDir() {
 		_ = f.Close()
-		return g.removeReconciliation(path) // no intent can be hidden in an empty source
+		return r.removeReconciliation(path) // no intent can be hidden in an empty source
 	}
 	sum := sha256.New()
 	if _, err := io.Copy(sum, &reconciliationReader{ctx: ctx, reader: f}); err != nil {
@@ -879,8 +843,8 @@ func (g *Gateway) migrateLegacyReconciliation(root string) error {
 	moved := 0
 	var readErr error
 	var reader io.Reader = f
-	if g.legacyReconciliationReader != nil {
-		reader = g.legacyReconciliationReader(reader)
+	if r.legacyReader != nil {
+		reader = r.legacyReader(reader)
 	}
 	tracked := &reconciliationReader{ctx: ctx, reader: reader}
 	dec := json.NewDecoder(tracked)
@@ -907,8 +871,8 @@ func (g *Gateway) migrateLegacyReconciliation(root string) error {
 		if item.At.IsZero() {
 			item.At = info.ModTime().UTC() // retrying the same source must not manufacture a newer edit
 		}
-		if g.legacyReconciliationStep != nil {
-			g.legacyReconciliationStep(moved)
+		if r.legacyStep != nil {
+			r.legacyStep(moved)
 		}
 		if err := ctx.Err(); err != nil {
 			return err
@@ -916,9 +880,9 @@ func (g *Gateway) migrateLegacyReconciliation(root string) error {
 		// The same source record always has the same name, including after a partial migration or
 		// restart. Delete files must not multiply every time a later write fails.
 		err := func() error {
-			g.reconciliationMu.Lock()
-			defer g.reconciliationMu.Unlock()
-			return g.queueNamedLocked(item, fmt.Sprintf("d-legacy-%s-%020d.json", source, moved))
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			return r.queueNamedLocked(item, fmt.Sprintf("d-legacy-%s-%020d.json", source, moved))
 		}()
 		if err != nil {
 			_ = f.Close()
@@ -947,10 +911,10 @@ func (g *Gateway) migrateLegacyReconciliation(root string) error {
 		if tracked.err != nil {
 			return tracked.err // only the reader can establish a transient read failure
 		}
-		return g.quarantineReconciliation(path)
+		return r.quarantineReconciliation(path)
 	}
-	g.log.Info("discord: old message reconciliation file moved", "events", moved)
-	return g.removeReconciliation(path)
+	r.log().Info("discord: old message reconciliation file moved", "events", moved)
+	return r.removeReconciliation(path)
 }
 
 type reconciliationReader struct {
@@ -971,56 +935,45 @@ func (r *reconciliationReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func (g *Gateway) reconciliationContext() context.Context {
-	if g.reconciliationCtx != nil {
-		return g.reconciliationCtx
+func (r *messageReconciler) reconciliationContext() context.Context {
+	if r.ctx != nil {
+		return r.ctx
 	}
-	return g.runCtx()
-}
-
-func (g *Gateway) startReconciliationDrain(ctx context.Context) {
-	g.workMu.Lock()
-	defer g.workMu.Unlock()
-	if g.draining {
-		return
-	}
-	g.reconciliationCtx, g.reconciliationCancel = context.WithCancel(ctx)
-	g.reconciliationDone = make(chan struct{})
-	go g.runReconciliationDrain(g.reconciliationCtx)
+	return r.host.runCtx()
 }
 
 // runReconciliationDrain applies deferred message changes in the background, so the gateway and the
 // console start without waiting on them. It sleeps while the queue is empty and is woken by a deferral.
-func (g *Gateway) runReconciliationDrain(ctx context.Context) {
-	if g.reconciliationDone != nil {
-		defer close(g.reconciliationDone)
+func (r *messageReconciler) runReconciliationDrain(ctx context.Context) {
+	if r.done != nil {
+		defer close(r.done)
 	}
-	defer g.recoverReconciliationPanic("drain", nil)
+	defer recoverReconciliationPanic(r.log(), "drain", nil)
 	delay := reconciliationDrainInitial
 	for ctx.Err() == nil {
 		// Notifications already queued are covered by this pass. Legacy records migrated by the
 		// pass itself do not notify, otherwise a failed migration would defeat its own backoff.
 		select {
-		case <-g.reconciliationWake:
+		case <-r.wake:
 		default:
 		}
-		err := g.runReconciliationStep("drain pass", g.drainMessageReconciliation)
+		err := runReconciliationStep(r.log(), "drain pass", r.drainMessageReconciliation)
 		if err == nil {
 			delay = reconciliationDrainInitial
-			if !g.waitReconciliationIdle(ctx) {
+			if !r.waitReconciliationIdle(ctx) {
 				return
 			}
 			continue
 		}
-		g.reconciliationBackingOff.Store(true)
+		r.backingOff.Store(true)
 		wait := jittered(delay)
-		if g.retryJitter != nil {
-			wait = g.retryJitter(delay)
+		if r.jitter != nil {
+			wait = r.jitter(delay)
 		}
 		if !errors.Is(err, errReconciliationBlocked) {
-			g.log.Warn("discord: message reconciliation not finished; will retry", "retry_in", wait.Round(time.Second).String(), "error_kind", fmt.Sprintf("%T", err))
+			r.log().Warn("discord: message reconciliation not finished; will retry", "retry_in", wait.Round(time.Second).String(), "error_kind", fmt.Sprintf("%T", err))
 		}
-		if !g.waitReconciliationRetry(ctx, wait) {
+		if !r.waitReconciliationRetry(ctx, wait) {
 			return
 		}
 		if delay *= 2; delay > reconciliationDrainMax {
@@ -1029,41 +982,33 @@ func (g *Gateway) runReconciliationDrain(ctx context.Context) {
 	}
 }
 
-func (g *Gateway) waitReconciliationIdle(ctx context.Context) bool {
-	g.reconciliationBackingOff.Store(false)
+func (r *messageReconciler) waitReconciliationIdle(ctx context.Context) bool {
+	r.backingOff.Store(false)
 	// Edits queued after settleReconciliation while the previous backoff was still active did
 	// not notify. Check after enabling notifications so neither side of that transition is lost.
-	if g.reconciliationPending.Load() {
+	if r.pending.Load() {
 		return true
 	}
 	select {
 	case <-ctx.Done():
 		return false
-	case <-g.reconciliationWake:
+	case <-r.wake:
 		return true
 	}
 }
 
-func (g *Gateway) waitReconciliationRetry(ctx context.Context, delay time.Duration) bool {
-	if g.reconciliationWait != nil {
-		return g.reconciliationWait(ctx, delay) // tests override the retry clock
+func (r *messageReconciler) waitReconciliationRetry(ctx context.Context, delay time.Duration) bool {
+	if r.wait != nil {
+		return r.wait(ctx, delay) // tests override the retry clock
 	}
 	timer := time.NewTimer(delay)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
 		return false
-	case <-g.reconciliationWake:
+	case <-r.wake:
 		return true
 	case <-timer.C:
 		return true
 	}
-}
-
-// ReconciliationBlocked is the number of quarantined recovery files that wait for an operator. It
-// implements application.DiscordReconciliationReporter so the doctor and the console's notifications
-// can show what used to be only an error log line. The count is kept by the recount that runs on every
-// drain pass, so this is a cheap atomic read.
-func (g *Gateway) ReconciliationBlocked() int {
-	return int(g.reconciliationBlocked.Load())
 }
