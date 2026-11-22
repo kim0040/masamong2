@@ -20,7 +20,10 @@ import (
 func TestDirectToolKeysAreMaskedInTheExportAndDeclaredInBackups(t *testing.T) {
 	s, _ := deliveryService(t)
 	const headerKey, queryKey = "synthetic-header-key-value", "synthetic-query-key-value"
-	res := s.mutateConfig(action.Request{Action: "config.patch", Locale: "en"}, func(d *config.Document) error {
+	// A save refuses a typed key now (tools.Validate); an older configuration that holds one still loads at
+	// start, so the tool is put in place the way that load does, not through a save.
+	d := s.Doc()
+	{
 		d.Tools = maps.Clone(d.Tools)
 		if d.Tools == nil {
 			d.Tools = map[string]tools.Settings{}
@@ -30,11 +33,15 @@ func TestDirectToolKeysAreMaskedInTheExportAndDeclaredInBackups(t *testing.T) {
 			Headers:       map[string]string{"Authorization": "Bearer " + headerKey, "Accept": "application/json", "X-Api-Key": "{credential}"},
 			CredentialRef: "env:SYNTHETIC_TOOL_KEY",
 		}, Params: []tools.Param{{Name: "q"}}, Description: "Looks up a synthetic record."}
-		return nil
-	})
-	if !res.OK {
-		t.Fatalf("store the tool: %+v", res.Error)
 	}
+	stored, err := config.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Store.DB.Exec(`UPDATE config_revisions SET content=?, content_hash=? WHERE revision=?`, string(stored), config.Hash(stored), s.Revision()); err != nil {
+		t.Fatal(err)
+	}
+	s.setDoc(d, s.Revision())
 	show := s.Execute(context.Background(), action.Request{Action: "config.show", Locale: "en"})
 	yaml, _ := show.Output["yaml"].(string)
 	if !show.OK || show.Output["redacted"] != true || yaml == "" {

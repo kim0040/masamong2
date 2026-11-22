@@ -68,9 +68,10 @@ func TestCapturingRoomsTwoPassesFinishOnASmallHost(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// memory is on by default, so every unconfigured room of an approved server captures
 	for _, n := range bothFinish(t, db, "capturingRooms", func() int { return len(s.capturingRooms(db)) }) {
-		if n != 0 {
-			t.Fatalf("no channel stores messages here, got %d capturing rooms", n)
+		if n != 200 {
+			t.Fatalf("every unconfigured room stores messages by default, got %d of 200 capturing rooms", n)
 		}
 	}
 }
