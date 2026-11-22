@@ -54,6 +54,11 @@ func decodeDocument(raw []byte) (Document, []byte, error) {
 	if trimmed := bytes.TrimSpace(raw); len(trimmed) > 0 && trimmed[0] == '{' {
 		var v any
 		if err := json.Unmarshal(trimmed, &v); err == nil {
+			// the map keeps only the last of a repeated object key, which the YAML decoder would
+			// refuse as a repeated mapping key: refuse it the same way here
+			if err := rejectDuplicateJSONKeys(trimmed); err != nil {
+				return Document{}, nil, err
+			}
 			if y, err := yaml.Marshal(v); err == nil {
 				raw = y
 			}
@@ -66,6 +71,54 @@ func decodeDocument(raw []byte) (Document, []byte, error) {
 		return Document{}, nil, fmt.Errorf("config parse: %w", err)
 	}
 	return d, raw, nil
+}
+
+// rejectDuplicateJSONKeys walks real JSON as tokens, since decoding into a map silently keeps only
+// the last of a repeated object key. A repeated key is an error naming the path it was read at.
+func rejectDuplicateJSONKeys(raw []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	return scanJSONValue(dec, "")
+}
+
+func scanJSONValue(dec *json.Decoder, path string) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delim {
+	case '{':
+		seen := map[string]bool{}
+		for dec.More() {
+			k, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			key, _ := k.(string)
+			p := key
+			if path != "" {
+				p = path + "." + key
+			}
+			if seen[key] {
+				return fmt.Errorf("config parse: duplicate object key %q", p)
+			}
+			seen[key] = true
+			if err := scanJSONValue(dec, p); err != nil {
+				return err
+			}
+		}
+	case '[':
+		for dec.More() {
+			if err := scanJSONValue(dec, path); err != nil {
+				return err
+			}
+		}
+	}
+	_, err = dec.Token() // the closing delimiter
+	return err
 }
 
 // parseKeys are the keys a file names explicitly, for the defaults that depend on absence.
