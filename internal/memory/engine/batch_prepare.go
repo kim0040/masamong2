@@ -62,66 +62,137 @@ func (e *Engine) PrepareBatch(ctx context.Context, room string, opts BatchOption
 	if p, ok, err := e.LoadBatchPlan(room); err != nil || ok {
 		return done(p, err)
 	}
-	rooms, err := e.syncRooms([]string{room}, &rep, progress)
-	if err != nil || len(rooms) == 0 { // a room that did not sync is in rep.FailedRooms
+	need, err := e.collectBatchNeed(room, opts, &rep, progress)
+	if err != nil || need == nil {
 		return done(BatchPlan{}, err)
 	}
-	space := e.EmbedSpace()
+	est, probe := e.batchNeedEstimate(need)
+	rep.Estimate = &est
+	if p, stop := e.batchGate(need, opts, est, &rep); stop {
+		return done(p, nil)
+	}
+	plan := BatchPlan{Version: batchPlanVersion, Room: room, Generation: newGeneration(), State: BatchPlanWaiting, Space: need.space,
+		MessageSpace: need.msgSpace, EmbedModel: e.Models.Embed, SummaryModel: e.Models.Summary, BudgetUSD: opts.BudgetUSD,
+		Limit: opts.Limit, EstimateUSD: *est.BatchUSD, CreatedAt: e.nowT().UTC()}
+	if opts.Limit > 0 {
+		plan.Workset = workset(need.pending, need.after, need.msgNeed, need.msgSelected)
+	}
+	if probe {
+		// one live summary first, so the batch leaves out the optional fields the model refuses (a batch item
+		// cannot be retried without them). When it fails nothing is sent: the batch would fail the same way,
+		// and running the summaries live instead is what the operator chose not to pay for
+		var err error
+		if need.needSumm, err = e.probeSummary(ctx, need.needSumm, &plan); err != nil {
+			if ctx.Err() != nil {
+				rep.StoppedBy = "cancelled"
+				return done(unsentPlan(&plan), nil)
+			}
+			return done(unsentPlan(&plan), err)
+		}
+	}
+	sub := batchSubmit{plan: &plan}
+	for _, w := range []batchWork{
+		{purpose: purposeLeaf, model: e.Models.Embed, items: e.leafWork(need.needEmbed)},
+		{purpose: purposeSummary, model: e.Models.Summary, items: e.summaryWork(need.needSumm)},
+		{purpose: purposeMessage, model: e.Models.Embed, items: e.messageWork(need.msgNeed)},
+	} {
+		e.submitWork(ctx, &sub, w)
+	}
+	return done(e.endSubmit(ctx, &sub, &rep, progress))
+}
+
+// batchNeed is the paid work a preparation found in its room.
+type batchNeed struct {
+	rooms       []string
+	space       string
+	pending     []store.PendingLeaf // the leaves selected before the reuse pass
+	after       []store.PendingLeaf // the leaves selected again for summaries, after it
+	needEmbed   []store.PendingLeaf
+	needSumm    []store.PendingLeaf
+	msgNeed     []store.PendingMessage
+	msgSpace    string
+	msgSelected bool // the messages were selected (a limited preparation lists them in its workset)
+}
+
+func (n *batchNeed) items() int { return len(n.needEmbed) + len(n.needSumm) + len(n.msgNeed) }
+
+// collectBatchNeed syncs the room, runs the free reuse pass and selects the paid work left. It is nil when
+// the room did not sync (rep.FailedRooms has it).
+func (e *Engine) collectBatchNeed(room string, opts BatchOptions, rep *IndexReport, progress Progress) (*batchNeed, error) {
+	rooms, err := e.syncRooms([]string{room}, rep, progress)
+	if err != nil || len(rooms) == 0 {
+		return nil, err
+	}
+	n := &batchNeed{rooms: rooms, space: e.EmbedSpace()}
 	if rep.Adapted, err = e.adaptSpace(); err != nil {
-		return done(BatchPlan{}, err)
+		return nil, err
 	}
 	leafDims, err := e.pendingLeafDims()
 	if err != nil {
-		return done(BatchPlan{}, err)
+		return nil, err
 	}
 	recipe := e.Settings.Recipe.Version()
-	pending, err := e.Store.PendingAtWidth(rooms, space, e.Settings.Summaries, opts.Limit, leafDims, recipe)
+	if n.pending, err = e.Store.PendingAtWidth(rooms, n.space, e.Settings.Summaries, opts.Limit, leafDims, recipe); err != nil {
+		return nil, err
+	}
+	rep.Pending = len(n.pending)
+	if n.needEmbed, err = e.reuseLeaves(n.pending, n.space, leafDims, rep); err != nil {
+		return nil, err
+	}
+	if err := e.summaryNeed(n, opts.Limit, leafDims, recipe); err != nil {
+		return nil, err
+	}
+	return n, e.messageNeed(n, opts.Limit, recipe)
+}
+
+// summaryNeed selects the leaves the live pass would summarize with a paid call (a summary text kept for
+// the same body is free, and is left to the live remainder like the summary vectors).
+func (e *Engine) summaryNeed(n *batchNeed, limit, leafDims int, recipe string) error {
+	if !e.Settings.Summaries {
+		return nil
+	}
+	var err error
+	if n.after, err = e.Store.PendingAtWidth(n.rooms, n.space, true, limit, leafDims, recipe); err != nil {
+		return err
+	}
+	for _, p := range n.after {
+		if _, cached := e.cachedSummaryText(p.Body); p.NeedSumm && !cached {
+			n.needSumm = append(n.needSumm, p)
+		}
+	}
+	return nil
+}
+
+// messageNeed selects the messages to embed when message vectors are on and their width is known.
+func (e *Engine) messageNeed(n *batchNeed, limit int, recipe string) error {
+	if !e.Settings.MessageVectors {
+		return nil
+	}
+	dims, wait, err := e.messageVectorState()
 	if err != nil {
-		return done(BatchPlan{}, err)
+		return err
 	}
-	rep.Pending = len(pending)
-	needEmbed, err := e.reuseLeaves(pending, space, leafDims, &rep)
-	if err != nil {
-		return done(BatchPlan{}, err)
+	n.msgSpace = e.messageSpaceAt(dims)
+	// a model without MRL takes its message width from the leaves: before the first leaf is embedded it
+	// is unknown, and the leaf results this batch brings set it before the message results are applied
+	// (Apply goes in plan order). Any other wait (mixed or short widths) leaves the messages to the live
+	// pass, which waits too.
+	deferred := n.msgSpace == "" && wait == "leaf_width_unknown" && len(n.needEmbed) > 0
+	if n.msgSpace != "" || deferred {
+		if n.msgNeed, err = e.Store.PendingMessages(n.rooms, n.msgSpace, limit, recipe); err != nil {
+			return err
+		}
+		n.msgSelected = true
 	}
-	// summaries: the leaves the live pass would summarize with a paid call (a summary text kept for the
-	// same body is free, and is left to the live remainder like the summary vectors)
-	var needSumm, after []store.PendingLeaf
-	if e.Settings.Summaries {
-		if after, err = e.Store.PendingAtWidth(rooms, space, true, opts.Limit, leafDims, recipe); err != nil {
-			return done(BatchPlan{}, err)
-		}
-		for _, p := range after {
-			if _, cached := e.cachedSummaryText(p.Body); p.NeedSumm && !cached {
-				needSumm = append(needSumm, p)
-			}
-		}
-	}
-	var msgNeed []store.PendingMessage
-	msgSpace, msgSelected := "", false
-	if e.Settings.MessageVectors {
-		dims, wait, err := e.messageVectorState()
-		if err != nil {
-			return done(BatchPlan{}, err)
-		}
-		msgSpace = e.messageSpaceAt(dims)
-		// a model without MRL takes its message width from the leaves: before the first leaf is embedded it
-		// is unknown, and the leaf results this batch brings set it before the message results are applied
-		// (Apply goes in plan order). Any other wait (mixed or short widths) leaves the messages to the live
-		// pass, which waits too.
-		deferred := msgSpace == "" && wait == "leaf_width_unknown" && len(needEmbed) > 0
-		if msgSpace != "" || deferred {
-			if msgNeed, err = e.Store.PendingMessages(rooms, msgSpace, opts.Limit, recipe); err != nil {
-				return done(BatchPlan{}, err)
-			}
-			msgSelected = true
-		}
-	}
-	est := e.BatchEstimate(e.estimate(needEmbed, pending, msgNeed))
-	// a summary batch for a model whose request shape is not learned yet starts with one live summary
-	// (probeSummary), at the live price: the estimate the budget is checked against includes it in full
-	probe := false
-	if len(needSumm) > 0 && e.canBatch(purposeSummary) {
+	return nil
+}
+
+// batchNeedEstimate prices the work at the batch rate. A summary batch for a model whose request shape is
+// not learned yet starts with one live summary (probeSummary, probe true), at the live price: the estimate
+// the budget is checked against includes it in full.
+func (e *Engine) batchNeedEstimate(n *batchNeed) (est Estimate, probe bool) {
+	est = e.BatchEstimate(e.estimate(n.needEmbed, n.pending, n.msgNeed))
+	if len(n.needSumm) > 0 && e.canBatch(purposeSummary) {
 		if sl, ok := e.batcher(purposeSummary).(shapeLearner); ok && !sl.ShapeLearned(e.Models.Summary) {
 			probe = true
 			if est.Summaries > 0 {
@@ -130,171 +201,185 @@ func (e *Engine) PrepareBatch(ctx context.Context, room string, opts BatchOption
 			}
 		}
 	}
-	rep.Estimate = &est
+	return est, probe
+}
+
+// batchGate is where a preparation stops before anything is stored or sent (stop true), with the plan it
+// returns: no provider, no host that can batch the work, or a budget the estimate is over.
+func (e *Engine) batchGate(n *batchNeed, opts BatchOptions, est Estimate, rep *IndexReport) (BatchPlan, bool) {
 	if e.LLM == nil || !e.LLM.Configured() {
-		if len(needEmbed)+len(needSumm)+len(msgNeed) > 0 {
+		if n.items() > 0 {
 			rep.StoppedBy = "provider_not_configured"
 		}
-		return done(BatchPlan{}, nil)
+		return BatchPlan{}, true
 	}
 	// no host can batch any of the paid work (or there is none): the caller runs the normal live pass, with
 	// its usual budget behaviour, instead of the all-at-once batch budget check below
-	if !(len(needEmbed) > 0 && e.canBatch(purposeLeaf)) && !(len(needSumm) > 0 && e.canBatch(purposeSummary)) &&
-		!(len(msgNeed) > 0 && e.canBatch(purposeMessage)) {
-		return done(BatchPlan{LiveItems: len(needEmbed) + len(needSumm) + len(msgNeed)}, nil)
+	if !(len(n.needEmbed) > 0 && e.canBatch(purposeLeaf)) && !(len(n.needSumm) > 0 && e.canBatch(purposeSummary)) &&
+		!(len(n.msgNeed) > 0 && e.canBatch(purposeMessage)) {
+		return BatchPlan{LiveItems: n.items()}, true
 	}
 	// the whole batch is submitted at once, so the budget is checked against its estimate before anything
 	// is sent (a live pass instead stops starting calls once the budget is spent)
 	if opts.BudgetUSD > 0 && *est.BatchUSD > opts.BudgetUSD {
 		rep.StoppedBy = "budget"
-		return done(BatchPlan{}, nil)
+		return BatchPlan{}, true
 	}
-	plan := BatchPlan{Version: batchPlanVersion, Room: room, Generation: newGeneration(), State: BatchPlanWaiting, Space: space,
-		MessageSpace: msgSpace, EmbedModel: e.Models.Embed, SummaryModel: e.Models.Summary, BudgetUSD: opts.BudgetUSD,
-		Limit: opts.Limit, EstimateUSD: *est.BatchUSD, CreatedAt: e.nowT().UTC()}
-	if opts.Limit > 0 {
-		plan.Workset = workset(pending, after, msgNeed, msgSelected)
+	return BatchPlan{}, false
+}
+
+// unsentPlan is what the caller's live pass needs when nothing went to a batch: the room, the selection,
+// and what this preparation already spent (the probe), so the pass stays within the budget.
+func unsentPlan(plan *BatchPlan) BatchPlan {
+	return BatchPlan{Room: plan.Room, BudgetUSD: plan.BudgetUSD, Limit: plan.Limit, Workset: plan.Workset, LiveItems: plan.LiveItems,
+		Summaries: plan.Summaries, SpentUSD: plan.SpentUSD}
+}
+
+// batchSubmit is a preparation's submitting: the plan its groups go into and why it stopped.
+type batchSubmit struct {
+	plan    *BatchPlan
+	stored  bool  // a plan row exists for this generation
+	stopErr error // set with plan.Cut: nothing more is submitted
+}
+
+// submitWork submits one group's chunks, or counts the group live when its host cannot batch it.
+func (e *Engine) submitWork(ctx context.Context, sub *batchSubmit, w batchWork) {
+	plan := sub.plan
+	if len(w.items) == 0 || plan.Cut {
+		return
 	}
-	// unsent is what the caller's live pass needs when nothing went to a batch: the room, the selection, and
-	// what this preparation already spent (the probe), so the pass stays within the budget
-	unsent := func() BatchPlan {
-		return BatchPlan{Room: room, BudgetUSD: opts.BudgetUSD, Limit: opts.Limit, Workset: plan.Workset, LiveItems: plan.LiveItems,
-			Summaries: plan.Summaries, SpentUSD: plan.SpentUSD}
+	client := e.batcher(w.purpose)
+	kind := purposeKind(w.purpose)
+	if client == nil || !client.BatchSupport(kind) {
+		plan.LiveItems += w.units(0)
+		return
 	}
-	if probe {
-		// one live summary first, so the batch leaves out the optional fields the model refuses (a batch item
-		// cannot be retried without them). When it fails nothing is sent: the batch would fail the same way,
-		// and running the summaries live instead is what the operator chose not to pay for
-		var err error
-		if needSumm, err = e.probeSummary(ctx, needSumm, &plan); err != nil {
-			if ctx.Err() != nil {
-				rep.StoppedBy = "cancelled"
-				return done(unsent(), nil)
-			}
-			return done(unsent(), err)
+	from := 0
+	for _, chunk := range splitWork(w.items, client.BatchMaxItems(kind), kind) {
+		if ctx.Err() != nil {
+			break
+		}
+		sent, more := e.submitChunk(ctx, sub, w, client, kind, chunk)
+		if sent {
+			from += len(chunk)
+		}
+		if !more {
+			break
 		}
 	}
-	stored := false // a plan row exists for this generation
-	works := []batchWork{
-		{purpose: purposeLeaf, model: e.Models.Embed, items: e.leafWork(needEmbed)},
-		{purpose: purposeSummary, model: e.Models.Summary, items: e.summaryWork(needSumm)},
-		{purpose: purposeMessage, model: e.Models.Embed, items: e.messageWork(msgNeed)},
+	if !plan.Cut || sub.stopErr == nil {
+		plan.LiveItems += liveAfter(w, from, plan.Cut)
 	}
-	var stopErr error
-	for _, w := range works {
-		if len(w.items) == 0 || plan.Cut {
-			continue
-		}
-		client := e.batcher(w.purpose)
-		kind := purposeKind(w.purpose)
-		if client == nil || !client.BatchSupport(kind) {
-			plan.LiveItems += w.units(0)
-			continue
-		}
-		from := 0
-	chunks:
-		for _, chunk := range splitWork(w.items, client.BatchMaxItems(kind), kind) {
-			if ctx.Err() != nil {
-				break
-			}
-			reqs := make([]openai.BatchItem, len(chunk))
-			items := make([]BatchPlanItem, len(chunk))
-			units := 0
-			for i, it := range chunk {
-				reqs[i] = it.req
-				items[i] = BatchPlanItem{ID: it.req.ID, Targets: it.targets, Tokens: it.tokens}
-				units += len(it.targets)
-			}
-			prov := e.providerOf(w.purpose, client)
-			key := plan.Generation[:16] + fmt.Sprintf("-%d", len(plan.Groups))
-			// the intent is stored before the call: a process that stops during it finds the submission at
-			// restart and looks it up instead of sending it again
-			plan.Groups = append(plan.Groups, BatchGroup{Purpose: w.purpose, Kind: kind, Model: w.model, Provider: prov,
-				Submit: submitPending, Items: items, Units: units, Ref: openai.BatchRef{API: prov.API, BaseURL: prov.BaseURL,
-					Kind: kind, Model: w.model, Count: len(chunk), SubmitKey: key, SubmittedAt: e.nowT().UTC()}})
-			g := &plan.Groups[len(plan.Groups)-1]
-			save := e.saveBatchPlan
-			if !stored {
-				save = e.insertBatchPlan // only a new preparation creates the row
-			}
-			if err := save(&plan); err != nil {
-				plan.Groups = plan.Groups[:len(plan.Groups)-1] // nothing was sent
-				stopErr = err
-				plan.Cut = true
-				break
-			}
-			stored = true
-			ref, err := client.SubmitBatch(ctx, kind, w.model, reqs, key)
-			switch {
-			case err == nil:
-				g.Ref, g.Submit, g.State = ref, "", openai.BatchPending
-				if g.Ref.SubmitKey == "" {
-					g.Ref.SubmitKey = key
-				}
-				if g.Provider.BaseURL == "" {
-					g.Provider.BaseURL, g.Provider.API = strings.TrimRight(ref.BaseURL, "/"), ref.API
-				}
-				plan.BatchItems += units
-				from += len(chunk)
-				if err := e.saveAccepted(&plan); err != nil {
-					// the batch is running and paid for: it is never cancelled or forgotten. The plan keeps it, the
-					// stored intent holds the room, and the next run looks the batch up by its key instead of
-					// sending it again; nothing more is submitted
-					slog.Error("memory: an accepted batch could not be recorded; it is kept and the room stays held",
-						"room", room, "purpose", w.purpose, "batch", ref.ID, "err", err)
-					stopErr = fmt.Errorf("memory: the %s batch %s was accepted but the plan could not be stored (%w); the batch is kept, the room stays held, and the next run looks it up instead of sending it again",
-						w.purpose, ref.ID, err)
-					plan.Cut = true
-					break chunks
-				}
-			case errors.Is(err, openai.ErrBatchUnsupported):
-				// the host or the model cannot batch: this chunk and the rest of the group run live
-				plan.Groups = plan.Groups[:len(plan.Groups)-1]
-				break chunks
-			case errors.Is(err, openai.ErrBatchSubmitUnknown):
-				// the host may be running it: never sent again, never run live; ReconcilePlan settles it
-				var su *openai.SubmitUnknownError
-				if errors.As(err, &su) {
-					g.Ref.InputFile = su.Ref.InputFile
-				}
-				g.Submit, g.Error = submitUnknown, clipText(err.Error(), 200)
-				slog.Warn("memory: a batch submission's answer was lost; it is looked up, not sent again", "room", room, "purpose", w.purpose, "err", err)
-				from += len(chunk)
-				plan.BatchItems += units // the other batches are independent: submitting goes on
-			default:
-				// a refusal (a 4xx, a rate limit, the daily gate, no key): nothing of this runs live
-				plan.Groups = plan.Groups[:len(plan.Groups)-1]
-				stopErr = fmt.Errorf("%w (%s batch): %v", ErrBatchSubmitRefused, w.purpose, err)
-				plan.Cut = true
-				break chunks
-			}
-		}
-		if !plan.Cut || stopErr == nil {
-			plan.LiveItems += liveAfter(w, from, plan.Cut)
-		}
+}
+
+// batchRequests is a chunk's requests and the plan items they cover.
+func batchRequests(chunk []workItem) (reqs []openai.BatchItem, items []BatchPlanItem, units int) {
+	reqs = make([]openai.BatchItem, len(chunk))
+	items = make([]BatchPlanItem, len(chunk))
+	for i, it := range chunk {
+		reqs[i] = it.req
+		items[i] = BatchPlanItem{ID: it.req.ID, Targets: it.targets, Tokens: it.tokens}
+		units += len(it.targets)
 	}
+	return reqs, items, units
+}
+
+// submitChunk stores the intent of one batch, sends it and records the answer. sent is whether the host
+// has the chunk now (accepted, or the answer lost); more is whether the group's next chunk is submitted.
+func (e *Engine) submitChunk(ctx context.Context, sub *batchSubmit, w batchWork, client BatchClient, kind openai.BatchKind, chunk []workItem) (sent, more bool) {
+	plan := sub.plan
+	reqs, items, units := batchRequests(chunk)
+	prov := e.providerOf(w.purpose, client)
+	key := plan.Generation[:16] + fmt.Sprintf("-%d", len(plan.Groups))
+	// the intent is stored before the call: a process that stops during it finds the submission at
+	// restart and looks it up instead of sending it again
+	plan.Groups = append(plan.Groups, BatchGroup{Purpose: w.purpose, Kind: kind, Model: w.model, Provider: prov,
+		Submit: submitPending, Items: items, Units: units, Ref: openai.BatchRef{API: prov.API, BaseURL: prov.BaseURL,
+			Kind: kind, Model: w.model, Count: len(chunk), SubmitKey: key, SubmittedAt: e.nowT().UTC()}})
+	g := &plan.Groups[len(plan.Groups)-1]
+	save := e.saveBatchPlan
+	if !sub.stored {
+		save = e.insertBatchPlan // only a new preparation creates the row
+	}
+	if err := save(plan); err != nil {
+		plan.Groups = plan.Groups[:len(plan.Groups)-1] // nothing was sent
+		sub.stopErr = err
+		plan.Cut = true
+		return false, false
+	}
+	sub.stored = true
+	ref, err := client.SubmitBatch(ctx, kind, w.model, reqs, key)
+	switch {
+	case err == nil:
+		g.Ref, g.Submit, g.State = ref, "", openai.BatchPending
+		if g.Ref.SubmitKey == "" {
+			g.Ref.SubmitKey = key
+		}
+		if g.Provider.BaseURL == "" {
+			g.Provider.BaseURL, g.Provider.API = strings.TrimRight(ref.BaseURL, "/"), ref.API
+		}
+		plan.BatchItems += units
+		if err := e.saveAccepted(plan); err != nil {
+			// the batch is running and paid for: it is never cancelled or forgotten. The plan keeps it, the
+			// stored intent holds the room, and the next run looks the batch up by its key instead of
+			// sending it again; nothing more is submitted
+			slog.Error("memory: an accepted batch could not be recorded; it is kept and the room stays held",
+				"room", plan.Room, "purpose", w.purpose, "batch", ref.ID, "err", err)
+			sub.stopErr = fmt.Errorf("memory: the %s batch %s was accepted but the plan could not be stored (%w); the batch is kept, the room stays held, and the next run looks it up instead of sending it again",
+				w.purpose, ref.ID, err)
+			plan.Cut = true
+			return true, false
+		}
+		return true, true
+	case errors.Is(err, openai.ErrBatchUnsupported):
+		// the host or the model cannot batch: this chunk and the rest of the group run live
+		plan.Groups = plan.Groups[:len(plan.Groups)-1]
+		return false, false
+	case errors.Is(err, openai.ErrBatchSubmitUnknown):
+		// the host may be running it: never sent again, never run live; ReconcilePlan settles it
+		var su *openai.SubmitUnknownError
+		if errors.As(err, &su) {
+			g.Ref.InputFile = su.Ref.InputFile
+		}
+		g.Submit, g.Error = submitUnknown, clipText(err.Error(), 200)
+		slog.Warn("memory: a batch submission's answer was lost; it is looked up, not sent again", "room", plan.Room, "purpose", w.purpose, "err", err)
+		plan.BatchItems += units // the other batches are independent: submitting goes on
+		return true, true
+	default:
+		// a refusal (a 4xx, a rate limit, the daily gate, no key): nothing of this runs live
+		plan.Groups = plan.Groups[:len(plan.Groups)-1]
+		sub.stopErr = fmt.Errorf("%w (%s batch): %v", ErrBatchSubmitRefused, w.purpose, err)
+		plan.Cut = true
+		return false, false
+	}
+}
+
+// endSubmit settles the plan once every group was submitted or the submitting stopped: no plan holds the
+// room when nothing went to a batch, a stopped one drains, and the plan is stored as it ends.
+func (e *Engine) endSubmit(ctx context.Context, sub *batchSubmit, rep *IndexReport, progress Progress) (BatchPlan, error) {
+	plan, stopErr := sub.plan, sub.stopErr
 	if ctx.Err() != nil && stopErr == nil {
 		rep.StoppedBy = "cancelled" // the caller cancels what was sent
 	}
 	if len(plan.Groups) == 0 {
 		// nothing went to a batch (every chunk unsupported, or refused): no plan holds the room
-		if stored {
-			if err := e.deletePlan(&plan, "submit"); err != nil && stopErr == nil {
+		if sub.stored {
+			if err := e.deletePlan(plan, "submit"); err != nil && stopErr == nil {
 				stopErr = err
 			}
 		}
-		return done(unsent(), stopErr)
+		return unsentPlan(plan), stopErr
 	}
-	if stopErr != nil && !hasOpenSubmit(&plan) {
+	if stopErr != nil && !hasOpenSubmit(plan) {
 		// what was sent is collected; nothing else runs
 		plan.State, plan.Drain = BatchPlanDraining, true
 		plan.Reason = clipText("submission stopped: "+stopErr.Error()+"; the batches sent are collected, the rest is not sent; prepare again for it", 300)
 	}
-	if err := e.saveAccepted(&plan); err != nil && stopErr == nil {
+	if err := e.saveAccepted(plan); err != nil && stopErr == nil {
 		stopErr = err
 	}
 	progress("batch", 0, plan.requests())
-	return done(plan, stopErr)
+	return *plan, stopErr
 }
 
 // liveAfter is how many of a group's units run live after its submit loop: those after the last chunk
