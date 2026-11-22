@@ -560,24 +560,6 @@ func (l *loginLimiter) attempt(now time.Time) (succeeded func(), ok bool) {
 	}, true
 }
 
-func (l *loginLimiter) allow(now time.Time) bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if now.Sub(l.window) > time.Minute {
-		l.failures, l.window = 0, now
-	}
-	return l.failures < 10
-}
-
-func (l *loginLimiter) fail(now time.Time) {
-	l.mu.Lock()
-	if now.Sub(l.window) > time.Minute {
-		l.failures, l.window = 0, now
-	}
-	l.failures++
-	l.mu.Unlock()
-}
-
 func (s *Server) currentSession(r *http.Request) (string, session, bool) {
 	c, err := r.Cookie(sessionCookie)
 	if err != nil || c.Value == "" {

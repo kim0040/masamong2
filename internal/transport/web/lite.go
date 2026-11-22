@@ -166,16 +166,16 @@ func (s *Server) liteSubmit(w http.ResponseWriter, r *http.Request) {
 // browser history or an access log) and signs the browser in.
 func (s *Server) liteSignIn(w http.ResponseWriter, r *http.Request) {
 	text := liteText[s.liteLang(r)]
-	logins := s.loginsFor(r)
-	if !logins.allow(s.now()) {
+	succeeded, allowed := s.loginsFor(r).attempt(s.now())
+	if !allowed {
 		s.liteRenderStatus(w, r, http.StatusTooManyRequests, text["rate"])
 		return
 	}
 	if !s.tokenMatches(strings.TrimSpace(r.PostFormValue("token"))) {
-		logins.fail(s.now())
 		s.liteRenderStatus(w, r, http.StatusUnauthorized, text["wrong"])
 		return
 	}
+	succeeded()
 	id, _ := s.sessions.create(s.now(), r.UserAgent())
 	s.setSessionCookie(w, r, id, int(sessionTTL.Seconds()))
 	http.Redirect(w, r, "/lite", http.StatusSeeOther)
