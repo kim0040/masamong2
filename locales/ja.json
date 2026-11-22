@@ -1137,6 +1137,7 @@
   "disaster.eqk.more": "…ほか{n}件",
   "disaster.footer": "気象庁 · {time} KST時点",
   "disaster.wrn.issued": "⚠️ {kind} {level} 発表",
+  "disaster.wrn.upgraded": "⚠️ {kind} {from}から{level}に引き上げ",
   "disaster.wrn.lifted": "✅ {kind} {level} 解除",
   "disaster.wrn.effective": "発効: {time}",
   "discord.command.places.name": "場所",

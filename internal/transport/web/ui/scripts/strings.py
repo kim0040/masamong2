@@ -1104,6 +1104,7 @@ add("room", {
     "copy_what": ("복사할 설정 항목", "What to copy"), "copy_targets": ("대상 방", "Rooms"), "copy_none": ("설정을 복사할 대상 방이 없습니다.", "No other rooms."),
     "copy.reply": ("응답 조건·말투·규칙", "Reply mode, persona and rules"), "copy.memory": ("기억 검색 및 실시간 수집", "Memory use and capture"),
     "copy.logging": ("대화 기록 저장 범위", "Conversation log"), "copy.tools": ("채널별 도구 설정", "Per-room tools"),
+    "copy.alerts": ("재난 알림·지역별 알림 레벨", "Disaster alerts and area levels"),
     "copy_apply": ("{n}개 방에 복사", "Copy to {n} rooms"), "copy_done": ("전체 {total}개 중 {n}개 방에 설정을 복사했습니다", "Copied to {n} of {total} rooms"),
     "copy_unsaved": ("저장되지 않은 변경 사항은 복사되지 않습니다. 먼저 현재 설정을 저장해 주세요.", "Unsaved changes are not copied. Save first."),
     "summary_title": ("채널 대화 요약", "Channel summary"),
@@ -2228,11 +2229,11 @@ add("disaster", {
     "title": ("지진·특보 알림", "Earthquake & warning alerts"),
     "desc": ("기상청을 계속 확인해 지진은 1분마다, 기상 특보는 5분마다 새로 나온 것을 봇이 응답하는 채널에 올립니다. 기상청 키가 필요합니다. 방마다 끌 수 있습니다(서버·방 → 방 → 응답).", "The bot keeps checking KMA and posts what is new to the channels it answers in: earthquakes every minute, weather warnings every five. Needs a KMA key. Each room can turn it off (Servers & rooms → room → Replies)."),
     "enabled": ("지진·특보 알림 켜기", "Announce earthquakes and warnings"), "enabled_hint": ("끄면 아무것도 확인하거나 올리지 않습니다.", "Off: nothing is checked or posted."),
-    "warnings": ("기상 특보도 알리기", "Announce weather warnings too"), "warnings_hint": ("경보는 전국 육상 지역, 주의보는 아래 지역만 알립니다. 발표와 해제를 모두 알립니다.", "Warnings (경보) for every land region, advisories (주의보) only for the regions below; issued and lifted."),
+    "warnings": ("기상 특보도 알리기", "Announce weather warnings too"), "warnings_hint": ("각 방에서 설정한 구역과 레벨에 따라 특보의 발표·격상·해제를 알립니다.", "Each room receives issues, upgrades and lifts for the areas and levels it follows."),
+    "legacy_regions": ("이전 버전의 '주의보를 받을 지역'({regions})은 더 이상 쓰지 않습니다. 방마다 서버·방 → 방 → 응답에서 지역별 알림 레벨을 정하세요.", "The old advisory regions ({regions}) are no longer used. Set each room's alert level by area under Servers & rooms → room → Replies."),
+    "legacy_regions_clear": ("이전 설정 지우기", "Clear old setting"),
     "marine": ("해상 특보 포함", "Include sea areas"), "marine_hint": ("먼바다·앞바다 풍랑 같은 해상 특보도 알립니다. 보통 끄는 게 조용합니다.", "Sea-area warnings (풍랑 on 먼바다 …) too. Usually quieter off."),
     "min_domestic": ("국내 지진 최소 규모", "Smallest domestic magnitude"), "min_overseas": ("국외 지진 최소 규모", "Smallest overseas magnitude"),
-    "regions": ("주의보를 받을 지역", "Regions for advisories (주의보)"), "regions_hint": ("쉼표로 구분합니다. 지역 이름에 이 말이 들어가면 주의보도 알립니다. 비우면 경보만 알립니다.", "Comma-separated. An advisory whose region name contains one of these is announced; empty: warnings only."),
-    "regions_ph": ("서울, 경기", "Seoul, Gyeonggi"),
     "state.off": ("꺼짐", "Off"), "state.on": ("켜짐 · 채널 {n}개", "On · {n} channel(s)"),
     "waiting.no_kma_key": ("기상청 키가 없어 확인하지 못합니다", "No KMA key: nothing is checked"), "waiting.discord_offline": ("Discord가 연결되면 시작합니다", "Starts when Discord is connected"),
     "waiting.no_channels": ("알림을 받을 채널이 없습니다", "No channel takes the alerts"), "waiting.off": ("꺼짐", "Off"),
@@ -2242,7 +2243,25 @@ add("disaster", {
 })
 add("room", {
     "disaster_alerts": ("지진·특보 알림 받기", "Earthquake & warning alerts"),
-    "disaster_alerts_hint": ("새 지진과 기상 특보를 이 방에 올립니다. 기준은 도구 → 재난·특보 → 운영에서 정합니다.", "New earthquakes and weather warnings are posted here. What is announced is set under Tools → Disaster alerts → Operations."),
+    "disaster_alerts_hint": ("모든 레벨에서 규모 기준을 충족하는 국내외 지진을 알립니다. 규모 기준은 도구 → 재난·특보 → 운영에서 정합니다.", "Every level includes domestic and overseas earthquakes that meet the thresholds set under Tools → Disaster alerts → Operations."),
+    "watch_region_invalid": ("지역을 입력하고 중복된 지역을 지워 주세요.", "Enter an area for each row and remove duplicates."),
+    "watch_levels": ("지역별 알림 레벨", "Alert level by area"),
+    "watch_hint": ("기상청 구역명이나 코드를 입력하세요. 세부 구역 설정이 상위 구역보다 우선하고, 어느 설정에도 해당하지 않으면 레벨 1입니다.", "Enter an exact KMA area name or code. A local area overrides its parent. Unmatched areas use level 1."),
+    "watch_region": ("구역명 또는 코드 (예: 목포시)", "Area name or code (e.g. 목포시)"),
+    "watch_remove": ("삭제", "Remove"),
+    "watch_level_of": ("{area} 알림 레벨", "Alert level for {area}"),
+    "watch_remove_of": ("{area} 삭제", "Remove {area}"),
+    "watch_row": ("{n}번째 줄", "row {n}"),
+    "watch_matched": ("기상청 구역: {area}", "KMA area: {area}"),
+    "watch_unknown": ("기상청 특보에서 아직 본 적 없는 이름입니다. 구역명이나 코드가 정확한지 확인하세요. 맞지 않으면 이 줄로는 특보가 오지 않습니다.", "Not seen in any KMA warning yet. Check the exact area name or code: a row that matches no area brings no warnings."),
+    "watch_unchecked": ("봇이 기상청 특보를 한 번 받으면 입력한 구역이 맞는지 여기에 표시합니다.", "Once the bot has received KMA warnings, this shows whether each area matches."),
+    "watch_add": ("지역 추가", "Add area"),
+    "watch_guide": ("레벨별 알림 종류", "Alerts included at each level"),
+    "watch_level.1": ("국내외 지진 발생 알림 (기존 규모 기준 적용)", "Domestic and overseas earthquakes meeting the magnitude thresholds"),
+    "watch_level.2": ("레벨 1 + 지진해일주의보·경보", "Level 1 + tsunami advisories and warnings"),
+    "watch_level.3": ("레벨 2 + 폭염중대경보, 폭염·대설·한파·호우·태풍·폭풍해일 경보", "Level 2 + heat emergency warnings and warnings for extreme heat, heavy snow, cold waves, heavy rain, typhoons and storm surges"),
+    "watch_level.4": ("레벨 3 + 황사·풍랑·강풍 경보, 폭염·대설·한파·태풍 주의보", "Level 3 + warnings for yellow dust, high seas and strong winds, and advisories for extreme heat, heavy snow, cold waves and typhoons"),
+    "watch_level.5": ("레벨 4 + 나머지 모든 주의보·경보", "Level 4 + all remaining advisories and warnings"),
     "disaster_alerts_off_respond": ("응답 안 함인 방에는 알림도 올리지 않습니다.", "A room the bot does not answer in gets no alerts either."),
 })
 add("cfg", {
@@ -2250,7 +2269,7 @@ add("cfg", {
     "disaster_alerts.desc": ("봇이 기상청을 확인해 지진과 기상 특보를 응답하는 채널에 올리는 기준입니다. 도구 → 재난·특보 → 운영 화면에서 바꾸는 편이 쉽습니다.", "What the bot announces from KMA in the channels it answers in. Easier to change under Tools → Disaster alerts → Operations."),
     "disaster_alerts.enabled": ("알림 켜기", "Announce"), "disaster_alerts.warnings": ("기상 특보도 알리기", "Weather warnings too"),
     "disaster_alerts.earthquake_min_domestic": ("국내 지진 최소 규모", "Smallest domestic magnitude"), "disaster_alerts.earthquake_min_overseas": ("국외 지진 최소 규모", "Smallest overseas magnitude"),
-    "disaster_alerts.warning_regions": ("주의보를 받을 지역", "Regions for advisories"), "disaster_alerts.marine": ("해상 특보 포함", "Include sea areas"),
+    "disaster_alerts.warning_regions": ("이전 주의보 지역 설정 (채널의 watch_level로 대체됨)", "Legacy advisory regions (replaced by channel watch_level)"), "disaster_alerts.marine": ("해상 특보 포함", "Include sea areas"),
 })
 
 add("tool", {

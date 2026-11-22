@@ -167,6 +167,18 @@ func TestParseWarningsJSON(t *testing.T) {
 	}
 }
 
+func TestRetiredFogWarning(t *testing.T) {
+	for _, body := range []string{
+		`[{"WRN":"안개  ","LVL":"경보"},{"WRN":"강풍","LVL":"주의"}]`,
+		strings.Replace(string(fixture(t, "wrn_now.txt")), ",H,2,", ",F,2,", 1),
+	} {
+		rows, err := ParseWarnings([]byte(body))
+		if err != nil || len(rows) != 1 || (rows[0].Kind != "W" && rows[0].Kind != "V") {
+			t.Fatalf("active warnings: %+v, %v", rows, err)
+		}
+	}
+}
+
 func TestLookupGrid(t *testing.T) {
 	for _, name := range []string{"서울", "서울특별시", "Seoul", " 서울 "} {
 		g, err := LookupGrid(name)

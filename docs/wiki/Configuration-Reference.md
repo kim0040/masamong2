@@ -289,15 +289,31 @@ disaster_alerts:
   enabled: true                 # master switch (on by default)
   earthquake_min_domestic: 4.0  # magnitude threshold in Korea (0–10)
   earthquake_min_overseas: 7.0  # magnitude threshold abroad
-  warnings: true                # weather warnings (land warnings nationwide)
-  warning_regions: [부산, 서울] # advisories only for regions whose names contain these
+  warnings: true                # weather warnings
   marine: false                 # marine warnings
 guilds:
   "<server ID>":
     channels:
       "<channel ID>":
-        disaster_alerts: "off"  # off in this room only (empty = on)
+        disaster_alerts: "on"
+        watch_level:
+          L1052100: 3  # Mokpo
+          L1052500: 1  # Heuksando and Hongdo
 ```
+
+Each level includes the levels above it in this table.
+
+| Level | Alerts added |
+| --- | --- |
+| 1 | Domestic and overseas earthquakes meeting the existing magnitude thresholds. |
+| 2 | Tsunami advisories and warnings. |
+| 3 | Extreme heat emergency warnings. Warnings for extreme heat, heavy snow, cold waves, heavy rain, typhoons and storm surges. |
+| 4 | Warnings for yellow dust, high seas and strong winds. Advisories for extreme heat, heavy snow, cold waves and typhoons. |
+| 5 | All remaining advisories and warnings. |
+
+Use the exact KMA area code or name. A specific area takes priority over its parent, with the code preferred to the name at each tier. An unmatched area uses level 1. Earthquakes reach every enabled room, regardless of area. Sea areas additionally require `marine: true`. After upgrading, set any desired areas per room. The old global `warning_regions` list is accepted when loading older files and has no effect on delivery.
+
+The room page in the console shows, for each saved area, whether it matches an area seen in KMA warnings. The bot ships no KMA area list, so an area that has had no warning yet can show as "not seen" even when its name is right. A lift goes only to the rooms that received the issue or upgrade for that level. After upgrading, the first warning check records what is in force as its starting point and announces nothing, and those warnings end without a lift. A room with no area set gets earthquakes only, and no lifts.
 
 ## personas
 

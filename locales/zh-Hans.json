@@ -1136,6 +1136,7 @@
   "disaster.eqk.more": "…还有 {n} 条",
   "disaster.footer": "KMA · 截至 {time} KST",
   "disaster.wrn.issued": "⚠️ {kind} {level} 发布",
+  "disaster.wrn.upgraded": "⚠️ {kind}由{from}升级为{level}",
   "disaster.wrn.lifted": "✅ {kind} {level} 解除",
   "disaster.wrn.effective": "生效时间：{time}",
   "discord.command.places.name": "地点",

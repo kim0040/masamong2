@@ -25,16 +25,16 @@
       "docs/wiki/개발-가이드.md": "12ac2f2cb027f4b0"
     },
     "wiki/관리-콘솔": {
-      "docs/wiki/Admin-Console.md": "dc4dc9001f989493",
-      "docs/wiki/관리-콘솔.md": "ad0549d52ffc84d0"
+      "docs/wiki/Admin-Console.md": "67053375e88b1f23",
+      "docs/wiki/관리-콘솔.md": "06393d8879d9c2db"
     },
     "wiki/기억-블록": {
       "docs/wiki/Memory-Blocks.md": "9e53c1c0ac67387b",
       "docs/wiki/기억-블록.md": "e95fa65c1945bf2c"
     },
     "wiki/도구와-한도": {
-      "docs/wiki/Tools-and-Limits.md": "94ca84d18909fdb5",
-      "docs/wiki/도구와-한도.md": "af5bc25a2a97b077"
+      "docs/wiki/Tools-and-Limits.md": "3f4518c5cb738a14",
+      "docs/wiki/도구와-한도.md": "749ba488689aa585"
     },
     "wiki/동시-처리와-성능": {
       "docs/wiki/Concurrency-and-Performance.md": "fe42487fb484f48c",
@@ -65,8 +65,8 @@
       "docs/wiki/빠른-시작.md": "8f97bbe7ac9959e6"
     },
     "wiki/설정-레퍼런스": {
-      "docs/wiki/Configuration-Reference.md": "6ec49607b761d378",
-      "docs/wiki/설정-레퍼런스.md": "16584c7268004d9e"
+      "docs/wiki/Configuration-Reference.md": "618e12b71e3244fd",
+      "docs/wiki/설정-레퍼런스.md": "5ae82e5a597ee291"
     },
     "wiki/설치": {
       "docs/wiki/Installation.md": "0fadd96bae14101a",

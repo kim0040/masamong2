@@ -58,27 +58,51 @@
   const paused = $derived(!!overview.data?.pause?.channels?.[`${g}:${c}`] || !!overview.data?.pause?.guilds?.[g])
 
   // editable copy of the behavior form
-  let form = $state({ respond: 'mention', persona_ref: '', rules: '', capture: false, logging_level: 'ops', memory_use: 'on', disaster_alerts: 'on' })
+  let form = $state({ respond: 'mention', persona_ref: '', rules: '', capture: false, logging_level: 'ops', memory_use: 'on', disaster_alerts: 'on', watch_level: [] as { region: string; level: string }[] })
   let base = $state('')
   let saving = $state(false)
+  // the configuration revision the saved area levels on screen were read at: the loaded document's,
+  // taken only while it holds the same levels as the room list. An edited map is saved against it, so
+  // levels saved elsewhere meanwhile are a conflict instead of being overwritten.
+  let watchRev = 0
+  const levelsKey = (m: Record<string, number> | undefined) => JSON.stringify(Object.entries(m ?? {}).sort(([a], [b]) => a.localeCompare(b)))
   $effect(() => {
     if (!ch) return
-    const f = { respond: ch.respond, persona_ref: ch.persona_ref, rules: pol.rules ?? '', capture: !!ch.capture, logging_level: ch.logging_level, memory_use: ch.memory_use, disaster_alerts: ch.disaster_alerts === false ? 'off' : 'on' }
+    const watch_level = Object.entries(ch.watch_level ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([region, level]) => ({ region, level: String(level) }))
+    const f = { respond: ch.respond, persona_ref: ch.persona_ref, rules: pol.rules ?? '', capture: !!ch.capture, logging_level: ch.logging_level, memory_use: ch.memory_use, disaster_alerts: ch.disaster_alerts === false ? 'off' : 'on', watch_level }
     const s = JSON.stringify(f)
     if (s !== base) {
       form = f
       base = s
     }
+    if (cfg.loaded && levelsKey(pol.watch_level) === levelsKey(ch.watch_level)) watchRev = cfg.revision
   })
-  const dirty = $derived(base ? Object.entries(form).filter(([k, v]) => (JSON.parse(base) as any)[k] !== v).length : 0)
+  // the area levels are edited only while alerts reach this room; a hidden draft is dropped, never saved
+  const watchShown = $derived(form.disaster_alerts === 'on' && form.respond !== 'off')
+  const dirty = $derived(base ? Object.entries(form).filter(([k, v]) => (k !== 'watch_level' || watchShown) && JSON.stringify((JSON.parse(base) as any)[k]) !== JSON.stringify(v)).length : 0)
   async function save() {
+    const { watch_level, ...rest } = form
+    const input: Record<string, unknown> = { guild_id: g, channel_id: c, ...rest, capture: form.capture ? 'true' : 'false' }
+    // sent only when edited here, so saving another field never replaces levels saved meanwhile
+    if (watchShown && base && JSON.stringify(watch_level) !== JSON.stringify(JSON.parse(base).watch_level)) {
+      const entries = watch_level.map(({ region, level }) => [region.trim(), Number(level)] as const)
+      if (entries.some(([region]) => !region) || new Set(entries.map(([region]) => region)).size !== entries.length) {
+        toast('error', t('room.watch_region_invalid'))
+        return
+      }
+      input.watch_level = Object.fromEntries(entries)
+    }
     saving = true
-    const r = await call('channels.configure', { guild_id: g, channel_id: c, ...form, capture: form.capture ? 'true' : 'false' })
+    const r = await call('channels.configure', input, input.watch_level ? { base_revision: watchRev } : {})
     saving = false
     if (r.ok) {
       toast('ok', t('rooms.saved'))
       base = ''
-      await list.refresh()
+      await Promise.all([list.refresh(), loadConfig(true)])
+    } else if (r.error?.code === 'CONFIG_CONFLICT') {
+      // the levels were saved elsewhere since this form read them: show the newest, then save again on purpose
+      await Promise.all([list.refresh(), loadConfig(true)])
+      toast('warn', t('config.conflict_title'), t('config.conflict_body'))
     } else toast('error', t('config.save_failed'), r.error?.message)
   }
 
@@ -177,7 +201,7 @@
 
   // copy this room's saved settings to other rooms
   let copyOpen = $state(false)
-  let copyWhat = $state<Record<string, boolean>>({ reply: true, memory: false, logging: false, tools: false })
+  let copyWhat = $state<Record<string, boolean>>({ reply: true, alerts: false, memory: false, logging: false, tools: false })
   let copyTo = $state<Set<string>>(new Set())
   let copying = $state(false)
   const others = $derived(((list.data?.channels ?? []) as any[]).filter((x) => !(x.id === c && x.guild_id === g)))
@@ -192,6 +216,7 @@
     const src = savedForm
     const input: Record<string, unknown> = {}
     if (copyWhat.reply) Object.assign(input, { respond: src.respond, persona_ref: src.persona_ref, rules: src.rules ?? '' })
+    if (copyWhat.alerts) Object.assign(input, { disaster_alerts: src.disaster_alerts, watch_level: Object.fromEntries((src.watch_level ?? []).map((w: { region: string; level: string }) => [w.region, Number(w.level)])) })
     if (copyWhat.memory) Object.assign(input, { memory_use: src.memory_use, capture: src.capture ? 'true' : 'false' })
     if (copyWhat.logging) input.logging_level = src.logging_level
     const tools = { ...(pol.tools ?? {}) }
@@ -264,6 +289,33 @@
           <Segmented label={t('rooms.respond')} bind:value={form.respond} options={['always', 'mention', 'command', 'off'].map((v) => ({ value: v, label: t(`rooms.respond.${v}`) }))} />
           <p class="small muted">{t(`rooms.respond_hint.${form.respond}`)}</p>
           <Switch checked={form.disaster_alerts === 'on'} disabled={form.respond === 'off'} onchange={(v) => (form.disaster_alerts = v ? 'on' : 'off')} label={t('room.disaster_alerts')} hint={form.respond === 'off' ? t('room.disaster_alerts_off_respond') : t('room.disaster_alerts_hint')} />
+          {#if form.disaster_alerts === 'on' && form.respond !== 'off'}
+            <fieldset class="watch-levels stack">
+              <legend>{t('room.watch_levels')}</legend>
+              <p class="small muted">{t('room.watch_hint')}</p>
+              {#each form.watch_level as row, i}
+                <!-- a saved key shows the KMA area it matched, or a flag when KMA has reported no such area yet -->
+                {@const key = row.region.trim()}
+                {@const checked = !!ch.watch_areas?.checked && Object.hasOwn(ch.watch_level ?? {}, key)}
+                {@const area = checked ? ch.watch_areas.matched?.[key] : undefined}
+                {@const name = key || t('room.watch_row', { n: i + 1 })}
+                <div class="watch-row">
+                  <Input aria-label={t('room.watch_region')} placeholder={t('room.watch_region')} bind:value={row.region} aria-describedby={checked ? `watch-area-${i}` : undefined} />
+                  <Select aria-label={t('room.watch_level_of', { area: name })} bind:value={row.level} options={['1','2','3','4','5'].map(value => ({ value, label: value }))} />
+                  <Button size="sm" aria-label={t('room.watch_remove_of', { area: name })} onclick={() => form.watch_level.splice(i, 1)}>{t('room.watch_remove')}</Button>
+                  {#if checked}
+                    {#if area}<p id="watch-area-{i}" class="watch-area xs muted">{t('room.watch_matched', { area })}</p>
+                    {:else}<p id="watch-area-{i}" class="watch-area xs warn-text"><I.TriangleAlert size={12} aria-hidden="true" />{t('room.watch_unknown')}</p>{/if}
+                  {/if}
+                </div>
+              {/each}
+              {#if ch.watch_areas && !ch.watch_areas.checked}<p class="xs muted">{t('room.watch_unchecked')}</p>{/if}
+              <Button size="sm" onclick={() => form.watch_level.push({ region: '', level: '2' })}>{t('room.watch_add')}</Button>
+              <details><summary class="small">{t('room.watch_guide')}</summary>
+                <ol class="small">{#each [1,2,3,4,5] as level}<li>{t(`room.watch_level.${level}`)}</li>{/each}</ol>
+              </details>
+            </fieldset>
+          {/if}
           <Field id="persona" label={t('rooms.col.persona')} hint={t('room.persona_hint')}>
             {#snippet children({ id, describedby })}<Select {id} aria-describedby={describedby} bind:value={form.persona_ref} options={personaOptions} />{/snippet}
           </Field>
@@ -489,7 +541,7 @@
     {#if dirty}<div class="callout warn"><span class="ic"><I.TriangleAlert size={16} /></span><span>{t('room.copy_unsaved')}</span></div>{/if}
     <fieldset>
       <legend class="small">{t('room.copy_what')}</legend>
-      {#each ['reply', 'memory', 'logging', 'tools'] as k}
+      {#each ['reply', 'alerts', 'memory', 'logging', 'tools'] as k}
         <label class="check"><input type="checkbox" bind:checked={copyWhat[k]} />{t(`room.copy.${k}`)}</label>
       {/each}
     </fieldset>
@@ -512,6 +564,30 @@
 <SaveBar count={dirty} saving={saving} onsave={save} onreset={() => (form = JSON.parse(base))} />
 
 <style>
+  .watch-levels {
+    margin: 0;
+    padding: var(--s-3);
+    min-width: 0;
+  }
+  .watch-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: var(--s-2);
+    align-items: center;
+  }
+  .watch-levels ol {
+    padding-inline-start: 1.5em;
+  }
+  .watch-area {
+    grid-column: 1 / -1;
+    margin: 0;
+    display: flex;
+    gap: 4px;
+    align-items: baseline;
+  }
+  .warn-text {
+    color: var(--warn);
+  }
   .panel {
     margin-top: var(--s-4);
   }

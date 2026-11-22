@@ -2,10 +2,12 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"masamong/internal/errclass"
 	"math"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -28,10 +30,10 @@ import (
 //     kept in the database and advanced before sending, so a restart or a failed channel never
 //     announces an event twice. The first check only sets the watermark: what was already published
 //     before the bot started watching is not announced.
-//   - Weather warnings: 경보 for every land region, 주의보 only for disaster_alerts.warning_regions, sea
-//     areas only with disaster_alerts.marine. A warning that appears is announced as issued, one that
-//     disappears as lifted; warnings of the same kind and level are one message. The first check only
-//     records what is active.
+//   - Weather warnings: each room selects its watch level by KMA area; sea areas also require
+//     disaster_alerts.marine. A warning that appears is announced as issued, one that
+//     disappears as lifted. A rise in level for the same area and kind is one upgrade. The first check only
+//     records what is active, and so does the first check on a set an older build stored.
 //
 // disaster_alerts.enabled / .warnings switch them off for the instance, a channel's disaster_alerts:
 // off for that channel; the scheduler skips everything while the bot is paused.
@@ -68,19 +70,19 @@ type disasterState struct {
 // disasterChannel is one channel announcements go to, with its server's language.
 type disasterChannel struct {
 	Guild, Channel, Locale string
+	WatchLevel             map[string]int
 }
 
 // disasterChannels are the channels the bot answers in on approved servers, minus those that turned
-// announcements off.
-func (s *Service) disasterChannels() []disasterChannel {
-	doc := s.Doc()
+// announcements off. doc is the configuration snapshot the caller also reads its switches from.
+func (s *Service) disasterChannels(doc config.Document) []disasterChannel {
 	pause := s.pauseState()
 	if pause.All {
 		return nil
 	}
 	var out []disasterChannel
 	for gid, g := range doc.Guilds {
-		if !s.GuildAllowed(gid) {
+		if !disasterGuildAllowed(doc, gid) {
 			continue
 		}
 		loc := g.Locale
@@ -91,16 +93,26 @@ func (s *Service) disasterChannels() []disasterChannel {
 			if c.Respond == "off" || c.DisasterAlerts == "off" || pause.Channels[gid+":"+cid] {
 				continue
 			}
-			out = append(out, disasterChannel{Guild: gid, Channel: cid, Locale: loc})
+			out = append(out, disasterChannel{Guild: gid, Channel: cid, Locale: loc, WatchLevel: c.WatchLevel})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Guild+out[i].Channel < out[j].Guild+out[j].Channel })
 	return out
 }
 
+// disasterGuildAllowed is GuildAllowed read from doc, the check's configuration snapshot, so a server's
+// approval never comes from another revision than its rooms. Keep it in step with GuildAllowed.
+func disasterGuildAllowed(doc config.Document, guildID string) bool {
+	return guildID == "" || !doc.Access.ApprovalRequired() || slices.Contains(doc.Access.Servers, guildID) || guildConfigured(doc, guildID)
+}
+
 // disasterTick is one scheduler minute: earthquakes, and warnings when five minutes have passed.
 func (s *Service) disasterTick(ctx context.Context) {
-	if s.practice || s.Store == nil || !s.Doc().DisasterAlerts.On() {
+	// one configuration snapshot for the whole check: the rooms' levels and the instance switches
+	// (warnings, marine, magnitudes) always come from the same revision
+	doc := s.Doc()
+	cfg := doc.DisasterAlerts
+	if s.practice || s.Store == nil || !cfg.On() {
 		return
 	}
 	r := s.Registry()
@@ -111,7 +123,7 @@ func (s *Service) disasterTick(ctx context.Context) {
 	if !ok {
 		return
 	}
-	channels := s.disasterChannels()
+	channels := s.disasterChannels(doc)
 	if len(channels) == 0 {
 		return
 	}
@@ -127,7 +139,7 @@ func (s *Service) disasterTick(ctx context.Context) {
 		}
 		s.Log.Warn("disaster alerts: check failed", "err", err)
 	}
-	if n, err := s.earthquakeTick(ctx, poster, channels); err != nil {
+	if n, err := s.earthquakeTick(ctx, poster, channels, cfg); err != nil {
 		fail(err)
 	} else if n > 0 {
 		st.LastSentAt, st.LastSentKind, st.LastSentCount = checkedAt, "earthquake", n
@@ -136,13 +148,13 @@ func (s *Service) disasterTick(ctx context.Context) {
 	s.disaster.mu.Lock()
 	s.disaster.checkedAt = now.UTC()
 	last := s.disaster.warningsAt
-	due := s.Doc().DisasterAlerts.WarningsOn() && now.Sub(last) >= warningEvery-5*time.Second
+	due := cfg.WarningsOn() && now.Sub(last) >= warningEvery-5*time.Second
 	if due {
 		s.disaster.warningsAt = now.UTC()
 	}
 	s.disaster.mu.Unlock()
 	if due {
-		if n, err := s.warningTick(ctx, poster, channels); err != nil {
+		if n, err := s.warningTick(ctx, poster, channels, doc); err != nil {
 			fail(err)
 		} else if n > 0 {
 			st.LastSentAt, st.LastSentKind, st.LastSentCount = checkedAt, "warning", n
@@ -160,7 +172,7 @@ func (s *Service) disasterTick(ctx context.Context) {
 // ---------------------------------------------------------------------------
 
 // earthquakeTick announces new earthquakes; it returns how many channel messages it sent or edited.
-func (s *Service) earthquakeTick(ctx context.Context, poster ChannelPoster, channels []disasterChannel) (int, error) {
+func (s *Service) earthquakeTick(ctx context.Context, poster ChannelPoster, channels []disasterChannel, cfg config.DisasterAlerts) (int, error) {
 	r := s.Registry()
 	if err := r.reserve(r.kmaID); err != nil {
 		return 0, err
@@ -170,7 +182,6 @@ func (s *Service) earthquakeTick(ctx context.Context, poster ChannelPoster, chan
 	if err != nil {
 		return 0, err
 	}
-	cfg := s.Doc().DisasterAlerts
 	var events []kma.Earthquake
 	for _, e := range all {
 		if e.NoDomesticImpact || e.EventTime.IsZero() || e.Magnitude == nil || *e.Magnitude < cfg.MinMagnitude(e.Domestic) {
@@ -333,8 +344,99 @@ func (s *Service) earthquakeCard(locale string, inc []kma.Earthquake) action.Car
 // Weather warnings
 // ---------------------------------------------------------------------------
 
-// warningTick announces warnings that appeared or ended since the last check.
-func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channels []disasterChannel) (int, error) {
+// All rooms compare the same KMA observations, including advisories below a room's watch level.
+type warningSnapshot map[string]kma.Warning
+
+// warningStateVersion marks what the warning check stores in disaster:wrn_active. Builds before room
+// watch levels stored a bare map that kept only what the global warning_regions and marine switches
+// let through, so it cannot say which advisories were already in force. The first check that finds
+// such a set (or any set without this version) records everything in force again and announces
+// nothing, whatever the rooms are set to.
+const warningStateVersion = 2
+
+// warningState is what one warning check leaves for the next.
+type warningState struct {
+	Version int             `json:"version"`
+	Active  warningSnapshot `json:"active"`
+	// Sent is, for each area and kind in Active, the level each room (by channel ID) was last told is
+	// in force. A lift goes only to the rooms told about that level, and an entry ends with its warning.
+	Sent map[string]map[string]string `json:"sent,omitempty"`
+}
+
+// warningKey is the area and kind a warning's level belongs to.
+func warningKey(w kma.Warning) string { return w.RegionCode + "|" + w.Kind }
+
+// Lower levels are cumulative. Other advisories and warnings require level 5.
+var warningWatchLevels = map[string]map[string]int{
+	"N": {"2": 2, "3": 2},            // 지진해일
+	"H": {"2": 4, "3": 3, "중대경보": 3}, // 폭염
+	"S": {"2": 4, "3": 3},            // 대설
+	"C": {"2": 4, "3": 3},            // 한파
+	"T": {"2": 4, "3": 3},            // 태풍
+	"R": {"3": 3},                    // 호우
+	"O": {"3": 3},                    // 폭풍해일
+	"Y": {"3": 4},                    // 황사
+	"V": {"3": 4},                    // 풍랑
+	"W": {"3": 4},                    // 강풍
+}
+
+func (ch disasterChannel) watches(w kma.Warning) bool {
+	required := warningWatchLevels[w.Kind][w.Level]
+	if required == 0 {
+		required = 5
+	}
+	for _, region := range []string{w.RegionCode, w.Region, w.ParentCode, w.Parent} {
+		if level, ok := ch.WatchLevel[region]; ok {
+			return level >= required
+		}
+	}
+	return false // unconfigured regions are level 1, earthquakes only
+}
+
+// Rank orders the levels locally. KMA sends the heat emergency as the literal "중대경보".
+func warningRank(w kma.Warning) int {
+	switch w.Level {
+	case "2":
+		return 2
+	case "3":
+		return 3
+	case "중대경보":
+		if w.Kind == "H" {
+			return 4
+		}
+	}
+	return 0
+}
+
+func warningCancelled(command string) bool {
+	switch command {
+	case "해제", "대치해제", "변경해제", "3", "4", "7":
+		return true
+	}
+	return false
+}
+
+// warningLater says a takes effect after b, or at the same time but was announced later.
+func warningLater(a, b kma.Warning) bool {
+	return a.Effective > b.Effective || a.Effective == b.Effective && a.Announced > b.Announced
+}
+
+func (snapshot warningSnapshot) record(w kma.Warning) {
+	key := warningKey(w)
+	old := snapshot[key]
+	if w.Effective < old.Effective || (w.Effective == old.Effective && w.Announced < old.Announced) {
+		return
+	}
+	if w.Effective == old.Effective && w.Announced == old.Announced && warningRank(w) < warningRank(old) {
+		return
+	}
+	snapshot[key] = w
+}
+
+// warningTick announces changes to the active level of each area's warning. doc is the check's
+// configuration snapshot, the one channels were chosen from.
+func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channels []disasterChannel, doc config.Document) (int, error) {
+	cfg := doc.DisasterAlerts
 	r := s.Registry()
 	if err := r.reserve(r.kmaID); err != nil {
 		return 0, err
@@ -344,18 +446,97 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 	if err != nil {
 		return 0, err
 	}
-	cfg := s.Doc().DisasterAlerts
-	current := map[string]kma.Warning{}
+	s.learnWarningAreas(all)
+	current := warningSnapshot{}
+	cancelled := warningSnapshot{}
+	issued := map[string]kma.Warning{}   // the latest issue of each area, kind and level
+	released := map[string]kma.Warning{} // the latest cancellation of each area, kind and level
 	for _, w := range all {
-		if wantWarning(cfg, w) {
-			current[w.RegionCode+"|"+w.Kind+"|"+w.Level] = w
+		rank := warningRank(w)
+		if rank == 0 {
+			continue
+		}
+		latest := issued
+		if warningCancelled(w.Command) {
+			cancelled.record(w)
+			latest = released
+		}
+		if l, ok := latest[warningKey(w)+"|"+w.Level]; !ok || warningLater(w, l) {
+			latest[warningKey(w)+"|"+w.Level] = w
 		}
 	}
-	var before map[string]kma.Warning
-	seen, _ := s.kvGet("disaster:wrn_active", &before)
-	// the set is stored only when it changed (or on the first check): most checks find the same warnings
-	if !seen || !reflect.DeepEqual(before, current) {
-		if err := s.kvSet("disaster:wrn_active", current); err != nil {
+	// A release of a level published after its issue ends that level, even when the response still
+	// lists the issue; another level of the same area and kind that is still issued stays in force.
+	for k, w := range issued {
+		if r, ok := released[k]; ok && warningLater(r, w) {
+			continue
+		}
+		current.record(w)
+	}
+	var raw json.RawMessage
+	seen, err := s.kvGet("disaster:wrn_active", &raw)
+	if err != nil {
+		return 0, err
+	}
+	var stored warningState
+	if seen && (json.Unmarshal(raw, &stored) != nil || stored.Version != warningStateVersion) {
+		// an older build's set: what it left out may have been in force for hours, so nothing is news yet
+		s.Log.Info("disaster alerts: older warning state replaced; what is in force now is the starting point", "active", len(current))
+		// It also kept no record of which rooms it told, so nothing in force now is counted as told: those
+		// warnings end without a lift, as the starting point of a first check does.
+		return 0, s.kvSet("disaster:wrn_active", warningState{Version: warningStateVersion, Active: current})
+	}
+	before := stored.Active
+	if before == nil {
+		before = warningSnapshot{}
+	}
+	// A room removed from the configuration, or one that watches no area any more (earthquakes only), is
+	// told nothing more about weather: what it was told is dropped and it gets no lift. Lifts read told,
+	// the stored record without those rooms.
+	watching := map[string]bool{}
+	for _, g := range doc.Guilds {
+		for id, c := range g.Channels {
+			if len(c.WatchLevel) > 0 {
+				watching[id] = true
+			}
+		}
+	}
+	told := map[string]map[string]string{}
+	for k, rooms := range stored.Sent {
+		for room, level := range rooms {
+			if watching[room] {
+				if told[k] == nil {
+					told[k] = map[string]string{}
+				}
+				told[k][room] = level
+			}
+		}
+	}
+	// what each room was told is kept only for the level still in force: a level that ended is gone with
+	// its lift, whether or not the lift reached the room, and a later issue of it needs its own delivery
+	next := warningState{Version: warningStateVersion, Active: current}
+	for k, rooms := range told {
+		w, ok := current[k]
+		if !ok {
+			continue
+		}
+		for room, level := range rooms {
+			if level != w.Level {
+				continue
+			}
+			if next.Sent == nil {
+				next.Sent = map[string]map[string]string{}
+			}
+			if next.Sent[k] == nil {
+				next.Sent[k] = map[string]string{}
+			}
+			next.Sent[k][room] = level
+		}
+	}
+	// the set is stored only when it changed (or on the first check): most checks find the same warnings.
+	// It is stored before anything is sent, so a crash or a failed channel never repeats a card.
+	if !seen || !reflect.DeepEqual(before, current) || !reflect.DeepEqual(stored.Sent, next.Sent) {
+		if err := s.kvSet("disaster:wrn_active", next); err != nil {
 			return 0, err
 		}
 	}
@@ -363,29 +544,46 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 		return 0, nil // first check: what is already in force is the starting point
 	}
 	type group struct {
-		kind, level string
-		lifted      bool
-		regions     []string
-		at          string
+		kind, level, change, from string
+		warnings                  []kma.Warning
+		at                        string
 	}
 	groups := map[string]*group{}
-	add := func(w kma.Warning, lifted bool) {
-		k := fmt.Sprint(w.KindName, w.LevelName, lifted)
+	add := func(w kma.Warning, change, from string) {
+		if !cfg.Marine && strings.HasPrefix(w.RegionCode, "S") {
+			return
+		}
+		k := strings.Join([]string{w.KindName, w.LevelName, change, from}, "|")
+		if change != "lifted" {
+			k += "|" + w.Effective // one card shows one effective time
+		}
 		g := groups[k]
 		if g == nil {
-			g = &group{kind: w.KindName, level: w.LevelName, lifted: lifted, at: w.Effective}
+			g = &group{kind: w.KindName, level: w.LevelName, change: change, from: from, at: w.Effective}
 			groups[k] = g
 		}
-		g.regions = append(g.regions, w.Region)
+		g.warnings = append(g.warnings, w)
 	}
 	for k, w := range current {
-		if _, was := before[k]; !was {
-			add(w, false)
+		old, was := before[k]
+		// Both commands can fall between polls. An explicit cancellation at the same
+		// effective time supplies the old level even if the advisory was never observed.
+		if ended, ok := cancelled[k]; !was && ok && w.Effective != "" && ended.Effective == w.Effective && warningRank(ended) < warningRank(w) {
+			old, was = ended, true
+		}
+		switch {
+		case !was:
+			add(w, "issued", "")
+		case warningRank(w) > warningRank(old):
+			add(w, "upgraded", old.LevelName)
+		case old.Level != w.Level:
+			add(old, "lifted", "")
+			add(w, "issued", "")
 		}
 	}
 	for k, w := range before {
 		if _, still := current[k]; !still {
-			add(w, true)
+			add(w, "lifted", "")
 		}
 	}
 	keys := make([]string, 0, len(groups))
@@ -394,17 +592,32 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 	}
 	sort.Strings(keys)
 	sent := 0
+	recorded := false
 	for _, k := range keys {
 		g := groups[k]
-		sort.Strings(g.regions)
 		for _, ch := range channels {
-			t := func(key string, args ...any) string { return s.I18n.T(ch.Locale, key, args...) }
-			title, tone := t("disaster.wrn.issued", "kind", g.kind, "level", g.level), "warn"
-			if g.lifted {
-				title, tone = t("disaster.wrn.lifted", "kind", g.kind, "level", g.level), "ok"
+			var shown []kma.Warning
+			var regions []string
+			for _, w := range g.warnings {
+				// a lift goes to the rooms that were told this level is in force, an issue or an
+				// upgrade to the rooms whose levels include it
+				if g.change == "lifted" && told[warningKey(w)][ch.Channel] == w.Level || g.change != "lifted" && ch.watches(w) {
+					shown = append(shown, w)
+					regions = append(regions, w.Region)
+				}
 			}
-			text := clip(strings.Join(g.regions, ", "), 1500)
-			if at := warningTime(g.at); at != "" && !g.lifted {
+			if len(regions) == 0 {
+				continue
+			}
+			sort.Strings(regions)
+			t := func(key string, args ...any) string { return s.I18n.T(ch.Locale, key, args...) }
+			title := t("disaster.wrn."+g.change, "kind", g.kind, "level", g.level, "from", g.from)
+			tone := "warn"
+			if g.change == "lifted" {
+				tone = "ok"
+			}
+			text := clip(strings.Join(regions, ", "), 1500)
+			if at := warningTime(g.at); at != "" && g.change != "lifted" {
 				text += "\n" + t("disaster.wrn.effective", "time", at)
 			}
 			card := action.Card{Title: title, Text: text, Tone: tone, Footer: t("disaster.footer", "time", s.Clock.Now().In(kma.KST).Format("01-02 15:04"))}
@@ -414,28 +627,78 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 				continue
 			}
 			sent++
+			if g.change == "lifted" {
+				continue // the ended level's deliveries were already left out of next
+			}
+			for _, w := range shown {
+				wk := warningKey(w)
+				if next.Sent == nil {
+					next.Sent = map[string]map[string]string{}
+				}
+				if next.Sent[wk] == nil {
+					next.Sent[wk] = map[string]string{}
+				}
+				next.Sent[wk][ch.Channel] = w.Level
+				recorded = true
+			}
+		}
+	}
+	if recorded {
+		if err := s.kvSet("disaster:wrn_active", next); err != nil {
+			s.Log.Warn("disaster alerts: could not record where warnings were announced", "err", err)
 		}
 	}
 	return sent, nil
 }
 
-// wantWarning: 경보 on land everywhere, 주의보 on land in the chosen regions, sea areas (region codes
-// starting with S) only when asked for; 예비특보 never.
-func wantWarning(cfg config.DisasterAlerts, w kma.Warning) bool {
-	if strings.HasPrefix(w.RegionCode, "S") && !cfg.Marine {
-		return false
-	}
-	switch w.Level {
-	case "3":
-		return true
-	case "2":
-		for _, r := range cfg.WarningRegions {
-			if r = strings.TrimSpace(r); r != "" && (strings.Contains(w.Region, r) || strings.Contains(w.Parent, r)) {
-				return true
+// warningAreasMax bounds the area names and codes the watcher remembers; KMA has a few hundred areas.
+const warningAreasMax = 4000
+
+// learnWarningAreas remembers every area code and name KMA reports (an area and the area it belongs
+// to), each pointing at "name (code)". The bot ships no KMA area list, so this is what the console
+// checks a room's watch_level keys against. It writes only when a new name or code appears.
+func (s *Service) learnWarningAreas(all []kma.Warning) {
+	known := map[string]string{}
+	_, _ = s.kvGet("disaster:wrn_areas", &known)
+	added := false
+	for _, w := range all {
+		for _, area := range [][2]string{{w.RegionCode, w.Region}, {w.ParentCode, w.Parent}} {
+			label := area[1] + " (" + area[0] + ")"
+			if area[0] == "" || area[1] == "" {
+				label = area[0] + area[1]
+			}
+			for _, key := range area {
+				if key != "" && known[key] == "" && len(known) < warningAreasMax {
+					known[key] = label
+					added = true
+				}
 			}
 		}
 	}
-	return false
+	if added {
+		if err := s.kvSet("disaster:wrn_areas", known); err != nil {
+			s.Log.Warn("disaster alerts: could not remember KMA areas", "err", err)
+		}
+	}
+}
+
+// watchLevelCheck is a room's watch_areas for the console: which of its watch_level keys match an
+// area KMA has reported so far ("matched": key → "name (code)"). A key that matches nothing yet is
+// saved as it is, and the console flags it: it may be misspelled, or its area has had no warning since
+// the bot began watching. "checked" is false until the watcher has seen any area at all.
+func (s *Service) watchLevelCheck(levels map[string]int) map[string]any {
+	if len(levels) == 0 {
+		return nil
+	}
+	known := map[string]string{}
+	_, _ = s.kvGet("disaster:wrn_areas", &known)
+	matched := map[string]string{}
+	for key := range levels {
+		if label := known[key]; label != "" {
+			matched[key] = label
+		}
+	}
+	return map[string]any{"checked": len(known) > 0, "matched": matched}
 }
 
 // warningTime is TM_EF (YYYYMMDDHHMM) as "MM-DD HH:MM".
@@ -465,7 +728,9 @@ func (s *Service) disasterAlertsStatus(req action.Request) action.Result {
 		st.WarningsAt = at.Format(time.RFC3339)
 	}
 	s.disaster.mu.Unlock()
-	cfg := s.Doc().DisasterAlerts
+	doc := s.Doc()
+	cfg := doc.DisasterAlerts
+	channels := len(s.disasterChannels(doc))
 	r := s.Registry()
 	reason := ""
 	switch {
@@ -475,7 +740,7 @@ func (s *Service) disasterAlertsStatus(req action.Request) action.Result {
 		reason = "no_kma_key"
 	case s.Discord == nil || !s.Discord.Connected():
 		reason = "discord_offline"
-	case len(s.disasterChannels()) == 0:
+	case channels == 0:
 		reason = "no_channels"
 	}
 	regions := cfg.WarningRegions
@@ -484,5 +749,5 @@ func (s *Service) disasterAlertsStatus(req action.Request) action.Result {
 	}
 	return action.OK(req, map[string]any{"enabled": cfg.On(), "warnings": cfg.WarningsOn(), "marine": cfg.Marine,
 		"earthquake_min_domestic": cfg.MinMagnitude(true), "earthquake_min_overseas": cfg.MinMagnitude(false),
-		"warning_regions": regions, "channels": len(s.disasterChannels()), "waiting": reason, "state": st})
+		"warning_regions": regions, "channels": channels, "waiting": reason, "state": st})
 }
