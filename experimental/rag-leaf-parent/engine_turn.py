@@ -712,17 +712,9 @@ def _persist_session(
     )
 
 
-def chat(
-    index: IndexBundle,
-    *,
-    message: str,
-    history: list[dict[str, str]] | None = None,
-    ranking: str | None = None,
-    speaker: str | None = None,
-    conversation_id: str | None = None,
-    persist: bool = False,
-) -> dict[str, Any]:
-    cfg = index.cfg
+def _check_turn(cfg: dict[str, Any], message: str | None, ranking: str | None) -> tuple[str, float, str]:
+    """Both transports refuse the same requests the same way: (message, remaining session budget, ranking mode)."""
+
     message = (message or "").strip()
     if not message:
         raise PlaygroundError("메시지를 입력해 달라")
@@ -739,139 +731,130 @@ def chat(
         )
     except RankingError as exc:
         raise PlaygroundError(str(exc)) from exc
+    return message, remaining, rank_mode
 
-    client = make_client(cfg, budget_usd=min(remaining, float(cfg.get("turn_budget_usd", 0.45))))
-    history = list(history or [])
-    session_summary = ""
-    session_id = str(conversation_id or "")
-    session_channel = ""
-    if persist:
-        session_channel, session_id, history, session_summary = _load_session(
-            index, client, conversation_id=conversation_id
-        )
-    bundle: dict[str, Any] | None = None
-    hits: list[dict[str, Any]] = []
-    rank_trace: dict[str, Any] = {}
-    messages: list[dict[str, str]] = []
-    generate_ms = 0.0
-    answer_text = ""
-    failed = False
-    try:
-        bundle = _prepare_bot_turn(
-            index,
-            client,
-            message=message,
-            ranking=rank_mode,
-            remaining=remaining,
-            history=history,
-            session_summary=session_summary,
-            conversation_id=session_id or conversation_id,
-        )
-        hits = bundle["hits"]
-        rank_trace = bundle["rank_trace"]
-        messages = _build_chat_messages(
-            index,
-            message=message,
-            history=history,
-            hits=hits,
-            system_prompt=bundle["system"],
-            tool_results=bundle["tool_results"],
-            speaker=speaker,
-            session_summary=session_summary,
-            rag_state=str(bundle.get("rag_state") or ""),
-            intent=bundle.get("intent"),
-        )
-        t_gen = time.perf_counter()
-        answer = client.chat(messages, max_tokens=500, temperature=0.2, reasoning="low")
-        generate_ms = _elapsed_ms(t_gen)
-        answer_text = answer.strip() if answer else ""
-    except (ClientError, PlaygroundError) as exc:
-        failed = True
-        append_debug_error(
-            engine_index.DATA,
-            query=message,
-            ranking=rank_mode,
-            error=exc,
-            extra={
-                "path": "chat",
-                **_log_context(index, bundle, rank_trace, hits, conversation_id=session_id, timing=None, answer=None),
-                "intent": (bundle or {}).get("intent") or resolve_intent(message, None, cfg),
-                "rank_trace": rank_trace,
-                "plan": (bundle or {}).get("plan"),
-                "plan_raw": (bundle or {}).get("plan_raw"),
-                "tools": (bundle or {}).get("tool_results"),
-                "channel_id": (bundle or {}).get("channel_id"),
-                "speaker": speaker,
-                "usage": client.usage.as_dict(),
-                "config": _config_snap(cfg),
-            },
-        )
-        posted = apply_client_usage(
-            client, extra_usd=float(rank_trace.get("rerank_cost_usd") or 0.0)
-        )
-        if isinstance(exc, PlaygroundError):
-            raise
-        raise PlaygroundError(str(exc)) from exc
-    posted = apply_client_usage(client, extra_usd=float(rank_trace.get("rerank_cost_usd") or 0.0))
-    # 턴 장부 반영 뒤에 끝난 헤지 요청(query_embed)은 이 훅으로 따로 더한다(attempt_id로 중복 방지).
-    client.late_settle = lambda: apply_client_usage(client)
-    spent = float(posted["spent_usd"])
-    new_total = float(posted["session_spent_usd"])
-    timing = _compact_timing((bundle or {}).get("timing") or {}, rank_trace, {"generate_ms": generate_ms})
-    debug_id = append_debug_turn(
-        engine_index.DATA,
-        query=message,
-        ranking=rank_mode,
-        hits=hits,
-        extra={
-            "path": "chat",
-            **_log_context(index, bundle, rank_trace, hits, conversation_id=session_id, timing=timing, answer=answer_text),
-            "intent": (bundle or {}).get("intent") or resolve_intent(message, None, cfg),
-            "rank_trace": rank_trace,
-            "spent_usd": spent,
-            "answer": answer_text,
-            "answer_preview": answer_text[:400],
-            "answer_chars": len(answer_text),
-            "plan": bundle.get("plan"),
-            "plan_raw": bundle.get("plan_raw"),
-            "tools": bundle.get("tool_results"),
-            "channel_id": bundle.get("channel_id"),
-            "speaker": speaker,
-            "timing": timing,
-            "usage": client.usage.as_dict(),
-            "models": {
-                "response": client.llm_model,
-                "planner": configured_models(cfg)["planner"],
-                "summary": configured_models(cfg)["summary"],
-                "embed": client.embed_model,
-                "rerank": rank_trace.get("rerank_model")
-                or rank_trace.get("rerank_model_requested")
-                or configured_models(cfg)["rerank"],
-            },
-            "prompt": _prompt_stats(messages),
-            "history": _history_stats(history, keep=int(cfg.get("max_history_turns") or 0)),
-            "config": _config_snap(cfg),
-            "ranking_applied": rank_trace.get("applied"),
-            "rag_used": bundle.get("rag_used"),
-            "rag_state": bundle.get("rag_state"),
-            "memory_requirement": bundle.get("memory_requirement"),
-            "search_query": bundle.get("search_query"),
-        },
-    )
-    if persist and session_id:
-        saved = _persist_session(
-            index,
-            channel_id=session_channel or str(bundle.get("channel_id") or ""),
-            conversation_id=session_id,
-            user=message,
-            assistant=answer_text,
-            speaker=str(speaker or ""),
-            client=client,
-            debug_id=debug_id,
-        )
-        session_id = str(saved.get("id") or session_id)
+
+def _models_block(cfg: dict[str, Any], client: PlayClient, rank_trace: dict[str, Any]) -> dict[str, Any]:
     return {
-        "answer": answer_text,
+        "response": client.llm_model,
+        "planner": configured_models(cfg)["planner"],
+        "summary": configured_models(cfg)["summary"],
+        "embed": client.embed_model,
+        "rerank": rank_trace.get("rerank_model")
+        or rank_trace.get("rerank_model_requested")
+        or configured_models(cfg)["rerank"],
+    }
+
+
+def _intent_of(bundle: dict[str, Any] | None, message: str, cfg: dict[str, Any]) -> dict[str, Any]:
+    return (bundle or {}).get("intent") or resolve_intent(message, None, cfg)
+
+
+def _error_row(
+    index: IndexBundle,
+    client: PlayClient,
+    bundle: dict[str, Any] | None,
+    *,
+    path: str,
+    rank_trace: dict[str, Any],
+    hits: list[dict[str, Any]],
+    session_id: str,
+    message: str,
+    speaker: str | None,
+    answer: str | None,
+    partial_chars: int | None,
+) -> dict[str, Any]:
+    """The debug row for a turn that failed. `partial_chars` is only known on the stream path."""
+
+    cfg = index.cfg
+    extra = {
+        "path": path,
+        **_log_context(index, bundle, rank_trace, hits, conversation_id=session_id, timing=None, answer=answer),
+        "intent": _intent_of(bundle, message, cfg),
+        "rank_trace": rank_trace,
+        "plan": (bundle or {}).get("plan"),
+        "plan_raw": (bundle or {}).get("plan_raw"),
+        "tools": (bundle or {}).get("tool_results"),
+        "channel_id": (bundle or {}).get("channel_id"),
+        "speaker": speaker,
+        "usage": client.usage.as_dict(),
+        "config": _config_snap(cfg),
+    }
+    if partial_chars is not None:
+        extra["partial_chars"] = partial_chars
+    return extra
+
+
+def _turn_row(
+    index: IndexBundle,
+    client: PlayClient,
+    bundle: dict[str, Any],
+    *,
+    path: str,
+    rank_trace: dict[str, Any],
+    hits: list[dict[str, Any]],
+    session_id: str,
+    message: str,
+    speaker: str | None,
+    answer: str,
+    spent: float,
+    timing: dict[str, float],
+    messages: list[dict[str, str]],
+    history: list[dict[str, str]],
+) -> dict[str, Any]:
+    """The debug row for a turn that answered."""
+
+    cfg = index.cfg
+    return {
+        "path": path,
+        **_log_context(index, bundle, rank_trace, hits, conversation_id=session_id, timing=timing, answer=answer),
+        "intent": _intent_of(bundle, message, cfg),
+        "rank_trace": rank_trace,
+        "spent_usd": spent,
+        "answer": answer,
+        "answer_preview": answer[:400],
+        "answer_chars": len(answer),
+        "plan": bundle.get("plan"),
+        "plan_raw": bundle.get("plan_raw"),
+        "tools": bundle.get("tool_results"),
+        "channel_id": bundle.get("channel_id"),
+        "speaker": speaker,
+        "timing": timing,
+        "usage": client.usage.as_dict(),
+        "models": _models_block(cfg, client, rank_trace),
+        "prompt": _prompt_stats(messages),
+        "history": _history_stats(history, keep=int(cfg.get("max_history_turns") or 0)),
+        "config": _config_snap(cfg),
+        "ranking_applied": rank_trace.get("applied"),
+        "rag_used": bundle.get("rag_used"),
+        "rag_state": bundle.get("rag_state"),
+        "memory_requirement": bundle.get("memory_requirement"),
+        "search_query": bundle.get("search_query"),
+    }
+
+
+def _result_payload(
+    index: IndexBundle,
+    client: PlayClient,
+    bundle: dict[str, Any],
+    *,
+    rank_trace: dict[str, Any],
+    hits: list[dict[str, Any]],
+    session_id: str,
+    session_summary: bool | None,
+    message: str,
+    rank_mode: str,
+    answer: str,
+    spent: float,
+    new_total: float,
+    debug_id: str,
+    timing: dict[str, float],
+) -> dict[str, Any]:
+    """What the caller gets back. `session_summary` is the chat() field the stream's `done` event never had."""
+
+    cfg = index.cfg
+    payload: dict[str, Any] = {
+        "answer": answer,
         "hits": hits,
         "usage": client.usage.summary(),
         "spent_usd": spent,
@@ -881,7 +864,7 @@ def chat(
         "debug_id": debug_id,
         "ranking": rank_mode,
         "ranking_applied": rank_trace.get("applied"),
-        "intent": (bundle or {}).get("intent") or resolve_intent(message, None, cfg),
+        "intent": _intent_of(bundle, message, cfg),
         "plan": bundle.get("plan"),
         "memory_requirement": bundle.get("memory_requirement"),
         "rag_state": bundle.get("rag_state"),
@@ -889,54 +872,85 @@ def chat(
         "tools": bundle.get("tool_results"),
         "channel_id": bundle.get("channel_id"),
         "conversation_id": session_id,
-        "session_summary": bool(session_summary),
-        "timing": timing,
-        "diagnosis": _log_context(index, bundle, rank_trace, hits, conversation_id=session_id, timing=timing, answer=answer_text).get("diagnosis"),
-        "server_run_id": SERVER_RUN_ID,
-        "usage_detail": client.usage.as_dict(),
-        "models": {
-            "response": client.llm_model,
-            "planner": configured_models(cfg)["planner"],
-            "summary": configured_models(cfg)["summary"],
-            "embed": client.embed_model,
-            "rerank": rank_trace.get("rerank_model")
-            or rank_trace.get("rerank_model_requested")
-            or configured_models(cfg)["rerank"],
-        },
     }
+    if session_summary is not None:
+        payload["session_summary"] = session_summary
+    payload.update(
+        {
+            "timing": timing,
+            "diagnosis": _log_context(index, bundle, rank_trace, hits, conversation_id=session_id, timing=timing, answer=answer).get("diagnosis"),
+            "server_run_id": SERVER_RUN_ID,
+            "usage_detail": client.usage.as_dict(),
+            "models": _models_block(cfg, client, rank_trace),
+        }
+    )
+    return payload
 
 
-def chat_stream(
+def _stream_answer(client: PlayClient, messages: list[dict[str, str]], parts: list[str]):
+    """Relay the model's stream as `delta` events and collect the text in `parts`."""
+
+    for piece in client.chat_stream(messages, max_tokens=500, temperature=0.2, reasoning="low"):
+        if piece.get("type") == "delta":
+            text = str(piece.get("text") or "")
+            parts.append(text)
+            yield {"event": "delta", "text": text}
+        elif piece.get("type") == "done":
+            break
+        elif piece.get("type") == "error":
+            raise StreamError("stream error payload", status="provider_error", partial_chars=sum(len(p) for p in parts))
+
+
+def _persist_turn(
+    index: IndexBundle,
+    client: PlayClient,
+    bundle: dict[str, Any],
+    *,
+    session_channel: str,
+    session_id: str,
+    message: str,
+    answer: str,
+    speaker: str | None,
+    debug_id: str,
+) -> str:
+    """Append the turn to its saved conversation; returns the conversation id to report."""
+
+    saved = _persist_session(
+        index,
+        channel_id=session_channel or str(bundle.get("channel_id") or ""),
+        conversation_id=session_id,
+        user=message,
+        assistant=answer,
+        speaker=str(speaker or ""),
+        client=client,
+        debug_id=debug_id,
+    )
+    return str(saved.get("id") or session_id)
+
+
+def _run_turn(
     index: IndexBundle,
     *,
     message: str,
-    history: list[dict[str, str]] | None = None,
-    ranking: str | None = None,
-    speaker: str | None = None,
-    conversation_id: str | None = None,
-    persist: bool = False,
+    history: list[dict[str, str]] | None,
+    ranking: str | None,
+    speaker: str | None,
+    conversation_id: str | None,
+    persist: bool,
+    stream: bool,
 ):
-    """SSE용 이벤트 스트림. status → hits → delta* → done|error."""
+    """One chat turn for both transports.
+
+    `stream=True` yields the SSE events (status, debug, hits, tools, delta, then done or error) and returns None.
+    `stream=False` yields nothing and returns the result payload. The two keep the order each always had where
+    they differ: the stream saves the conversation before it writes the debug row, chat() after.
+    """
 
     cfg = index.cfg
-    message = (message or "").strip()
-    if not message:
-        raise PlaygroundError("메시지를 입력해 달라")
-    if len(message) > 2000:
-        raise PlaygroundError("메시지가 너무 길다 (2000자 이하)")
+    message, remaining, rank_mode = _check_turn(cfg, message, ranking)
 
-    remaining = remaining_session_budget(cfg)
-    if remaining <= 0.01:
-        raise PlaygroundError("세션 예산이 소진됐다")
-    try:
-        rank_mode = normalize_ranking(
-            ranking if ranking is not None else cfg.get("ranking"),
-            default="heuristic",
-        )
-    except RankingError as exc:
-        raise PlaygroundError(str(exc)) from exc
-
-    yield {"event": "status", "phase": "retrieve", "label": "봇이 끼어들 준비…"}
+    if stream:
+        yield {"event": "status", "phase": "retrieve", "label": "봇이 끼어들 준비…"}
 
     client = make_client(cfg, budget_usd=min(remaining, float(cfg.get("turn_budget_usd", 0.45))))
     history = list(history or [])
@@ -953,9 +967,10 @@ def chat_stream(
     messages: list[dict[str, str]] = []
     parts: list[str] = []
     generate_ms = 0.0
-    stream_failed: StreamError | ClientError | PlaygroundError | None = None
+    stream_failed: StreamError | None = None
     try:
-        yield {"event": "status", "phase": "plan", "label": "도구 고르는 중…"}
+        if stream:
+            yield {"event": "status", "phase": "plan", "label": "도구 고르는 중…"}
         bundle = _prepare_bot_turn(
             index,
             client,
@@ -968,28 +983,29 @@ def chat_stream(
         )
         hits = bundle["hits"]
         rank_trace = bundle["rank_trace"]
-        yield {
-            "event": "debug",
-            "debug_id": None,
-            "ranking": rank_mode,
-            "ranking_applied": rank_trace.get("applied"),
-            "intent": (bundle or {}).get("intent") or resolve_intent(message, None, cfg),
-            "rerank_error": rank_trace.get("rerank_error"),
-            "plan": bundle.get("plan"),
-            "memory_requirement": bundle.get("memory_requirement"),
-            "rag_state": bundle.get("rag_state"),
-            "search_query": bundle.get("search_query"),
-            "tools": bundle.get("tool_results"),
-            "channel_id": bundle.get("channel_id"),
-            "timing": bundle.get("timing"),
-            "rerank_model": rank_trace.get("rerank_model")
-            or rank_trace.get("rerank_model_requested"),
-            "pool_n": rank_trace.get("pool_n") or rank_trace.get("pool"),
-            "diagnosis": _log_context(index, bundle, rank_trace, hits, conversation_id=session_id).get("diagnosis"),
-        }
-        yield {"event": "hits", "hits": hits}
-        yield {"event": "tools", "tools": bundle.get("tool_results") or []}
-        yield {"event": "status", "phase": "writing", "label": "마사몽이 입력 중…"}
+        if stream:
+            yield {
+                "event": "debug",
+                "debug_id": None,
+                "ranking": rank_mode,
+                "ranking_applied": rank_trace.get("applied"),
+                "intent": _intent_of(bundle, message, cfg),
+                "rerank_error": rank_trace.get("rerank_error"),
+                "plan": bundle.get("plan"),
+                "memory_requirement": bundle.get("memory_requirement"),
+                "rag_state": bundle.get("rag_state"),
+                "search_query": bundle.get("search_query"),
+                "tools": bundle.get("tool_results"),
+                "channel_id": bundle.get("channel_id"),
+                "timing": bundle.get("timing"),
+                "rerank_model": rank_trace.get("rerank_model")
+                or rank_trace.get("rerank_model_requested"),
+                "pool_n": rank_trace.get("pool_n") or rank_trace.get("pool"),
+                "diagnosis": _log_context(index, bundle, rank_trace, hits, conversation_id=session_id).get("diagnosis"),
+            }
+            yield {"event": "hits", "hits": hits}
+            yield {"event": "tools", "tools": bundle.get("tool_results") or []}
+            yield {"event": "status", "phase": "writing", "label": "마사몽이 입력 중…"}
         messages = _build_chat_messages(
             index,
             message=message,
@@ -1003,66 +1019,40 @@ def chat_stream(
             intent=bundle.get("intent"),
         )
         t_gen = time.perf_counter()
-        for piece in client.chat_stream(
-            messages, max_tokens=500, temperature=0.2, reasoning="low"
-        ):
-            if piece.get("type") == "delta":
-                text = str(piece.get("text") or "")
-                parts.append(text)
-                yield {"event": "delta", "text": text}
-            elif piece.get("type") == "done":
-                break
-            elif piece.get("type") == "error":
-                raise StreamError("stream error payload", status="provider_error", partial_chars=sum(len(p) for p in parts))
+        if stream:
+            yield from _stream_answer(client, messages, parts)
+        else:
+            parts.append(client.chat(messages, max_tokens=500, temperature=0.2, reasoning="low") or "")
         generate_ms = _elapsed_ms(t_gen)
-    except StreamError as exc:
-        stream_failed = exc
-        append_debug_error(
-            engine_index.DATA,
-            query=message,
-            ranking=rank_mode,
-            error=exc,
-            extra={
-                "path": "stream",
-                **_log_context(index, bundle, rank_trace, hits, conversation_id=session_id, timing=None, answer="".join(parts)),
-                "intent": (bundle or {}).get("intent") or resolve_intent(message, None, cfg),
-                "rank_trace": rank_trace,
-                "plan": (bundle or {}).get("plan"),
-                "plan_raw": (bundle or {}).get("plan_raw"),
-                "tools": (bundle or {}).get("tool_results"),
-                "channel_id": (bundle or {}).get("channel_id"),
-                "speaker": speaker,
-                "usage": client.usage.as_dict(),
-                "config": _config_snap(cfg),
-                "partial_chars": exc.partial_chars,
-            },
-        )
     except (ClientError, PlaygroundError) as exc:
-        stream_failed = exc
+        # a cut stream is reported to the caller as an `error` event; every other failure is raised
+        cut = stream and isinstance(exc, StreamError)
         append_debug_error(
             engine_index.DATA,
             query=message,
             ranking=rank_mode,
             error=exc,
-            extra={
-                "path": "stream",
-                **_log_context(index, bundle, rank_trace, hits, conversation_id=session_id, timing=None, answer="".join(parts)),
-                "intent": (bundle or {}).get("intent") or resolve_intent(message, None, cfg),
-                "rank_trace": rank_trace,
-                "plan": (bundle or {}).get("plan"),
-                "plan_raw": (bundle or {}).get("plan_raw"),
-                "tools": (bundle or {}).get("tool_results"),
-                "channel_id": (bundle or {}).get("channel_id"),
-                "speaker": speaker,
-                "usage": client.usage.as_dict(),
-                "config": _config_snap(cfg),
-                "partial_chars": sum(len(p) for p in parts),
-            },
+            extra=_error_row(
+                index,
+                client,
+                bundle,
+                path="stream" if stream else "chat",
+                rank_trace=rank_trace,
+                hits=hits,
+                session_id=session_id,
+                message=message,
+                speaker=speaker,
+                answer="".join(parts) if stream else None,
+                partial_chars=(exc.partial_chars if cut else sum(len(p) for p in parts)) if stream else None,
+            ),
         )
-        posted = apply_client_usage(client, extra_usd=float(rank_trace.get("rerank_cost_usd") or 0.0))
-        if isinstance(exc, PlaygroundError):
-            raise
-        raise PlaygroundError(str(exc)) from exc
+        if cut:
+            stream_failed = exc
+        else:
+            apply_client_usage(client, extra_usd=float(rank_trace.get("rerank_cost_usd") or 0.0))
+            if isinstance(exc, PlaygroundError):
+                raise
+            raise PlaygroundError(str(exc)) from exc
 
     posted = apply_client_usage(client, extra_usd=float(rank_trace.get("rerank_cost_usd") or 0.0))
     # 턴 장부 반영 뒤에 끝난 헤지 요청(query_embed)은 이 훅으로 따로 더한다(attempt_id로 중복 방지).
@@ -1079,98 +1069,121 @@ def chat_stream(
             "spent_usd": spent,
             "session_spent_usd": new_total,
         }
-        return
+        return None
 
     timing = _compact_timing((bundle or {}).get("timing") or {}, rank_trace, {"generate_ms": generate_ms})
-    answer = "".join(parts).strip()
-    debug_id = new_debug_id()
-    if persist and session_id:
-        saved = _persist_session(
-            index,
-            channel_id=session_channel or str((bundle or {}).get("channel_id") or ""),
-            conversation_id=session_id,
-            user=message,
-            assistant=answer,
-            speaker=str(speaker or ""),
-            client=client,
-            debug_id=debug_id,
-        )
-        session_id = str(saved.get("id") or session_id)
-    append_debug_turn(
-        engine_index.DATA,
-        debug_id=debug_id,
-        query=message,
-        ranking=rank_mode,
+    answer_text = "".join(parts).strip()
+    row = dict(
+        path="stream" if stream else "chat",
+        rank_trace=rank_trace,
         hits=hits,
-        extra={
-            "path": "stream",
-            **_log_context(index, bundle, rank_trace, hits, conversation_id=session_id, timing=timing, answer=answer),
-            "intent": (bundle or {}).get("intent") or resolve_intent(message, None, cfg),
-            "rank_trace": rank_trace,
-            "spent_usd": spent,
-            "answer": answer,
-            "answer_preview": answer[:400],
-            "answer_chars": len(answer),
-            "plan": (bundle or {}).get("plan"),
-            "plan_raw": (bundle or {}).get("plan_raw"),
-            "tools": (bundle or {}).get("tool_results"),
-            "channel_id": (bundle or {}).get("channel_id"),
-            "speaker": speaker,
-            "timing": timing,
-            "usage": client.usage.as_dict(),
-            "models": {
-                "response": client.llm_model,
-                "planner": configured_models(cfg)["planner"],
-                "summary": configured_models(cfg)["summary"],
-                "embed": client.embed_model,
-                "rerank": rank_trace.get("rerank_model")
-                or rank_trace.get("rerank_model_requested")
-                or configured_models(cfg)["rerank"],
-            },
-            "prompt": _prompt_stats(messages),
-            "history": _history_stats(history, keep=int(cfg.get("max_history_turns") or 0)),
-            "config": _config_snap(cfg),
-            "ranking_applied": rank_trace.get("applied"),
-            "rag_used": (bundle or {}).get("rag_used"),
-            "rag_state": (bundle or {}).get("rag_state"),
-            "memory_requirement": (bundle or {}).get("memory_requirement"),
-            "search_query": (bundle or {}).get("search_query"),
-        },
+        message=message,
+        speaker=speaker,
+        answer=answer_text,
+        spent=spent,
+        timing=timing,
+        messages=messages,
+        history=history,
     )
-    yield {
-        "event": "done",
-        "answer": answer,
-        "hits": hits,
-        "usage": client.usage.summary(),
-        "spent_usd": spent,
-        "session_spent_usd": new_total,
-        "session_remaining_usd": max(0.0, float(cfg["session_budget_usd"]) - new_total),
-        "recipe": index.meta.get("recipe"),
-        "debug_id": debug_id,
-        "ranking": rank_mode,
-        "ranking_applied": rank_trace.get("applied"),
-        "intent": (bundle or {}).get("intent") or resolve_intent(message, None, cfg),
-        "plan": bundle.get("plan"),
-        "memory_requirement": bundle.get("memory_requirement"),
-        "rag_state": bundle.get("rag_state"),
-        "search_query": bundle.get("search_query"),
-        "tools": bundle.get("tool_results"),
-        "channel_id": (bundle or {}).get("channel_id"),
-        "conversation_id": session_id,
-        "timing": timing,
-        "diagnosis": _log_context(index, bundle, rank_trace, hits, conversation_id=session_id, timing=timing, answer=answer).get("diagnosis"),
-        "server_run_id": SERVER_RUN_ID,
-        "usage_detail": client.usage.as_dict(),
-        "models": {
-            "response": client.llm_model,
-            "planner": configured_models(cfg)["planner"],
-            "summary": configured_models(cfg)["summary"],
-            "embed": client.embed_model,
-            "rerank": rank_trace.get("rerank_model")
-            or rank_trace.get("rerank_model_requested")
-            or configured_models(cfg)["rerank"],
-        },
-    }
+    if stream:
+        debug_id = new_debug_id()
+        if persist and session_id:
+            session_id = _persist_turn(
+                index, client, bundle, session_channel=session_channel, session_id=session_id,
+                message=message, answer=answer_text, speaker=speaker, debug_id=debug_id,
+            )
+        append_debug_turn(
+            engine_index.DATA,
+            debug_id=debug_id,
+            query=message,
+            ranking=rank_mode,
+            hits=hits,
+            extra=_turn_row(index, client, bundle, session_id=session_id, **row),
+        )
+    else:
+        debug_id = append_debug_turn(
+            engine_index.DATA,
+            query=message,
+            ranking=rank_mode,
+            hits=hits,
+            extra=_turn_row(index, client, bundle, session_id=session_id, **row),
+        )
+        if persist and session_id:
+            session_id = _persist_turn(
+                index, client, bundle, session_channel=session_channel, session_id=session_id,
+                message=message, answer=answer_text, speaker=speaker, debug_id=debug_id,
+            )
+    payload = _result_payload(
+        index,
+        client,
+        bundle,
+        rank_trace=rank_trace,
+        hits=hits,
+        session_id=session_id,
+        session_summary=None if stream else bool(session_summary),
+        message=message,
+        rank_mode=rank_mode,
+        answer=answer_text,
+        spent=spent,
+        new_total=new_total,
+        debug_id=debug_id,
+        timing=timing,
+    )
+    if stream:
+        yield {"event": "done", **payload}
+        return None
+    return payload
+
+
+def chat(
+    index: IndexBundle,
+    *,
+    message: str,
+    history: list[dict[str, str]] | None = None,
+    ranking: str | None = None,
+    speaker: str | None = None,
+    conversation_id: str | None = None,
+    persist: bool = False,
+) -> dict[str, Any]:
+    turn = _run_turn(
+        index,
+        message=message,
+        history=history,
+        ranking=ranking,
+        speaker=speaker,
+        conversation_id=conversation_id,
+        persist=persist,
+        stream=False,
+    )
+    try:
+        while True:
+            next(turn)
+    except StopIteration as done:
+        return done.value
+
+
+def chat_stream(
+    index: IndexBundle,
+    *,
+    message: str,
+    history: list[dict[str, str]] | None = None,
+    ranking: str | None = None,
+    speaker: str | None = None,
+    conversation_id: str | None = None,
+    persist: bool = False,
+):
+    """SSE용 이벤트 스트림. status → hits → delta* → done|error."""
+
+    yield from _run_turn(
+        index,
+        message=message,
+        history=history,
+        ranking=ranking,
+        speaker=speaker,
+        conversation_id=conversation_id,
+        persist=persist,
+        stream=True,
+    )
 
 
 def status_payload(index: IndexBundle | None) -> dict[str, Any]:
