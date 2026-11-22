@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
+
 	"masamong/internal/application"
 	"masamong/internal/memory/engine"
 )
@@ -73,5 +75,64 @@ func TestDeleteAfterServiceCloseIsQueuedAndAppliedOnRestart(t *testing.T) {
 	}
 	if left := reconciliationNames(t, dir); len(left) != 0 {
 		t.Fatalf("the applied delete is still queued: %v", left)
+	}
+}
+
+// A delete Discord delivered is part of the gateway's work in progress: while its handler still cleans up
+// (before it stores the deletion) Wait does not report that everything finished, so the daemon does not go
+// on to close the database and exit under it. Once the handler ends, the message is gone from memory.
+func TestGatewayWaitJoinsDeliveredDelete(t *testing.T) {
+	for _, bulk := range []bool{false, true} {
+		name := "delete"
+		if bulk {
+			name = "bulk delete"
+		}
+		t.Run(name, func(t *testing.T) {
+			g, dir := reconciliationTestGateway(t)
+			eng, err := g.svc.MemoryEngine()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := eng.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", MessageID: "m1", AuthorID: "u1", AuthorName: "u",
+				Content: "a synthetic message the author will delete", At: time.Now().Add(-time.Minute)}); err != nil {
+				t.Fatal(err)
+			}
+			entered, release := make(chan struct{}), make(chan struct{})
+			g.cancelPictures = func(string, []string) { close(entered); <-release }
+			handled := make(chan struct{})
+			go func() {
+				defer close(handled)
+				if bulk {
+					g.onMessageDeleteBulk(nil, &discordgo.MessageDeleteBulk{Messages: []string{"m1"}, GuildID: "g", ChannelID: "c"})
+					return
+				}
+				g.onMessageDelete(nil, &discordgo.MessageDelete{Message: &discordgo.Message{ID: "m1", GuildID: "g", ChannelID: "c"}})
+			}()
+			select {
+			case <-entered:
+			case <-time.After(10 * time.Second):
+				t.Fatal("the delete handler never reached its cleanup")
+			}
+			if g.Wait(200 * time.Millisecond) {
+				close(release)
+				t.Fatal("Wait reported everything finished while a delivered delete was still being handled")
+			}
+			close(release)
+			if !g.Wait(10 * time.Second) {
+				t.Fatal("Wait did not finish after the delete handler ended")
+			}
+			select {
+			case <-handled:
+			default:
+				t.Fatal("Wait finished before the delete handler returned")
+			}
+			var deleted string
+			if err := g.svc.Store.Reader().QueryRow(`SELECT COALESCE(deleted_at,'') FROM memory_observations WHERE native_message_id='m1'`).Scan(&deleted); err != nil {
+				t.Fatal(err)
+			}
+			if deleted == "" && len(reconciliationNames(t, dir)) == 0 {
+				t.Fatal("the delivered delete was neither applied nor queued")
+			}
+		})
 	}
 }

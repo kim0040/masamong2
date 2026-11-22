@@ -72,6 +72,7 @@ type Gateway struct {
 	cancelPictures    func(channelID string, messageIDs []string) // tests; nil means the service's queue
 	reactForTest      func(context.Context, string, string, string) error
 	recon             messageReconciler // edits and deletes that could not be applied yet (reconciliation.go)
+	changes           changeHandlers    // edit and delete handlers running now; Wait joins them (change_handlers.go)
 	noticeMu          sync.Mutex
 	notices           map[string]time.Time // "user:channel" and "channel" -> last refusal notice
 	// timeout for one Action execution. The reply that follows (the result, or the error card after a
@@ -403,6 +404,7 @@ func (g *Gateway) Wait(timeout time.Duration) bool {
 		if drainDone != nil {
 			<-drainDone
 		}
+		<-g.changes.done() // a delivered edit or delete is applied or queued before the database closes
 		close(done)
 	}()
 	select {
@@ -1820,6 +1822,7 @@ func (g *Gateway) toSomeone(m *discordgo.MessageCreate) bool {
 // message-content intent). Discord also sends updates when a link preview loads; only real edits
 // (EditedTimestamp set) change anything.
 func (g *Gateway) onMessageUpdate(s *discordgo.Session, m *discordgo.MessageUpdate) {
+	defer g.changes.enter()() // counted even while draining: Wait joins it (change_handlers.go)
 	defer crash.Recover(g.log, "discord message update")
 	if m.Message == nil || (!g.cfg.MessageContent && m.GuildID != "") || m.EditedTimestamp == nil || (m.Author != nil && m.Author.Bot) {
 		return
@@ -1856,6 +1859,7 @@ const stateMessages = 100
 // channel's capture setting is now: a message stored while capture was on is still removed. The server
 // log hears of them first, while the stored message still has its author and text.
 func (g *Gateway) onMessageDelete(s *discordgo.Session, m *discordgo.MessageDelete) {
+	defer g.changes.enter()() // counted even while draining: Wait joins it (change_handlers.go)
 	defer recoverReconciliationPanic(g.log, "delete handler", nil)
 	if m.Message == nil || m.ID == "" {
 		return
@@ -1898,6 +1902,7 @@ func (g *Gateway) cancelPictureJobs(channelID string, messageIDs []string) {
 }
 
 func (g *Gateway) onMessageDeleteBulk(s *discordgo.Session, m *discordgo.MessageDeleteBulk) {
+	defer g.changes.enter()()
 	defer recoverReconciliationPanic(g.log, "bulk delete handler", nil)
 	if kept := g.interims.withoutInterims(m.Messages); len(kept) != len(m.Messages) {
 		if len(kept) == 0 {
