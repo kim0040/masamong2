@@ -461,7 +461,8 @@ func (s *Service) consentList(req action.Request) action.Result {
 
 // forgetPerson removes what the console's records kept of a person who withdrew memory consent: the
 // text of their messages in the turn history and the participation log (collected rows hold no text but
-// are about them, so they are deleted), and their reply ratings. The rest of each record (when, which channel, the outcome, the bot's reply) stays. Records written before
+// are about them, so they are deleted), their reply ratings, and their message counts for the activity
+// ranking (activity_counts holds their account id and the name they used). The rest of each record (when, which channel, the outcome, the bot's reply) stays. Records written before
 // speaker references were kept have none and go with retention.turn_detail. These are indexed updates;
 // copies of their messages inside other people's turns are erased by the durable withdrawal job.
 func (s *Service) forgetPerson(ctx context.Context, userID string) error {
@@ -492,6 +493,18 @@ func (s *Service) forgetPerson(ctx context.Context, userID string) error {
 			s.Log.Warn("privacy: record not cleared", "err", err.Error())
 			return err
 		}
+	}
+	// the activity ranking's counts are keyed by the account id itself, not a reference; without this
+	// they would leave only with retention.turn_days, or never with turn_days -1
+	if _, err := s.batched(ctx, func() (int64, error) {
+		result, err := db.DB.ExecContext(ctx, `DELETE FROM activity_counts WHERE rowid IN (SELECT rowid FROM activity_counts WHERE user_id=? LIMIT ?)`, userID, pruneBatch)
+		if err != nil {
+			return 0, err
+		}
+		return result.RowsAffected()
+	}); err != nil {
+		s.Log.Warn("privacy: activity counts not cleared", "err", err.Error())
+		return err
 	}
 	return nil
 }
