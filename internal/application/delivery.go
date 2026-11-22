@@ -1,7 +1,6 @@
 package application
 
 import (
-	"sync"
 	"time"
 
 	"masamong/internal/errclass"
@@ -88,8 +87,6 @@ func (s *Service) NoteDelivery(turnID, guildID, channelID string, rep DeliveryRe
 	}
 }
 
-var deliveryAlertMu sync.Mutex
-
 // NoteDeliveryProblem tells the operators about a delivery failure they can fix. Today that is a missing
 // Discord permission in a channel; it is queued as an alert at most once per channel per
 // deliveryAlertEvery. Other classes are only in the ledger.
@@ -98,8 +95,8 @@ func (s *Service) NoteDeliveryProblem(guildID, channelID string, class errclass.
 		return
 	}
 	s.LogProblem(guildID, channelID, logPermission, "", class)
-	deliveryAlertMu.Lock()
-	defer deliveryAlertMu.Unlock()
+	s.stateLocks.deliveryAlerted.Lock()
+	defer s.stateLocks.deliveryAlerted.Unlock()
 	now := s.Clock.Now().UTC()
 	last := map[string]string{}
 	_, _ = s.kvGet("delivery:alerted", &last)

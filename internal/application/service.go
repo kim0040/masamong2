@@ -219,6 +219,7 @@ type Service struct {
 	runs        runFlags                      // "one at a time" marks of background passes (run_flags.go)
 	drains      batchDrainSet                 // the rooms' background batch drains (memory_blocks.go)
 	adminReady  adminMigration                // whether the admin tables are in the store (admin.go)
+	stateLocks  stateLocks                    // read-modify-write order of admin_state records (state_locks.go)
 	// leftovers are files of a finished restore or an interrupted backup that could not be removed
 	// (CleanDataLeftovers); doctor lists them and the scheduler retries.
 	leftovers atomic.Pointer[[]string]
