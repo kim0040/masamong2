@@ -334,16 +334,7 @@ func (s *Service) applyPracticePrivacy(fn func(*Service) error) error {
 		return nil
 	}
 	root := PracticeRoot(s.DataRoot)
-	var target *Service
-	memStates.Range(func(k, _ any) bool {
-		p := k.(*Service)
-		if p.practice && filepath.Clean(p.DataRoot) == filepath.Clean(root) {
-			target = p
-			return false
-		}
-		return true
-	})
-	if target != nil {
+	if target := openPractices.find(root); target != nil {
 		if _, done, ok := target.beginWork(context.Background()); ok {
 			defer done()
 			return fn(target)

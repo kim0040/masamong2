@@ -214,6 +214,7 @@ type Service struct {
 	summaryRevs roomRevisions                 // edits and deletions seen per room (summaries.go)
 	lifeReqs    lifecycleQueue                // restart/stop requests for the daemon (admin.go)
 	logs        logRing                       // the console's live log (logring.go)
+	mem         memoryState                   // the memory engine of the live configuration (memory_engine.go)
 	// leftovers are files of a finished restore or an interrupted backup that could not be removed
 	// (CleanDataLeftovers); doctor lists them and the scheduler retries.
 	leftovers atomic.Pointer[[]string]
@@ -358,14 +359,15 @@ func (s *Service) Close() error {
 			}
 			q.mu.Unlock()
 		}
-		if v, ok := memStates.Load(s); ok { // a memory rebuild stops at its next stage instead of holding Close
-			st := v.(*memoryState)
-			st.mu.Lock()
-			if st.eng != nil {
-				st.eng.StopReload()
-			}
-			st.mu.Unlock()
+		if s.practice {
+			openPractices.remove(s)
 		}
+		// a memory rebuild stops at its next stage instead of holding Close
+		s.mem.mu.Lock()
+		if s.mem.eng != nil {
+			s.mem.eng.StopReload()
+		}
+		s.mem.mu.Unlock()
 		s.workWG.Wait()
 		s.part.mu.Lock()
 		for _, c := range s.part.chans {
@@ -375,15 +377,12 @@ func (s *Service) Close() error {
 		}
 		s.part.chans = nil
 		s.part.mu.Unlock()
-		if v, ok := memStates.LoadAndDelete(s); ok {
-			st := v.(*memoryState)
-			st.mu.Lock()
-			if st.eng != nil {
-				st.eng.Close()
-				st.eng = nil
-			}
-			st.mu.Unlock()
+		s.mem.mu.Lock()
+		if s.mem.eng != nil {
+			s.mem.eng.Close()
+			s.mem.eng = nil
 		}
+		s.mem.mu.Unlock()
 		s.logs.close()
 		s.mu.Lock()
 		for ch := range s.watchers {

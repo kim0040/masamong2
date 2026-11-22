@@ -26,7 +26,7 @@ import (
 	"masamong/internal/storage"
 )
 
-// memoryState caches the engine per config revision (models/settings come from config).
+// memoryState caches the engine per config revision (models/settings come from config; Service.mem).
 type memoryState struct {
 	mu  sync.Mutex
 	eng *engine.Engine
@@ -62,12 +62,7 @@ func memoryConfigKey(doc config.Document) string {
 	return string(raw)
 }
 
-var memStates sync.Map // *Service → *memoryState
-
-func (s *Service) memState() *memoryState {
-	v, _ := memStates.LoadOrStore(s, &memoryState{})
-	return v.(*memoryState)
-}
+func (s *Service) memState() *memoryState { return &s.mem }
 
 func modelOf(d config.Document, role string) (config.Model, bool) {
 	m, ok := d.Models[role]

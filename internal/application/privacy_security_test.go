@@ -333,7 +333,7 @@ func TestPracticeCloseReleasesWorkersIndexesAndGlobalState(t *testing.T) {
 		if e.Index() != nil || s.Store.DB.Ping() == nil || s.Store.Read.Ping() == nil {
 			t.Fatal("store/index remains open")
 		}
-		for _, m := range []*sync.Map{&memStates, &resyncQueues} {
+		for _, m := range []*sync.Map{&resyncQueues} {
 			if _, ok := m.Load(s); ok {
 				t.Fatal("service retained in global state")
 			}

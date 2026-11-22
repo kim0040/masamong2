@@ -1,6 +1,8 @@
 package application
 
 import (
+	"context"
+	"log/slog"
 	"testing"
 
 	"masamong/internal/config"
@@ -87,9 +89,42 @@ func TestTwoServicesKeepTheirOwnState(t *testing.T) {
 		}
 	})
 
+	t.Run("memory engine", func(t *testing.T) {
+		ea, err := a.MemoryEngine()
+		if err != nil {
+			t.Fatal(err)
+		}
+		eb, err := b.MemoryEngine()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ea == eb {
+			t.Fatal("two services share one memory engine")
+		}
+	})
+
 	t.Run("tool usage", func(t *testing.T) {
 		if a.toolUsage() == nil || a.toolUsage() == b.toolUsage() || a.toolUsage() != a.toolUsage() {
 			t.Fatal("each service opens and keeps its own tool usage counter")
 		}
 	})
+}
+
+// The practice instance is found by its folder while it is open, and forgotten when it closes, so the
+// real instance's deletions reach it and a closed one is not kept alive.
+func TestPracticeRegistryFollowsOpenAndClose(t *testing.T) {
+	s := privacyService(t)
+	p, err := OpenPractice(context.Background(), s.DataRoot, "en", slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := openPractices.find(PracticeRoot(s.DataRoot)); got != p {
+		t.Fatalf("open practice instance not found: %p, want %p", got, p)
+	}
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := openPractices.find(PracticeRoot(s.DataRoot)); got != nil {
+		t.Fatal("a closed practice instance is still registered")
+	}
 }
