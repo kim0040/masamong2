@@ -360,39 +360,6 @@ type warningState struct {
 // warningKey is the area and kind a warning's level belongs to.
 func warningKey(w kma.Warning) string { return w.RegionCode + "|" + w.Kind }
 
-// legacySent is the delivery migration rule: an older build announced what it stored to every room,
-// so a warning it stored that is still in force at the same level counts as told to the rooms that
-// watch it now. Nothing else counts as told.
-func legacySent(raw []byte, current warningSnapshot, channels []disasterChannel, marine bool) map[string]map[string]string {
-	var old map[string]kma.Warning
-	if json.Unmarshal(raw, &old) != nil {
-		return nil
-	}
-	sent := map[string]map[string]string{}
-	for _, w := range old {
-		if w.Kind == "해일" { // older JSON snapshots used the API's short name
-			w.Kind = "O"
-		}
-		k := warningKey(w)
-		cur, ok := current[k]
-		if !ok || cur.Level != w.Level || (!marine && strings.HasPrefix(cur.RegionCode, "S")) {
-			continue
-		}
-		for _, ch := range channels {
-			if ch.watches(cur) {
-				if sent[k] == nil {
-					sent[k] = map[string]string{}
-				}
-				sent[k][ch.Channel] = cur.Level
-			}
-		}
-	}
-	if len(sent) == 0 {
-		return nil
-	}
-	return sent
-}
-
 // Lower levels are cumulative. Other advisories and warnings require level 5.
 var warningWatchLevels = map[string]map[string]int{
 	"N": {"2": 2, "3": 2},            // 지진해일
@@ -505,7 +472,9 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 	if seen && (json.Unmarshal(raw, &stored) != nil || stored.Version != warningStateVersion) {
 		// an older build's set: what it left out may have been in force for hours, so nothing is news yet
 		s.Log.Info("disaster alerts: older warning state replaced; what is in force now is the starting point", "active", len(current))
-		return 0, s.kvSet("disaster:wrn_active", warningState{Version: warningStateVersion, Active: current, Sent: legacySent(raw, current, channels, cfg.Marine)})
+		// It also kept no record of which rooms it told, so nothing in force now is counted as told: those
+		// warnings end without a lift, as the starting point of a first check does.
+		return 0, s.kvSet("disaster:wrn_active", warningState{Version: warningStateVersion, Active: current})
 	}
 	before := stored.Active
 	if before == nil {

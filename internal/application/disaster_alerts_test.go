@@ -460,17 +460,24 @@ func TestDisasterTickReadsOneConfigRevision(t *testing.T) {
 
 // The first check after an upgrade from a build that stored a bare, filtered map announces nothing,
 // whatever the rooms are set to: the old set left out advisories that may have been in force for
-// hours. The set is then stored with its version, and a restart repeats nothing. A warning the older
-// build stored (and so announced) still gets its lift in the rooms that watch it; one it never stored
-// does not.
+// hours. The set is then stored with its version, and a restart repeats nothing. The older build kept
+// no record of which rooms it told (its own first check stored what was in force and sent nothing), so
+// whatever is in force at the upgrade ends without a lift, even what it stored; a later change is news.
+// The stored rows are what v1.4.0 wrote.
 func TestDisasterOlderWarningStateIsAStartingPoint(t *testing.T) {
-	for name, legacy := range map[string]string{
-		"empty":       `{}`,
-		"warning":     `{"L1|R|3":{"RegionCode":"L1","Region":"경산시","Kind":"R","KindName":"호우","Level":"3","LevelName":"경보"}}`,
-		"storm surge": `{"L2|해일|3":{"RegionCode":"L2","Region":"포항시","Kind":"해일","KindName":"해일","Level":"3","LevelName":"경보"}}`,
-		"no version":  `{"active":{}}`,
+	const rain = `{"L1|R|3":{"RegionCode":"L1","Region":"경산시","ParentCode":"L1000000","Parent":"경상북도","Kind":"R","KindName":"호우","Level":"3","LevelName":"경보","Command":"발표","Announced":"202610011100","Effective":"202610011200"}}`
+	const surge = `{"L2|해일|3":{"RegionCode":"L2","Region":"포항시","ParentCode":"L1000000","Parent":"경상북도","Kind":"해일","KindName":"해일","Level":"3","LevelName":"경보","Command":"발표","Announced":"202610011100","Effective":"202610011200"}}`
+	for _, tc := range []struct {
+		name, legacy string
+		replaced     bool // the feed's warning took effect again after the stored one
+	}{
+		{"empty", `{}`, false},
+		{"warning", rain, false},
+		{"warning replaced since", rain, true},
+		{"storm surge", surge, false},
+		{"no version", `{"active":{}}`, false},
 	} {
-		t.Run(name, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			svc := setupSvc(t)
 			feed := &kmaFeed{}
 			pointAt(t, svc, "kma", feed.server(t).URL, "KMA_TEST_KEY", "k")
@@ -483,14 +490,20 @@ func TestDisasterOlderWarningStateIsAStartingPoint(t *testing.T) {
 				d.Guilds["g1"] = g
 			})
 			now := time.Date(2026, 7, 12, 0, 0, 0, 0, time.UTC)
-			if _, err := svc.Store.DB.Exec(`INSERT INTO admin_state(k,v,updated_at) VALUES(?,?,?)`, "disaster:wrn_active", legacy, now.Format(time.RFC3339)); err != nil {
+			if _, err := svc.Store.DB.Exec(`INSERT INTO admin_state(k,v,updated_at) VALUES(?,?,?)`, "disaster:wrn_active", tc.legacy, now.Format(time.RFC3339)); err != nil {
 				t.Fatal(err)
 			}
+			rainNow := warning("L1", "경상북도", "경산시", "호우", "경보", "발표")
+			if tc.replaced {
+				rainNow = strings.Replace(rainNow, "202610011200", "202610011210", 1)
+			}
+			feed.mu.Lock()
 			feed.warnings = []string{
-				warning("L1", "경상북도", "경산시", "호우", "경보", "발표"),
+				rainNow,
 				warning("L1", "경상북도", "경산시", "강풍", "주의", "발표"),
 				warning("L2", "경상북도", "포항시", "해일  ", "경보    ", "발표"),
 			}
+			feed.mu.Unlock()
 			gw := &postingGateway{}
 			svc.Discord = gw
 			svc.Clock = clock.Fixed{T: now}
@@ -499,8 +512,8 @@ func TestDisasterOlderWarningStateIsAStartingPoint(t *testing.T) {
 				t.Fatalf("the first check after the upgrade announced %q", gw.posts)
 			}
 			var n int
-			if err := svc.Store.DB.QueryRow(`SELECT count(*) FROM admin_state WHERE k='disaster:wrn_active' AND json_extract(v,'$.version')=2 AND json_extract(v,'$.active."L2|O".Kind')='O' AND json_extract(v,'$.active."L1|W".Level')='2'`).Scan(&n); err != nil || n != 1 {
-				t.Fatalf("the set in force was not stored with its version: %d %v", n, err)
+			if err := svc.Store.DB.QueryRow(`SELECT count(*) FROM admin_state WHERE k='disaster:wrn_active' AND json_extract(v,'$.version')=2 AND json_extract(v,'$.active."L2|O".Kind')='O' AND json_extract(v,'$.active."L1|W".Level')='2' AND json_extract(v,'$.sent') IS NULL`).Scan(&n); err != nil || n != 1 {
+				t.Fatalf("the set in force was not stored with its version and without deliveries: %d %v", n, err)
 			}
 			if err := svc.Close(); err != nil {
 				t.Fatal(err)
@@ -515,13 +528,14 @@ func TestDisasterOlderWarningStateIsAStartingPoint(t *testing.T) {
 			if len(gw.posts) != 0 {
 				t.Fatalf("repeated after a restart: %q", gw.posts)
 			}
-			feed.warnings = append(feed.warnings[1:], warning("L1", "경상북도", "경산시", "대설", "주의", "발표"))
+			// everything in force at the upgrade ends, and a new advisory is issued
+			feed.mu.Lock()
+			feed.warnings = []string{warning("L1", "경상북도", "경산시", "대설", "주의", "발표")}
+			feed.mu.Unlock()
 			reopened.Clock = clock.Fixed{T: now.Add(10 * time.Minute)}
 			application.DisasterTickForTest(reopened, context.Background())
-			got := strings.Join(gw.posts, "\n")
-			wantLift := name == "warning"
-			if len(gw.posts) != map[bool]int{false: 1, true: 2}[wantLift] || !strings.Contains(got, "c1|⚠️ 대설주의보 발표|경산시") || strings.Contains(got, "c1|✅ 호우경보 해제|경산시") != wantLift {
-				t.Fatalf("a change after the starting point is news, a lift only where the older build announced it: %q", gw.posts)
+			if len(gw.posts) != 1 || !strings.HasPrefix(gw.posts[0], "c1|⚠️ 대설주의보 발표|경산시") {
+				t.Fatalf("a change after the starting point is news, and nothing in force at the upgrade gets a lift: %q", gw.posts)
 			}
 		})
 	}
