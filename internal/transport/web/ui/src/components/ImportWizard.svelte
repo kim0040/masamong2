@@ -8,6 +8,7 @@
   import { motionAllowed } from '../lib/prefs.svelte'
   import { num, bytes, usd, duration } from '../lib/format'
   import { period, roomFromFile, blockHref, batchOffer, effectiveMode, type PrepareMode } from '../lib/blocks'
+  import { prepareStart } from '../lib/prepareresult'
   import { toast } from '../lib/toast.svelte'
   import Dialog from './Dialog.svelte'
   import Button from './Button.svelte'
@@ -177,9 +178,10 @@
     const r = await call('memory.blocks.prepare', { source_room: room, background: true, budget_usd: String(b), mode: chosen })
     starting = false
     if (!r.ok) return void (err = r.error?.message ?? t('common.failed'))
-    if (r.output.batch_resumed) toast('info', t('blocks.batch_resumed'), label)
+    const started = prepareStart(r.output)
+    if (started.key === 'blocks.batch_resumed' || started.key === 'blocks.already_running') toast(started.tone, t(started.key), label)
     jobStarted = true
-    batchStarted = r.output.mode === 'batch'
+    batchStarted = started.batch
     step = channels.length ? 3 : 4
   }
   function skipPrepare() {
