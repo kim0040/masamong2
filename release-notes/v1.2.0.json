@@ -1,0 +1,16 @@
+{
+  "version": "v1.2.0",
+  "date": "2026-11-12",
+  "user": {
+    "en": [],
+    "ko": []
+  },
+  "operator": {
+    "en": [
+      "Release notes were not recorded for this version."
+    ],
+    "ko": [
+      "이 버전의 릴리스 노트는 기록되어 있지 않습니다."
+    ]
+  }
+}
