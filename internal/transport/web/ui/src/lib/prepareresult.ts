@@ -16,3 +16,7 @@ export function prepareStart(out: { batch_resumed?: boolean; already_running?: b
   if (out?.mode === 'batch') return { tone: 'ok', key: 'blocks.batch_started', batch: true }
   return { tone: 'ok', key: 'blocks.prepare_started', batch: false }
 }
+
+/** The answer says something the person may not expect (a provider batch picked up again, a job that was already
+ * running); a plain start needs no toast where the screen moves on by itself (the import wizard's next step). */
+export const prepareIsNews = (s: PrepareStart): boolean => s.key === 'blocks.batch_resumed' || s.key === 'blocks.already_running'
