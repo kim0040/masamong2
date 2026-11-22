@@ -19,6 +19,7 @@ import (
 	"masamong/internal/chat"
 	"masamong/internal/config"
 	"masamong/internal/memory/engine"
+	"masamong/internal/testutil"
 	"masamong/locales"
 )
 
@@ -413,7 +414,7 @@ func TestInterimPostLandingAfterClearDeletesItself(t *testing.T) {
 	go func() { ip.clear(); close(cleared) }()
 	// clear has parked on the post in flight when its state is cleared; from there it can only
 	// return once the post has landed
-	waitFor(t, 3*time.Second, func() bool {
+	testutil.WaitFor(t, 3*time.Second, "the interim to reach the cleared state", func() bool {
 		ip.mu.Lock()
 		defer ip.mu.Unlock()
 		return ip.state == interimCleared
@@ -765,7 +766,7 @@ func TestInterimAmbiguousSendIsDeletedWhenTheCreateArrives(t *testing.T) {
 			t.Fatalf("the lost send deleted early: %+v", log.list())
 		}
 		g.onMessage(g.sess, botReplyTo(m.ChannelID, m.ID, "late", line(g, m)))
-		waitFor(t, 3*time.Second, func() bool {
+		testutil.WaitFor(t, 3*time.Second, "the late line to be deleted", func() bool {
 			return slices.Equal(log.shape(interimTexts(g, m)), []string{"POST interim", "DELETE late"})
 		})
 		if got := log.shape(interimTexts(g, m)); !slices.Equal(got, []string{"POST interim", "DELETE late"}) {
@@ -875,7 +876,7 @@ func TestBackfillDoesNotCaptureAnInterimLine(t *testing.T) {
 // waitForShape waits until the fake Discord has seen the calls want (deleteInterimLine runs on a goroutine).
 func waitForShape(t *testing.T, g *Gateway, log *restLog, m *discordgo.MessageCreate, want []string) {
 	t.Helper()
-	waitFor(t, 3*time.Second, func() bool {
+	testutil.WaitFor(t, 3*time.Second, "the REST calls "+strings.Join(want, ", "), func() bool {
 		return slices.Equal(log.shape(interimTexts(g, m)), want)
 	})
 }
@@ -1004,7 +1005,7 @@ func TestInterimSameTextTurnsDeleteTheirOwnLines(t *testing.T) {
 		slices.Sort(out)
 		return out
 	}
-	waitFor(t, 3*time.Second, func() bool { return len(deletes()) >= 2 })
+	testutil.WaitFor(t, 3*time.Second, "both lines to be deleted", func() bool { return len(deletes()) >= 2 })
 	if got := deletes(); !slices.Equal(got, []string{"first", "second"}) {
 		t.Fatalf("deleted %q", got)
 	}
@@ -1030,7 +1031,7 @@ func TestInterimBadGatewayRetriesShareOneNonce(t *testing.T) {
 		}
 	}
 	g.onMessage(g.sess, botReplyTo(m.ChannelID, m.ID, "made", messages.T(g.noticeLocale(m), "discord.chat.interim.1")))
-	waitFor(t, 3*time.Second, func() bool {
+	testutil.WaitFor(t, 3*time.Second, "the created line to be deleted", func() bool {
 		evs := log.list()
 		return evs[len(evs)-1].Method == http.MethodDelete
 	})

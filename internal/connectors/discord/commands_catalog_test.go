@@ -13,6 +13,7 @@ import (
 
 	"masamong/internal/docnames"
 	"masamong/internal/i18n"
+	"masamong/internal/testutil"
 	"masamong/locales"
 )
 
@@ -141,7 +142,7 @@ func TestSlashNamesInCatalogs(t *testing.T) {
 // with the commands it actually registers: a new slash command is checked in docs, and a renamed or
 // prefix-only one stops being treated as a slash name.
 func TestRegistryNamesMatchCommands(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join(findRepoRoot(t), "internal/connectors/discord/commands.go"))
+	raw, err := os.ReadFile(filepath.Join(testutil.RepoRoot(t), "internal/connectors/discord/commands.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
