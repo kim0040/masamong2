@@ -824,8 +824,8 @@ type ToolCommand struct {
 	FirstParam string
 }
 
-// PrefixTable resolves "!word" with config overrides: configured aliases replace a built-in
-// command's default words, and operator tools with aliases become commands whose text fills their
+// PrefixTable resolves "!word" with config overrides: configured aliases replace the default words of the
+// first built-in command on that Action, and operator tools with aliases become commands whose text fills their
 // first parameter. The zero value uses the defaults only.
 type PrefixTable struct {
 	overrides map[string][]string // action → aliases
@@ -847,11 +847,15 @@ func NewPrefixTable(tc []ToolCommand) PrefixTable {
 
 func (t PrefixTable) byAlias(alias string) (Command, bool) {
 	alias = strings.ToLower(strings.TrimSpace(alias))
+	// configured words are the tool's own: they replace the words of the first command on that Action only, so
+	// the other commands on it (!이번달운세 and !별자리 on fortune.query) keep theirs
+	overridden := map[string]bool{}
 	for _, c := range Commands() {
 		words := c.Aliases
-		if o, ok := t.overrides[c.Action]; ok {
+		if o, ok := t.overrides[c.Action]; ok && !overridden[c.Action] {
 			words = o
 		}
+		overridden[c.Action] = true
 		for _, a := range words {
 			if strings.ToLower(a) == alias {
 				return c, true
