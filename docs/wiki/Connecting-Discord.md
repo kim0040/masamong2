@@ -95,6 +95,7 @@ masamong channels configure --guild_id 123456789 --id 987654321 --respond mentio
 | `/remind`, `/reminders` | Reminders in plain language (confirmed with a button), list and cancel |
 | `/privacy` | See, give or withdraw consent for memory, fortunes, notices and chiming in |
 | `/mysettings` | Your weather place, time zone, quiet hours, language |
+| `/mymemory`, `/forgetme` | What the bot remembers about you in this server (only you see the answer), and a preview of it with a confirm button to delete it |
 | `/updates` | What changed in the version the bot runs (only the part that matters to people using it), `previous` for the version before, `subscribe` / `unsubscribe` / `status` for a private message when the bot moves to a new release |
 | `/admin` | Run the bot in this room: pause and resume, reply mode, collecting, chiming in, blocking people in this server (visible to server managers only) |
 | `/status` | Bot status (visible only to you) |

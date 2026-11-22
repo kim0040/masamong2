@@ -473,7 +473,7 @@ Storage settings needed before the database opens. Only SQLite is used now (`bac
 |---|---|
 | `MASAMONG_DATA_ROOT` | Default data folder |
 | `MASAMONG_TRY_ROOT` | The separate test data folder for `make try` / `start-test.command` (default `~/.masamong-try`) |
-| `MASAMONG_OPENROUTER_KEY`, `MASAMONG_GEMINI_KEY`, `MASAMONG_OPENAI_KEY`, `MASAMONG_COMETAPI_KEY`, `MASAMONG_NANOGPT_KEY` | Model keys (default references of providers added in the console) |
+| `MASAMONG_OPENROUTER_KEY`, `MASAMONG_GEMINI_KEY`, `MASAMONG_OPENAI_KEY`, `MASAMONG_ANTHROPIC_KEY`, `MASAMONG_COMETAPI_KEY`, `MASAMONG_NANOGPT_KEY`, `MASAMONG_OPENGATEWAY_KEY` | Model keys (default references of providers added in the console) |
 | `MASAMONG_DISCORD_TOKEN` | Discord bot token (default reference) |
 | `MASAMONG_KMA_KEY`, `MASAMONG_FINNHUB_KEY`, `MASAMONG_EXCHANGERATE_KEY` | Weather and market data keys |
 | `MASAMONG_TAVILY_KEY`, `MASAMONG_LINKUP_KEY`, `MASAMONG_EXA_KEY`, `MASAMONG_SERPER_KEY`, `MASAMONG_BRAVE_KEY`, `MASAMONG_TINYFISH_KEY`, `MASAMONG_KAKAO_KEY`, `MASAMONG_JINA_KEY` | Web search and link reading keys (Jina works without one) |
