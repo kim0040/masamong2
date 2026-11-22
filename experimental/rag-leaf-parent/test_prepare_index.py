@@ -57,7 +57,7 @@ class PrepareIndexTests(unittest.TestCase):
         self.data = Path(self.tmp.name)
         self.cfg = dict(CFG, data_dir=str(self.data))
         self.prev_cfg_fn = EI.load_config
-        self.prev_data = EI.DATA
+        self.prev_data = EI.context().paths.data
         self.prev_env = {k: os.environ.get(k) for k in ("MASAMONG_SANDBOX_DATA", "MASAMONG_SANDBOX_CONFIG")}
         os.environ.pop("MASAMONG_SANDBOX_DATA", None)
         os.environ.pop("MASAMONG_SANDBOX_CONFIG", None)

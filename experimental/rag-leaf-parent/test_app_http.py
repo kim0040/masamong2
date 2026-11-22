@@ -54,7 +54,7 @@ class AppHttpTests(unittest.TestCase):
         cls.data = Path(cls.tmp.name)
         cls.cfg = dict(CFG, data_dir=str(cls.data))
         cls.prev_cfg_fn = EI.load_config
-        cls.prev_data = EI.DATA
+        cls.prev_data = EI.context().paths.data
         cls.prev_index = app.INDEX
         cls.prev_env = {k: os.environ.get(k) for k in ("MASAMONG_SANDBOX_DATA", "MASAMONG_SANDBOX_CONFIG", "EVAL_SECRETS")}
         os.environ.pop("MASAMONG_SANDBOX_DATA", None)

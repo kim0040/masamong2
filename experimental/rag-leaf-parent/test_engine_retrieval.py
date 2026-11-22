@@ -297,7 +297,7 @@ class EmbedModelBindingTests(unittest.TestCase):
         index = build_index(with_summaries=False)
         with tempfile.TemporaryDirectory() as td:
             data = Path(td)
-            saved = (EI.DATA, dict(E.__dict__))
+            saved = (EI.context().paths.data, dict(E.__dict__))
             try:
                 E._bind_data_dir(data)
                 (data / "meta.json").write_text(

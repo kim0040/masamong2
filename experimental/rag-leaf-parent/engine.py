@@ -4,24 +4,23 @@ The code lives in `engine_index` (config, paths, ledger, prepare_index, load_ind
 (intent, candidates, fusion, rerank, retrieve) and `engine_turn` (prompt, sessions, chat, chat_stream).
 Reading a name here gives the owner module's current value. Assigning to a name here does NOT reach the
 owner: a test that fakes `RerankClient`, `load_secrets` or `retrieve` patches the module that uses it
-(`engine_retrieve`, `engine_turn`), not this one. The data-dir paths and the prepare state are read live
-through `__getattr__` because `_bind_data_dir()` rebinds them in `engine_index`.
+(`engine_retrieve`, `engine_turn`), not this one. The data-dir paths and the prepare state are not copied
+here: they live in `engine_index.context()` and are read through `__getattr__`.
 """
 
 from __future__ import annotations
 
 from engine_index import (  # noqa: F401
-    _repo_root,
     ROOT,
     EVAL,
     HERE,
     _bind_data_dir,
+    context,
     SUMMARY_PROMPT,
     ThreadSafeLexicalIndex,
     PlaygroundError,
     load_config,
     _maybe_rebind_data_from_env,
-    _LEDGER_LOCK,
     load_ledger,
     save_ledger,
     apply_client_usage,
@@ -312,30 +311,32 @@ from prepare_progress import (  # noqa: F401
 import engine_index  # noqa: E402
 import engine_retrieve  # noqa: E402
 
-_LIVE = {
-    "DATA": engine_index,
-    "MESSAGES_PATH": engine_index,
-    "LEAVES_PATH": engine_index,
-    "BASELINE_PATH": engine_index,
-    "LEAF_VECS_PATH": engine_index,
-    "BASELINE_VECS_PATH": engine_index,
-    "SUMMARIES_PATH": engine_index,
-    "SUMMARY_VECS_PATH": engine_index,
-    "META_PATH": engine_index,
-    "LEDGER_PATH": engine_index,
-    "CKPT_DIR": engine_index,
-    "CKPT_STATE_PATH": engine_index,
-    "PROGRESS_PATH": engine_index,
-    "_prepare_summary_on": engine_index,
-    "_prepare_cost_usd": engine_index,
-    "LEXICAL_LIMIT": engine_retrieve,
-    "DENSE_LIMIT": engine_retrieve,
+# The old module globals. The data-dir paths and the prepare state now live in `engine_index.context()` and
+# change when the data dir is rebound, so they are read from there each time instead of copied.
+_PATH_FIELDS = {
+    "DATA": "data",
+    "MESSAGES_PATH": "messages",
+    "LEAVES_PATH": "leaves",
+    "BASELINE_PATH": "baseline",
+    "LEAF_VECS_PATH": "leaf_vecs",
+    "BASELINE_VECS_PATH": "baseline_vecs",
+    "SUMMARIES_PATH": "summaries",
+    "SUMMARY_VECS_PATH": "summary_vecs",
+    "META_PATH": "meta",
+    "LEDGER_PATH": "ledger",
+    "CKPT_DIR": "ckpt_dir",
+    "CKPT_STATE_PATH": "ckpt_state",
+    "PROGRESS_PATH": "progress",
 }
+_PREPARE_FIELDS = {"_prepare_summary_on": "summary_on", "_prepare_cost_usd": "cost_usd"}
 
 
 def __getattr__(name: str):
-    """The paths and prepare state change when the data dir is rebound; always read the owner."""
-    owner = _LIVE.get(name)
-    if owner is None:
-        raise AttributeError(f"module 'engine' has no attribute {name!r}")
-    return getattr(owner, name)
+    ctx = engine_index.context()
+    if name in _PATH_FIELDS:
+        return getattr(ctx.paths, _PATH_FIELDS[name])
+    if name in _PREPARE_FIELDS:
+        return getattr(ctx.prepare, _PREPARE_FIELDS[name])
+    if name in ("LEXICAL_LIMIT", "DENSE_LIMIT"):
+        return getattr(engine_retrieve, name)
+    raise AttributeError(f"module 'engine' has no attribute {name!r}")

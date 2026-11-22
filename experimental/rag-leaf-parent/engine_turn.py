@@ -321,7 +321,7 @@ def _log_context(
             "server_run_id": SERVER_RUN_ID,
             "dataset": index.cfg.get("experiment"),
             "collection": index.cfg.get("collection"),
-            "data_dir": engine_index.DATA.name,
+            "data_dir": engine_index.context().paths.data.name,
             "conversation_id": conversation_id or None,
             "channel_id": b.get("channel_id"),
         }
@@ -432,7 +432,7 @@ def _prepare_bot_turn(
     time_reference: RetrievalTimeReference | None = None,
 ) -> dict[str, Any]:
     runtime = ensure_runtime(
-        engine_index.DATA, cfg=index.cfg, indexed_rooms=_indexed_rooms(index), blocks=index.blocks
+        engine_index.context().paths.data, cfg=index.cfg, indexed_rooms=_indexed_rooms(index), blocks=index.blocks
     )
     cid = str(runtime.get("active_channel_id") or channel_id_from_room(_indexed_rooms(index)[0]))
     channel = get_channel(runtime, cid)
@@ -524,7 +524,7 @@ def _prepare_bot_turn(
             execute_named_tool(
                 name,
                 step.get("parameters"),
-                data_dir=engine_index.DATA,
+                data_dir=engine_index.context().paths.data,
                 index_meta=index.meta,
                 tool_defaults=tool_defaults,
             )
@@ -652,10 +652,10 @@ def _load_session(
     conversation_id: str | None,
 ) -> tuple[str, str, list[dict[str, str]], str]:
     runtime = ensure_runtime(
-        engine_index.DATA, cfg=index.cfg, indexed_rooms=_indexed_rooms(index), blocks=index.blocks
+        engine_index.context().paths.data, cfg=index.cfg, indexed_rooms=_indexed_rooms(index), blocks=index.blocks
     )
     channel_id = str(runtime.get("active_channel_id") or channel_id_from_room(_indexed_rooms(index)[0]))
-    conv = get_conversation(engine_index.DATA, channel_id, conversation_id)
+    conv = get_conversation(engine_index.context().paths.data, channel_id, conversation_id)
     keep = _session_keep(index.cfg)
     limit = _session_char_limit(index.cfg)
     if needs_compact(conv, keep=keep, char_limit=limit):
@@ -670,7 +670,7 @@ def _load_session(
             )
 
         conv = compact(conv, keep=keep, char_limit=limit, summarizer=_sum)
-        put_conversation(engine_index.DATA, channel_id, conv)
+        put_conversation(engine_index.context().paths.data, channel_id, conv)
     summary, history = history_for_llm(conv, keep=keep)
     return channel_id, str(conv.get("id") or ""), history, summary
 
@@ -699,7 +699,7 @@ def _persist_session(
         )
 
     return append_turn(
-        engine_index.DATA,
+        engine_index.context().paths.data,
         channel_id,
         conversation_id,
         user=user,
@@ -1028,7 +1028,7 @@ def _run_turn(
         # a cut stream is reported to the caller as an `error` event; every other failure is raised
         cut = stream and isinstance(exc, StreamError)
         append_debug_error(
-            engine_index.DATA,
+            engine_index.context().paths.data,
             query=message,
             ranking=rank_mode,
             error=exc,
@@ -1093,7 +1093,7 @@ def _run_turn(
                 message=message, answer=answer_text, speaker=speaker, debug_id=debug_id,
             )
         append_debug_turn(
-            engine_index.DATA,
+            engine_index.context().paths.data,
             debug_id=debug_id,
             query=message,
             ranking=rank_mode,
@@ -1102,7 +1102,7 @@ def _run_turn(
         )
     else:
         debug_id = append_debug_turn(
-            engine_index.DATA,
+            engine_index.context().paths.data,
             query=message,
             ranking=rank_mode,
             hits=hits,
@@ -1215,14 +1215,14 @@ def status_payload(index: IndexBundle | None) -> dict[str, Any]:
         "session_spent_usd": ledger["spent_usd"],
         "session_remaining_usd": remaining_session_budget(cfg),
         "warning": "Discord 봇 흉내 샌드박스. 실 토큰/발송 없음. 인덱스가 있는 채널만 활성.",
-        "debug_turns": str(engine_index.DATA / "debug_turns.jsonl"),
-        "debug_dumps": str(engine_index.DATA / "debug_dumps"),
+        "debug_turns": str(engine_index.context().paths.data / "debug_turns.jsonl"),
+        "debug_dumps": str(engine_index.context().paths.data / "debug_dumps"),
         "prepare": prepare_status_payload(),
         "run": {
             "server_run_id": SERVER_RUN_ID,
             "dataset": cfg.get("experiment"),
             "collection": cfg.get("collection"),
-            "data_dir": engine_index.DATA.name,
+            "data_dir": engine_index.context().paths.data.name,
         },
     }
     embedder = getattr(index, "query_embedder", None)
@@ -1244,7 +1244,7 @@ def status_payload(index: IndexBundle | None) -> dict[str, Any]:
         }
         return base
     runtime = ensure_runtime(
-        engine_index.DATA, cfg=cfg, indexed_rooms=_indexed_rooms(index), blocks=index.blocks
+        engine_index.context().paths.data, cfg=cfg, indexed_rooms=_indexed_rooms(index), blocks=index.blocks
     )
     active = get_channel(runtime, str(runtime.get("active_channel_id") or ""))
     base["bot"] = {

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import tempfile
 import threading
 import time
@@ -16,19 +15,12 @@ from typing import Any
 import numpy as np
 
 
-def _repo_root() -> Path:
-    here = Path(__file__).resolve().parent
-    for cand in [here, *here.parents]:
-        if (cand / "tools" / "evaluation").is_dir() and (cand / "docs").is_dir():
-            return cand
-    return here.parents[1]
+import sandbox_env
+from engine_context import EngineContext, SandboxPaths
 
-
-ROOT = _repo_root()
-EVAL = ROOT / "tools" / "evaluation"
-os.environ.setdefault("RAW_CORPUS_ROOT", str(ROOT / ".private" / "raw-corpus"))
-os.environ.setdefault("EVAL_SECRETS", str(ROOT / ".private" / "eval" / "secrets.env"))
-sys.path.insert(0, str(EVAL))
+sandbox_env.ensure()
+ROOT = sandbox_env.ROOT
+EVAL = sandbox_env.EVAL
 
 from corpus import iter_observations  # noqa: E402
 from lexical import (  # noqa: E402
@@ -88,39 +80,18 @@ from prepare_progress import (  # noqa: E402
 )
 
 HERE = Path(__file__).resolve().parent
-DATA = HERE / "data"
-MESSAGES_PATH = DATA / "messages.json"
-LEAVES_PATH = DATA / "leaves.json"
-BASELINE_PATH = DATA / "baseline_windows.json"
-LEAF_VECS_PATH = DATA / "leaf_vecs.npy"
-BASELINE_VECS_PATH = DATA / "baseline_vecs.npy"
-SUMMARIES_PATH = DATA / "summaries.json"
-SUMMARY_VECS_PATH = DATA / "summary_vecs.npy"
-META_PATH = DATA / "meta.json"
-LEDGER_PATH = DATA / "session_ledger.json"
-CKPT_DIR = DATA / "ckpt"
-CKPT_STATE_PATH = CKPT_DIR / "state.json"
-PROGRESS_PATH = DATA / "prepare_progress.json"
+
+_CTX = EngineContext(SandboxPaths.under(HERE / "data"))
+
+
+def context() -> EngineContext:
+    """The paths in use and the prepare state; read it when you need it, do not keep the paths."""
+    return _CTX
 
 
 def _bind_data_dir(data: Path) -> None:
     """RAG-ified artifacts live under test-sandbox/data, not the product DB."""
-    global DATA, MESSAGES_PATH, LEAVES_PATH, BASELINE_PATH, LEAF_VECS_PATH
-    global BASELINE_VECS_PATH, SUMMARIES_PATH, SUMMARY_VECS_PATH, META_PATH
-    global LEDGER_PATH, CKPT_DIR, CKPT_STATE_PATH, PROGRESS_PATH
-    DATA = Path(data)
-    MESSAGES_PATH = DATA / "messages.json"
-    LEAVES_PATH = DATA / "leaves.json"
-    BASELINE_PATH = DATA / "baseline_windows.json"
-    LEAF_VECS_PATH = DATA / "leaf_vecs.npy"
-    BASELINE_VECS_PATH = DATA / "baseline_vecs.npy"
-    SUMMARIES_PATH = DATA / "summaries.json"
-    SUMMARY_VECS_PATH = DATA / "summary_vecs.npy"
-    META_PATH = DATA / "meta.json"
-    LEDGER_PATH = DATA / "session_ledger.json"
-    CKPT_DIR = DATA / "ckpt"
-    CKPT_STATE_PATH = CKPT_DIR / "state.json"
-    PROGRESS_PATH = DATA / "prepare_progress.json"
+    _CTX.paths = SandboxPaths.under(data)
 
 
 _bind_data_dir(resolve_sandbox_data_dir(load_local_config()))
@@ -157,7 +128,7 @@ def load_config() -> dict[str, Any]:
 
 
 def _maybe_rebind_data_from_env(cfg: dict[str, Any]) -> None:
-    """Rebind only when an explicit override is set so tests can keep a temp DATA."""
+    """Rebind only when an explicit override is set so tests can keep a temp data dir."""
 
     if str(os.environ.get("MASAMONG_SANDBOX_DATA") or "").strip() or str(
         os.environ.get("MASAMONG_SANDBOX_CONFIG") or ""
@@ -165,29 +136,27 @@ def _maybe_rebind_data_from_env(cfg: dict[str, Any]) -> None:
         _bind_data_dir(resolve_sandbox_data_dir(cfg))
 
 
-_LEDGER_LOCK = threading.Lock()
-
-
 def load_ledger() -> dict[str, float]:
-    if not LEDGER_PATH.exists():
-        return {"spent_usd": 0.0}
-    raw = json.loads(LEDGER_PATH.read_text(encoding="utf-8"))
+    with _CTX.ledger_lock:
+        if not _CTX.paths.ledger.exists():
+            return {"spent_usd": 0.0}
+        raw = json.loads(_CTX.paths.ledger.read_text(encoding="utf-8"))
     return {"spent_usd": float(raw.get("spent_usd", 0.0))}
 
 
 def save_ledger(spent_usd: float) -> None:
-    DATA.mkdir(parents=True, exist_ok=True)
-    with _LEDGER_LOCK:
+    _CTX.paths.data.mkdir(parents=True, exist_ok=True)
+    with _CTX.ledger_lock:
         existing: dict[str, Any] = {}
-        if LEDGER_PATH.exists():
+        if _CTX.paths.ledger.exists():
             try:
-                row = json.loads(LEDGER_PATH.read_text(encoding="utf-8"))
+                row = json.loads(_CTX.paths.ledger.read_text(encoding="utf-8"))
                 if isinstance(row, dict):
                     existing = row
             except (OSError, json.JSONDecodeError, TypeError):
                 existing = {}
         existing["spent_usd"] = round(float(spent_usd), 6)
-        _atomic_write_json(LEDGER_PATH, existing)
+        _atomic_write_json(_CTX.paths.ledger, existing)
 
 
 def apply_client_usage(
@@ -198,11 +167,11 @@ def apply_client_usage(
 ) -> dict[str, Any]:
     """Persist settled client usage exactly once per attempt_id. Unknown cost is kept, never zeroed."""
 
-    with _LEDGER_LOCK:
+    with _CTX.ledger_lock:
         existing: dict[str, Any] = {"spent_usd": 0.0, "unknown_cost_usd": 0.0, "attempt_ids": []}
-        if LEDGER_PATH.exists():
+        if _CTX.paths.ledger.exists():
             try:
-                row = json.loads(LEDGER_PATH.read_text(encoding="utf-8"))
+                row = json.loads(_CTX.paths.ledger.read_text(encoding="utf-8"))
                 if isinstance(row, dict):
                     existing.update(row)
             except (OSError, json.JSONDecodeError, TypeError):
@@ -226,8 +195,8 @@ def apply_client_usage(
         existing["spent_usd"] = round(total, 6)
         existing["unknown_cost_usd"] = round(unknown, 6)
         existing["attempt_ids"] = ids[-500:]
-        DATA.mkdir(parents=True, exist_ok=True)
-        _atomic_write_json(LEDGER_PATH, existing)
+        _CTX.paths.data.mkdir(parents=True, exist_ok=True)
+        _atomic_write_json(_CTX.paths.ledger, existing)
         return {
             "spent_usd": round(added + extra, 6),
             "session_spent_usd": existing["spent_usd"],
@@ -341,10 +310,6 @@ def _load_vecs(path: Path) -> np.ndarray:
     return np.asarray(np.load(path), dtype=np.float32)
 
 
-_prepare_summary_on = True
-_prepare_cost_usd: float | None = None
-
-
 def _report_prepare(
     *,
     phase: str,
@@ -360,36 +325,35 @@ def _report_prepare(
         total=total,
         status=status,
         detail=detail,
-        cost_usd=_prepare_cost_usd,
-        summary_enabled=_prepare_summary_on,
+        cost_usd=_CTX.prepare.cost_usd,
+        summary_enabled=_CTX.prepare.summary_on,
         started_at=phase_started(phase),
     )
-    wrote = write_progress(PROGRESS_PATH, payload, force=force or status != "running")
+    wrote = write_progress(_CTX.paths.progress, payload, force=force or status != "running")
     if wrote:
         print_cli(payload)
 
 
 def _note_prepare_cost(client: PlayClient) -> None:
-    global _prepare_cost_usd
     try:
-        _prepare_cost_usd = float(client.usage.cost_usd)
+        _CTX.prepare.cost_usd = float(client.usage.cost_usd)
     except (TypeError, ValueError, AttributeError):
         return
 
 
 def prepare_status_payload() -> dict[str, Any]:
-    row = read_progress(PROGRESS_PATH)
+    row = read_progress(_CTX.paths.progress)
     if row:
         return row
-    ready = META_PATH.is_file() and LEAVES_PATH.is_file() and LEAF_VECS_PATH.is_file()
+    ready = _CTX.paths.meta.is_file() and _CTX.paths.leaves.is_file() and _CTX.paths.leaf_vecs.is_file()
     return idle_payload(ready=ready)
 
 
 def _load_ckpt_state(wanted: dict[str, Any]) -> dict[str, Any] | None:
-    if not CKPT_STATE_PATH.exists():
+    if not _CTX.paths.ckpt_state.exists():
         return None
     try:
-        state = json.loads(CKPT_STATE_PATH.read_text(encoding="utf-8"))
+        state = json.loads(_CTX.paths.ckpt_state.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     if state.get("fingerprint") != wanted:
@@ -398,14 +362,14 @@ def _load_ckpt_state(wanted: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def _save_ckpt_state(state: dict[str, Any]) -> None:
-    CKPT_DIR.mkdir(parents=True, exist_ok=True)
-    _atomic_write_json(CKPT_STATE_PATH, state)
+    _CTX.paths.ckpt_dir.mkdir(parents=True, exist_ok=True)
+    _atomic_write_json(_CTX.paths.ckpt_state, state)
 
 
 def _clear_checkpoint() -> None:
-    if not CKPT_DIR.exists():
+    if not _CTX.paths.ckpt_dir.exists():
         return
-    for path in CKPT_DIR.iterdir():
+    for path in _CTX.paths.ckpt_dir.iterdir():
         if path.is_file():
             path.unlink(missing_ok=True)
 
@@ -447,7 +411,7 @@ def _summarize_leaves(
 
     def _flush() -> None:
         rows = [by_id[leaf["doc_id"]] for leaf in leaves if leaf["doc_id"] in by_id]
-        _atomic_write_json(SUMMARIES_PATH, rows)
+        _atomic_write_json(_CTX.paths.summaries, rows)
         state = _load_ckpt_state(fingerprint) or {"fingerprint": fingerprint}
         state["fingerprint"] = fingerprint
         state["phase"] = "summaries"
@@ -536,9 +500,9 @@ def _embed_texts(
             _report_prepare(phase="embeddings", done=done, total=total, detail=name)
             return np.asarray(arr, dtype=np.float32)
 
-    CKPT_DIR.mkdir(parents=True, exist_ok=True)
-    partial_path = CKPT_DIR / f"{name}_vecs.partial.npy"
-    meta_path = CKPT_DIR / f"{name}_embed.json"
+    _CTX.paths.ckpt_dir.mkdir(parents=True, exist_ok=True)
+    partial_path = _CTX.paths.ckpt_dir / f"{name}_vecs.partial.npy"
+    meta_path = _CTX.paths.ckpt_dir / f"{name}_embed.json"
     start = 0
     parts: list[np.ndarray] = []
     if resume and partial_path.exists() and meta_path.exists():
@@ -609,7 +573,7 @@ def _message_fingerprint_for(
         # Match the query's stored leaf space; mmap reads only the array header for its width.
         dims = 0
         try:
-            leaf_vecs = np.load(DATA / "leaf_vecs.npy", mmap_mode="r", allow_pickle=False)
+            leaf_vecs = np.load(_CTX.paths.data / "leaf_vecs.npy", mmap_mode="r", allow_pickle=False)
             if leaf_vecs.ndim == 2 and leaf_vecs.shape[0] > 0:
                 dims = int(leaf_vecs.shape[1])
         except (OSError, ValueError):
@@ -636,15 +600,15 @@ def _align_message_checkpoint(fingerprint: dict[str, Any]) -> None:
     fingerprint of the run that wrote them (model, dimensionality, texts in canonical order, projection).
     Anything else is dropped, so a changed index never resumes from rows of another one."""
 
-    fp_path = CKPT_DIR / "message_fingerprint.json"
+    fp_path = _CTX.paths.ckpt_dir / "message_fingerprint.json"
     try:
         same = json.loads(fp_path.read_text(encoding="utf-8")) == fingerprint
     except (OSError, ValueError):
         same = False
-    CKPT_DIR.mkdir(parents=True, exist_ok=True)
+    _CTX.paths.ckpt_dir.mkdir(parents=True, exist_ok=True)
     if not same:
         for name in _MESSAGE_CKPT_FILES:
-            (CKPT_DIR / name).unlink(missing_ok=True)
+            (_CTX.paths.ckpt_dir / name).unlink(missing_ok=True)
         _atomic_write_json(fp_path, fingerprint)
 
 
@@ -665,13 +629,13 @@ def prepare_message_vectors(
     leaf_rows = [li for _, li in pairs]
     report = {"message_vectors": len(observations), "message_rows": len(pairs)}
     if (
-        (DATA / MESSAGE_VECS_NAME).exists()
-        and (DATA / MESSAGE_LEAF_NAME).exists()
-        and load_message_vectors(DATA, fingerprint=fingerprint, leaf_rows=leaf_rows) is not None
+        (_CTX.paths.data / MESSAGE_VECS_NAME).exists()
+        and (_CTX.paths.data / MESSAGE_LEAF_NAME).exists()
+        and load_message_vectors(_CTX.paths.data, fingerprint=fingerprint, leaf_rows=leaf_rows) is not None
     ):
         return {**report, "reused": True}
     _align_message_checkpoint(fingerprint)
-    full_path = CKPT_DIR / "message_vecs_full.npy"
+    full_path = _CTX.paths.ckpt_dir / "message_vecs_full.npy"
     _report_prepare(phase="embeddings", done=0, total=1, detail="messages", force=True)
     full = _embed_texts(client, [text for _, text in observations], name="message", final_path=full_path, resume=True)
     truncatable = bool(cfg["embed_truncatable"]) if "embed_truncatable" in cfg else embed_full_width(client.embed_model) > 0
@@ -679,7 +643,7 @@ def prepare_message_vectors(
         raise PlaygroundError("메시지 임베딩 폭이 leaf 폭보다 작습니다")
     row_of = {oid: i for i, (oid, _) in enumerate(observations)}
     vecs = fit_message_vectors(full, fingerprint["dims"])[[row_of[oid] for oid, _ in pairs]]
-    write_message_vectors(DATA, vecs, leaf_rows, meta={"fingerprint": fingerprint, "count": len(pairs)})
+    write_message_vectors(_CTX.paths.data, vecs, leaf_rows, meta={"fingerprint": fingerprint, "count": len(pairs)})
     full_path.unlink(missing_ok=True)
     return {**report, "reused": False}
 
@@ -694,7 +658,7 @@ def _settle_prepare(
 
     meta["prepare_cost_usd"] = round(base_cost + float(client.usage.cost_usd), 6)
     meta[usage_key] = client.usage.summary()
-    META_PATH.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    _CTX.paths.meta.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     save_ledger(load_ledger()["spent_usd"] + float(client.usage.cost_usd))
     if clear:
         _clear_checkpoint()
@@ -710,7 +674,7 @@ def _prepare_messages_only(cfg: dict[str, Any], meta: dict[str, Any], leaves: li
     client = make_client(cfg, budget_usd=float(cfg["prepare_budget_usd"]))
     prior = float(meta.get("prepare_cost_usd") or 0.0)
     try:
-        report = prepare_message_vectors(cfg, json.loads(MESSAGES_PATH.read_text(encoding="utf-8")), leaves, client)
+        report = prepare_message_vectors(cfg, json.loads(_CTX.paths.messages.read_text(encoding="utf-8")), leaves, client)
     except BaseException:
         _settle_prepare(client, meta, base_cost=prior, clear=False, usage_key="message_prepare_usage")
         raise
@@ -719,10 +683,9 @@ def _prepare_messages_only(cfg: dict[str, Any], meta: dict[str, Any], leaves: li
 
 
 def prepare_index(*, force: bool = False) -> dict[str, Any]:
-    global _prepare_summary_on, _prepare_cost_usd
     cfg = load_config()
     _bind_data_dir(resolve_sandbox_data_dir(cfg))
-    DATA.mkdir(parents=True, exist_ok=True)
+    _CTX.paths.data.mkdir(parents=True, exist_ok=True)
     wanted = index_fingerprint(cfg)
     from index_artifacts import (
         wanted_layers,
@@ -735,37 +698,37 @@ def prepare_index(*, force: bool = False) -> dict[str, Any]:
 
     summary_on = bool(cfg.get("summary_enabled", False))
     baseline_on = bool(cfg.get("baseline_enabled", False))
-    _prepare_summary_on = summary_on
-    _prepare_cost_usd = None
+    _CTX.prepare.summary_on = summary_on
+    _CTX.prepare.cost_usd = None
     ready = (
-        META_PATH.exists()
-        and MESSAGES_PATH.exists()
-        and LEAVES_PATH.exists()
-        and LEAF_VECS_PATH.exists()
-        and (not baseline_on or (BASELINE_PATH.exists() and BASELINE_VECS_PATH.exists()))
-        and (not summary_on or (SUMMARIES_PATH.exists() and SUMMARY_VECS_PATH.exists()))
+        _CTX.paths.meta.exists()
+        and _CTX.paths.messages.exists()
+        and _CTX.paths.leaves.exists()
+        and _CTX.paths.leaf_vecs.exists()
+        and (not baseline_on or (_CTX.paths.baseline.exists() and _CTX.paths.baseline_vecs.exists()))
+        and (not summary_on or (_CTX.paths.summaries.exists() and _CTX.paths.summary_vecs.exists()))
     )
     layers = wanted_layers(cfg)
     stored_fp = None
-    if META_PATH.exists():
+    if _CTX.paths.meta.exists():
         try:
-            stored_fp = json.loads(META_PATH.read_text(encoding="utf-8")).get("index_fingerprint")
+            stored_fp = json.loads(_CTX.paths.meta.read_text(encoding="utf-8")).get("index_fingerprint")
         except (OSError, json.JSONDecodeError):
             stored_fp = None
     ckpt_fp = None
-    if CKPT_STATE_PATH.exists():
+    if _CTX.paths.ckpt_state.exists():
         try:
-            ckpt_fp = json.loads(CKPT_STATE_PATH.read_text(encoding="utf-8")).get("fingerprint")
+            ckpt_fp = json.loads(_CTX.paths.ckpt_state.read_text(encoding="utf-8")).get("fingerprint")
         except (OSError, json.JSONDecodeError):
             ckpt_fp = None
     on_disk_fp = stored_fp if stored_fp is not None else ckpt_fp
-    existing_manifest = load_manifest(DATA / MANIFEST_NAME)
+    existing_manifest = load_manifest(_CTX.paths.data / MANIFEST_NAME)
     reuse_plan = decide_reuse(existing_manifest, layers, files_ready=ready)
     if ready and not force:
-        meta = json.loads(META_PATH.read_text(encoding="utf-8"))
+        meta = json.loads(_CTX.paths.meta.read_text(encoding="utf-8"))
         leaves_on_disk: list[Any] = []
         try:
-            leaves_on_disk = json.loads(LEAVES_PATH.read_text(encoding="utf-8"))
+            leaves_on_disk = json.loads(_CTX.paths.leaves.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError, TypeError):
             leaves_on_disk = []
         spans_ok = segmentation_matches_leaves(leaves_on_disk, cfg) if isinstance(leaves_on_disk, list) else False
@@ -796,7 +759,7 @@ def prepare_index(*, force: bool = False) -> dict[str, Any]:
             and spans_ok
         ):
             write_manifest(
-                DATA / MANIFEST_NAME,
+                _CTX.paths.data / MANIFEST_NAME,
                 layers,
                 extra={"status": "bootstrapped", "leaf_count": len(leaves_on_disk)},
             )
@@ -814,28 +777,28 @@ def prepare_index(*, force: bool = False) -> dict[str, Any]:
         print("force: 체크포인트·기존 산출물 재생성")
         _clear_checkpoint()
         for path in (
-            LEAF_VECS_PATH,
-            BASELINE_VECS_PATH,
-            SUMMARY_VECS_PATH,
-            SUMMARIES_PATH,
-            META_PATH,
-            DATA / MESSAGE_VECS_NAME,
-            DATA / MESSAGE_LEAF_NAME,
-            DATA / MESSAGE_SCALE_NAME,
-            DATA / MESSAGE_META_NAME,
+            _CTX.paths.leaf_vecs,
+            _CTX.paths.baseline_vecs,
+            _CTX.paths.summary_vecs,
+            _CTX.paths.summaries,
+            _CTX.paths.meta,
+            _CTX.paths.data / MESSAGE_VECS_NAME,
+            _CTX.paths.data / MESSAGE_LEAF_NAME,
+            _CTX.paths.data / MESSAGE_SCALE_NAME,
+            _CTX.paths.data / MESSAGE_META_NAME,
         ):
             path.unlink(missing_ok=True)
         resumed = False
     else:
         ckpt = _load_ckpt_state(wanted)
         resumed = bool(ckpt) or (
-            SUMMARIES_PATH.exists() and not (META_PATH.exists() and ready)
+            _CTX.paths.summaries.exists() and not (_CTX.paths.meta.exists() and ready)
         )
         if ckpt:
             print(f"체크포인트 재개 phase={ckpt.get('phase')} summaries={ckpt.get('summary_count', 0)}")
         else:
             # fingerprint가 바뀌었으면 옛 ckpt 폐기
-            if CKPT_STATE_PATH.exists():
+            if _CTX.paths.ckpt_state.exists():
                 print("fingerprint 변경 → 체크포인트 초기화")
                 _clear_checkpoint()
             resumed = False
@@ -858,17 +821,17 @@ def prepare_index(*, force: bool = False) -> dict[str, Any]:
     # 세그먼트는 디스크에 있는 실제 recipe와 wanted가 같을 때만 재사용한다 (ckpt를 먼저 갱신하지 않음).
     can_reuse_segments = (
         not force
-        and MESSAGES_PATH.exists()
-        and LEAVES_PATH.exists()
-        and (not baseline_on or BASELINE_PATH.exists())
+        and _CTX.paths.messages.exists()
+        and _CTX.paths.leaves.exists()
+        and (not baseline_on or _CTX.paths.baseline.exists())
         and reuse_plan.segments
         and on_disk_fp == wanted
     )
     if can_reuse_segments:
-        messages = json.loads(MESSAGES_PATH.read_text(encoding="utf-8"))
-        leaves = json.loads(LEAVES_PATH.read_text(encoding="utf-8"))
-        if baseline_on and BASELINE_PATH.exists():
-            baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+        messages = json.loads(_CTX.paths.messages.read_text(encoding="utf-8"))
+        leaves = json.loads(_CTX.paths.leaves.read_text(encoding="utf-8"))
+        if baseline_on and _CTX.paths.baseline.exists():
+            baseline = json.loads(_CTX.paths.baseline.read_text(encoding="utf-8"))
         else:
             baseline = []
         print(
@@ -910,10 +873,10 @@ def prepare_index(*, force: bool = False) -> dict[str, Any]:
             )
         if not leaves or (baseline_on and not baseline):
             raise PlaygroundError("leaf/baseline 세그먼트를 만들지 못했다")
-        MESSAGES_PATH.write_text(json.dumps(messages, ensure_ascii=False), encoding="utf-8")
-        LEAVES_PATH.write_text(json.dumps(leaves, ensure_ascii=False), encoding="utf-8")
+        _CTX.paths.messages.write_text(json.dumps(messages, ensure_ascii=False), encoding="utf-8")
+        _CTX.paths.leaves.write_text(json.dumps(leaves, ensure_ascii=False), encoding="utf-8")
         if baseline_on:
-            BASELINE_PATH.write_text(json.dumps(baseline, ensure_ascii=False), encoding="utf-8")
+            _CTX.paths.baseline.write_text(json.dumps(baseline, ensure_ascii=False), encoding="utf-8")
         state["phase"] = "segments_done"
         _save_ckpt_state(state)
 
@@ -934,9 +897,9 @@ def prepare_index(*, force: bool = False) -> dict[str, Any]:
     summaries: list[dict[str, Any]] = []
     if summary_on:
         existing: dict[str, dict[str, Any]] = {}
-        if not force and SUMMARIES_PATH.exists():
+        if not force and _CTX.paths.summaries.exists():
             try:
-                for row in json.loads(SUMMARIES_PATH.read_text(encoding="utf-8")):
+                for row in json.loads(_CTX.paths.summaries.read_text(encoding="utf-8")):
                     if isinstance(row, dict) and row.get("doc_id") and row.get("summary"):
                         existing[str(row["doc_id"])] = row
             except (OSError, json.JSONDecodeError):
@@ -965,12 +928,12 @@ def prepare_index(*, force: bool = False) -> dict[str, Any]:
     from concurrent.futures import ThreadPoolExecutor
 
     embed_specs: list[tuple[str, list[str], Path]] = [
-        ("leaf", leaf_texts, LEAF_VECS_PATH),
+        ("leaf", leaf_texts, _CTX.paths.leaf_vecs),
     ]
     if baseline_texts:
-        embed_specs.append(("baseline", baseline_texts, BASELINE_VECS_PATH))
+        embed_specs.append(("baseline", baseline_texts, _CTX.paths.baseline_vecs))
     if summaries:
-        embed_specs.append(("summary", [s["summary"] for s in summaries], SUMMARY_VECS_PATH))
+        embed_specs.append(("summary", [s["summary"] for s in summaries], _CTX.paths.summary_vecs))
 
     print(f"임베딩 병렬… jobs={[name for name, _, _ in embed_specs]}")
     vectors_by_name: dict[str, np.ndarray] = {}
@@ -997,12 +960,12 @@ def prepare_index(*, force: bool = False) -> dict[str, Any]:
     summary_vecs = vectors_by_name.get("summary")
 
     if summaries and summary_vecs is not None:
-        _atomic_write_json(SUMMARIES_PATH, summaries)
-        np.save(SUMMARY_VECS_PATH, summary_vecs)
-    elif SUMMARIES_PATH.exists():
-        SUMMARIES_PATH.unlink()
-        if SUMMARY_VECS_PATH.exists():
-            SUMMARY_VECS_PATH.unlink()
+        _atomic_write_json(_CTX.paths.summaries, summaries)
+        np.save(_CTX.paths.summary_vecs, summary_vecs)
+    elif _CTX.paths.summaries.exists():
+        _CTX.paths.summaries.unlink()
+        if _CTX.paths.summary_vecs.exists():
+            _CTX.paths.summary_vecs.unlink()
 
     meta = {
         "status": "ready",
@@ -1050,11 +1013,11 @@ def prepare_index(*, force: bool = False) -> dict[str, Any]:
         },
     }
     write_manifest(
-        DATA / MANIFEST_NAME,
+        _CTX.paths.data / MANIFEST_NAME,
         layers,
         extra={"leaf_count": len(leaves), "message_count": len(messages), "status": "ready"},
     )
-    META_PATH.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    _CTX.paths.meta.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
     if bool(retrieval_config(cfg)["message_dense"].get("enabled", False)):
         try:
             meta["message_vectors"] = prepare_message_vectors(cfg, messages, leaves, client)["message_vectors"]
@@ -1145,14 +1108,14 @@ def load_index() -> IndexBundle:
     cfg = load_config()
     _maybe_rebind_data_from_env(cfg)
     needed = [
-        META_PATH,
-        MESSAGES_PATH,
-        LEAVES_PATH,
-        LEAF_VECS_PATH,
+        _CTX.paths.meta,
+        _CTX.paths.messages,
+        _CTX.paths.leaves,
+        _CTX.paths.leaf_vecs,
     ]
     if not all(p.exists() for p in needed):
         raise PlaygroundError("leaf/parent 인덱스가 없다. prepare.py --force 를 실행하라")
-    meta = json.loads(META_PATH.read_text(encoding="utf-8"))
+    meta = json.loads(_CTX.paths.meta.read_text(encoding="utf-8"))
     # 인덱스를 만든 임베딩 모델과 질의 임베딩 모델이 다르면 차원이 같아도 유사도가 무의미하다.
     indexed_model = str(((meta.get("recipe") or {}).get("models") or {}).get("embed") or "")
     wanted_model = _configured_embed_model()
@@ -1161,17 +1124,17 @@ def load_index() -> IndexBundle:
             f"인덱스 임베딩 모델({indexed_model})과 현재 설정({wanted_model})이 다르다. "
             "EVAL_EMBED_MODEL을 맞추거나 prepare.py --force 를 실행하라"
         )
-    messages = json.loads(MESSAGES_PATH.read_text(encoding="utf-8"))
-    leaves = json.loads(LEAVES_PATH.read_text(encoding="utf-8"))
-    leaf_vectors = _load_vecs(LEAF_VECS_PATH)
+    messages = json.loads(_CTX.paths.messages.read_text(encoding="utf-8"))
+    leaves = json.loads(_CTX.paths.leaves.read_text(encoding="utf-8"))
+    leaf_vectors = _load_vecs(_CTX.paths.leaf_vecs)
     if len(leaves) != len(leaf_vectors):
         raise PlaygroundError("세그먼트와 벡터 개수가 맞지 않는다. prepare.py --force")
 
     baseline: list[dict[str, Any]] = []
     baseline_vectors = np.zeros((0, int(leaf_vectors.shape[1])), dtype=np.float32)
-    if BASELINE_PATH.exists() and BASELINE_VECS_PATH.exists():
-        baseline = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
-        baseline_vectors = _load_vecs(BASELINE_VECS_PATH)
+    if _CTX.paths.baseline.exists() and _CTX.paths.baseline_vecs.exists():
+        baseline = json.loads(_CTX.paths.baseline.read_text(encoding="utf-8"))
+        baseline_vectors = _load_vecs(_CTX.paths.baseline_vecs)
         if len(baseline) != len(baseline_vectors):
             raise PlaygroundError("세그먼트와 벡터 개수가 맞지 않는다. prepare.py --force")
 
@@ -1187,10 +1150,10 @@ def load_index() -> IndexBundle:
     summary_ids: list[str] = []
     summary_by_id: dict[str, dict[str, Any]] = {}
     if bool(cfg.get("summary_enabled", False)):
-        if not SUMMARIES_PATH.exists() or not SUMMARY_VECS_PATH.exists():
+        if not _CTX.paths.summaries.exists() or not _CTX.paths.summary_vecs.exists():
             raise PlaygroundError("요약 인덱스가 없다. prepare.py --force 를 실행하라")
-        summaries = json.loads(SUMMARIES_PATH.read_text(encoding="utf-8"))
-        summary_vectors = _load_vecs(SUMMARY_VECS_PATH)
+        summaries = json.loads(_CTX.paths.summaries.read_text(encoding="utf-8"))
+        summary_vectors = _load_vecs(_CTX.paths.summary_vecs)
         if len(summaries) != len(summary_vectors):
             raise PlaygroundError("요약과 벡터 개수가 맞지 않는다. prepare.py --force")
         summary_ids = [d["doc_id"] for d in summaries]
@@ -1250,11 +1213,11 @@ def load_index() -> IndexBundle:
         # the artifacts are used only while their fingerprint equals the one worked out from this very
         # index (model, dimensionality, texts and leaf projection); stale ones are ignored
         fingerprint, _obs, pairs = _message_fingerprint_for(cfg, wanted_model, messages, leaves)
-        loaded = load_message_vectors(DATA, fingerprint=fingerprint, leaf_rows=[li for _, li in pairs])
+        loaded = load_message_vectors(_CTX.paths.data, fingerprint=fingerprint, leaf_rows=[li for _, li in pairs])
         if loaded is not None:
             bundle.message_vectors, bundle.message_leaf = loaded
     apply_vector_dims(bundle, int(cfg.get("vector_dims") or 0))
-    populate_block_catalog(bundle, persist_dir=DATA)
+    populate_block_catalog(bundle, persist_dir=_CTX.paths.data)
     return bundle
 
 

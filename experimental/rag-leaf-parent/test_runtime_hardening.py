@@ -112,7 +112,7 @@ class LedgerAndStreamTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.data = Path(self.tmp.name)
-        self.prev = EI.DATA
+        self.prev = EI.context().paths.data
         self.prev_secrets = os.environ.get("EVAL_SECRETS")
         self.prev_legacy = os.environ.get("MASAMONG_LEGACY_ROOT")
         E._bind_data_dir(self.data)

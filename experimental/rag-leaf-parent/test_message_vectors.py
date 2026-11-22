@@ -9,6 +9,7 @@ import json
 import tempfile
 import importlib.util
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest import mock
 
@@ -18,6 +19,7 @@ import engine as E
 import engine_index as EI
 import engine_retrieve as ER
 import message_vectors as MV
+from engine_context import SandboxPaths
 from candidates import Candidate, FusionResult, fuse, guarantee_pool, source_family
 from retrieval_config import DEFAULTS, retrieval_config
 from test_engine_retrieval import ROOM_OLD, _FakeClient, _unit, build_index
@@ -54,7 +56,7 @@ class MessageDimensionTests(unittest.TestCase):
             np.save(Path(tmp) / "leaf_vecs.npy", np.ones((1, 768), dtype=np.float16))
             messages = [{"observation_id": "m1", "actor_label": "x", "content": "synthetic message"}]
             leaves = [{"doc_id": "L0", "observation_ids": ["m1"]}]
-            with mock.patch.object(EI, "DATA", Path(tmp)), mock.patch.object(EI, "embed_full_width", detached.embed_full_width):
+            with mock.patch.object(EI.context(), "paths", SandboxPaths.under(tmp)), mock.patch.object(EI, "embed_full_width", detached.embed_full_width):
                 for flag, want in [(False, 768), (True, 512)]:
                     fp, _, _ = E._message_fingerprint_for(
                         {"embed_truncatable": flag, "embed_dimension": 1024}, "unknown-model", messages, leaves
@@ -342,12 +344,9 @@ class ArtifactTests(unittest.TestCase):
     def _env(self, tmp: str):
         d = Path(tmp)
         (d / "ckpt").mkdir()
+        paths = replace(SandboxPaths.under(d), ledger=d / "ledger.json")
         return d, [
-            mock.patch.object(EI, "DATA", d),
-            mock.patch.object(EI, "CKPT_DIR", d / "ckpt"),
-            mock.patch.object(EI, "META_PATH", d / "meta.json"),
-            mock.patch.object(EI, "LEDGER_PATH", d / "ledger.json"),
-            mock.patch.object(EI, "MESSAGES_PATH", d / "messages.json"),
+            mock.patch.object(EI.context(), "paths", paths),
             mock.patch.object(EI, "_report_prepare"),
         ]
 
@@ -451,7 +450,7 @@ class ArtifactTests(unittest.TestCase):
         messages = [{"observation_id": "m1", "actor_label": "x", "content": "synthetic message"}]
         leaves = [{"doc_id": "L0", "observation_ids": ["m1"]}]
         model = "  Provider/QWEN3-Embedding-8B:free  "
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(EI, "DATA", Path(tmp)):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(EI.context(), "paths", SandboxPaths.under(tmp)):
             np.save(Path(tmp) / "leaf_vecs.npy", np.ones((1, 1536), dtype=np.float16))
             for leaf_dims, want in [(0, 512), (256, 256), (512, 512), (1024, 512), (4096, 512)]:
                 fp, _, _ = E._message_fingerprint_for({"embed_dimension": leaf_dims}, model, messages, leaves)
@@ -553,7 +552,7 @@ class ArtifactTests(unittest.TestCase):
     def test_non_mrl_waits_without_leaf_vectors(self) -> None:
         messages = [{"observation_id": "m1", "actor_label": "x", "content": "synthetic message"}]
         leaves = [{"doc_id": "L0", "observation_ids": ["m1"]}]
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(EI, "DATA", Path(tmp)), mock.patch.object(EI, "_embed_texts") as embed:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(EI.context(), "paths", SandboxPaths.under(tmp)), mock.patch.object(EI, "_embed_texts") as embed:
             report = E.prepare_message_vectors({}, messages, leaves, _Client())
             self.assertEqual(report["message_vectors"], 0)
             embed.assert_not_called()
