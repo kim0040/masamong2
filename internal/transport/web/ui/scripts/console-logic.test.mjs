@@ -169,9 +169,11 @@ test('protected page resources wait for both sign-in and completed setup', async
   await res.refresh()
   assert.equal(calls, 1, 'the same resource loads after setup and sign-in')
 
-  const connections = readFileSync(new URL('../src/pages/Connections.svelte', import.meta.url), 'utf8')
+  // the page is split: the card owns the check, the page only calls it after a token was saved
+  const connDir = '../src/components/connections/'
+  const connections = ['../src/pages/Connections.svelte', connDir + 'DiscordCard.svelte', connDir + 'KeyDialog.svelte'].map((f) => readFileSync(new URL(f, import.meta.url), 'utf8')).join('\n')
   assert.doesNotMatch(connections, /onMount\s*\([^)]*checkBot|\$effect(?:\.root)?\s*\([^)]*checkBot/, 'a saved token is not checked automatically on page load')
-  assert.match(connections, /onclick=\{checkBot\}/, 'operators can ask for a token check from the page')
+  assert.match(readFileSync(new URL(connDir + 'DiscordCard.svelte', import.meta.url), 'utf8'), /onclick=\{checkBot\}/, 'operators can ask for a token check from the page')
 })
 
 test('a busy button and a tall dialog keep the keyboard flow: focus stays on the button, the footer stays on screen', () => {
@@ -548,7 +550,7 @@ test('the width picker reads providers.list once and never falls back to an olde
 })
 
 test('the width picker builds its basis from providers.list alone and sends that revision', () => {
-  const src = readFileSync(new URL('../src/pages/Connections.svelte', import.meta.url), 'utf8')
+  const src = readFileSync(new URL('../src/components/connections/WidthDialog.svelte', import.meta.url), 'utf8')
   const calls = src.match(/widthBasis\([^)]*\)/g) ?? []
   assert.deepEqual([...new Set(calls)], ['widthBasis(wi)'], "one source for the basis: the picker's own providers.list read")
   const widthPart = src.slice(src.indexOf('async function loadWidth'), src.indexOf('async function confirmWidthLower'))
@@ -636,7 +638,7 @@ test('a settings change during the first recommendation load is remembered and t
   assert.equal(recLiveChange(done.state, false).refresh, true)
   assert.equal(recLiveChange(done.state, true).refresh, false)
   // the page wires them in this order: start before the request, change through the live callback, loaded after the answer
-  const src = readFileSync(new URL('../src/pages/Connections.svelte', import.meta.url), 'utf8')
+  const src = readFileSync(new URL('../src/components/connections/Recommend.svelte', import.meta.url), 'utf8')
   const open = src.slice(src.indexOf('async function openRecommend'), src.indexOf('// The width proposals (and the picks themselves)'))
   assert.ok(open.indexOf('recLiveStart()') < open.indexOf("call('models.recommend'") && open.indexOf("call('models.recommend'") < open.indexOf('recLiveLoaded(') && open.indexOf('recLiveLoaded(') < open.indexOf('void refreshRecommend()'))
   assert.ok(src.includes('recLiveChange(recLive, recBusy)'), 'the live callback goes through the same state')
@@ -664,7 +666,7 @@ test('a width request carries the approval it was asked on, and a late refusal o
   assert.equal(widthApproval(null, 'raise'), null)
   assert.equal(widthApproval(now, 'same'), null)
   // the page keeps the approval in the confirmation and sends it back, never rebuilding it from the current basis
-  const src = readFileSync(new URL('../src/pages/Connections.svelte', import.meta.url), 'utf8')
+  const src = readFileSync(new URL('../src/components/connections/WidthDialog.svelte', import.meta.url), 'utf8')
   assert.ok(src.includes('widthAsk = { ...ask, value: choice.value, approval }'))
   assert.ok(src.includes('sendWidth(choice, approval, true)'))
   assert.ok(src.includes('widthReplyFits(approval, widthBase)'))
