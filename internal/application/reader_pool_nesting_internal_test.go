@@ -121,3 +121,76 @@ func TestEpisodeListTwoAtOnceFinishOnASmallHost(t *testing.T) {
 		}
 	}
 }
+
+// seedRoomPeople stores one message each from a person who keeps memory consent (501) and one who
+// withdrew it (502) in discord:g:c.
+func seedRoomPeople(t *testing.T, s *Service, at time.Time) {
+	t.Helper()
+	key := "discord:g:c"
+	for _, p := range []struct{ account, label string }{{"501", "Minsu"}, {"502", "Withdrawn Name"}} {
+		if _, err := s.Store.DB.Exec(`INSERT INTO memory_observations(observation_id,platform,collection,source_room,room,native_message_id,actor_label,actor_account,content,parsed_time,record_kind,imported_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, key+":"+p.account, "discord", "c", key, key, "m-"+p.account, p.label, p.account, "synthetic line "+p.account,
+			at.UTC().Format(time.RFC3339), "human_text", at.UTC().Format(time.RFC3339)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.setConsent("502", "memory", "withdrawn", "console"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// holdWriter takes the single writer connection until the test ends (or release is called).
+func holdWriter(t *testing.T, db *storage.Store) (release func()) {
+	t.Helper()
+	tx, err := db.DB.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	release = func() { _ = tx.Rollback() }
+	t.Cleanup(release) // before the service closes
+	return release
+}
+
+// A pass that checks consent per stored line must not keep a reader connection while it waits for the
+// writer: on a small host two such waits would leave no reader for anyone else.
+func TestConsentChecksDoNotHoldAReaderWhileTheWriterIsBusy(t *testing.T) {
+	t.Run("room style lines", func(t *testing.T) {
+		s, db := smallHostSvc(t)
+		seedRoomPeople(t, s, s.Clock.Now().Add(-time.Hour))
+		waits := db.DB.Stats().WaitCount
+		release := holdWriter(t, db)
+		type result struct {
+			lines []styleLine
+			err   error
+		}
+		done := make(chan result, 1)
+		go func() { l, err := s.styleLines(db, "g", "c"); done <- result{l, err} }()
+		waitFor(t, "the consent check to wait for the writer", func() bool { return db.DB.Stats().WaitCount > waits })
+		if n := db.Reader().Stats().InUse; n != 0 {
+			t.Fatalf("%d reader connection(s) held while waiting for the writer", n)
+		}
+		release()
+		r := <-done
+		if r.err != nil || len(r.lines) != 1 || r.lines[0].account != "501" {
+			t.Fatalf("want the consenting person's line only: %+v %v", r.lines, r.err)
+		}
+	})
+	t.Run("episode labels", func(t *testing.T) {
+		s, db := smallHostSvc(t)
+		seedRoomPeople(t, s, time.Date(2026, 11, 22, 0, 0, 0, 0, time.UTC))
+		holdWriter(t, db)
+		done := make(chan [2]string, 1)
+		go func() {
+			labelOf := s.refLabels(db, "discord:g:c")
+			done <- [2]string{labelOf(store.PersonRef("501")), labelOf(store.PersonRef("502"))}
+		}()
+		select {
+		case got := <-done:
+			if got != [2]string{"Minsu", ""} {
+				t.Fatalf("labels must follow memory consent: %q", got)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("naming the people of a room waits for the writer")
+		}
+	})
+}

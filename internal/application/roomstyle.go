@@ -176,13 +176,21 @@ func (s *Service) styleLines(db *storage.Store, guildID, channelID string) ([]st
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
-	var out []styleLine
+	var read []styleLine
 	for rows.Next() {
 		var l styleLine
 		if err := rows.Scan(&l.id, &l.native, &l.account, &l.text); err != nil {
+			rows.Close()
 			return nil, err
 		}
+		read = append(read, l)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	// consent after the cursor is closed: it reads the writer pool, which must not wait with a reader held
+	var out []styleLine
+	for _, l := range read {
 		if l.account != "" && (!s.MemoryAllowed(l.account) || !s.ConsentAllows(l.account, privacy.Profile)) {
 			continue // a person who withdrew consent ("don't analyze me" included) is not counted either
 		}
@@ -192,7 +200,7 @@ func (s *Service) styleLines(db *storage.Store, guildID, channelID string) ([]st
 		}
 	}
 	slices.Reverse(out) // oldest first
-	return out, rows.Err()
+	return out, nil
 }
 
 // countStyle is the code-only part: no model, no names.
