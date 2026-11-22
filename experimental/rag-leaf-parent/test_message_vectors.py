@@ -15,6 +15,8 @@ from unittest import mock
 import numpy as np
 
 import engine as E
+import engine_index as EI
+import engine_retrieve as ER
 import message_vectors as MV
 from candidates import Candidate, FusionResult, fuse, guarantee_pool, source_family
 from retrieval_config import DEFAULTS, retrieval_config
@@ -52,7 +54,7 @@ class MessageDimensionTests(unittest.TestCase):
             np.save(Path(tmp) / "leaf_vecs.npy", np.ones((1, 768), dtype=np.float16))
             messages = [{"observation_id": "m1", "actor_label": "x", "content": "synthetic message"}]
             leaves = [{"doc_id": "L0", "observation_ids": ["m1"]}]
-            with mock.patch.object(E, "DATA", Path(tmp)), mock.patch.object(E, "embed_full_width", detached.embed_full_width):
+            with mock.patch.object(EI, "DATA", Path(tmp)), mock.patch.object(EI, "embed_full_width", detached.embed_full_width):
                 for flag, want in [(False, 768), (True, 512)]:
                     fp, _, _ = E._message_fingerprint_for(
                         {"embed_truncatable": flag, "embed_dimension": 1024}, "unknown-model", messages, leaves
@@ -239,7 +241,7 @@ def _with_messages(index: E.IndexBundle, *, enabled: bool, limit: int = 200) -> 
 
 def _run(index: E.IndexBundle, **kw):
     q = _unit(1)
-    return E._generate_candidates(
+    return ER._generate_candidates(
         index, _FakeClient(q), "점심 뭐 먹을까", q_vec=q, intent={}, scope=kw.pop("scope", None),
         use_summary=True, pool=40, lex_lim=200, den_lim=150, **kw,
     )
@@ -300,7 +302,7 @@ class EngineIntegrationTests(unittest.TestCase):
         self.assertEqual(_run(index)[2]["message_dense"]["leaves"], 4)
         self.assertEqual(_run(index, limit_scale=1.5)[2]["message_dense"]["leaves"], 6)
         # the recovery attempt of retrieve() passes recovery.limit_scale on
-        self.assertIn("limit_scale=scale,", Path(E.__file__).read_text(encoding="utf-8"))
+        self.assertIn("limit_scale=scale,", Path(ER.__file__).read_text(encoding="utf-8"))
 
     def test_message_run_weight_moves_the_order(self) -> None:
         heavy = _with_messages(build_index(seed=3), enabled=True)
@@ -341,12 +343,12 @@ class ArtifactTests(unittest.TestCase):
         d = Path(tmp)
         (d / "ckpt").mkdir()
         return d, [
-            mock.patch.object(E, "DATA", d),
-            mock.patch.object(E, "CKPT_DIR", d / "ckpt"),
-            mock.patch.object(E, "META_PATH", d / "meta.json"),
-            mock.patch.object(E, "LEDGER_PATH", d / "ledger.json"),
-            mock.patch.object(E, "MESSAGES_PATH", d / "messages.json"),
-            mock.patch.object(E, "_report_prepare"),
+            mock.patch.object(EI, "DATA", d),
+            mock.patch.object(EI, "CKPT_DIR", d / "ckpt"),
+            mock.patch.object(EI, "META_PATH", d / "meta.json"),
+            mock.patch.object(EI, "LEDGER_PATH", d / "ledger.json"),
+            mock.patch.object(EI, "MESSAGES_PATH", d / "messages.json"),
+            mock.patch.object(EI, "_report_prepare"),
         ]
 
     def test_select_rows_skips_short_messages_and_projects_onto_every_leaf(self) -> None:
@@ -407,7 +409,7 @@ class ArtifactTests(unittest.TestCase):
         calls: list[int] = []
         with tempfile.TemporaryDirectory() as tmp:
             d, patches = self._env(tmp)
-            with mock.patch.object(E, "_embed_texts", _embedder(calls)):
+            with mock.patch.object(EI, "_embed_texts", _embedder(calls)):
                 for p in patches:
                     p.start()
                 try:
@@ -432,7 +434,7 @@ class ArtifactTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             d, patches = self._env(tmp)
             np.save(d / "leaf_vecs.npy", np.ones((1, 12), dtype=np.float16))
-            with mock.patch.object(E, "_embed_texts", _embedder(calls, dims=12)):
+            with mock.patch.object(EI, "_embed_texts", _embedder(calls, dims=12)):
                 for p in patches:
                     p.start()
                 try:
@@ -449,7 +451,7 @@ class ArtifactTests(unittest.TestCase):
         messages = [{"observation_id": "m1", "actor_label": "x", "content": "synthetic message"}]
         leaves = [{"doc_id": "L0", "observation_ids": ["m1"]}]
         model = "  Provider/QWEN3-Embedding-8B:free  "
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(E, "DATA", Path(tmp)):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(EI, "DATA", Path(tmp)):
             np.save(Path(tmp) / "leaf_vecs.npy", np.ones((1, 1536), dtype=np.float16))
             for leaf_dims, want in [(0, 512), (256, 256), (512, 512), (1024, 512), (4096, 512)]:
                 fp, _, _ = E._message_fingerprint_for({"embed_dimension": leaf_dims}, model, messages, leaves)
@@ -472,7 +474,7 @@ class ArtifactTests(unittest.TestCase):
             try:
                 for dims in [12, 24, 8]:
                     np.save(d / "leaf_vecs.npy", np.ones((1, dims), dtype=np.float16))
-                    with mock.patch.object(E, "_embed_texts", _embedder(calls, dims=dims)):
+                    with mock.patch.object(EI, "_embed_texts", _embedder(calls, dims=dims)):
                         first = E.prepare_message_vectors({}, messages, leaves, _Client())
                         second = E.prepare_message_vectors({}, messages, leaves, _Client())
                     self.assertFalse(first["reused"])
@@ -496,7 +498,7 @@ class ArtifactTests(unittest.TestCase):
                     p.start()
                 try:
                     cfg = {"embed_dimension": dims}
-                    with mock.patch.object(E, "_embed_texts", _embedder([], dims=6144)):
+                    with mock.patch.object(EI, "_embed_texts", _embedder([], dims=6144)):
                         E.prepare_message_vectors(cfg, messages, leaves, _Client())
                     fp, _, pairs = E._message_fingerprint_for(cfg, "test-embed", messages, leaves)
                     vecs, leaf = MV.load_message_vectors(d, fingerprint=fp, leaf_rows=[li for _, li in pairs])
@@ -517,7 +519,7 @@ class ArtifactTests(unittest.TestCase):
                 p.start()
             try:
                 cfg = {"embed_dimension": 1024, "embed_truncatable": False}
-                with mock.patch.object(E, "_embed_texts", _embedder([], dims=768)):
+                with mock.patch.object(EI, "_embed_texts", _embedder([], dims=768)):
                     E.prepare_message_vectors(cfg, messages, leaves, _Client())
                 fp, _, pairs = E._message_fingerprint_for(cfg, "test-embed", messages, leaves)
                 vecs, leaf = MV.load_message_vectors(d, fingerprint=fp, leaf_rows=[li for _, li in pairs])
@@ -538,7 +540,7 @@ class ArtifactTests(unittest.TestCase):
                     p.start()
                 try:
                     cfg = {"embed_truncatable": flag, "embed_dimension": 1024}
-                    with mock.patch.object(E, "embed_full_width", side_effect=RuntimeError("missing hosts.json")) as classify, mock.patch.object(E, "_embed_texts", _embedder([], dims=768)):
+                    with mock.patch.object(EI, "embed_full_width", side_effect=RuntimeError("missing hosts.json")) as classify, mock.patch.object(EI, "_embed_texts", _embedder([], dims=768)):
                         report = E.prepare_message_vectors(cfg, messages, leaves, _Client())
                         fp, _, pairs = E._message_fingerprint_for(cfg, "test-embed", messages, leaves)
                         classify.assert_not_called()
@@ -551,7 +553,7 @@ class ArtifactTests(unittest.TestCase):
     def test_non_mrl_waits_without_leaf_vectors(self) -> None:
         messages = [{"observation_id": "m1", "actor_label": "x", "content": "synthetic message"}]
         leaves = [{"doc_id": "L0", "observation_ids": ["m1"]}]
-        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(E, "DATA", Path(tmp)), mock.patch.object(E, "_embed_texts") as embed:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(EI, "DATA", Path(tmp)), mock.patch.object(EI, "_embed_texts") as embed:
             report = E.prepare_message_vectors({}, messages, leaves, _Client())
             self.assertEqual(report["message_vectors"], 0)
             embed.assert_not_called()
@@ -605,7 +607,7 @@ class ArtifactTests(unittest.TestCase):
         calls: list[int] = []
         with tempfile.TemporaryDirectory() as tmp:
             d, patches = self._env(tmp)
-            with mock.patch.object(E, "_embed_texts", _embedder(calls)):
+            with mock.patch.object(EI, "_embed_texts", _embedder(calls)):
                 for p in patches:
                     p.start()
                 try:
@@ -627,7 +629,7 @@ class ArtifactTests(unittest.TestCase):
         cfg = {"embed_dimension": 8, "embed_truncatable": True}
         with tempfile.TemporaryDirectory() as tmp:
             d, patches = self._env(tmp)
-            with mock.patch.object(E, "_embed_texts", _embedder(calls)):
+            with mock.patch.object(EI, "_embed_texts", _embedder(calls)):
                 for p in patches:
                     p.start()
                 try:
@@ -654,7 +656,7 @@ class ArtifactTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmp:
             d, patches = self._env(tmp)
-            with mock.patch.object(E, "_embed_texts", _embedder(calls)):
+            with mock.patch.object(EI, "_embed_texts", _embedder(calls)):
                 for p in patches:
                     p.start()
                 try:
@@ -685,7 +687,7 @@ class ArtifactTests(unittest.TestCase):
             def spy(client, texts):  # noqa: ANN001
                 seen.append((ckpt / "message_vecs.partial.npy").exists())
 
-            with mock.patch.object(E, "_embed_texts", _embedder([], spy=spy)):
+            with mock.patch.object(EI, "_embed_texts", _embedder([], spy=spy)):
                 for p in patches:
                     p.start()
                 try:
@@ -738,7 +740,7 @@ class ArtifactTests(unittest.TestCase):
             index, cfg, d, meta = self._message_only_env(tmp)
             try:
                 with mock.patch.object(E, "make_client", return_value=client), \
-                        mock.patch.object(E, "_embed_texts", _embedder([], spy=spend)):
+                        mock.patch.object(EI, "_embed_texts", _embedder([], spy=spend)):
                     E._prepare_messages_only(cfg, meta, index.leaves)
                 ledger = json.loads((d / "ledger.json").read_text(encoding="utf-8"))
                 saved = json.loads((d / "meta.json").read_text(encoding="utf-8"))
@@ -768,7 +770,7 @@ class ArtifactTests(unittest.TestCase):
             index, cfg, d, meta = self._message_only_env(tmp)
             try:
                 with mock.patch.object(E, "make_client", return_value=client), \
-                        mock.patch.object(E, "_embed_texts", _embedder([], spy=spend_then_fail)):
+                        mock.patch.object(EI, "_embed_texts", _embedder([], spy=spend_then_fail)):
                     with self.assertRaises(RuntimeError):
                         E._prepare_messages_only(cfg, meta, index.leaves)
                 ledger = json.loads((d / "ledger.json").read_text(encoding="utf-8"))

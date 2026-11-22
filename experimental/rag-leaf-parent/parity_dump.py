@@ -24,11 +24,12 @@ os.environ.setdefault("EVAL_SECRETS", os.path.join(repo, ".private/eval/secrets.
 out_dir, gold_name = sys.argv[1], sys.argv[2]
 import numpy as np
 import engine as E
+import engine_retrieve as ER  # the fakes below go where the retrieval code looks the names up
 capture_generation(E)
 # The speaker run is fused inside person_retrieval; record its two sources like the others so the dumped
 # tree carries them (without this the person cases have a speaker run with no children).
 import person_retrieval
-person_retrieval.fuse = E.fuse
+person_retrieval.fuse = ER.fuse
 # 옛 정렬을 비교할 때만 사용한다. 기본 덤프와 검색은 항상 안정 정렬이다.
 if os.environ.get("PARITY_SORT") == "legacy":
     original_argsort = np.argsort
@@ -181,8 +182,8 @@ class FakeRerank:
         r = R(); r.indices = order; r.scores = [score(docs[i]) for i in order]; r.model = "voyageai/rerank-2.5-lite"
         r.cost_usd = 0.0; r.latency_ms = 0.0; r.billed = None; r.generation_id = None
         return r
-E.RerankClient = FakeRerank
-E.load_secrets = lambda *a, **k: {"OPENROUTER_API_KEY": "x"}
+ER.RerankClient = FakeRerank
+ER.load_secrets = lambda *a, **k: {"OPENROUTER_API_KEY": "x"}
 
 leaf_room = {d["doc_id"]: d["source_room_id"] for d in index.leaves}
 rows = []
@@ -198,7 +199,7 @@ for q in gold["questions"]:
     reference = references.get(q["question_id"])
     rec = {"question_id": q["question_id"], "query": query, "room": room, "intent": intent, "time_reference": reference, "modes": {}}
     for mode, avail in (("hybrid", False), ("auto", False), ("rerank", True)):
-        E._rerank_available = (lambda a=avail: a)
+        ER._rerank_available = (lambda a=avail: a)
         trace = {}
         try:
             hits = E.retrieve(index, FakeClient(), query, top_k=5, mode="leaf_parent", q_vec=np.asarray(qv, dtype=np.float32),

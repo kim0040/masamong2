@@ -7,6 +7,7 @@ import unittest
 import numpy as np
 
 import engine as E
+import engine_retrieve as ER
 import person_retrieval as PR
 from test_engine_retrieval import ROOM_NEW, ROOM_OLD, _FakeClient, _unit, build_index
 
@@ -116,15 +117,15 @@ class SpeakerRetrieverTests(unittest.TestCase):
 
     def test_retriever_failure_is_isolated(self) -> None:
         index = build_index()
-        saved = E.resolve_persons
-        E.resolve_persons = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        saved = ER.resolve_persons
+        ER.resolve_persons = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
         try:
             q = _unit(2)
             trace: dict = {}
             hits = E.retrieve(index, _FakeClient(q), "을동 뭐래", top_k=3, q_vec=q, ranking="hybrid",
                               trace=trace, source_room_id=ROOM_OLD, intent=_intent(targets=["을동"]))
         finally:
-            E.resolve_persons = saved
+            ER.resolve_persons = saved
         self.assertTrue(hits)
         self.assertEqual(trace["person_retriever_error"], "RuntimeError")
         self.assertEqual(trace["retrievers_used"], ["leaf_lexical", "leaf_dense", "summary_lexical", "summary_dense"])

@@ -14,8 +14,13 @@ def platform_metadata(np):
 
 
 def capture_generation(engine):
-    original = engine._generate_candidates
-    original_fuse = engine.fuse
+    """Wrap the candidate generator, fuse and the packer in the module that calls them (engine_retrieve).
+
+    The captured pack call and the original packer are kept on `engine` for packing_variants()."""
+    import engine_retrieve as owner
+
+    original = owner._generate_candidates
+    original_fuse = owner.fuse
     trees = {}
 
     def recorded_fuse(runs, **kwargs):
@@ -28,7 +33,7 @@ def capture_generation(engine):
                              "raw": kwargs.get("raw_scores") or {}}
         return result
 
-    engine.fuse = recorded_fuse
+    owner.fuse = recorded_fuse
 
     def generate(*args, **kwargs):
         trees.clear()
@@ -46,13 +51,13 @@ def capture_generation(engine):
         trace["parity_tree"] = trees[id(fusion)]
         return result
 
-    engine._generate_candidates = generate
-    original_pack = engine.pack_evidence_set
+    owner._generate_candidates = generate
+    original_pack = owner.pack_evidence_set
     def pack(*args, **kwargs):
         engine._parity_pack_call = (args, kwargs)
         return original_pack(*args, **kwargs)
     engine._parity_original_pack = original_pack
-    engine.pack_evidence_set = pack
+    owner.pack_evidence_set = pack
 
 
 def packing_variants(engine, index, hits, scores):

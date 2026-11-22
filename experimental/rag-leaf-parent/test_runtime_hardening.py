@@ -11,6 +11,8 @@ from pathlib import Path
 from unittest import mock
 
 import engine as E
+import engine_index as EI
+import engine_turn as ET
 from client import StreamError, Usage
 from retrieval_post import TimeReference
 from test_engine_retrieval import ROOM_NEW, ROOM_OLD, _FakeClient, _unit, build_index
@@ -110,7 +112,7 @@ class LedgerAndStreamTests(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
         self.data = Path(self.tmp.name)
-        self.prev = E.DATA
+        self.prev = EI.DATA
         self.prev_secrets = os.environ.get("EVAL_SECRETS")
         self.prev_legacy = os.environ.get("MASAMONG_LEGACY_ROOT")
         E._bind_data_dir(self.data)
@@ -165,7 +167,7 @@ class LedgerAndStreamTests(unittest.TestCase):
     def test_empty_tools_bang_weather_is_disabled(self) -> None:
         index = self._runtime_index(tools_enabled=[])
         client = _TurnClient()
-        with mock.patch("engine.execute_named_tool", side_effect=AssertionError("tool must not run")):
+        with mock.patch("engine_turn.execute_named_tool", side_effect=AssertionError("tool must not run")):
             bundle = E._prepare_bot_turn(
                 index, client, message="!날씨 부산", ranking="heuristic", remaining=1.0
             )
@@ -183,7 +185,7 @@ class LedgerAndStreamTests(unittest.TestCase):
             called["retrieve"] = True
             return []
 
-        with mock.patch("engine.retrieve", side_effect=_no_retrieve):
+        with mock.patch("engine_turn.retrieve", side_effect=_no_retrieve):
             bundle = E._prepare_bot_turn(
                 index,
                 client,
@@ -223,7 +225,7 @@ class LedgerAndStreamTests(unittest.TestCase):
                 ensure_ascii=False,
             )
 
-        with mock.patch("engine.retrieve", side_effect=_retrieve):
+        with mock.patch("engine_turn.retrieve", side_effect=_retrieve):
             bundle = E._prepare_bot_turn(
                 index, _TurnClient(plan_json=_plan("recent")), message="요즘 가명 누구야", ranking="heuristic", remaining=1.0
             )
@@ -238,7 +240,7 @@ class LedgerAndStreamTests(unittest.TestCase):
         self.assertFalse(bundle["intent"]["recent"])  # the answer is not told "recent"
         # an explicit range is relaxed the same way; the rerank floor is not
         calls.clear()
-        with mock.patch("engine.retrieve", side_effect=_retrieve):
+        with mock.patch("engine_turn.retrieve", side_effect=_retrieve):
             E._prepare_bot_turn(
                 index, _TurnClient(plan_json=_plan("between")), message="가명 누구야", ranking="heuristic", remaining=1.0
             )
@@ -250,14 +252,14 @@ class LedgerAndStreamTests(unittest.TestCase):
             return []
 
         calls.clear()
-        with mock.patch("engine.retrieve", side_effect=_floor):
+        with mock.patch("engine_turn.retrieve", side_effect=_floor):
             E._prepare_bot_turn(
                 index, _TurnClient(plan_json=_plan("recent")), message="요즘 가명 누구야", ranking="heuristic", remaining=1.0
             )
         self.assertEqual(len(calls), 1)
         # no window: one search, even when it is empty
         calls.clear()
-        with mock.patch("engine.retrieve", side_effect=lambda *_a, **kw: calls.append(kw["intent"]) or []):
+        with mock.patch("engine_turn.retrieve", side_effect=lambda *_a, **kw: calls.append(kw["intent"]) or []):
             bundle = E._prepare_bot_turn(
                 index, _TurnClient(plan_json=_plan("any")), message="가명 누구야", ranking="heuristic", remaining=1.0
             )
@@ -274,8 +276,8 @@ class LedgerAndStreamTests(unittest.TestCase):
             return client
 
         events = []
-        with mock.patch("engine.make_client", side_effect=_make):
-            with mock.patch("engine._prepare_bot_turn", return_value={
+        with mock.patch("engine_turn.make_client", side_effect=_make):
+            with mock.patch("engine_turn._prepare_bot_turn", return_value={
                 "hits": [],
                 "system": "sys",
                 "tool_results": [],
