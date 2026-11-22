@@ -588,18 +588,16 @@ func storedThreadParent(db *storage.Store, guild, channel string) string {
 	return parent
 }
 
-// roomCaptures reports whether a Discord room's messages are stored now: its own policy, or — for a
-// thread without an entry of its own — its parent channel's (a thread is part of its channel).
+// roomCaptures reports whether a Discord room's messages are stored now (captureAllowed): neither its own
+// entry nor, for a thread, its parent channel's turns capture off. The parent is found first, from the
+// thread table when the in-memory list no longer holds the thread (closed more than a month ago), so an old
+// thread is not taken for an unconfigured channel that stores by default.
 func (s *Service) roomCaptures(db *storage.Store, guild, channel string) bool {
-	if s.ChannelPolicyFor(guild, channel).Capture {
-		return true
+	parent := ""
+	if s.captureOffInGuild(guild) { // only a channel with capture off can stop a room that has no off of its own
+		if parent = s.threadParent(channel); parent == "" {
+			parent = storedThreadParent(db, guild, channel)
+		}
 	}
-	if g, ok := s.Doc().Guilds[guild]; ok && g.Channels != nil && hasChannel(g.Channels, channel) {
-		return false // the thread's own entry decides
-	}
-	parent := s.threadParent(channel)
-	if parent == "" {
-		parent = storedThreadParent(db, guild, channel)
-	}
-	return parent != "" && parent != channel && s.ChannelPolicyFor(guild, parent).Capture
+	return s.captureAllowed(guild, channel, parent)
 }

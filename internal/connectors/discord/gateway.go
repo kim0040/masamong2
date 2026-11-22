@@ -1478,9 +1478,9 @@ func (g *Gateway) onDirectMessage(s *discordgo.Session, m *discordgo.MessageCrea
 // onServerMessage handles a person's message in an approved server: capture and observe it, then run the
 // command, hold the call, or let the follow-up window decide.
 func (g *Gateway) onServerMessage(s *discordgo.Session, m *discordgo.MessageCreate, cmd Command, opts map[string]string, isCmd bool) {
-	g.noteThread(s, m.GuildID, m.ChannelID) // before the policy: a thread follows its parent's
+	place := g.noteThread(s, m.GuildID, m.ChannelID) // before the policy: a thread follows its parent's
 	pol := g.svc.ChannelPolicyFor(m.GuildID, m.ChannelID)
-	g.capture(m, pol)
+	g.capture(m, place)
 	answer, follows := g.classifyServerMessage(m, pol, isCmd)
 	o := application.ObservedMessage{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID, AuthorID: m.Author.ID,
 		AuthorName: displayName(m), Content: bodyOf(m.Message), At: m.Timestamp, Addressed: isCmd || answer || follows || pol.Respond == "always", ToSomeone: g.toSomeone(m), BotCall: g.botCallKind(m)}
@@ -1951,13 +1951,13 @@ func messageAuthorName(m *discordgo.Message) string {
 	return m.Author.Username
 }
 
-// capture stores the message as channel memory when both the instance and the channel allow it.
-func (g *Gateway) capture(m *discordgo.MessageCreate, pol config.ChannelPolicy) {
+// capture stores the message as channel memory when the instance, the channel and its parent allow it.
+func (g *Gateway) capture(m *discordgo.MessageCreate, place application.ChannelPlace) {
 	if m.GuildID == "" {
 		return
 	}
 	body := bodyOf(m.Message)
-	if !g.svc.Doc().Memory.Capture || !pol.Capture || body == "" || !g.svc.MemoryAllowed(m.Author.ID) {
+	if body == "" || !g.svc.CapturesIn(m.GuildID, m.ChannelID, place) || !g.svc.MemoryAllowed(m.Author.ID) {
 		return
 	}
 	eng, err := g.svc.MemoryEngine()

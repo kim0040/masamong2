@@ -93,7 +93,7 @@ func (s *Service) capturingChannels() [][2]string {
 	var out [][2]string
 	for g, gs := range doc.Guilds {
 		for c := range gs.Channels {
-			if s.channelPolicy(g, c).Capture {
+			if s.roomCapturesNow(g, c) { // a configured thread follows its parent's capture off too
 				out = append(out, [2]string{g, c})
 			}
 		}
@@ -130,6 +130,11 @@ func (s *Service) Backfill(ctx context.Context, trigger, guildID, channelID stri
 	for _, t := range targets {
 		if ctx.Err() != nil {
 			break
+		}
+		if !s.roomCapturesNow(t[0], t[1]) {
+			// checked again here for a named room: a thread under a channel with capture off is never read
+			rep.Channels = append(rep.Channels, BackfillChannel{GuildID: t[0], ChannelID: t[1], Skipped: "capture_off"})
+			continue
 		}
 		ch := s.backfillChannel(ctx, eng, h, t[0], t[1], cutoff)
 		rep.Stored += ch.Stored
@@ -218,7 +223,7 @@ func (s *Service) memoryBackfill(ctx context.Context, req action.Request) action
 	if channelID != "" && guildID == "" {
 		return action.Fail(req, errcode.InvalidInput, "generic.error", "guild_id required with channel_id", nil)
 	}
-	if channelID != "" && !s.channelPolicy(guildID, channelID).Capture {
+	if channelID != "" && !s.roomCapturesNow(guildID, channelID) {
 		return action.Fail(req, errcode.InvalidInput, "generic.error", "this channel does not capture messages", nil)
 	}
 	rep, err := s.Backfill(ctx, "manual", guildID, channelID)
