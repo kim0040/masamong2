@@ -5,7 +5,7 @@
 
 import { t, has } from './i18n.svelte'
 
-export type ToolInput = { name: string; type: 'text' | 'number' | 'select' | 'bool' | 'url' | 'provider'; required?: boolean; options?: string[]; min?: number; max?: number; example?: string; operator?: boolean }
+export type ToolInput = { name: string; type: 'text' | 'number' | 'select' | 'bool' | 'url' | 'provider' | 'list'; required?: boolean; options?: string[]; min?: number; max?: number; example?: string; operator?: boolean }
 
 /** Values as the form holds them: strings, and true/false/undefined for switches. */
 export type InputValues = Record<string, string | boolean | undefined>
@@ -49,6 +49,11 @@ export function toValues(inputs: ToolInput[], obj: Record<string, unknown> | und
   for (const s of inputs) {
     const v = obj?.[s.name]
     if (v === undefined || v === null) continue
+    if (s.type === 'list') {
+      // a list shows as comma-separated texts; entries the form cannot show (objects) are left to the JSON
+      if (Array.isArray(v) && v.every((x) => typeof x === 'string' || typeof x === 'number')) out[s.name] = v.join(', ')
+      continue
+    }
     out[s.name] = s.type === 'bool' ? v === true : String(v)
   }
   return out
@@ -60,6 +65,7 @@ export function toObject(inputs: ToolInput[], vals: InputValues, base: Record<st
   const obj: Record<string, unknown> = { ...base }
   for (const s of inputs) {
     const raw = vals[s.name]
+    if (s.type === 'list' && raw === undefined && Array.isArray(base[s.name])) continue // not shown in the form: kept as saved
     delete obj[s.name]
     if (s.type === 'bool') {
       if (raw === true || raw === false) obj[s.name] = raw
@@ -68,6 +74,11 @@ export function toObject(inputs: ToolInput[], vals: InputValues, base: Record<st
     const v = typeof raw === 'string' ? raw.trim() : ''
     if (!v) {
       if (requireAll && s.required) return { obj, missing: s.name }
+      continue
+    }
+    if (s.type === 'list') {
+      const items = v.split(',').map((x) => x.trim()).filter(Boolean)
+      if (items.length) obj[s.name] = items
       continue
     }
     obj[s.name] = s.type === 'number' || (s.type === 'select' && /^-?\d+$/.test(v)) ? Number(v) : v
