@@ -173,7 +173,9 @@ func implied() map[string]any {
 		"web_search.read_pages": WebSearch{}.Pages(""), "web_search.deep_pages": WebSearch{}.Pages("deep"),
 		"web_search.fetch_daily_limit": WebSearch{}.FetchDailyPages(),
 		"memory.derived_budget_usd":    "3.00", "memory.day_boundary": "05:00",
+		"memory.capture": true, "memory.embed": true, "memory.retrieve": "auto", "memory.summaries": true,
 		"memory.episodes": "on", "memory.state": "on", "memory.cards": "off", "memory.warm_query": "on", "memory.message_vectors": m.MessageVectorsOn(),
+		"guilds.*.channels.*.capture": true, "guilds.*.channels.*.memory_use": "on",
 		"participation.wait_sec": int(p.Wait().Seconds()), "participation.cooldown_sec": int(p.Cooldown().Seconds()),
 		"participation.per_hour": p.Hourly(), "participation.per_day": p.Daily(), "participation.judge_per_hour": p.Judges(),
 		"participation.min_score": p.Threshold(), "participation.shadow_drafts": p.Drafts(),
@@ -201,11 +203,14 @@ var (
 	}
 	// legacy: memory.chat_tools is superseded by tools.<id>.chat; memory.extract is not built.
 	legacy = map[string]bool{"memory.chat_tools": true, "memory.extract": true}
+	// bounds is the one declaration of each numeric limit: the console schema annotates Min/Max from
+	// it and parse() checks the stored value against it (clamping committed documents). A bound that
+	// includes 0 means the file may write 0 for the default or the documented meaning it carries.
 	bounds = map[string][2]*float64{
 		"backup.hour": bound(0, 23), "backup.weekday": bound(0, 6), "backup.keep": bound(1, 365),
-		"limits.budget_alert_percent": bound(1, 100), "limits.max_concurrent_turns": bound(1, 64),
-		"limits.max_external_attempts": bound(1, 20),
-		"memory.backfill_days":         bound(-1, 30), "memory.index_interval_min": bound(1, 1440), "memory.index_workers": bound(1, MaxIndexWorkers),
+		"limits.budget_alert_percent": bound(0, 100), "limits.max_concurrent_turns": bound(0, 64),
+		"limits.max_external_attempts": bound(0, 20),
+		"memory.backfill_days":         bound(-1, 30), "memory.index_interval_min": bound(1, 1440), "memory.index_workers": bound(0, MaxIndexWorkers),
 		"participation.min_score": bound(0, 1),
 		"dm.per_user_per_day":     bound(-1, 10000), "dm.per_day": bound(-1, 100000),
 		"web_search.read_pages": bound(0, 10), "web_search.deep_pages": bound(0, 10), "web_search.fetch_daily_limit": bound(0, 5000),
