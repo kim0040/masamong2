@@ -402,7 +402,7 @@ func TestStatsHistogramAndBuckets(t *testing.T) {
 // code and reason a caller (and the parts' own tests) can see.
 func TestStatsActionsNotYetImplemented(t *testing.T) {
 	s, _ := deliveryService(t)
-	for _, id := range []string{"stats.export", "stats.rollup"} {
+	for _, id := range []string{"stats.rollup"} {
 		res := s.Execute(context.Background(), action.Request{Action: id})
 		if res.OK || res.Error == nil || res.Error.Code != errcode.ActionUnavailable || res.Error.Args["reason"] != catalog.ImplementationDeferred {
 			t.Fatalf("%s: %+v", id, res.Error)

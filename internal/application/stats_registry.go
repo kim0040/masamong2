@@ -1132,6 +1132,8 @@ func (s *Service) statsFinishedDays(ctx context.Context, group, first, last stri
 type statsExportInput struct {
 	From string `json:"from,omitempty"` // first day (YYYY-MM-DD); default 12 weeks before To
 	To   string `json:"to,omitempty"`   // last day; default the end of the last finished week
+	// ResetID replaces the install id before building the file (the console's "new id" button).
+	ResetID bool `json:"reset_id,omitempty"`
 }
 
 // statsExportDoc is the exported file (stats.export output, the CLI's --file).

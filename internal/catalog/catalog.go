@@ -183,11 +183,12 @@ func All() []Descriptor {
 		exec("audit.list", "audit", "/settings", "read"),
 		exec("stats.series", "stats series", "/stats", "read"),
 		// Usage statistics (internal/application/stats_registry.go). stats.export: input
-		// {from, to} (statsExportInput), output the file of weekly totals (statsExportDoc); it reads what
-		// was collected even with stats.enabled off. stats.rollup (operator only, CLI or console): input
+		// {from, to, reset_id} (statsExportInput), output {file, bytes, collecting} where file is the
+		// weekly totals (statsExportDoc); it reads what was collected even with stats.enabled off, and
+		// only writes the random install id (made at the first export, replaced by reset_id). stats.rollup (operator only, CLI or console): input
 		// {group, since, force} (statsRollupInput), output {zone, finished, through, skipped}
 		// (statsRollupOutput); it finishes past days and never rewrites a finished one unless forced.
-		building("stats.export", "stats export", "/stats", "read"),
+		exec("stats.export", "stats export", "/stats", "read"),
 		building("stats.rollup", "stats rollup", "/jobs", "internal_write"),
 		exec("lab.reviews", "lab reviews", "/lab", "read"),
 		exec("lab.review", "lab review", "/lab", "internal_write"),

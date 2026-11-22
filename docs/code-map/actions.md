@@ -137,7 +137,7 @@ internal/catalog의 모든 Action: CLI 명령, 콘솔 경로와 internal/applica
 | search.web | executable | external_read | `search` | `/tools` | [features.go · search](../../internal/application/features.go) |
 | serverlog.test | executable | external_write | `serverlog test` | `/rooms` | [serverlog.go · serverLogTest](../../internal/application/serverlog.go) |
 | setup.resume | executable | internal_write | `setup` | `/setup` | [setup.go · setup](../../internal/application/setup.go) |
-| stats.export | deferred (implementation_deferred) | read | `stats export` | `/stats` | — |
+| stats.export | executable | read | `stats export` | `/stats` | [stats_export.go · statsExport](../../internal/application/stats_export.go) |
 | stats.query | executable | read | `stats query` | `/stats` | [providers_persona.go · stats](../../internal/application/providers_persona.go) |
 | stats.rollup | deferred (implementation_deferred) | internal_write | `stats rollup` | `/jobs` | — |
 | stats.series | executable | read | `stats series` | `/stats` | [admin.go · statsSeries](../../internal/application/admin.go) |
