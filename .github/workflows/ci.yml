@@ -3,7 +3,7 @@
 #                          console or its strings changed, the license audit only when dependencies changed.
 #                          Windows and macOS verification run on every push/PR; a newer push cancels the older run.
 #   weekly, Run workflow, release -> the full gate: also the race detector, the 45 s load test, the large-input
-#                          perf tests (MASAMONG_PERF=1), every release platform's build and the license audit.
+#                          perf tests (MASAMONG_PERF_TESTS=1; MASAMONG_PERF is the host tier), every release platform's build and the license audit.
 # The release workflow calls this (full) before it builds archives.
 name: ci
 on:
@@ -182,7 +182,7 @@ jobs:
   perf:
     # The large-input tests that bound the heap or time a migration over hundreds of thousands of rows.
     # They depend on the machine's GC and load and take minutes, so the normal suite skips them (they
-    # run only with MASAMONG_PERF=1). One job runs just those tests, in the full gate.
+    # run only with MASAMONG_PERF_TESTS=1). One job runs just those tests, in the full gate.
     needs: changes
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
@@ -194,7 +194,7 @@ jobs:
           go-version-file: go.mod
       - run: go test ./internal/memory/engine ./internal/memory/corpus ./internal/memory/store -run '^(TestImportGeneratedFileHeapBounded|TestKakaoStreamingHeapStaysBounded|TestReviewAliasMigration200k)$' -count=1 -v
         env:
-          MASAMONG_PERF: "1"
+          MASAMONG_PERF_TESTS: "1"
 
   load:
     # 45 s of mixed traffic against the real service (fake model): fails on leaked goroutines or

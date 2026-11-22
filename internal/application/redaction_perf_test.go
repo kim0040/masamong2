@@ -15,16 +15,16 @@ import (
 
 // TestRedactionPerformance prints how long edit, delete and withdrawal events take on a large history
 // (60k stored messages of which 5,000 are one heavy user's, 5k turn rows of about 3 KB). It is slow to
-// build, so it runs only with MASAMONG_PERF=1:
+// build, so it runs only with MASAMONG_PERF_TESTS=1:
 //
-//	MASAMONG_PERF=1 go test ./internal/application -run TestRedactionPerformance -v
+//	MASAMONG_PERF_TESTS=1 go test ./internal/application -run TestRedactionPerformance -v
 //
 // Turns are written by recordTurn like production, so they carry provenance. MASAMONG_PERF_LEGACY=1
 // writes them straight into the table instead (the worker classifies them in the background first);
 // MASAMONG_PERF_LEGACY=text writes rows from an older release that kept only the copied text.
 func TestRedactionPerformance(t *testing.T) {
-	if os.Getenv("MASAMONG_PERF") == "" {
-		t.Skip("set MASAMONG_PERF=1")
+	if os.Getenv("MASAMONG_PERF_TESTS") == "" {
+		t.Skip("set MASAMONG_PERF_TESTS=1")
 	}
 	s := privacyService(t)
 	e, err := s.MemoryEngine()
