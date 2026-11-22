@@ -221,6 +221,7 @@ type Service struct {
 	adminReady  adminMigration                // whether the admin tables are in the store (admin.go)
 	stateLocks  stateLocks                    // read-modify-write order of admin_state records (state_locks.go)
 	hooks       serviceHooks                  // what a test injected; zero in production (service_hooks.go)
+	zodiacs     zodiacState                   // zodiac cooldowns and generations (fortune.go)
 	// leftovers are files of a finished restore or an interrupted backup that could not be removed
 	// (CleanDataLeftovers); doctor lists them and the scheduler retries.
 	leftovers atomic.Pointer[[]string]
