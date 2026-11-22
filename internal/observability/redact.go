@@ -6,7 +6,8 @@ import (
 )
 
 var (
-	secretish = regexp.MustCompile(`(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*\S+`)
+	// The optional first group is a counting word ("input_token=5" is a number of tokens, not a token).
+	secretish = regexp.MustCompile(`(?i)((?:input|output|prompt|completion|total|cached|cache|reasoning|max|min)[_-])?((?:api|auth|service|access|private)[_-]?key|token|secret|password)\s*[:=]\s*\S+`)
 
 	// An Authorization header value is "Scheme credentials"; the whole value goes, not just the scheme.
 	authHeader = regexp.MustCompile(`(?i)(authorization\s*[:=]\s*)(?:(?:bearer|bot|basic)\s+)?\S+`)
@@ -17,8 +18,12 @@ var (
 	discordToken = regexp.MustCompile(`[\w-]{23,28}\.[\w-]{6,7}\.[\w-]{27,}`)
 	// sk-... / sk_... style API keys (OpenAI, Anthropic, and lookalikes).
 	skKey = regexp.MustCompile(`\bsk[-_][A-Za-z0-9_-]{17,}`)
-	// key=, api_key=, token= and friends inside a URL query string.
-	urlSecret = regexp.MustCompile(`(?i)([?&](?:api[_-]?key|key|token|access[_-]?token|secret|password|auth)=)[^&\s"'<>]+`)
+	// Tavily keys ("tvly-dev-…") and Google API keys ("AIza…", also Gemini's).
+	tavilyKey = regexp.MustCompile(`\btvly-[A-Za-z0-9_-]{16,}`)
+	googleKey = regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{20,}`)
+	// key=, api_key=, token= and friends inside a URL query string (authKey and serviceKey are the
+	// Korean public-data portals' names for it).
+	urlSecret = regexp.MustCompile(`(?i)([?&](?:api[_-]?key|auth[_-]?key|service[_-]?key|key|token|access[_-]?token|secret|password|auth)=)[^&\s"'<>]+`)
 )
 
 // Redact removes credentials that slipped into a log line or error text. It keeps the surrounding words
@@ -36,10 +41,15 @@ func Redact(s string) string {
 		if i := strings.IndexAny(m, ":="); i >= 0 && strings.HasPrefix(strings.TrimLeft(m[i+1:], " \t"), "***") {
 			return m
 		}
+		if sub := secretish.FindStringSubmatch(m); sub[1] != "" && strings.EqualFold(sub[2], "token") {
+			return m
+		}
 		return m[:strings.IndexAny(m, ":=")] + "=***"
 	})
 	s = discordToken.ReplaceAllString(s, "***")
 	s = skKey.ReplaceAllString(s, "sk-***")
+	s = tavilyKey.ReplaceAllString(s, "tvly-***")
+	s = googleKey.ReplaceAllString(s, "AIza***")
 	return s
 }
 
