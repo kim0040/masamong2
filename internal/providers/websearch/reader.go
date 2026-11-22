@@ -101,14 +101,14 @@ func (r *Reader) Read(ctx context.Context, pageURL string, maxChars int) (Page, 
 	if err != nil {
 		var pe *providers.Error
 		if errors.As(err, &pe) && (pe.Status == 401 || pe.Status == 403) && r.cred.Present() {
-			return Page{}, fmt.Errorf("%w: %s", ErrAuth, serviceMessage(resp))
+			return Page{}, fmt.Errorf("%w: %s", ErrAuth, serviceMessage(resp, r.cred.Value()))
 		}
-		if msg := serviceMessage(resp); msg != "" {
+		if msg := serviceMessage(resp, r.cred.Value()); msg != "" {
 			return Page{}, fmt.Errorf("%w: %s", err, msg)
 		}
 		return Page{}, err
 	}
-	return parseReader(resp.ContentType, resp.Body, maxChars)
+	return parseReader(resp.ContentType, resp.Body, maxChars, r.cred.Value())
 }
 
 // ParseReader reads {"code":200,"data":{"title","url","content","usage":{"tokens"}}}.
@@ -123,7 +123,7 @@ func parseReader(contentType string, body []byte, maxChars int, secrets ...strin
 		return Page{}, err
 	}
 	if code, ok := decode.Number(obj["code"]); ok && code != 200 {
-		return Page{}, fmt.Errorf("reader: %s", clip(decode.Str(obj["readableMessage"])+" "+decode.Str(obj["message"])))
+		return Page{}, fmt.Errorf("reader: %s", clip(scrub(decode.Str(obj["readableMessage"])+" "+decode.Str(obj["message"]), secrets...)))
 	}
 	var d struct {
 		Title   string `json:"title"`

@@ -60,6 +60,7 @@ import (
 	"time"
 	"unicode"
 
+	"masamong/internal/observability"
 	"masamong/internal/providers"
 	"masamong/internal/providers/decode"
 	"masamong/internal/providers/kakao"
@@ -317,10 +318,11 @@ func post(ctx context.Context, c *providers.Client, url string, headers map[stri
 	resp, err := c.PostJSON(ctx, url, headers, raw)
 	if err != nil {
 		var pe *providers.Error
+		secrets := headerSecrets(headers)
 		if errors.As(err, &pe) && (pe.Status == 401 || pe.Status == 403) {
-			return nil, fmt.Errorf("%w: %s", ErrAuth, serviceMessage(resp))
+			return nil, fmt.Errorf("%w: %s", ErrAuth, serviceMessage(resp, secrets...))
 		}
-		if msg := serviceMessage(resp); msg != "" {
+		if msg := serviceMessage(resp, secrets...); msg != "" {
 			return nil, fmt.Errorf("%w: %s", err, msg)
 		}
 		return nil, err
@@ -328,11 +330,47 @@ func post(ctx context.Context, c *providers.Client, url string, headers map[stri
 	return decode.Object(resp.ContentType, resp.Body)
 }
 
-// serviceMessage is the error text a service put in its body ({"detail":…}, {"error":…}, {"message":…}).
-func serviceMessage(resp *providers.Response) string {
+// minScrubbed is the shortest key value cut out of a service message by value: a shorter one would also
+// eat ordinary words of the message.
+const minScrubbed = 6
+
+// headerSecrets is the credential values a request carries in its headers: the whole header value and,
+// for "Scheme value", the value alone.
+func headerSecrets(headers map[string]string) []string {
+	var out []string
+	for _, v := range headers {
+		out = append(out, v)
+		if _, rest, ok := strings.Cut(v, " "); ok {
+			out = append(out, rest)
+		}
+	}
+	return out
+}
+
+// scrub removes every given secret value, and anything that looks like a key, from text a service sent
+// back: a service that refuses a key often repeats it ("invalid key abc123"). The text is shown in the
+// console and logs, so it never carries the key.
+func scrub(text string, secrets ...string) string {
+	for _, sec := range secrets {
+		if len(sec) >= minScrubbed {
+			text = strings.ReplaceAll(text, sec, "***")
+		}
+	}
+	return observability.Redact(text)
+}
+
+// serviceMessage is the error text a service put in its body ({"detail":…}, {"error":…}, {"message":…}),
+// with the request's key values (secrets) and key-shaped text removed.
+func serviceMessage(resp *providers.Response, secrets ...string) string {
 	if resp == nil || len(resp.Body) == 0 {
 		return ""
 	}
+	return clip(scrub(rawServiceMessage(resp), secrets...))
+}
+
+// rawServiceMessage is the message as the service sent it: not clipped yet, because a cut in the middle of
+// a key would hide it from scrub.
+func rawServiceMessage(resp *providers.Response) string {
 	obj, err := decode.Object(resp.ContentType, resp.Body)
 	if err != nil {
 		return ""
@@ -343,13 +381,13 @@ func serviceMessage(resp *providers.Response) string {
 			continue
 		}
 		if s := decode.Str(v); s != "" {
-			return clip(s)
+			return s
 		}
 		var inner map[string]json.RawMessage
 		if json.Unmarshal(v, &inner) == nil {
 			for _, ik := range []string{"message", "error"} {
 				if s := decode.Str(inner[ik]); s != "" {
-					return clip(s)
+					return s
 				}
 			}
 		}
