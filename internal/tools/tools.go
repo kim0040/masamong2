@@ -159,6 +159,8 @@ func Builtins() []Builtin {
 				{Name: "topic", Type: "select", Options: []string{"general", "news", "research"}},
 				// with depth deep: the same question asked from other angles, searched in the same call
 				{Name: "queries", Type: "list", Max: 3},
+				// how many result pages are read for passages; 0 keeps the search to snippets (searchPages)
+				{Name: "pages", Type: "number", Min: 0, Max: 10, Example: "3"},
 				{Name: "provider", Type: "provider"}}},
 		{ID: "places.search", Feature: "search", Chat: true, Command: true, Implemented: true, Final: true, Parallel: true, Required: []string{"query"}, Sample: map[string]any{"query": "강남역 맛집", "size": 3},
 			Providers: []string{"kakao_search"},
