@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // writeProvenHealth answers /api/health like a console that knows token: with the proof for the
@@ -83,14 +84,16 @@ func TestMaintenanceStopNeedsTheProof(t *testing.T) {
 	}
 }
 
-// A console of an older version cannot answer the challenge. It is still signed in to while this data
-// folder's daemon lock is held (that daemon is alive, so nothing else holds its port), and refused
-// otherwise.
-func TestOlderConsoleIsAcceptedOnlyWhileTheDaemonLockIsHeld(t *testing.T) {
+// A held daemon lock proves nothing about the recorded address: a daemon that is still starting holds it
+// while daemon.json may still name the port of the copy that crashed, which another program may have
+// taken. A console that cannot answer the challenge (another program, or a console of an older version)
+// never receives the token, whether the lock is held or not, for the sign-in and the maintenance stop.
+func TestUnprovenListenerIsRejectedWithDaemonLockHeld(t *testing.T) {
+	shortRecordWait(t)
 	bind, bodies := tokenCatcher(t, "")
 	dir := t.TempDir()
-	if err := verifyEndpoint(context.Background(), bind, "synthetic-token", dir); !errors.Is(err, errUnproven) {
-		t.Fatalf("no lock: %v", err)
+	if err := WriteInfo(dir, DaemonInfo{PID: 1, Bind: bind}); err != nil {
+		t.Fatal(err)
 	}
 	lock, err := AcquireLock(dir)
 	if err != nil {
@@ -100,17 +103,82 @@ func TestOlderConsoleIsAcceptedOnlyWhileTheDaemonLockIsHeld(t *testing.T) {
 	if !Running(dir, "daemon.lock") {
 		t.Skip("this system cannot see its own process's lock as held")
 	}
-	if err := verifyEndpoint(context.Background(), bind, "synthetic-token", dir); err != nil {
-		t.Fatalf("lock held: %v", err)
+	c := NewClient(bind, "synthetic-token")
+	c.DataRoot = dir
+	if _, err := c.Action(context.Background(), "runtime.status", nil); !errors.Is(err, errUnproven) {
+		t.Fatalf("sign-in: %v", err)
 	}
-	if bodies.Load() != 0 {
-		t.Fatal("verification sent a body")
+	if ok, err := Stop(context.Background(), dir, "synthetic-token", "cli"); ok || !errors.Is(err, errUnproven) {
+		t.Fatalf("stop: %v %v", ok, err)
 	}
+	if err := stopMaintenance(context.Background(), dir, bind, "synthetic-token", "", 1); !errors.Is(err, errUnproven) {
+		t.Fatalf("maintenance stop: %v", err)
+	}
+	if n := bodies.Load(); n != 0 {
+		t.Fatalf("%d requests with a body reached a listener that did not prove itself", n)
+	}
+}
+
+// While the daemon lock is held, a record that does not prove itself may belong to a daemon that is still
+// starting: the client reads the record again and signs in once a fresh record names a console that
+// proves itself, and the stale address never receives the token.
+func TestSignInWaitsForAFreshRecordWhileTheDaemonStarts(t *testing.T) {
+	shortRecordWait(t)
+	stale, staleBodies := tokenCatcher(t, "")
+	var logins atomic.Int32
+	real := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/health":
+			writeProvenHealth(w, r, "synthetic-token", nil)
+		case "/api/login":
+			logins.Add(1)
+			fmtJSON(w, map[string]any{"ok": true, "csrf": "c"})
+		default:
+			fmtJSON(w, map[string]any{"ok": true, "output": map[string]any{}})
+		}
+	}))
+	defer real.Close()
+	dir := t.TempDir()
+	if err := WriteInfo(dir, DaemonInfo{PID: 1, Bind: stale}); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := AcquireLock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Release()
+	if !Running(dir, "daemon.lock") {
+		t.Skip("this system cannot see its own process's lock as held")
+	}
+	listened := make(chan error, 1)
+	go func() { // the starting daemon's console listens and writes its record
+		time.Sleep(300 * time.Millisecond)
+		listened <- WriteInfo(dir, DaemonInfo{PID: 2, Bind: strings.TrimPrefix(real.URL, "http://")})
+	}()
+	c := NewClient(stale, "synthetic-token")
+	c.DataRoot = dir
+	if _, err := c.Action(context.Background(), "runtime.status", nil); err != nil {
+		t.Fatalf("sign-in after the fresh record: %v", err)
+	}
+	if err := <-listened; err != nil {
+		t.Fatal(err)
+	}
+	if logins.Load() != 1 || staleBodies.Load() != 0 {
+		t.Fatalf("logins %d, bodies at the stale address %d", logins.Load(), staleBodies.Load())
+	}
+}
+
+// shortRecordWait keeps a test's wait for a fresh daemon record short.
+func shortRecordWait(t *testing.T) {
+	t.Helper()
+	old := recordWait
+	recordWait = time.Second
+	t.Cleanup(func() { recordWait = old })
 }
 
 func TestTokenIsNeverSentOffThisComputer(t *testing.T) {
 	for _, bind := range []string{"192.0.2.1:8787", "example.invalid:8787", "[2001:db8::1]:8787"} {
-		if err := verifyEndpoint(context.Background(), bind, "synthetic-token", ""); !errors.Is(err, errNotLoopback) {
+		if err := verifyEndpoint(context.Background(), bind, "synthetic-token"); !errors.Is(err, errNotLoopback) {
 			t.Fatalf("%s: %v", bind, err)
 		}
 	}

@@ -106,7 +106,7 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	lock, err := launcher.AcquireLock(dataRoot)
+	lock, err := takeDataRoot(dataRoot)
 	if err != nil {
 		log.Error("lock", "err", err)
 		os.Exit(launcher.ExitLocked)
@@ -136,6 +136,18 @@ func main() {
 		log.Error("restart failed; start masamong again", "err", err)
 		os.Exit(1)
 	}
+}
+
+// takeDataRoot takes the data folder's daemon lock. A daemon.json left by the previous owner names a
+// port that another program may hold by now, so it goes while this daemon holds the lock; the console
+// writes a fresh record once it listens. Until then clients find no record to send the token to.
+func takeDataRoot(dataRoot string) (*launcher.Lock, error) {
+	lock, err := launcher.AcquireLock(dataRoot)
+	if err != nil {
+		return nil, err
+	}
+	launcher.RemoveInfo(dataRoot)
+	return lock, nil
 }
 
 // openLog writes JSON lines to a rotating file so months of uptime cannot fill the disk. The lines also go

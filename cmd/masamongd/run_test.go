@@ -12,6 +12,7 @@ import (
 	"masamong/internal/action"
 	"masamong/internal/application"
 	"masamong/internal/cli"
+	"masamong/internal/launcher"
 	"masamong/internal/transport/web"
 )
 
@@ -120,5 +121,23 @@ func TestRunListenFailureReturnsAfterShutdown(t *testing.T) {
 		if e.Kind == "stop" || e.Kind == "restart" {
 			t.Fatalf("a failed run was recorded as a clean %s: %s", e.Kind, raw)
 		}
+	}
+}
+
+// A record left by the previous owner of the folder (a crash leaves one) names a port that another
+// program may hold by now: the daemon removes it as soon as it holds the lock, so no client sends the
+// token there while this daemon starts.
+func TestTakingTheDataRootRemovesTheStaleAddressRecord(t *testing.T) {
+	root := t.TempDir()
+	if err := launcher.WriteInfo(root, launcher.DaemonInfo{PID: 1, Bind: "127.0.0.1:1"}); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := takeDataRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Release()
+	if info, ok := launcher.ReadInfo(root); ok {
+		t.Fatalf("the stale record survived: %+v", info)
 	}
 }

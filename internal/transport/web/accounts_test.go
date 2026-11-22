@@ -52,7 +52,7 @@ func TestSessionsSurviveARestart(t *testing.T) {
 	}
 	// the restarted service: same data folder, new server
 	s2 := New(s.svc)
-	s2.sessions.load(s.svc.DataRoot, s2.now())
+	s2.sessions.load(s.svc.DataRoot, s2.now(), s2.currentTag())
 	ts2 := httptest.NewServer(s2.Handler())
 	defer ts2.Close()
 	if code, _ := act(t, c, ts2, csrf, "dashboard.overview", nil); code != 200 {
@@ -67,13 +67,13 @@ func TestSessionPersistenceFiltersExpiredAndUsesPrivateMode(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 9, 24, 3, 0, 0, 0, time.UTC)
 	st := newSessionStore()
-	liveID, _ := st.create(now, "test browser")
-	otherID, _ := st.create(now, "other browser")
+	liveID, _ := st.create(now, "test browser", "synthetic-tag")
+	otherID, _ := st.create(now, "other browser", "synthetic-tag")
 	st.mu.Lock()
 	st.byID["expired-at-boundary"] = session{Expires: now}
 	st.byID["already-expired"] = session{Expires: now.Add(-time.Second)}
 	st.mu.Unlock()
-	revokedID, _ := st.create(now, "test browser")
+	revokedID, _ := st.create(now, "test browser", "synthetic-tag")
 	st.drop(revokedID)
 
 	path := sessionsPath(dir)
@@ -91,7 +91,7 @@ func TestSessionPersistenceFiltersExpiredAndUsesPrivateMode(t *testing.T) {
 	}
 
 	restored := newSessionStore()
-	restored.load(dir, now)
+	restored.load(dir, now, "synthetic-tag")
 	if _, ok := restored.get(liveID, now); !ok {
 		t.Fatal("live session was not restored")
 	}
@@ -129,7 +129,7 @@ func TestListenPersistsSessionsOnlyForRestart(t *testing.T) {
 			s, ts := testServer(t)
 			ts.Close()
 			s.addr = "127.0.0.1:0"
-			s.sessions.create(s.now(), "test browser")
+			s.sessions.create(s.now(), "test browser", s.currentTag())
 			if tc.restart {
 				s.PreserveSessionsForRestart()
 			}

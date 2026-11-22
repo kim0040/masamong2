@@ -98,9 +98,9 @@ func TestConsoleUseLeavesNothingBehind(t *testing.T) {
 func TestSessionsAreCapped(t *testing.T) {
 	st := newSessionStore()
 	now := time.Now()
-	first, _ := st.create(now, "")
+	first, _ := st.create(now, "", "")
 	for i := range maxSessions * 3 {
-		st.create(now.Add(time.Duration(i+1)*time.Second), "")
+		st.create(now.Add(time.Duration(i+1)*time.Second), "", "")
 	}
 	if n := st.len(); n != maxSessions {
 		t.Fatalf("%d sessions, want %d", n, maxSessions)

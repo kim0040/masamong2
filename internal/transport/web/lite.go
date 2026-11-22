@@ -171,12 +171,13 @@ func (s *Server) liteSignIn(w http.ResponseWriter, r *http.Request) {
 		s.liteRenderStatus(w, r, http.StatusTooManyRequests, text["rate"])
 		return
 	}
-	if !s.tokenMatches(strings.TrimSpace(r.PostFormValue("token"))) {
+	tag, ok := s.checkToken(strings.TrimSpace(r.PostFormValue("token")))
+	if !ok {
 		s.liteRenderStatus(w, r, http.StatusUnauthorized, text["wrong"])
 		return
 	}
 	succeeded()
-	id, _ := s.sessions.create(s.now(), r.UserAgent())
+	id, _ := s.sessions.create(s.now(), r.UserAgent(), tag)
 	s.setSessionCookie(w, r, id, int(sessionTTL.Seconds()))
 	http.Redirect(w, r, "/lite", http.StatusSeeOther)
 }

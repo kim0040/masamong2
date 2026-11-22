@@ -36,9 +36,11 @@ type Server struct {
 	tailnet  tailnetName
 	log      *slog.Logger
 	http     *http.Server
-	// tokenMu guards token: a re-issue (rotateToken) replaces it while requests compare against it.
+	// tokenMu guards token and tag: a re-issue (rotateToken) replaces them while requests compare
+	// against them. tag names the token in the sessions it signs in (see tokenTag).
 	tokenMu  sync.RWMutex
 	token    string
+	tag      string
 	sessions *sessionStore
 	logins   *loginLimiter
 	// remoteLogins counts failed sign-ins that came through an admin.web.hosts name (another device on
@@ -99,7 +101,7 @@ func New(svc *application.Service) *Server {
 	if err != nil {
 		s.log.Error("web token", "err", err)
 	}
-	s.token = tok
+	s.token, s.tag = tok, tokenTag(tok)
 	s.signin = signinCommands(svc.DataRoot)
 	return s
 }
@@ -219,7 +221,7 @@ func (s *Server) Listen(ctx context.Context) error {
 		_ = s.http.Shutdown(c)
 		s.closePractice()
 	}()
-	s.sessions.load(s.svc.DataRoot, s.now())
+	s.sessions.load(s.svc.DataRoot, s.now(), s.currentTag())
 	err = s.http.Serve(ln)
 	if errors.Is(err, http.ErrServerClosed) {
 		if s.keepSessions.Load() {
@@ -279,6 +281,20 @@ func (s *Server) beginEventStream(session string, cancel context.CancelFunc, exp
 			}
 		}
 	}
+}
+
+// closeEventStreams ends every open event stream at once (a re-issue ended every session). A stream
+// that registers after this rechecks its session, which is already gone (see events).
+func (s *Server) closeEventStreams() {
+	s.streamsMu.Lock()
+	defer s.streamsMu.Unlock()
+	for _, st := range s.streams {
+		if st.expire != nil {
+			st.expire()
+		}
+		st.cancel()
+	}
+	s.streams = nil
 }
 
 func (s *Server) openEventStreams() int {
@@ -357,12 +373,14 @@ func sameOrigin(r *http.Request) bool { return SameOrigin(r) }
 
 // session is one signed-in browser. There is one admin — whoever can reach the console through the
 // launcher's one-time link (this machine, or an SSH tunnel) or read the token file — so a session
-// carries no identity beyond its CSRF secret.
+// carries no identity beyond its CSRF secret. Tag names the token it was signed in with: a session
+// made with an earlier token is refused, even one that was saved to sessions.json.
 type session struct {
 	CSRF    string
 	Created time.Time
 	Expires time.Time
 	Agent   string
+	Tag     string
 }
 
 type sessionStore struct {
@@ -372,9 +390,14 @@ type sessionStore struct {
 
 func newSessionStore() *sessionStore { return &sessionStore{byID: map[string]session{}} }
 
-func (st *sessionStore) create(now time.Time, agent string) (id string, sess session) {
+// create starts a session for a sign-in that checked the token whose tag is tag.
+func (st *sessionStore) create(now time.Time, agent, tag string) (id string, sess session) {
+	return st.add(now, session{CSRF: randomHex(16), Created: now, Expires: now.Add(sessionTTL), Agent: agentLabel(agent), Tag: tag})
+}
+
+// add stores sess under a new id.
+func (st *sessionStore) add(now time.Time, sess session) (id string, _ session) {
 	id = randomHex(24)
-	sess = session{CSRF: randomHex(16), Created: now, Expires: now.Add(sessionTTL), Agent: agentLabel(agent)}
 	st.mu.Lock()
 	for k, v := range st.byID {
 		if !now.Before(v.Expires) {
@@ -423,15 +446,11 @@ func (st *sessionStore) drop(id string) {
 	st.mu.Unlock()
 }
 
-// dropAllExcept ends every session but keep (which may be empty).
-func (st *sessionStore) dropAllExcept(keep string) {
+// dropAll ends every session.
+func (st *sessionStore) dropAll() {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	for id := range st.byID {
-		if id != keep {
-			delete(st.byID, id)
-		}
-	}
+	clear(st.byID)
 }
 
 func (st *sessionStore) save(dataRoot string, now time.Time) error {
@@ -477,7 +496,10 @@ func (st *sessionStore) save(dataRoot string, now time.Time) error {
 	return f.Close()
 }
 
-func (st *sessionStore) load(dataRoot string, now time.Time) {
+// load restores the sessions a restart kept, only those made with the token whose tag is tag: a file
+// left by an interrupted re-issue holds sessions of the old token. One saved by an older version, which
+// records no tag, takes this tag when it is newer than the token file (see madeWith).
+func (st *sessionStore) load(dataRoot string, now time.Time, tag string) {
 	raw, err := os.ReadFile(sessionsPath(dataRoot))
 	if err != nil {
 		return
@@ -490,7 +512,8 @@ func (st *sessionStore) load(dataRoot string, now time.Time) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	for id, sess := range saved {
-		if now.Before(sess.Expires) {
+		if now.Before(sess.Expires) && madeWith(dataRoot, sess.Tag, tag, sess.Created) {
+			sess.Tag = tag
 			st.byID[id] = sess
 		}
 	}
@@ -565,8 +588,23 @@ func (s *Server) currentSession(r *http.Request) (string, session, bool) {
 	if err != nil || c.Value == "" {
 		return "", session{}, false
 	}
-	sess, ok := s.sessions.get(c.Value, s.now())
+	sess, ok := s.liveSession(c.Value)
 	return c.Value, sess, ok
+}
+
+// liveSession returns session id while it is signed in with the current token. A sign-in that checked
+// the old token while a re-issue ran can store its session after the re-issue ended the others; its tag
+// gives it away, and it goes.
+func (s *Server) liveSession(id string) (session, bool) {
+	sess, ok := s.sessions.get(id, s.now())
+	if !ok {
+		return session{}, false
+	}
+	if tag := s.currentTag(); tag == "" || sess.Tag != tag {
+		s.sessions.drop(id)
+		return session{}, false
+	}
+	return sess, true
 }
 
 // operator is the action.Operator for a session: always the installation's one admin.
@@ -581,12 +619,15 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, id str
 	})
 }
 
-func (s *Server) tokenMatches(candidate string) bool {
-	tok := s.currentToken()
-	if tok == "" || candidate == "" {
-		return false
+// checkToken reports whether candidate is the current token, and that token's tag, read together so a
+// re-issue cannot fall between them: the session the sign-in makes records the token it checked.
+func (s *Server) checkToken(candidate string) (tag string, ok bool) {
+	s.tokenMu.RLock()
+	defer s.tokenMu.RUnlock()
+	if s.token == "" || candidate == "" || subtle.ConstantTimeCompare([]byte(candidate), []byte(s.token)) != 1 {
+		return "", false
 	}
-	return subtle.ConstantTimeCompare([]byte(candidate), []byte(tok)) == 1
+	return s.tag, true
 }
 
 func (s *Server) currentToken() string {
@@ -595,20 +636,30 @@ func (s *Server) currentToken() string {
 	return s.token
 }
 
-// rotateToken re-issues the sign-in token. The old token stops working at once: links and sign-ins
-// that carry it are refused, pending one-time codes are deleted, and every session ends except keep
-// (the console tab that asked; empty for none). The tray and the CLI read the token file again on
-// their next sign-in.
-func (s *Server) rotateToken(keep string) error {
+func (s *Server) currentTag() string {
+	s.tokenMu.RLock()
+	defer s.tokenMu.RUnlock()
+	return s.tag
+}
+
+// rotateToken re-issues the sign-in token and returns the new token's tag. The old token stops working
+// at once: links and sign-ins that carry it are refused, every session ends with its event streams, and
+// pending one-time codes are deleted (a code or saved session that outlives that was made with the old
+// token and is refused for it). The tray and the CLI read the token file again on their next sign-in.
+// An empty tag means the old token is still in place; with a tag, err only names a leftover file.
+func (s *Server) rotateToken() (tag string, err error) {
 	s.tokenMu.Lock()
-	defer s.tokenMu.Unlock()
 	tok, err := RotateToken(s.svc.DataRoot)
 	if tok != "" {
-		// the file holds the new token even when a leftover code or session file could not be removed
-		s.token = tok
-		s.sessions.dropAllExcept(keep)
+		s.token, s.tag = tok, tokenTag(tok)
+		tag = s.tag
+		s.sessions.dropAll()
 	}
-	return err
+	s.tokenMu.Unlock()
+	if tag != "" {
+		s.closeEventStreams()
+	}
+	return tag, err
 }
 
 func (s *Server) csrfOK(sess session, got string) bool {
@@ -631,18 +682,20 @@ func (s *Server) loginLink(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login?error=rate", http.StatusSeeOther)
 		return
 	}
-	ok := false
+	tag, ok := "", false
 	if once != "" {
-		ok = ConsumeOnce(s.svc.DataRoot, once, s.now())
+		// the tag is read before the code: a re-issue in between leaves the session with the old tag
+		tag = s.currentTag()
+		ok = ConsumeOnce(s.svc.DataRoot, once, tag, s.now())
 	} else {
-		ok = s.tokenMatches(tok)
+		tag, ok = s.checkToken(tok)
 	}
 	if !ok {
 		http.Redirect(w, r, "/login?error=token", http.StatusSeeOther)
 		return
 	}
 	succeeded()
-	id, _ := s.sessions.create(s.now(), r.UserAgent())
+	id, _ := s.sessions.create(s.now(), r.UserAgent(), tag)
 	s.setSessionCookie(w, r, id, int(sessionTTL.Seconds()))
 	next := loginNext(q.Get("next"))
 	http.Redirect(w, r, next, http.StatusSeeOther)

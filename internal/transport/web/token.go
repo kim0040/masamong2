@@ -4,9 +4,12 @@ package web
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -50,10 +53,36 @@ func writeNewToken(path string) (string, error) {
 	return tok, nil
 }
 
+// tokenTag names a token without revealing it. Sessions and one-time codes record the tag of the token
+// they were made with, so a re-issue ends them even when a file that holds them outlives it.
+func tokenTag(tok string) string {
+	if tok == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte("masamong-console-token\x00" + tok))
+	return hex.EncodeToString(sum[:16])
+}
+
+// madeWith reports whether a session or one-time code was made with the token whose tag is tag, from
+// the tag it recorded and the time it was made. One made by an older version records no tag: it counts
+// only when it is newer than the token file, so it cannot be from before a re-issue.
+func madeWith(dataRoot, recorded, tag string, made time.Time) bool {
+	if tag == "" {
+		return false
+	}
+	if recorded != "" {
+		return subtle.ConstantTimeCompare([]byte(recorded), []byte(tag)) == 1
+	}
+	st, err := os.Stat(TokenPath(dataRoot))
+	return err == nil && made.After(st.ModTime())
+}
+
 // RotateToken replaces the bootstrap token with a new one and deletes pending one-time codes and the
 // sessions a restart would keep (sessions.json). A running console must do this through
 // Server.rotateToken, which also ends the sessions it holds; the CLI calls it directly only while no
-// daemon holds the data folder.
+// daemon holds the data folder. A token is returned once it is in place: the old one already fails, and
+// an error beside it only names a leftover code or session file, which was made with the old token and
+// is refused for that (an interrupted re-issue leaves nothing usable either).
 func RotateToken(dataRoot string) (string, error) {
 	path := TokenPath(dataRoot)
 	if err := fsutil.PrivateDir(dataRoot); err != nil {
@@ -109,8 +138,8 @@ func LoginURL(bind, token string) string {
 }
 
 // One-time login codes let the launcher open the browser already signed in without putting the
-// long-lived token in a URL. The launcher (same user, same data root) writes a code file; the console
-// consumes it once within two minutes.
+// long-lived token in a URL. The launcher (same user, same data root) writes a code file that holds the
+// tag of the current token; the console consumes it once within two minutes, while that token is current.
 
 func onceDir(dataRoot string) string { return filepath.Join(dataRoot, "admin", "login-once") }
 
@@ -119,6 +148,10 @@ const onceTTL = 2 * time.Minute
 
 // CreateOnce writes a fresh one-time code and returns it.
 func CreateOnce(dataRoot string) (string, error) {
+	tok, err := ReadToken(dataRoot)
+	if err != nil {
+		return "", err
+	}
 	var b [18]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", err
@@ -129,7 +162,7 @@ func CreateOnce(dataRoot string) (string, error) {
 		return "", err
 	}
 	path := filepath.Join(dir, code)
-	if err := os.WriteFile(path, nil, 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(tokenTag(tok)), 0o600); err != nil {
 		return "", err
 	}
 	if err := fsutil.PrivateFile(path); err != nil {
@@ -139,8 +172,9 @@ func CreateOnce(dataRoot string) (string, error) {
 	return code, nil
 }
 
-// ConsumeOnce reports whether code exists and is fresh, deleting it (and stale codes) either way.
-func ConsumeOnce(dataRoot, code string, now time.Time) bool {
+// ConsumeOnce reports whether code exists, is fresh and was made with the token whose tag is tag,
+// deleting it (and stale codes) either way.
+func ConsumeOnce(dataRoot, code, tag string, now time.Time) bool {
 	dir := onceDir(dataRoot)
 	if entries, err := os.ReadDir(dir); err == nil {
 		for _, e := range entries {
@@ -157,11 +191,23 @@ func ConsumeOnce(dataRoot, code string, now time.Time) bool {
 	if err != nil {
 		return false
 	}
+	recorded, err := readOnce(p)
 	// only the request whose Remove succeeds signs in, so a code cannot be used twice concurrently
-	if os.Remove(p) != nil {
+	if os.Remove(p) != nil || err != nil {
 		return false
 	}
-	return now.Sub(info.ModTime()) <= onceTTL
+	return now.Sub(info.ModTime()) <= onceTTL && madeWith(dataRoot, recorded, tag, info.ModTime())
+}
+
+// readOnce reads the token tag a code file holds (empty for a code made by an older version).
+func readOnce(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	raw, err := io.ReadAll(io.LimitReader(f, 64))
+	return strings.TrimSpace(string(raw)), err
 }
 
 // OnceURL is the launcher's sign-in link for a bind address.

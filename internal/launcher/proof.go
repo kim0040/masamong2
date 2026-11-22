@@ -61,10 +61,10 @@ func loopbackAddr(hostport string) bool {
 func noRedirect(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 // verifyEndpoint checks, before the token leaves this process, that bind is a loopback address and
-// that the console there knows token. dataRoot is used only for a console of an older version, which
-// cannot answer the challenge: it is accepted while this data folder's daemon lock is held, since
-// then that daemon is alive and still owns its port (no other program can have taken it).
-func verifyEndpoint(ctx context.Context, bind, token, dataRoot string) error {
+// that the console there knows token. A console that does not answer the challenge is refused, even
+// while this data folder's daemon lock is held: a daemon that is still starting holds the lock while
+// daemon.json may still name the port of the copy before it, which another program may have taken.
+func verifyEndpoint(ctx context.Context, bind, token string) error {
 	addr := hostPort(bind)
 	if !loopbackAddr(addr) {
 		return errNotLoopback
@@ -88,14 +88,39 @@ func verifyEndpoint(ctx context.Context, bind, token, dataRoot string) error {
 	if res.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(res.Body, 4096)).Decode(&out) != nil {
 		return errUnproven
 	}
-	if out.Proof == nil {
-		if dataRoot != "" && lockHeld(dataRoot, "daemon.lock") {
-			return nil
-		}
-		return errUnproven
-	}
-	if !hmac.Equal([]byte(*out.Proof), []byte(EndpointProof(token, addr, challenge))) {
+	if out.Proof == nil || !hmac.Equal([]byte(*out.Proof), []byte(EndpointProof(token, addr, challenge))) {
 		return errUnproven
 	}
 	return nil
+}
+
+// recordWait bounds how long a client waits for a starting daemon to replace a stale address record.
+var recordWait = 15 * time.Second
+
+// provenBind returns the address the token may be sent to: bind, once its console proved itself. With a
+// data folder whose daemon lock is held, a console that does not prove itself may be a stale record of a
+// daemon that is still starting (it writes a fresh record once its console listens), so the record is
+// read again until the address in it proves itself or recordWait passes. Nothing is sent to an address
+// that did not prove itself.
+func provenBind(ctx context.Context, bind, token, dataRoot string) (string, error) {
+	err := verifyEndpoint(ctx, bind, token)
+	if err == nil || dataRoot == "" || !errors.Is(err, errUnproven) {
+		return bind, err
+	}
+	deadline := time.Now().Add(recordWait)
+	for time.Now().Before(deadline) && lockHeld(dataRoot, "daemon.lock") {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+		info, ok := ReadInfo(dataRoot)
+		if !ok {
+			continue // the starting daemon removed the stale record and has not written its own yet
+		}
+		if verifyEndpoint(ctx, info.Bind, token) == nil {
+			return info.Bind, nil
+		}
+	}
+	return "", err
 }

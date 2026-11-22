@@ -23,8 +23,8 @@ import (
 type Client struct {
 	Base string
 	Via  string // "cli" (default) or "tray"
-	// DataRoot lets a console of an older version, which cannot prove it knows the token, be signed in
-	// while this data folder's daemon lock is held (see verifyEndpoint). Empty: such a console is refused.
+	// DataRoot lets a sign-in wait for a fresh daemon.json while this data folder's daemon is starting
+	// (see provenBind). Empty: a recorded address that does not prove itself is refused at once.
 	DataRoot string
 	// Reload reads the current token before each sign-in, so a long-lived client (the tray) follows a
 	// token re-issue. Nil keeps the token given to NewClient.
@@ -59,8 +59,12 @@ func (c *Client) login(ctx context.Context) error {
 			c.token = tok
 		}
 	}
-	if err := verifyEndpoint(ctx, c.bind, c.token, c.DataRoot); err != nil {
+	bind, err := provenBind(ctx, c.bind, c.token, c.DataRoot)
+	if err != nil {
 		return err
+	}
+	if bind != c.bind { // the daemon wrote a fresh record: follow it
+		c.bind, c.Base = bind, "http://"+hostPort(bind)
 	}
 	body, _ := json.Marshal(map[string]string{"token": c.token})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.Base+"/api/login", bytes.NewReader(body))
@@ -333,7 +337,8 @@ func (c *Client) checkDataRoot(ctx context.Context, expected string) error {
 // stopMaintenance asks a daemon stopped for maintenance to end (POST /api/maintenance/stop, which takes
 // the admin token like a sign-in, so the console proves itself first).
 func stopMaintenance(ctx context.Context, dataRoot, bind, token, expectedRoot string, pid int) error {
-	if err := verifyEndpoint(ctx, bind, token, dataRoot); err != nil {
+	bind, err := provenBind(ctx, bind, token, dataRoot)
+	if err != nil {
 		return err
 	}
 	in := map[string]any{"token": token}
