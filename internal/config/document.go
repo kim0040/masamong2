@@ -367,6 +367,9 @@ type ChannelPolicy struct {
 	// WatchLevel sets the cumulative alert level by exact KMA region code or name.
 	// An unconfigured region is level 1 (earthquake notices only).
 	WatchLevel WatchLevels `yaml:"watch_level,omitempty" json:"watch_level,omitempty"`
+	// UpdateNews "on" lets the bot post one short card here when it starts on a new release with
+	// something user-facing to say. Unset (or "off") = never, whatever the people in the room do.
+	UpdateNews string `yaml:"update_news,omitempty" json:"update_news,omitempty"`
 	// NameCall is what a message that only says the bot's name (no mention, no reply to it) means:
 	// addressed = a small classifier tells "talking to the bot" from "talking about the bot" (default);
 	// always = every message with the name is a call (the old behaviour); off = the name alone never calls.
@@ -1604,6 +1607,9 @@ func parse(raw []byte, problems *[]Problem) (Document, error) {
 		for cid, c := range g.Channels {
 			if c.DisasterAlerts != "" && c.DisasterAlerts != "on" && c.DisasterAlerts != "off" {
 				return Document{}, fmt.Errorf("guilds.%s.channels.%s.disaster_alerts must be on or off", gid, cid)
+			}
+			if c.UpdateNews != "" && c.UpdateNews != "on" && c.UpdateNews != "off" {
+				return Document{}, fmt.Errorf("guilds.%s.channels.%s.update_news must be on or off", gid, cid)
 			}
 			for region, level := range c.WatchLevel {
 				if region == "" || strings.TrimSpace(region) != region || level < 1 || level > 5 {

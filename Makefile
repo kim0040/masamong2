@@ -1,6 +1,6 @@
 # Common builds. The console (internal/transport/web/ui) is committed pre-built in ui/dist, so plain
 # `go build` works without Node; run `make ui` after changing the console.
-.PHONY: ui check build test docs docs-record codemap try install uninstall app release
+.PHONY: ui check build test docs docs-record codemap release-notes try install uninstall app release
 
 ui:
 	cd internal/transport/web/ui && npm ci && npm run build
@@ -26,6 +26,13 @@ docs-record:
 # code map: writes the generated indexes under docs/code-map (a stale map fails go test ./tools/codemap)
 codemap:
 	go run ./tools/codemap
+
+# draft the release notes of a version before tagging: make release-notes VERSION=v1.6.0 [SINCE=v1.5.1]
+# (ANTHROPIC_API_KEY in the environment; without it a draft of commit subjects is written and the exit is non-zero).
+# Read and edit release-notes/$(VERSION).json and .md, then commit them before the tag.
+release-notes:
+	$(if $(VERSION),,$(error usage: make release-notes VERSION=vX.Y.Z [SINCE=vA.B.C]))
+	go run ./tools/relnotes --version $(VERSION) $(if $(SINCE),--since $(SINCE))
 
 # build from source and run a separate test instance (~/.masamong-try), console opened; Ctrl+C stops it
 ifeq ($(OS),Windows_NT)

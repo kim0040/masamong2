@@ -1,0 +1,16 @@
+{
+  "version": "v1.0.0",
+  "date": "2026-11-02",
+  "user": {
+    "en": [],
+    "ko": []
+  },
+  "operator": {
+    "en": [
+      "First public release."
+    ],
+    "ko": [
+      "첫 공개 릴리스입니다."
+    ]
+  }
+}

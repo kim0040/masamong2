@@ -2216,6 +2216,23 @@ add("maint.update", {
     "how": ("새 버전 {v}은(는) 설치 파일을 받아 다시 설치하면 됩니다. 데이터와 설정은 그대로 남습니다.", "To get {v}, download it and install it again. Data and settings stay."),
     "notes": ("릴리스 노트 보기", "Release notes"),
 })
+add("maint.news", {
+    "title": ("새 소식", "What's new"),
+    "desc": ("실행 중인 버전의 변경 내용입니다.", "What changed in the running version."),
+    "version": ("{v} · {date}", "{v} · {date}"),
+    "operator": ("운영자용", "For operators"), "user": ("대화에서 느끼는 변경", "What chat members notice"),
+    "earlier": ("이전 버전 {v} 보기", "Show {v}"), "current": ("실행 중인 버전으로", "Back to the running version"),
+    "none": ("이 버전에는 보여 드릴 소식이 없습니다. 개발용 빌드이거나 소식이 기록되지 않은 버전입니다.", "No notes to show for this version: a local build, or a version whose notes were not recorded."),
+})
+add("room", {
+    "update_news": ("새 버전 소식 올리기", "Post update news here"),
+    "update_news_hint": ("봇이 새 버전으로 시작할 때, 대화에서 느낄 만한 변경이 있으면 이 방에 카드 한 장을 올립니다. 기본은 꺼짐입니다.", "When the bot starts on a new version with changes people here would notice, it posts one card in this room. Off by default."),
+    "update_news_off_respond": ("응답 안 함인 방에는 소식도 올리지 않습니다.", "A room the bot does not answer in gets no update news either."),
+})
+add("people", {
+    "news.title": ("업데이트 소식 DM", "Update news by DM"), "news.chip": ("업데이트 소식", "Update news"),
+    "news.turn_off": ("끄기", "Turn off"), "news.off_done": ("업데이트 소식 DM을 껐습니다", "Update news by DM turned off"),
+})
 add("cfg", {
     "web_search": ("웹 검색", "Web search"),
     "web_search.desc": ("인터넷 검색 도구가 검색 서비스를 쓰는 순서입니다. 도구 → 인터넷 검색 화면에서 화살표로 바꾸는 편이 쉽습니다.", "The order the web search tool tries its services in. Easier to change with the arrows under Tools → Web search."),

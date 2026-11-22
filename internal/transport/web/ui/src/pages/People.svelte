@@ -75,7 +75,7 @@
     if (c.stale) return { tone: 'warn', label: t('people.consent.stale') }
     return { tone: 'ok', label: t('people.consent.granted') }
   }
-  const subscribed = (u: any) => !!u.fortune || (u.notices ?? []).length > 0
+  const subscribed = (u: any) => !!u.fortune || (u.notices ?? []).length > 0 || !!u.prefs?.update_news
   const withdrew = (u: any) => Object.values<any>(u.consents ?? {}).some((c) => c.status === 'withdrawn')
   const shown = $derived(((users.data?.users ?? []) as any[]).filter((u) => {
     if (q && !`${u.name ?? ''} ${u.user_id}`.toLowerCase().includes(q.trim().toLowerCase())) return false
@@ -122,6 +122,7 @@
   const withdraw = (scope: string) => run('privacy.consent', { user_id: openId, scope, decision: 'withdraw' }, t('people.withdrawn_toast', { scope: t(`people.scope.${scope}`) }))
   const fortune = (op: 'unsubscribe' | 'delete') => run('fortune.subscribe', { op, user_id: openId }, t(`people.fortune.${op}_done`))
   const notice = (kind: string, op: 'pause' | 'resume' | 'delete') => run('notices.subscribe', { op, kind, user_id: openId }, t(`people.notice.${op}_done`))
+  const updateNewsOff = () => run('updates.subscribe', { op: 'off', user_id: openId }, t('people.news.off_done'))
   const resetPrefs = () => run('preferences.set', { user_id: openId, reset: true }, t('people.prefs.reset_done'))
   const access = $derived(users.data?.access ?? { operators: [], blocked_users: [], guild_admins: true })
   async function setListed(field: 'operators' | 'blocked_users', id: string, on: boolean) {
@@ -138,11 +139,13 @@
     const u = cur
     if (!u) return
     const steps: Promise<unknown>[] = []
+    // first and alone: the settings reset below rewrites the same row and keeps the news subscription
+    const newsOff = u.prefs?.update_news ? ((await call('updates.subscribe', { op: 'off', user_id: u.user_id })) as any) : null
     for (const s of scopes) if (s === 'memory' || u.consents?.[s]?.allows) steps.push(call('privacy.consent', { user_id: u.user_id, scope: s, decision: 'withdraw' }))
     if (u.fortune) steps.push(call('fortune.subscribe', { op: 'delete', user_id: u.user_id }))
     for (const n of u.notices ?? []) steps.push(call('notices.subscribe', { op: 'delete', kind: n.kind, user_id: u.user_id }))
     if (u.prefs) steps.push(call('preferences.set', { user_id: u.user_id, reset: true }))
-    const res = (await Promise.all(steps)) as any[]
+    const res = [...(newsOff ? [newsOff] : []), ...((await Promise.all(steps)) as any[])]
     const failed = res.filter((r) => !r.ok).length
     failed ? toast('warn', t('people.erase_partial', { n: failed })) : toast('ok', t('people.erase_done'))
     await users.refresh()
@@ -213,6 +216,7 @@
                       <td class="small subs">
                         {#if u.fortune}<span class="chip" class:off={!u.fortune.active}>{t('people.scope.fortune')}{u.fortune.time ? ` ${u.fortune.time}` : ''}</span>{/if}
                         {#each u.notices ?? [] as n}<span class="chip" class:off={!n.active}>{t(`people.notice.kind.${n.kind}`)}</span>{/each}
+                        {#if u.prefs?.update_news}<span class="chip">{t('people.news.chip')}</span>{/if}
                         {#if u.reminders}<span class="chip">{t('rem.count', { n: u.reminders })}</span>{/if}
                         {#if !subscribed(u) && !u.reminders}<span class="subtle">–</span>{/if}
                       </td>
@@ -350,7 +354,7 @@
       </section>
       <section>
         <h3 class="small h">{t('people.subscriptions')}</h3>
-        {#if !cur.fortune && !(cur.notices ?? []).length}<p class="small muted">{t('people.no_subs')}</p>{/if}
+        {#if !cur.fortune && !(cur.notices ?? []).length && !cur.prefs?.update_news}<p class="small muted">{t('people.no_subs')}</p>{/if}
         <ul class="rows">
           {#if cur.fortune}
             <li>
@@ -358,6 +362,13 @@
               <Status tone={cur.fortune.active ? 'ok' : 'neutral'} label={cur.fortune.active ? t('people.sub.active') : t('people.sub.paused')} size="sm" />
               {#if cur.fortune.active}<Button size="sm" variant="ghost" onclick={() => fortune('unsubscribe')}>{t('people.fortune.unsubscribe')}</Button>{/if}
               <Button size="sm" variant="danger-ghost" onclick={() => (fortuneDelOpen = true)}>{t('people.fortune.delete')}</Button>
+            </li>
+          {/if}
+          {#if cur.prefs?.update_news}
+            <li>
+              <span class="small grow">{t('people.news.title')}</span>
+              <Status tone="ok" label={t('people.sub.active')} size="sm" />
+              <Button size="sm" variant="ghost" onclick={updateNewsOff}>{t('people.news.turn_off')}</Button>
             </li>
           {/if}
           {#each cur.notices ?? [] as n (n.kind)}

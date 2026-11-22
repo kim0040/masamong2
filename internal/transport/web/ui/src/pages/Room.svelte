@@ -58,7 +58,7 @@
   const paused = $derived(!!overview.data?.pause?.channels?.[`${g}:${c}`] || !!overview.data?.pause?.guilds?.[g])
 
   // editable copy of the behavior form
-  let form = $state({ respond: 'mention', persona_ref: '', rules: '', capture: false, logging_level: 'ops', memory_use: 'on', disaster_alerts: 'on', watch_level: [] as { region: string; level: string }[] })
+  let form = $state({ respond: 'mention', persona_ref: '', rules: '', capture: false, logging_level: 'ops', memory_use: 'on', disaster_alerts: 'on', update_news: 'off', watch_level: [] as { region: string; level: string }[] })
   let base = $state('')
   let saving = $state(false)
   // the configuration revision the saved area levels on screen were read at: the loaded document's,
@@ -69,7 +69,7 @@
   $effect(() => {
     if (!ch) return
     const watch_level = Object.entries(ch.watch_level ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([region, level]) => ({ region, level: String(level) }))
-    const f = { respond: ch.respond, persona_ref: ch.persona_ref, rules: pol.rules ?? '', capture: !!ch.capture, logging_level: ch.logging_level, memory_use: ch.memory_use, disaster_alerts: ch.disaster_alerts === false ? 'off' : 'on', watch_level }
+    const f = { respond: ch.respond, persona_ref: ch.persona_ref, rules: pol.rules ?? '', capture: !!ch.capture, logging_level: ch.logging_level, memory_use: ch.memory_use, disaster_alerts: ch.disaster_alerts === false ? 'off' : 'on', update_news: ch.update_news === true ? 'on' : 'off', watch_level }
     const s = JSON.stringify(f)
     if (s !== base) {
       form = f
@@ -316,6 +316,7 @@
               </details>
             </fieldset>
           {/if}
+          <Switch checked={form.update_news === 'on'} disabled={form.respond === 'off'} onchange={(v) => (form.update_news = v ? 'on' : 'off')} label={t('room.update_news')} hint={form.respond === 'off' ? t('room.update_news_off_respond') : t('room.update_news_hint')} />
           <Field id="persona" label={t('rooms.col.persona')} hint={t('room.persona_hint')}>
             {#snippet children({ id, describedby })}<Select {id} aria-describedby={describedby} bind:value={form.persona_ref} options={personaOptions} />{/snippet}
           </Field>

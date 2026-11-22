@@ -1,0 +1,54 @@
+{
+  "version": "v1.5.1",
+  "date": "2026-11-22",
+  "user": {
+    "en": [
+      "People memory (stage 0): the bot finds who a question is about, by mention, reply target and the names actually used in that room.",
+      "If two or more people use the same name, nobody is picked.",
+      "Your own memory is used only when the whole sentence is a request about you, like asking whether it remembers you. Messages with a quote (>) are excluded.",
+      "What you say about yourself in a public channel is used server-wide. What you say about others is used only within the channel group where it was said. Private threads never leak out.",
+      "Per-room warning levels: each room picks its Korea Meteorological Administration area and a level from 1 to 5, and a higher level includes everything below it.",
+      "Level 1 is earthquakes, 2 adds tsunamis, and 3 adds warnings for heat, heavy snow, cold wave, heavy rain, typhoon and storm surge.",
+      "Level 4 adds warnings for yellow dust, high waves and strong wind, plus advisories for heat, heavy snow, cold wave and typhoon. Level 5 is everything else.",
+      "A room with no area set receives earthquakes only.",
+      "When an advisory in the same area rises to a warning, one upgrade card is sent. A cancellation card goes only to rooms that received the issue card.",
+      "The discontinued fog warning was removed."
+    ],
+    "ko": [
+      "사람별 기억(0단계): 질문이 누구에 대한 것인지 멘션, 답장 대상, 그 방에서 실제로 쓰인 이름으로 찾습니다.",
+      "같은 이름을 쓰는 사람이 둘 이상이면 아무도 고르지 않습니다.",
+      "본인 기억은 \"날 기억해?\"처럼 문장 전체가 본인에 대한 요청일 때만 씁니다. 인용(>)이 있는 메시지는 제외합니다.",
+      "본인이 공개 채널에서 한 말은 서버 전체에서 씁니다. 다른 사람에 대한 말은 그 말이 나온 채널 묶음에서만 씁니다. 비공개 스레드의 말은 밖으로 나가지 않습니다.",
+      "방별 특보 레벨: 방마다 받을 기상청 구역과 레벨(1–5)을 정합니다. 레벨이 높을수록 아래 단계를 모두 포함합니다.",
+      "1은 지진, 2는 지진해일을 더하고, 3은 폭염·대설·한파·호우·태풍·폭풍해일 경보를 더합니다.",
+      "4는 황사·풍랑·강풍 경보와 폭염·대설·한파·태풍 주의보를 더하고, 5는 나머지 전부입니다.",
+      "구역을 정하지 않은 방은 지진만 받습니다.",
+      "같은 구역의 주의보가 경보로 오르면 격상 카드 한 장을 보냅니다. 해제 카드는 발령 카드를 받은 방에만 갑니다.",
+      "폐지된 안개 특보는 뺐습니다."
+    ]
+  },
+  "operator": {
+    "en": [
+      "The v1.5.0 tag never shipped: its release check stopped on a test time limit. v1.5.1 has the same content with only that test fixed.",
+      "The name index is filled once in the background after start. It does not block start, and existing memory is not re-summarized or re-embedded.",
+      "Upgrading: rooms that received disaster alerts before now get earthquakes only. Under Servers & rooms → room → Replies → Alert level by area, enter a KMA area name or code and a level for each room.",
+      "The old disaster_alerts.warning_regions value is still read but no longer written.",
+      "The first check after the update only records warnings already in force and sends no card.",
+      "On the console room page, an area you enter is checked against the areas the KMA reports.",
+      "Known limit: warnings of the same kind and level with different effective times get separate cards, and a failed warning card is not resent (at most once, as before).",
+      "Known limit: on Windows installs with a very large history, the first fill of the name index takes a while. It runs in the background and the bot works meanwhile.",
+      "Release files are not signed yet. For the first-launch warning, see https://github.com/kim0040/masamong2/wiki/Installation"
+    ],
+    "ko": [
+      "v1.5.0 태그는 릴리스 검사(테스트 시간 제한)에서 멈춰 배포 파일이 나가지 않았습니다. v1.5.1은 그 테스트만 고친 같은 내용입니다.",
+      "이름 색인은 시작 후 백그라운드에서 한 번 채웁니다. 시작을 막지 않으며 기존 기억을 다시 요약하거나 임베딩하지 않습니다.",
+      "업데이트할 때: 예전에 재난 알림을 받던 방은 이제 지진만 받습니다. 콘솔 서버·방 → 방 → 응답 → 지역별 알림 레벨에서 방마다 기상청 구역 이름이나 코드와 레벨을 넣어 주세요.",
+      "예전 disaster_alerts.warning_regions 값은 읽기는 하지만 더 이상 쓰지 않습니다.",
+      "업데이트 직후 첫 확인은 이미 발령 중인 특보를 기록만 하고 카드를 보내지 않습니다.",
+      "콘솔 방 화면에서 구역을 넣으면 기상청이 보고한 구역과 맞는지 표시합니다.",
+      "알려진 한계: 효력 시각이 다른 같은 종류·단계의 특보는 카드가 따로 나가며, 특보 카드 전송이 실패해도 다시 보내지 않습니다(이전과 같은 최대 한 번 동작).",
+      "알려진 한계: 기록이 아주 많은 Windows 설치에서는 이름 색인을 처음 채우는 데 시간이 걸립니다. 백그라운드로 진행되므로 그동안에도 봇은 동작합니다.",
+      "배포 파일은 아직 서명하지 않았습니다. 첫 실행 경고는 https://github.com/kim0040/masamong2/wiki/설치 안내를 보세요."
+    ]
+  }
+}

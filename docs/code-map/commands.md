@@ -32,5 +32,6 @@ Discord에 등록하는 애플리케이션 명령: 한국어 이름, 호출하�
 | `status` | 상태 | 슬래시 | runtime.doctor | — |
 | `summary` | 요약 | 슬래시 | summaries.channel | — |
 | `transfer` | 편입 | 슬래시 | transfer.recent | what (보기, string, 선택)<br>value (값, string, 선택) |
+| `updates` | 업데이트 | 슬래시 | updates.notes | what (할일, string, 선택)<br>value (값, string, 선택) |
 | `weather` | 날씨 | 슬래시 | weather.query | region (지역, string, 선택) |
 | `zodiac` | 별자리 | 슬래시 | fortune.query | sign (별자리, string, 선택) |

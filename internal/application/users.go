@@ -59,10 +59,10 @@ func (s *Service) usersList(req action.Request) action.Result {
 		}
 		rows.Close()
 	}
-	if rows, err := db.DB.Query(`SELECT user_id, locale, timezone, quiet_start, quiet_end, weather_region, updated_at FROM user_prefs`); err == nil {
+	if rows, err := db.DB.Query(`SELECT user_id, locale, timezone, quiet_start, quiet_end, weather_region, update_news, updated_at FROM user_prefs`); err == nil {
 		for rows.Next() {
 			var p UserPrefs
-			if rows.Scan(&p.UserID, &p.Locale, &p.Timezone, &p.QuietStart, &p.QuietEnd, &p.WeatherRegion, &p.UpdatedAt) == nil {
+			if rows.Scan(&p.UserID, &p.Locale, &p.Timezone, &p.QuietStart, &p.QuietEnd, &p.WeatherRegion, &p.UpdateNews, &p.UpdatedAt) == nil {
 				row(p.UserID, p.UpdatedAt).Prefs = &p
 			}
 		}

@@ -124,6 +124,8 @@ Versions are `vMAJOR.MINOR.PATCH` (semantic versioning); the first public releas
 
 Bumping a number resets the ones after it to 0. Pre-releases look like `v1.1.0-rc1`; the in-app update check treats the final release of the same number as newer than its pre-release.
 
+Before tagging, draft the notes: `make release-notes VERSION=vX.Y.Z` (needs `ANTHROPIC_API_KEY`) writes `release-notes/vX.Y.Z.json` and `.md` from the commits since the previous tag; read them, edit them and commit them (details in the [Release checklist](https://github.com/kim0040/masamong2/wiki/Release-Checklist)). The release workflow publishes the `.md` as the release text and attaches the `.json` as `release-notes.json`; a tag without the files gets GitHub's generated notes. The `.json` is also embedded in the binary.
+
 Pushing a version tag (`v*`) makes the `release` workflow build every archive on a macOS runner (`scripts/release.sh`), verify them (`scripts/verify-release.sh`), simulate Linux and Windows installs, and create the GitHub Release. The Windows smoke job downloads the Windows ZIP, checks it against `SHA256SUMS`, then sets up, starts, checks `status` and `doctor`, and stops an instance in a scratch folder with Go and the host's time zone files hidden, so a missing embedded time zone database fails the release.
 
 ```bash
@@ -135,7 +137,8 @@ git tag v1.0.1 && git push origin v1.0.1
 ```bash
 scripts/release.sh v1.0.1 && scripts/verify-release.sh build/release
 git tag v1.0.1 && git push origin v1.0.1
-gh release create v1.0.1 build/release/* --title "Masamong v1.0.1" --generate-notes
+cp release-notes/v1.0.1.json build/release-notes.json
+gh release create v1.0.1 build/release/* build/release-notes.json --title "Masamong v1.0.1" --notes-file release-notes/v1.0.1.md
 ```
 
 The in-app update check and the install scripts download from the repository's public releases (the first is v1.0.0). A build from source (a `git describe` version) is not updated by the console.

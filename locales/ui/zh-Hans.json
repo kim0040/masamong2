@@ -3779,5 +3779,20 @@
   "cfg.retention.pending_days": "未确认提议保留天数",
   "cfg.retention.pending_days.hint": "没人确认的提醒提议及其文字的保留时间。0 表示沿用“用量计数（天）”,-1 为永久保留。",
   "cfg.retention.context_days": "对话上下文保留天数",
-  "cfg.retention.context_days.hint": "安静下来的房间的对话上下文,以及已结束的提醒(含文字)的保留时间。0 表示沿用“对话文本（天）”,-1 为永久保留。"
+  "cfg.retention.context_days.hint": "安静下来的房间的对话上下文,以及已结束的提醒(含文字)的保留时间。0 表示沿用“对话文本（天）”,-1 为永久保留。",
+  "maint.news.title": "更新内容",
+  "maint.news.desc": "正在运行的版本有哪些变化。",
+  "maint.news.version": "{v} · {date}",
+  "maint.news.operator": "面向运维",
+  "maint.news.user": "聊天成员能感受到的变化",
+  "maint.news.earlier": "查看 {v}",
+  "maint.news.current": "回到正在运行的版本",
+  "maint.news.none": "此版本没有可显示的更新内容：可能是本地构建，或该版本没有记录更新内容。",
+  "room.update_news": "在此发布新版本通知",
+  "room.update_news_hint": "机器人以新版本启动且有这里的人能感受到的变化时，会在此房间发布一张卡片。默认关闭。",
+  "room.update_news_off_respond": "机器人不回复的房间也不会收到更新通知。",
+  "people.news.title": "更新通知（私信）",
+  "people.news.chip": "更新通知",
+  "people.news.turn_off": "关闭",
+  "people.news.off_done": "已关闭私信更新通知"
 }

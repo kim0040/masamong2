@@ -156,7 +156,9 @@ internal/catalog의 모든 Action: CLI 명령, 콘솔 경로와 internal/applica
 | turns.sample | executable | read | `turns sample` | `/turns` | [operator_marks.go · turnSampleAction](../../internal/application/operator_marks.go) |
 | updates.apply | executable | internal_write | `updates apply` | `/maintenance` | [selfupdate.go · updateApply](../../internal/application/selfupdate.go) |
 | updates.check | executable | read | `updates check` | `/maintenance` | [updates.go · updatesAction](../../internal/application/updates.go) |
+| updates.notes | executable | read | `updates notes` | `/maintenance` | [updatenews.go · updatesNotes](../../internal/application/updatenews.go) |
 | updates.status | executable | read | `updates status` | `/maintenance` | [updates.go · updatesAction](../../internal/application/updates.go) |
+| updates.subscribe | executable | internal_write | `updates subscribe` | `/people` | [updatenews.go · updatesSubscribe](../../internal/application/updatenews.go) |
 | usage.budgets | executable | read | `usage` | `/usage` | [service.go · usage](../../internal/application/service.go) |
 | usage.period | executable | read | `usage period` | `/usage` | [usage_period.go · usagePeriod](../../internal/application/usage_period.go) |
 | usage.reset | executable | internal_write | `usage reset` | `/usage` | [memory.go · usageReset](../../internal/application/memory.go) |

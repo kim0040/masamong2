@@ -384,3 +384,56 @@ func SetSearchDeadlineForTest(depth string, d time.Duration) func() {
 	searchDeadline[depth] = d
 	return func() { searchDeadline[depth] = old }
 }
+
+// UseVersionForTest sets the running version for a test (the update-news notes follow it).
+func UseVersionForTest(version string) (restore func()) {
+	old := Version
+	Version = version
+	return func() { Version = old }
+}
+
+// AnnounceUpdatesForTest runs one pass of the update-news announcement.
+func (s *Service) AnnounceUpdatesForTest(ctx context.Context) { s.announceUpdates(ctx) }
+
+// AnnouncedForTest is the last version announced ("" when none is recorded); SetAnnouncedForTest writes it.
+func (s *Service) AnnouncedForTest() string {
+	var v string
+	_, _ = s.kvGet(updatesAnnouncedKey, &v)
+	return v
+}
+func (s *Service) SetAnnouncedForTest(v string) { _ = s.kvSet(updatesAnnouncedKey, v) }
+
+// NewsSentForTest is the ledger: target -> state for a version.
+func (s *Service) NewsSentForTest(version string) map[string]string {
+	out := map[string]string{}
+	db, err := s.adminDB()
+	if err != nil {
+		return out
+	}
+	rows, err := db.DB.Query(`SELECT target, state FROM update_news_sent WHERE version=?`, version)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var t, st string
+		if rows.Scan(&t, &st) == nil {
+			out[t] = st
+		}
+	}
+	return out
+}
+
+// ClaimNewsForTest records a send as begun, the way a crash between the claim and the send leaves it.
+func (s *Service) ClaimNewsForTest(version, target string) {
+	if db, err := s.adminDB(); err == nil {
+		_, _ = db.DB.Exec(`INSERT OR IGNORE INTO update_news_sent(version, target, state, at) VALUES(?,?,?,?)`, version, target, "sending", "2026-11-22T00:00:00Z")
+	}
+}
+
+// UseNewsLimitsForTest sets the pause between sends and the sends per pass.
+func UseNewsLimitsForTest(pace time.Duration, perTick int) (restore func()) {
+	oldPace, oldTick := updateNewsPace, updateNewsPerTick
+	updateNewsPace, updateNewsPerTick = pace, perTick
+	return func() { updateNewsPace, updateNewsPerTick = oldPace, oldTick }
+}

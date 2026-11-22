@@ -59,7 +59,7 @@ func migrateFeatures(st *storage.Store) error {
 			return fmt.Errorf("feature tables: %w", err)
 		}
 	}
-	return nil
+	return migrateUpdateNews(st)
 }
 
 // scopeWords are the words for each consent scope in every loaded language
