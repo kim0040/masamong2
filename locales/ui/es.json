@@ -2400,7 +2400,7 @@
   "room.blocks_title": "Conversaciones que recuerda",
   "room.capture": "Guardar mensajes en vivo",
   "room.capture_hint": "Los mensajes nuevos de aquí entran en el índice de memoria. El interruptor global de captura también debe estar activado.",
-  "room.collect_desc": "Cuánto de lo que hizo el bot aquí se registra. El texto de los mensajes nunca se registra.",
+  "room.collect_desc": "Cuánto de lo que hizo el bot aquí se registra. El texto de los mensajes nunca se registra. Cuántos días se guardan los registros de turnos sigue el ajuste de Retención; para guardarlos menos tiempo solo en esta sala, define logging.retain_days en el archivo de configuración (0 sigue el ajuste global).",
   "room.collect_title": "Registro de operaciones",
   "room.copy": "Copiar a salas",
   "room.copy.logging": "Registro de conversaciones",

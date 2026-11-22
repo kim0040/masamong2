@@ -2400,7 +2400,7 @@
   "room.blocks_title": "它记住的对话",
   "room.capture": "存储实时消息",
   "room.capture_hint": "此处的消息会进入记忆索引。全局采集开关也必须开启。",
-  "room.collect_desc": "记录机器人在此处的操作详细程度。消息文本绝不会被记录。",
+  "room.collect_desc": "记录机器人在此处的操作详细程度。消息文本绝不会被记录。对话记录保存多少天遵循“保留期限”设置;若只想缩短此房间的保存时间,请在配置文件中设置 logging.retain_days(0 表示遵循全局设置)。",
   "room.collect_title": "操作日志",
   "room.copy": "复制到房间",
   "room.copy.logging": "对话记录范围",

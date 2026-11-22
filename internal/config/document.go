@@ -471,8 +471,11 @@ type MemoryView struct {
 
 // ChannelLogging records operator-facing ops verbosity. It must not store message bodies or user IDs.
 type ChannelLogging struct {
-	Level      string `yaml:"level,omitempty" json:"level,omitempty"` // off|errors|ops
-	RetainDays int    `yaml:"retain_days,omitempty" json:"retain_days,omitempty"`
+	Level string `yaml:"level,omitempty" json:"level,omitempty"` // off|errors|ops
+	// RetainDays shortens how long this room's turn text (message, answer, evidence) is kept. 0 follows
+	// retention.turn_detail_days; 30 was the old default written into every config and reads as 0 too.
+	// Any other value is used only when it is shorter than the global setting (see RoomDetailDays).
+	RetainDays int `yaml:"retain_days,omitempty" json:"retain_days,omitempty"`
 }
 
 // RAGAttachmentRef is a channel-scoped staged file for a future retrieval importer.
@@ -664,7 +667,7 @@ func DefaultChannelPolicy() ChannelPolicy {
 		Respond:    "command",
 		PersonaRef: "",
 		Capture:    true,
-		Logging:    ChannelLogging{Level: "ops", RetainDays: 30},
+		Logging:    ChannelLogging{Level: "ops"},
 		MemoryUse:  "on",
 		Proactive:  false,
 	}
@@ -686,9 +689,6 @@ func NormalizeChannelPolicy(p ChannelPolicy) ChannelPolicy {
 	}
 	if p.Logging.Level == "" {
 		p.Logging.Level = d.Logging.Level
-	}
-	if p.Logging.RetainDays == 0 && p.Logging.Level != "off" {
-		p.Logging.RetainDays = d.Logging.RetainDays
 	}
 	// "unavailable" was the pre-RAG placeholder; it was never a user choice.
 	if p.MemoryUse != "off" {
@@ -964,6 +964,23 @@ type Retention struct {
 	// and finished reminders with their text (unset = turn_detail_days).
 	PendingDays int `yaml:"pending_days,omitempty" json:"pending_days,omitempty"`
 	ContextDays int `yaml:"context_days,omitempty" json:"context_days,omitempty"`
+}
+
+// legacyRetainDays is the room retain_days every config written before the setting was wired carries.
+const legacyRetainDays = 30
+
+// RoomDetailDays is how long a room keeps its turn text: the room's retain_days when it is set (not 0,
+// not the old default 30) and shorter than the global turn_detail days (-1 = forever, which any room
+// value beats). A room never keeps text longer than the global setting. Returns the global value when the
+// room follows it.
+func RoomDetailDays(roomRetain, global int) int {
+	if roomRetain <= 0 || roomRetain == legacyRetainDays {
+		return global
+	}
+	if global < 0 || roomRetain < global {
+		return roomRetain
+	}
+	return global
 }
 
 func keepDays(v, def int) int {

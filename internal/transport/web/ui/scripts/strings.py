@@ -1683,7 +1683,7 @@ add("room", {
     "manage_blocks": ("채널별 연결 전체 보기", "All connections"), "open_block": ("블록 상세 보기", "Open block"),
     "stale_hint": ("삭제되었거나 재구성된 블록입니다. 연결을 해제해 주세요.", "Deleted or rebuilt; disconnect it."),
     "no_blocks_yet": ("연결할 수 있는 기억 블록이 아직 없습니다.", "No blocks to connect yet."),
-    "collect_title": ("운영 로그 기록", "Operations log"), "collect_desc": ("이 방에서 봇이 수행한 작업 로그의 보관 수준을 설정합니다. 대화 본문 텍스트는 로그에 기록되지 않습니다.", "How much of what the bot did here is logged. Message text is never logged."),
+    "collect_title": ("운영 로그 기록", "Operations log"), "collect_desc": ("이 방에서 봇이 수행한 작업 로그의 보관 수준을 설정합니다. 대화 본문 텍스트는 로그에 기록되지 않습니다. 대화 기록을 며칠 보관할지는 보관 기간 설정을 따르고, 이 방만 더 짧게 하려면 설정 파일의 logging.retain_days에 일 수를 적습니다(0은 전체 설정을 따름).", "How much of what the bot did here is logged. Message text is never logged. How many days the turn records are kept follows the Retention setting; to keep them shorter in this room only, set logging.retain_days in the config file (0 follows the global setting)."),
     "blocks_title": ("참조할 대화 기억", "Conversations it remembers"),
     "blocks_desc": ("이 방 자체의 대화와 함께, 연결된 블록의 기억을 검색하여 답변에 활용합니다. 블록 간 데이터는 병합되지 않습니다.", "Besides its own conversation, this room searches the blocks connected here. Nothing is merged."),
     "memory_desc": ("이 방에서 대화할 때 과거 기억을 검색할지와 새 대화를 실시간으로 수집할지 설정합니다.", "Whether replies here look up past conversations, and whether this room's new messages are stored."),
