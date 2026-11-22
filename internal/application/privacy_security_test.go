@@ -346,9 +346,6 @@ func TestPracticeCloseReleasesWorkersIndexesAndGlobalState(t *testing.T) {
 		if engineKept || ringOpen {
 			t.Fatalf("Close left the memory engine (%v) or the live log (%v) open", engineKept, ringOpen)
 		}
-		if _, ok := adminReady.Load(s.Store); ok {
-			t.Fatal("store retained in admin state")
-		}
 		if err := ResetPractice(root); err != nil {
 			t.Fatal(err)
 		} // proves Windows handles are released

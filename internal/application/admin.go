@@ -132,24 +132,44 @@ var adminTiDB = []string{
 	)`,
 }
 
-var adminReady sync.Map // *storage.Store → error
+// adminMigration remembers the outcome of migrating the admin tables into the service's store
+// (Service.adminReady). The migration runs outside the lock: it is idempotent, and two first callers
+// may both run it, as before.
+type adminMigration struct {
+	mu    sync.Mutex
+	store *storage.Store // the store the outcome is for; nil = not migrated yet
+	err   error
+}
+
+// get reports whether store was migrated already, and how that went.
+func (m *adminMigration) get(store *storage.Store) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.store == store, m.err
+}
+
+func (m *adminMigration) set(store *storage.Store, err error) {
+	m.mu.Lock()
+	m.store, m.err = store, err
+	m.mu.Unlock()
+}
 
 // adminDB migrates the admin tables once per store and returns the store (nil before setup).
 func (s *Service) adminDB() (*storage.Store, error) {
 	if s.Store == nil {
 		return nil, errors.New("run setup first")
 	}
-	if v, ok := adminReady.Load(s.Store); ok {
-		if v == nil {
+	if done, err := s.adminReady.get(s.Store); done {
+		if err == nil {
 			return s.Store, nil
 		}
-		return nil, v.(error)
-	}
-	if err := migrateAdmin(s.Store); err != nil {
-		adminReady.Store(s.Store, err)
 		return nil, err
 	}
-	adminReady.Store(s.Store, nil)
+	if err := migrateAdmin(s.Store); err != nil {
+		s.adminReady.set(s.Store, err)
+		return nil, err
+	}
+	s.adminReady.set(s.Store, nil)
 	return s.Store, nil
 }
 
