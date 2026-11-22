@@ -35,6 +35,8 @@ type serviceHooks struct {
 	chatDeadlines atomic.Pointer[map[string]time.Duration]
 	// search replaces defaultSearchLimits (features.go); a test may change it while the service runs.
 	search atomic.Pointer[searchLimits]
+	// fetchBase points TinyFish Fetch at a test server (registry.go); read when the fetcher is made.
+	fetchBase atomic.Pointer[string]
 	// oldEditsAtOnce settles old edits at the first idle pass instead of oldEditsDelay after the start.
 	oldEditsAtOnce bool
 }

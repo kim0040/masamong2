@@ -179,7 +179,9 @@ func OpenPractice(ctx context.Context, dataRoot, locale string, log *slog.Logger
 	openPractices.add(s) // Close removes it
 	// its lines still reach the daemon's log file, tagged, but not the real instance's console log
 	s.Log = s.CaptureLogs(log.With("instance", "practice"))
-	s.cfg.Store(&configSnapshot{reg: buildRegistry(offlineProviders(config.Default("", root)), s.Log, s.Clock.Now)})
+	reg := buildRegistry(offlineProviders(config.Default("", root)), s.Log, s.Clock.Now)
+	reg.hooks = &s.hooks
+	s.cfg.Store(&configSnapshot{reg: reg})
 	if err := s.reloadConfig(); err != nil {
 		_ = s.Close()
 		return nil, err

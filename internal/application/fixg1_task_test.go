@@ -75,7 +75,7 @@ func TestScheduledTaskReadsNoPagesAndClipsItsRecord(t *testing.T) {
 	body := taskWithSearch(t, plan, func(svc *application.Service) {
 		pointAt(t, svc, "serper", serperServer(t, 5, hostOf).URL, "S_KEY", "k")
 		pointAt(t, svc, "tinyfish", "http://127.0.0.1:1", "TF_KEY", "tf")
-		fake = newFetchFake(t, func(string) (int, string, time.Duration) { return 200, okPage(campPage), 0 })
+		fake = newFetchFake(t, svc, func(string) (int, string, time.Duration) { return 200, okPage(campPage), 0 })
 	})
 	if fake.count() != 0 {
 		t.Fatalf("the task's search opened %d pages", fake.count())

@@ -25,7 +25,7 @@ type fetchFake struct {
 	reply func(u string) (status int, body string, delay time.Duration)
 }
 
-func newFetchFake(t *testing.T, reply func(u string) (int, string, time.Duration)) *fetchFake {
+func newFetchFake(t *testing.T, svc *application.Service, reply func(u string) (int, string, time.Duration)) *fetchFake {
 	t.Helper()
 	f := &fetchFake{reply: reply}
 	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +50,7 @@ func newFetchFake(t *testing.T, reply func(u string) (int, string, time.Duration
 		_, _ = w.Write([]byte(body))
 	}))
 	t.Cleanup(f.srv.Close)
-	t.Cleanup(application.SetFetchBaseForTest(f.srv.URL))
+	application.SetFetchBaseForTest(svc, f.srv.URL)
 	return f
 }
 
@@ -109,7 +109,7 @@ func withFetch(t *testing.T, n int, urlOf func(int) string, reply func(string) (
 	svc := setupSvc(t)
 	pointAt(t, svc, "serper", serperServer(t, n, urlOf).URL, "S_KEY", "k")
 	pointAt(t, svc, "tinyfish", "http://127.0.0.1:1", "TF_KEY", "tf")
-	return svc, newFetchFake(t, reply)
+	return svc, newFetchFake(t, svc, reply)
 }
 
 // Pages are read for a chat turn by the depth's default and nowhere else; a planner's number is clamped.
@@ -320,7 +320,7 @@ func TestSearchUsesServiceTextBeforeFetching(t *testing.T) {
 	svc := setupSvc(t)
 	pointAt(t, svc, "exa", exa.URL, "E_KEY", "k")
 	pointAt(t, svc, "tinyfish", "http://127.0.0.1:1", "TF_KEY", "tf")
-	fake := newFetchFake(t, func(string) (int, string, time.Duration) { return 200, okPage(campPage), 0 })
+	fake := newFetchFake(t, svc, func(string) (int, string, time.Duration) { return 200, okPage(campPage), 0 })
 	res := runVia(svc, "chat", map[string]any{"query": "가평 캠핑장 요금"})
 	items := res.Output["results"].([]any)
 	first, second := items[0].(map[string]any), items[1].(map[string]any)
@@ -423,7 +423,7 @@ func TestSearchPageReaderFollowsTheProvider(t *testing.T) {
 	defer tf.Close()
 	svc := setupSvc(t)
 	pointAt(t, svc, "tinyfish", tf.URL, "TF_KEY", "tf")
-	fake := newFetchFake(t, func(string) (int, string, time.Duration) { return 200, okPage(campPage), 0 })
+	fake := newFetchFake(t, svc, func(string) (int, string, time.Duration) { return 200, okPage(campPage), 0 })
 	res := runVia(svc, "chat", map[string]any{"query": "가평 캠핑장 요금"})
 	if res.Output["provider"] != "tinyfish" || res.Output["pages_read"] != 2 || fake.count() != 2 {
 		t.Fatalf("tinyfish: %+v (fetched %d)", res.Output, fake.count())
@@ -467,7 +467,7 @@ func TestWebReadThroughTinyFishFetchThenJina(t *testing.T) {
 	}
 	pointAt(t, svc, "jina", jina.URL, "J_KEY", "")
 	pointAt(t, svc, "tinyfish", "http://127.0.0.1:1", "TF_KEY", "tf")
-	fake := newFetchFake(t, func(u string) (int, string, time.Duration) {
+	fake := newFetchFake(t, svc, func(u string) (int, string, time.Duration) {
 		if failing.Load() {
 			return 200, `{"results":[],"errors":[{"url":"` + u + `","error":"timeout"}]}`, 0
 		}

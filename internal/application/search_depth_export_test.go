@@ -30,11 +30,9 @@ func SetFetchDeadlineForTest(s *Service, depth string, d time.Duration) func() {
 	return s.changeSearchLimits(func(l *searchLimits) { l.fetchHard[depth] = d })
 }
 
-// SetFetchBaseForTest points TinyFish Fetch at a test server; it returns the restore.
-func SetFetchBaseForTest(url string) func() {
-	old := tinyfishFetchBase
-	tinyfishFetchBase = url
-	return func() { tinyfishFetchBase = old }
+// SetFetchBaseForTest points s's TinyFish Fetch at a test server (before its first page is read).
+func SetFetchBaseForTest(s *Service, url string) {
+	s.hooks.fetchBase.Store(&url)
 }
 
 // SetProbeTimeoutForTest shortens the limit of a connection check; it returns the restore.
