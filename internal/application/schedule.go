@@ -61,8 +61,8 @@ func (s *Service) RunScheduler(ctx context.Context) {
 					s.ownedGo("room styles", func(ctx context.Context) { defer s.runs.styles.Store(false); s.refreshRoomStyles(ctx) })
 				}
 				s.sweepCollectNext() // collected moments whose follow-up window ended with nothing happening
-				if threadsTicking.CompareAndSwap(false, true) {
-					s.ownedGo("idle threads", func(ctx context.Context) { defer threadsTicking.Store(false); s.closeIdleThreads(ctx) })
+				if s.runs.idleThreads.CompareAndSwap(false, true) {
+					s.ownedGo("idle threads", func(ctx context.Context) { defer s.runs.idleThreads.Store(false); s.closeIdleThreads(ctx) })
 				}
 				if disasterTicking.CompareAndSwap(false, true) {
 					s.ownedGo("disaster alerts", func(ctx context.Context) { defer disasterTicking.Store(false); s.disasterTick(ctx) })

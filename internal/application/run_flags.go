@@ -11,4 +11,5 @@ type runFlags struct {
 	morning     atomic.Bool // the morning fortune post is running (fortune.go)
 	reminders   atomic.Bool // the reminder pass is running (reminders.go)
 	styles      atomic.Bool // the room style refresh is running (roomstyle.go)
+	idleThreads atomic.Bool // closing idle threads is running (threads.go)
 }

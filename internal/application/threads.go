@@ -62,8 +62,6 @@ func init() {
 		`INSERT OR IGNORE INTO thread_tombstones(thread_id) SELECT thread_id FROM channel_threads WHERE close_reason='deleted'`)
 }
 
-var threadsTicking atomic.Bool
-
 // Every relation/participant lookup uses the same durable deletion boundary.
 func threadVisibleSQL(table string) string {
 	return table + `.close_reason<>'deleted' AND NOT EXISTS (SELECT 1 FROM thread_tombstones d WHERE d.thread_id=` + table + `.thread_id)`
