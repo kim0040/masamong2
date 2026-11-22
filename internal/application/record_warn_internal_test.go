@@ -99,7 +99,7 @@ func TestReminderStatusWriteFailureWarns(t *testing.T) {
 		t.Fatalf("due list: %v %d", err, len(rows))
 	}
 	p := &breakingPoster{drop: func() { _, _ = db.DB.Exec(`DROP TABLE reminders`) }}
-	s.Discord = p
+	s.SetDiscord(p)
 	s.deliverRows(context.Background(), rows, clk.t)
 	if p.posts != 1 {
 		t.Fatalf("posts = %d", p.posts)
@@ -127,7 +127,7 @@ func TestReminderStatusWriteRecorded(t *testing.T) {
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("due list: %v %d", err, len(rows))
 	}
-	s.Discord = &breakingPoster{}
+	s.SetDiscord(&breakingPoster{})
 	s.deliverRows(context.Background(), rows, clk.t)
 	var status, delivered string
 	if err := db.DB.QueryRow(`SELECT status, delivered_id FROM reminders WHERE id='r1'`).Scan(&status, &delivered); err != nil {
