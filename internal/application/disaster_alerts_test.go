@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -643,6 +644,103 @@ func TestDisasterLiftsGoWhereTheIssueWent(t *testing.T) {
 			var left int
 			if err := svc.Store.DB.QueryRow(`SELECT count(*) FROM admin_state WHERE k='disaster:wrn_active' AND json_extract(v,'$.sent') IS NOT NULL`).Scan(&left); err != nil || left != 0 {
 				t.Fatalf("delivery records outlived their warnings: %d %v", left, err)
+			}
+		})
+	}
+}
+
+// storedDeliveries is the stored warning set's record of what each room was told, by area and kind.
+func storedDeliveries(t *testing.T, svc *application.Service) map[string]map[string]string {
+	t.Helper()
+	var raw []byte
+	if err := svc.Store.DB.QueryRow(`SELECT v FROM admin_state WHERE k='disaster:wrn_active'`).Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+	var state struct {
+		Sent map[string]map[string]string `json:"sent"`
+	}
+	if err := json.Unmarshal(raw, &state); err != nil {
+		t.Fatal(err)
+	}
+	return state.Sent
+}
+
+// What each room was told survives a restart and follows the level in force. A level that ends takes
+// its deliveries with it even where its lift failed to post, so when that level is issued again, its
+// lift goes only where the new issue was posted.
+func TestDisasterDeliveriesFollowTheLevelInForce(t *testing.T) {
+	const area = "L1052100"
+	for _, change := range []string{"restart", "lift failed, then issued again"} {
+		t.Run(change, func(t *testing.T) {
+			svc := setupSvc(t)
+			feed := &kmaFeed{}
+			pointAt(t, svc, "kma", feed.server(t).URL, "KMA_TEST_KEY", "k")
+			for _, id := range []string{"a", "b"} {
+				if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": id, "respond": "mention", "watch_level": map[string]int{area: 3}}); !r.OK {
+					t.Fatal(r.Error)
+				}
+			}
+			applyDoc(t, svc, func(d *config.Document) {
+				g := d.Guilds["g1"]
+				g.Locale = "ko"
+				d.Guilds["g1"] = g
+			})
+			gw := &failingGateway{}
+			svc.Discord = gw
+			start := time.Date(2026, 10, 1, 3, 20, 0, 0, time.UTC)
+			tick := func(svc *application.Service, minutes int, rows ...string) []string {
+				feed.mu.Lock()
+				feed.warnings = rows
+				feed.mu.Unlock()
+				before := len(gw.posts)
+				svc.Clock = clock.Fixed{T: start.Add(time.Duration(minutes) * time.Minute)}
+				application.DisasterTickForTest(svc, context.Background())
+				return gw.posts[before:]
+			}
+			rain := warning(area, "광주·전라남도", "목포시", "호우", "경보", "발표")
+			tick(svc, 0)
+			if got := tick(svc, 5, rain); len(got) != 2 {
+				t.Fatalf("issue: %q", got)
+			}
+			want := []string{"a|✅ 호우경보 해제|", "b|✅ 호우경보 해제|"}
+			if change == "lift failed, then issued again" {
+				gw.failing = "a"
+				if got := tick(svc, 10, warning(area, "광주·전라남도", "목포시", "호우", "주의", "대치")); len(got) != 1 || !strings.HasPrefix(got[0], "b|✅ 호우경보 해제|") {
+					t.Fatalf("drop to an advisory: %q", got)
+				}
+				if sent := storedDeliveries(t, svc); len(sent) != 0 {
+					t.Fatalf("the ended level's deliveries outlived it: %v", sent)
+				}
+				rain = strings.Replace(strings.Replace(rain, "202610011100", "202610011230", 1), "202610011200", "202610011235", 1)
+				if got := tick(svc, 15, rain); len(got) != 1 || !strings.HasPrefix(got[0], "b|⚠️ 호우 주의보 → 경보 격상|") {
+					t.Fatalf("issued again: %q", got)
+				}
+				gw.failing = ""
+				want = want[1:]
+			}
+			if err := svc.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := application.Open(svc.DataRoot, clock.Fixed{T: start.Add(20 * time.Minute)}, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = reopened.Close() })
+			reopened.Discord = gw
+			if got := tick(reopened, 20, rain); len(got) != 0 {
+				t.Fatalf("repeated after a restart: %q", got)
+			}
+			got := tick(reopened, 25)
+			if len(got) != len(want) {
+				t.Fatalf("lift: got %q, want %q", got, want)
+			}
+			for i := range want {
+				if !strings.HasPrefix(got[i], want[i]) {
+					t.Fatalf("lift: got %q, want %q", got, want)
+				}
+			}
+			if sent := storedDeliveries(t, reopened); len(sent) != 0 {
+				t.Fatalf("deliveries outlived their warning: %v", sent)
 			}
 		})
 	}

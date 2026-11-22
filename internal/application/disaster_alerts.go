@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"masamong/internal/errclass"
 	"math"
 	"reflect"
@@ -480,15 +479,27 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 	if before == nil {
 		before = warningSnapshot{}
 	}
-	// what each room was told is kept only for what is still in force; lifts read the stored copy
+	// what each room was told is kept only for the level still in force: a level that ended is gone with
+	// its lift, whether or not the lift reached the room, and a later issue of it needs its own delivery.
+	// Lifts read the stored copy.
 	told := stored.Sent
 	next := warningState{Version: warningStateVersion, Active: current}
 	for k, rooms := range told {
-		if _, ok := current[k]; ok && len(rooms) > 0 {
+		w, ok := current[k]
+		if !ok {
+			continue
+		}
+		for room, level := range rooms {
+			if level != w.Level {
+				continue
+			}
 			if next.Sent == nil {
 				next.Sent = map[string]map[string]string{}
 			}
-			next.Sent[k] = maps.Clone(rooms)
+			if next.Sent[k] == nil {
+				next.Sent[k] = map[string]string{}
+			}
+			next.Sent[k][room] = level
 		}
 	}
 	// the set is stored only when it changed (or on the first check): most checks find the same warnings.
@@ -585,32 +596,23 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 				continue
 			}
 			sent++
+			if g.change == "lifted" {
+				continue // the ended level's deliveries were already left out of next
+			}
 			for _, w := range shown {
 				wk := warningKey(w)
-				switch {
-				case g.change != "lifted":
-					if next.Sent == nil {
-						next.Sent = map[string]map[string]string{}
-					}
-					if next.Sent[wk] == nil {
-						next.Sent[wk] = map[string]string{}
-					}
-					next.Sent[wk][ch.Channel] = w.Level
-					recorded = true
-				case next.Sent[wk][ch.Channel] == w.Level: // a lower level is still in force here
-					delete(next.Sent[wk], ch.Channel)
-					if len(next.Sent[wk]) == 0 {
-						delete(next.Sent, wk)
-					}
-					recorded = true
+				if next.Sent == nil {
+					next.Sent = map[string]map[string]string{}
 				}
+				if next.Sent[wk] == nil {
+					next.Sent[wk] = map[string]string{}
+				}
+				next.Sent[wk][ch.Channel] = w.Level
+				recorded = true
 			}
 		}
 	}
 	if recorded {
-		if len(next.Sent) == 0 {
-			next.Sent = nil
-		}
 		if err := s.kvSet("disaster:wrn_active", next); err != nil {
 			s.Log.Warn("disaster alerts: could not record where warnings were announced", "err", err)
 		}
