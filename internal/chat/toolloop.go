@@ -429,22 +429,35 @@ type loopCall struct {
 }
 
 // Do asks the loop model and runs what it calls. It returns the executed results (in the shape the
-// planner path produces), the trace, and an error only when the very first call failed: the caller
-// then lets the planner choose the tools for this turn.
-func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message, timeRef string) ([]ToolResult, *LoopTrace, error) {
+// planner path produces), the trace, and an error only when the very first call failed or a panic
+// stopped a later round: the caller then lets the planner choose the tools for this turn. The results
+// of the rounds before a panic stay.
+func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message, timeRef string) (results []ToolResult, tr *LoopTrace, err error) {
 	started := time.Now()
 	mode := ToolModeLoop
 	if l.Record {
 		mode = ToolModeShadow
 	}
-	tr := &LoopTrace{Mode: mode}
-	defer func() { tr.Ms = ms(started) }()
+	tr = &LoopTrace{Mode: mode}
+	var s *loopState
+	defer func() {
+		tr.Ms = ms(started)
+		// a panic keeps what the loop already did: its results stay the turn's, its trace the rounds it
+		// finished; the caller lets the planner choose the rest (its menu leaves out what already ran).
+		if p := recover(); p != nil {
+			if s != nil {
+				results = s.withNeedInput()
+			}
+			err = crash.Error(nil, "chat tool loop", p)
+			tr.Stop, tr.Fallback = "fallback", fallbackReason(err)
+		}
+	}()
 	specs := ToolSchemas(menu)
 	if len(specs) == 0 {
 		tr.Stop = "no_tools"
 		return nil, tr, nil
 	}
-	s := l.newLoopState(menu, specs, tr)
+	s = l.newLoopState(menu, specs, tr)
 	msgs := l.messages(history, message, timeRef)
 	stable := false
 	if st, ok := l.LLM.(StableToolsLLM); ok {
@@ -495,7 +508,7 @@ func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message,
 			tr.Stop = "max_rounds"
 		}
 	}
-	results := s.withNeedInput()
+	results = s.withNeedInput()
 	if l.Record {
 		return nil, tr, nil
 	}
@@ -857,9 +870,12 @@ func (rt *Runtime) startLoop(ctx context.Context, req Request, msg, timeRef stri
 		go func() {
 			defer close(lr.done)
 			defer func() {
-				if p := recover(); p != nil { // the loop runs on its own goroutine, out of reach of the turn's recover
-					lr.results, lr.err = nil, crash.Error(nil, "chat tool loop", p)
-					lr.trace = &LoopTrace{Mode: mode, Stop: "fallback", Fallback: fallbackReason(lr.err)}
+				// Do turns a panic inside it into an error with the loop's results kept; this net is
+				// only for a panic outside it (the loop runs on its own goroutine, out of reach of
+				// the turn's recover).
+				if p := recover(); p != nil {
+					lr.err = crash.Error(nil, "chat tool loop", p)
+					lr.trace.Stop, lr.trace.Fallback = "fallback", fallbackReason(lr.err)
 				}
 			}()
 			lr.results, lr.trace, lr.err = l.Do(ctx, others, req.History, msg, timeRef)

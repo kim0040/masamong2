@@ -261,8 +261,12 @@ func (t *turn) planTurn(ctx context.Context) turnPlan {
 		t.res.CostUSD += loop.trace.CostUSD
 		t.res.Timing["tool_loop"] = loop.trace.Ms
 		if loop.err != nil && req.ToolMode == ToolModeLoop {
-			// the model takes no tools (or failed): the planner chooses the tools of this turn
+			// the model takes no tools (or failed): the planner chooses the tools of this turn, except
+			// the ones the loop ran before it died — their results stay the turn's, not run twice.
 			plannerTools = others
+			for _, r := range loopTools {
+				plannerTools = plannerTools.without(r.Tool)
+			}
 			planRaw = t.askPlanner(ctx, memTool, plannerTools)
 			plan, assessed, intent = t.readPlan(planRaw, plannerTools)
 			if t.pf.early != nil && (assessed.MemoryState != "search" || !reflect.DeepEqual(intent, t.pf.early.intent)) {
@@ -317,9 +321,8 @@ func (t *turn) runPlan(ctx context.Context, p *turnPlan) (planned []*ToolResult,
 	req := t.req
 	t1 := time.Now()
 	t.res.Tools = append(t.res.Tools, req.Earlier...)
-	if p.loopRan {
-		t.res.Tools = append(t.res.Tools, p.loopTools...)
-	}
+	// the loop's results count even when it fell back to the planner: what ran before it died stays
+	t.res.Tools = append(t.res.Tools, p.loopTools...)
 	// the planner's tools and the memory search run at once (runSteps): each is checked against the
 	// turn's limits in plan order (the memory search last, unless it started ahead of the loop's end);
 	// results keep the plan's order. The memory search does wait for the tools that pay an unknown fee,
@@ -467,7 +470,7 @@ func (t *turn) answer(ctx context.Context, p *turnPlan, planned []*ToolResult) e
 	searched, searchedState := res.Hits, res.RagState
 	roomBlock := t.roomMemory()
 	system := ComposeSystem(v, req.Persona, req.Rules, req.AgentPrompt)
-	deep := deepSearched(res.ToolLoop, p.loopRan, res.Assess.Steps, planned)
+	deep := deepSearched(res.ToolLoop, p.loopRan || len(p.loopTools) > 0, res.Assess.Steps, planned)
 	msgs := BuildAnswerMessages(v, AnswerInput{
 		System: system, History: req.History, MaxHistory: maxHistory,
 		Hits: res.Hits, RagState: res.RagState, Tools: res.Tools, Speaker: req.Speaker, Message: msg, Intent: p.intent,

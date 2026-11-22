@@ -42,14 +42,60 @@ func TestToolLoopPanicFallsBackToThePlanner(t *testing.T) {
 	}
 }
 
+// panicSecondRoundLLM answers the first round, then panics inside the second tool-calling call
+// (a bug decoding a provider's reply that arrives after a tool already ran).
+type panicSecondRoundLLM struct {
+	loopLLM
+	calls int
+}
+
+func (p *panicSecondRoundLLM) ChatTools(ctx context.Context, role string, msgs []LoopMsg, tools []ToolSpec, maxTokens int) (LoopReply, error) {
+	p.calls++
+	if p.calls > 1 {
+		var m map[string]int
+		m["x"]++ // stands in for any bug in decoding a provider reply
+	}
+	return p.loopLLM.ChatTools(ctx, role, msgs, tools, maxTokens)
+}
+
+// A panic in a later round keeps what the loop already did: its results still reach the answer, and the
+// planner that chooses the tools in its place must not run a write the loop already ran (a second poll).
+func TestToolLoopPanicKeepsTheEarlierResults(t *testing.T) {
+	// the planner, asked after the loop dies, wants the poll the loop already made
+	plan := `{"memory_requirement":"none","tool_plan":[{"tool_name":"polls.create","parameters":{"question":"lunch?"}}]}`
+	llm := &panicSecondRoundLLM{loopLLM: loopLLM{plannerOut: plan, replies: []LoopReply{
+		{Calls: []LoopCall{call("a", "polls__create", `{"question":"lunch?"}`)}},
+	}}}
+	rec := &recorder{}
+	out, err := (&Runtime{LLM: llm, Tools: rec.run}).Answer(context.Background(), loopRequest("make a lunch poll", ToolModeLoop))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// the write ran exactly once: the fallback plan's poll step must not run again
+	if got := rec.tools(); !slices.Equal(got, []string{"polls.create"}) {
+		t.Fatalf("ran %v", got)
+	}
+	// the first result is kept: the answer sees the poll the loop made, not nothing
+	if len(out.Tools) != 1 || out.Tools[0].Tool != "polls.create" || !out.Tools[0].OK {
+		t.Fatalf("results %+v", out.Tools)
+	}
+	if out.ToolLoop == nil || out.ToolLoop.Stop != "fallback" || !strings.HasPrefix(out.ToolLoop.Fallback, "error:") {
+		t.Fatalf("trace %+v", out.ToolLoop)
+	}
+	// the planner that replaced the loop was offered the menu without the tool that already ran
+	if len(llm.plannerSys) != 2 || strings.Contains(llm.plannerSys[1], "polls.create") || !strings.Contains(llm.plannerSys[1], "weather.query") {
+		t.Fatalf("planner calls %d: %v", len(llm.plannerSys), llm.plannerSys)
+	}
+}
+
 // reminderMenu offers reminders.update with its closed choice of op, as the application declares it.
 func reminderMenu() Toolset {
-	ts := Toolset{Known: map[string]bool{"reminders.update": true, "polls.create": true}}
+	ts := Toolset{Known: map[string]bool{"reminders.update": true, "polls.create": true, "search.web": true}}
 	ts.Enabled = []ToolInfo{
 		{ID: "reminders.update", Description: "reminders", Writes: true,
 			Params: []ToolParam{{Name: "op", Enum: []string{"list", "cancel", "pause", "resume"}}, {Name: "id"}, {Name: "match"}}},
 		{ID: "polls.create", Description: "poll", Writes: true, Required: []string{"question"},
-			Params: []ToolParam{{Name: "question", Required: true}, {Name: "options_text"}}},
+			Params: []ToolParam{{Name: "question", Required: true}, {Name: "options_text"}, {Name: "options", Type: "array"}}},
 	}
 	return ts
 }
