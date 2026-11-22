@@ -14,6 +14,7 @@ import (
 
 	"masamong/internal/config"
 	"masamong/internal/launcher"
+	"masamong/internal/testutil"
 	"masamong/internal/transport/web"
 )
 
@@ -140,6 +141,8 @@ func TestMaintenanceStopNeedsTheAdminTokenAndKeepsTheHostChecks(t *testing.T) {
 			t.Fatalf("another maintenance instance must be refused: %d", c)
 		}
 	}
+	// the handler defers a stop by 200 ms so its reply lands first; a refused request that scheduled
+	// one anyway would fire inside this window
 	time.Sleep(300 * time.Millisecond)
 	if stopped.Load() {
 		t.Fatal("stopped without a valid request")
@@ -150,13 +153,7 @@ func TestMaintenanceStopNeedsTheAdminTokenAndKeepsTheHostChecks(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || out["stopping"] != true {
 		t.Fatalf("%s %v", w.Body.String(), err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for !stopped.Load() && time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
-	}
-	if !stopped.Load() {
-		t.Fatal("a valid stop request did not stop the daemon")
-	}
+	testutil.WaitFor(t, 2*time.Second, "the deferred stop to run", func() bool { return stopped.Load() })
 }
 
 func TestMaintenanceSupervisorStopUsesSameAuthenticatedEndpoint(t *testing.T) {
@@ -174,11 +171,5 @@ func TestMaintenanceSupervisorStopUsesSameAuthenticatedEndpoint(t *testing.T) {
 	if err := launcher.RequestStopChild(context.Background(), root, os.Getpid(), token); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(time.Second)
-	for !stopped.Load() && time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
-	}
-	if !stopped.Load() {
-		t.Fatal("supervisor's authenticated stop did not reach maintenance daemon")
-	}
+	testutil.WaitFor(t, time.Second, "the deferred stop to run", func() bool { return stopped.Load() })
 }

@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"masamong/internal/testutil"
 )
 
 func TestUnixStopKillPlanHasNoTimer(t *testing.T) {
@@ -37,20 +39,25 @@ func TestUnixSupervisorWaitsWithoutAKillTimer(t *testing.T) {
 	sigs := make(chan os.Signal, 2)
 	finished := make(chan int, 1)
 	go func() { finished <- sv.run(sigs) }()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		if _, err := os.Stat(filepath.Join(dir, "ready-signal")); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("fake daemon did not wait for a signal")
-		}
-		time.Sleep(20 * time.Millisecond)
+	testutil.WaitFor(t, 10*time.Second, "the fake daemon to wait for a signal", func() bool {
+		_, err := os.Stat(filepath.Join(dir, "ready-signal"))
+		return err == nil
+	})
+	sigs <- syscall.SIGTERM
+	testutil.WaitFor(t, 10*time.Second, "the fake daemon to take the signal", func() bool {
+		_, err := os.Stat(filepath.Join(dir, "signaled"))
+		return err == nil
+	})
+	sigs <- syscall.SIGTERM // a resent signal must not shorten anything
+	// the child exits only when it is released, so it cannot have finished yet
+	select {
+	case code := <-finished:
+		t.Fatalf("finished before the child could exit: %d", code)
+	default:
 	}
-	started := time.Now()
-	sigs <- syscall.SIGTERM
-	time.Sleep(100 * time.Millisecond)
-	sigs <- syscall.SIGTERM
+	if err := os.WriteFile(filepath.Join(dir, "release"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	select {
 	case code := <-finished:
 		if code != 0 {
@@ -59,13 +66,7 @@ func TestUnixSupervisorWaitsWithoutAKillTimer(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("supervisor did not finish")
 	}
-	if time.Since(started) < 700*time.Millisecond {
-		t.Fatal("kill timer fired before the child finished")
-	}
 	if text := log.String(); strings.Contains(text, "killing") || strings.Contains(text, "deadline") {
 		t.Fatalf("unix killed the child: %s", text)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "signaled")); err != nil {
-		t.Fatal(err)
 	}
 }

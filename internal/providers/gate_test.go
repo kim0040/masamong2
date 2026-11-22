@@ -17,36 +17,66 @@ import (
 // slot is told it was cancelled.
 func TestGateBoundsRequestsInFlight(t *testing.T) {
 	var now, most atomic.Int32
+	var releaseCh atomic.Value // the channel this burst's handlers wait on, captured as they enter
+	arrived := make(chan struct{}, 4)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		release := releaseCh.Load().(chan struct{})
 		n := now.Add(1)
 		for m := most.Load(); n > m && !most.CompareAndSwap(m, n); m = most.Load() {
 		}
-		time.Sleep(40 * time.Millisecond)
+		arrived <- struct{}{}
+		<-release // the test holds the requests open, so every caller's start is counted
 		now.Add(-1)
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
-	burst := func(c *Client) int32 {
+	burst := func(c *Client, slots int) int32 {
 		most.Store(0)
+		release := make(chan struct{})
+		releaseCh.Store(release)
+		started := make(chan struct{}, 4)
 		var wg sync.WaitGroup
 		for range 4 {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
+				started <- struct{}{}
 				if _, err := c.Get(context.Background(), srv.URL, nil); err != nil {
 					t.Error(err)
 				}
 			}()
+		}
+		// wait until all four callers asked for a slot and the gate let `slots` of them through
+		for i := 0; i < 4; i++ {
+			<-started
+		}
+		for i := 0; i < slots; i++ {
+			select {
+			case <-arrived:
+			case <-time.After(10 * time.Second):
+				t.Fatalf("only %d requests reached the server", i)
+			}
+		}
+		if got := now.Load(); got > int32(slots) {
+			t.Fatalf("%d requests in flight, the gate allows %d", got, slots)
+		}
+		close(release)
+		for i := slots; i < 4; i++ {
+			select {
+			case <-arrived:
+			case <-time.After(10 * time.Second):
+				t.Fatalf("a request the gate held never ran: %d of 4", i)
+			}
 		}
 		wg.Wait()
 		return most.Load()
 	}
 	base := NewClient(5*time.Second, nil)
 	gated := base.WithGate(2)
-	if got := burst(gated); got != 2 {
+	if got := burst(gated, 2); got != 2 {
 		t.Fatalf("gate of 2: %d in flight", got)
 	}
-	if got := burst(base); got != 4 {
+	if got := burst(base, 4); got != 4 {
 		t.Fatalf("no gate: %d in flight", got)
 	}
 	if base.WithGate(0) != base || base.Gate != nil {

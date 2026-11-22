@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"masamong/internal/memory/engine"
@@ -42,52 +43,55 @@ func (b *barrier) wait() bool {
 
 // The calls of one round run at once; each tool's own spending is what the call ledger reads off its
 // guard (no share of a call running beside it), and the results keep the model's order even when a
-// later call finishes first.
+// later call finishes first. The clock is fake (testing/synctest): the skew that finishes the first
+// call last is exact and takes no real time.
 func TestToolLoopRunsARoundsCallsAtOnce(t *testing.T) {
-	llm := &loopLLM{replies: []LoopReply{
-		{Calls: []LoopCall{call("a", "finance__quote", `{"symbol":"AAPL"}`), call("b", "weather__query", `{"region":"Busan"}`)}},
-		{Text: "-"},
-	}}
-	b := newBarrier(2)
-	spend := map[string]float64{"finance.quote": 0.01, "weather.query": 0.02}
-	var mu sync.Mutex
-	own := map[string]float64{}
-	tools := func(ctx context.Context, tool string, _ map[string]any) ToolResult {
-		_, before, _ := GuardFrom(ctx).Totals()
-		together := b.wait()
-		if tool == "finance.quote" {
-			time.Sleep(30 * time.Millisecond) // the first call finishes last
+	synctest.Test(t, func(t *testing.T) {
+		llm := &loopLLM{replies: []LoopReply{
+			{Calls: []LoopCall{call("a", "finance__quote", `{"symbol":"AAPL"}`), call("b", "weather__query", `{"region":"Busan"}`)}},
+			{Text: "-"},
+		}}
+		b := newBarrier(2)
+		spend := map[string]float64{"finance.quote": 0.01, "weather.query": 0.02}
+		var mu sync.Mutex
+		own := map[string]float64{}
+		tools := func(ctx context.Context, tool string, _ map[string]any) ToolResult {
+			_, before, _ := GuardFrom(ctx).Totals()
+			together := b.wait()
+			if tool == "finance.quote" {
+				time.Sleep(30 * time.Millisecond) // the first call finishes last
+			}
+			GuardFrom(ctx).Spend(spend[tool])
+			_, after, _ := GuardFrom(ctx).Totals() // as the application's call ledger reads it
+			mu.Lock()
+			own[tool] = after - before
+			mu.Unlock()
+			return ToolResult{Tool: tool, OK: together}
 		}
-		GuardFrom(ctx).Spend(spend[tool])
-		_, after, _ := GuardFrom(ctx).Totals() // as the application's call ledger reads it
-		mu.Lock()
-		own[tool] = after - before
-		mu.Unlock()
-		return ToolResult{Tool: tool, OK: together}
-	}
-	g := &Guard{MaxUSD: 1, MaxCalls: 20}
-	req := loopRequest("apple stock and the weather in Busan?", ToolModeLoop)
-	req.Guard = g
-	out, err := (&Runtime{LLM: llm, Tools: tools}).Answer(context.Background(), req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(out.Tools) != 2 || out.Tools[0].Tool != "finance.quote" || out.Tools[1].Tool != "weather.query" {
-		t.Fatalf("results not in the model's order: %+v", out.Tools)
-	}
-	if !out.Tools[0].OK || !out.Tools[1].OK {
-		t.Fatalf("the round's calls ran one after another: %+v", out.Tools)
-	}
-	if own["finance.quote"] != 0.01 || own["weather.query"] != 0.02 {
-		t.Fatalf("each call's own cost: %v", own)
-	}
-	if calls, spent, _ := g.Totals(); calls != 2 || math.Abs(spent-0.03) > 1e-12 {
-		t.Fatalf("turn totals: %d calls, %v spent", calls, spent)
-	}
-	next := llm.loopMsgs[1]
-	if len(next) != 5 || next[3].CallID != "a" || next[4].CallID != "b" {
-		t.Fatalf("tool messages out of order: %+v", next)
-	}
+		g := &Guard{MaxUSD: 1, MaxCalls: 20}
+		req := loopRequest("apple stock and the weather in Busan?", ToolModeLoop)
+		req.Guard = g
+		out, err := (&Runtime{LLM: llm, Tools: tools}).Answer(context.Background(), req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(out.Tools) != 2 || out.Tools[0].Tool != "finance.quote" || out.Tools[1].Tool != "weather.query" {
+			t.Fatalf("results not in the model's order: %+v", out.Tools)
+		}
+		if !out.Tools[0].OK || !out.Tools[1].OK {
+			t.Fatalf("the round's calls ran one after another: %+v", out.Tools)
+		}
+		if own["finance.quote"] != 0.01 || own["weather.query"] != 0.02 {
+			t.Fatalf("each call's own cost: %v", own)
+		}
+		if calls, spent, _ := g.Totals(); calls != 2 || math.Abs(spent-0.03) > 1e-12 {
+			t.Fatalf("turn totals: %d calls, %v spent", calls, spent)
+		}
+		next := llm.loopMsgs[1]
+		if len(next) != 5 || next[3].CallID != "a" || next[4].CallID != "b" {
+			t.Fatalf("tool messages out of order: %+v", next)
+		}
+	})
 }
 
 // The turn's limits are decided in the model's order before anything runs: the same calls are allowed
@@ -198,41 +202,44 @@ func (m *waitingMemory) Search(_ context.Context, req engine.SearchRequest) (sea
 }
 
 // The planner's tools run at once with each other and with the memory search; results keep the plan's
-// order and the trace keeps its tools and memory timings.
+// order and the trace keeps its tools and memory timings. The clock is fake (testing/synctest): the
+// skew that finishes the first tool last is exact and takes no real time.
 func TestPlannerToolsAndMemorySearchRunAtOnce(t *testing.T) {
-	plan := `{"memory_requirement":"required","question_kind":"event","person_targets":[],"tool_plan":[` +
-		`{"tool_name":"weather.query","parameters":{"region":"서울"}},{"tool_name":"finance.quote","parameters":{"symbol":"AAPL"}},` +
-		`{"tool_name":"memory.search","parameters":{"query":"캠핑"}}]}`
-	b := newBarrier(3)
-	tools := func(_ context.Context, tool string, _ map[string]any) ToolResult {
-		together := b.wait()
-		if tool == "weather.query" {
-			time.Sleep(30 * time.Millisecond) // the first tool finishes last
+	synctest.Test(t, func(t *testing.T) {
+		plan := `{"memory_requirement":"required","question_kind":"event","person_targets":[],"tool_plan":[` +
+			`{"tool_name":"weather.query","parameters":{"region":"서울"}},{"tool_name":"finance.quote","parameters":{"symbol":"AAPL"}},` +
+			`{"tool_name":"memory.search","parameters":{"query":"캠핑"}}]}`
+		b := newBarrier(3)
+		tools := func(_ context.Context, tool string, _ map[string]any) ToolResult {
+			together := b.wait()
+			if tool == "weather.query" {
+				time.Sleep(30 * time.Millisecond) // the first tool finishes last
+			}
+			return ToolResult{Tool: tool, OK: together}
 		}
-		return ToolResult{Tool: tool, OK: together}
-	}
-	mem := &waitingMemory{b: b}
-	res, err := (&Runtime{LLM: &fakeLLM{plan: plan}, Memory: mem, Tools: tools}).Answer(context.Background(), Request{
-		Message: "서울 날씨랑 애플 주가, 그리고 캠핑 어디 가기로 했지?", Speaker: "영희", Rooms: []string{"discord:1:10"}, MemoryOn: true,
-		PlannerModel: "planner", ResponseModel: "resp", BudgetUSD: 0.05, Voice: koVoice(), Tools: goldenTools([]string{"weather.query", "finance.quote"})})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(res.Tools) != 2 || res.Tools[0].Tool != "weather.query" || res.Tools[1].Tool != "finance.quote" {
-		t.Fatalf("results not in the plan's order: %+v", res.Tools)
-	}
-	if !res.Tools[0].OK || !res.Tools[1].OK || !mem.together {
-		t.Fatalf("the tools and the memory search ran one after another: %+v memory together %v", res.Tools, mem.together)
-	}
-	if res.RagState != "candidates" || len(res.Hits) != 1 || math.Abs(res.CostUSD-(0.0001+0.0003+0.0002)) > 1e-9 {
-		t.Fatalf("memory: state %s hits %d cost %v", res.RagState, len(res.Hits), res.CostUSD)
-	}
-	if res.Timing["tools"] < 30 {
-		t.Fatalf("timing %v", res.Timing)
-	}
-	if _, ok := res.Timing["memory"]; !ok {
-		t.Fatalf("timing %v", res.Timing)
-	}
+		mem := &waitingMemory{b: b}
+		res, err := (&Runtime{LLM: &fakeLLM{plan: plan}, Memory: mem, Tools: tools}).Answer(context.Background(), Request{
+			Message: "서울 날씨랑 애플 주가, 그리고 캠핑 어디 가기로 했지?", Speaker: "영희", Rooms: []string{"discord:1:10"}, MemoryOn: true,
+			PlannerModel: "planner", ResponseModel: "resp", BudgetUSD: 0.05, Voice: koVoice(), Tools: goldenTools([]string{"weather.query", "finance.quote"})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Tools) != 2 || res.Tools[0].Tool != "weather.query" || res.Tools[1].Tool != "finance.quote" {
+			t.Fatalf("results not in the plan's order: %+v", res.Tools)
+		}
+		if !res.Tools[0].OK || !res.Tools[1].OK || !mem.together {
+			t.Fatalf("the tools and the memory search ran one after another: %+v memory together %v", res.Tools, mem.together)
+		}
+		if res.RagState != "candidates" || len(res.Hits) != 1 || math.Abs(res.CostUSD-(0.0001+0.0003+0.0002)) > 1e-9 {
+			t.Fatalf("memory: state %s hits %d cost %v", res.RagState, len(res.Hits), res.CostUSD)
+		}
+		if res.Timing["tools"] < 30 {
+			t.Fatalf("timing %v", res.Timing)
+		}
+		if _, ok := res.Timing["memory"]; !ok {
+			t.Fatalf("timing %v", res.Timing)
+		}
+	})
 }
 
 // All three tools must reach the barrier, independent of the machine's scheduling speed.
@@ -277,10 +284,12 @@ func TestGuardMoneyWaitFollowsCancellation(t *testing.T) {
 			done <- g.Allow("optional")
 		}
 	}()
+	// an admission that did not wait for the model in flight answers at once — the wait's own end
+	// (the cancel below) is what a late answer is checked against, not a quiet window
 	select {
-	case <-done:
-		t.Error("money admission did not wait for the model in flight")
-	case <-time.After(30 * time.Millisecond):
+	case early := <-done:
+		t.Errorf("money admission answered %v before the model ended or the wait was cancelled", early)
+	default:
 	}
 	cancel()
 	select {

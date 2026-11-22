@@ -9,6 +9,7 @@ import (
 
 	"masamong/internal/providers"
 	"masamong/internal/providers/openai"
+	"masamong/internal/testutil"
 )
 
 // shapeFake is a batch host that knows its models' chat shapes (an *openai.Adapter does).
@@ -314,8 +315,9 @@ func TestBatchCancelDrainsUntilEveryBatchEnds(t *testing.T) {
 		t.Fatal("results not read yet must not be cleaned up")
 	}
 	drained := make(chan error, 1)
+	before := sum.polls.Load()
 	go func() { _, err := e.DrainBatch(context.Background(), &stored); drained <- err }()
-	time.Sleep(20 * time.Millisecond)
+	testutil.WaitFor(t, 5*time.Second, "the drain to poll the batch", func() bool { return sum.polls.Load() > before })
 	sum.set(openai.BatchDone)
 	if err := <-drained; err != nil {
 		t.Fatal(err)

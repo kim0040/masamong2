@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"masamong/internal/launcher"
+	"masamong/internal/testutil"
 	"masamong/internal/transport/web"
 )
 
@@ -75,16 +76,7 @@ func testWindowsSupervisorStop(t *testing.T, script string, removeToken, clean b
 	sigs := make(chan os.Signal, 2)
 	finished := make(chan int, 1)
 	go func() { finished <- sv.run(sigs) }()
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		if _, ok := launcher.ReadInfo(root); ok {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("fake daemon did not become ready")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	waitForDaemon(t, root)
 	if removeToken {
 		if err := os.Remove(web.TokenPath(root)); err != nil {
 			t.Fatal(err)
@@ -261,17 +253,11 @@ func TestWindowsSuccessfulStopUsesTheDaemonBudget(t *testing.T) {
 	waitForDaemon(t, root)
 	sigs <- os.Interrupt
 	want := "up to " + childStopGrace().String()
-	deadline := time.Now().Add(10 * time.Second)
-	for !strings.Contains(log.String(), want) {
-		if time.Now().After(deadline) {
-			t.Fatalf("log never showed %s: %s", want, log.String())
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	time.Sleep(time.Second)
-	if text := log.String(); strings.Contains(text, "deadline") || strings.Contains(text, "killing") || strings.Contains(text, launcher.StopGrace.String()) {
-		t.Fatalf("killed inside the daemon budget or armed the CLI wait: %s", text)
-	}
+	testutil.WaitFor(t, 10*time.Second, "the daemon's stop budget in the log", func() bool {
+		return strings.Contains(log.String(), want)
+	})
+	// the child stays up until it is released, so the whole remaining wait is its own doing: letting it
+	// go and watching the run end proves the supervisor waited the daemon out instead of killing it
 	if err := os.WriteFile(filepath.Join(dir, "release"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -283,8 +269,8 @@ func TestWindowsSuccessfulStopUsesTheDaemonBudget(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("supervisor did not finish")
 	}
-	if text := log.String(); strings.Contains(text, "deadline") || strings.Contains(text, "killing") {
-		t.Fatalf("killed a child that exited on its own: %s", text)
+	if text := log.String(); strings.Contains(text, "deadline") || strings.Contains(text, "killing") || strings.Contains(text, launcher.StopGrace.String()) {
+		t.Fatalf("killed inside the daemon budget or armed the CLI wait: %s", text)
 	}
 }
 
@@ -305,13 +291,9 @@ func TestWindowsSessionEndShrinksTheLoggedGrace(t *testing.T) {
 	go func() { finished <- sv.run(sigs) }()
 	waitForDaemon(t, root)
 	sigs <- os.Interrupt
-	deadline := time.Now().Add(10 * time.Second)
-	for !strings.Contains(log.String(), "up to 10s") {
-		if time.Now().After(deadline) {
-			t.Fatalf("ordinary grace was not logged: %s", log.String())
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	testutil.WaitFor(t, 10*time.Second, "the ordinary grace in the log", func() bool {
+		return strings.Contains(log.String(), "up to 10s")
+	})
 	shrunk := time.Now()
 	sigs <- sessionEndSignal{}
 	select {
@@ -336,14 +318,8 @@ func TestWindowsSessionEndShrinksTheLoggedGrace(t *testing.T) {
 
 func waitForDaemon(t *testing.T, root string) {
 	t.Helper()
-	deadline := time.Now().Add(30 * time.Second)
-	for {
-		if _, ok := launcher.ReadInfo(root); ok {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("fake daemon did not become ready")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	testutil.WaitFor(t, 30*time.Second, "the fake daemon to become ready", func() bool {
+		_, ok := launcher.ReadInfo(root)
+		return ok
+	})
 }

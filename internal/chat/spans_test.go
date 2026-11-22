@@ -5,6 +5,7 @@ import (
 	"math"
 	"slices"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -37,7 +38,8 @@ func spanOf(t *testing.T, spans []Span, name string) Span {
 }
 
 // The join of the planner and the tool loop records which of them the turn waited for, and the spans
-// put the two side by side from the turn's start.
+// put the two side by side from the turn's start. The clock is fake (testing/synctest): the delays in
+// delayLLM take no real time and the span offsets are exact.
 func TestSpansShowWhichSideOfTheJoinWasWaitedOn(t *testing.T) {
 	const slow, fast = 120 * time.Millisecond, 5 * time.Millisecond
 	for _, c := range []struct {
@@ -46,30 +48,32 @@ func TestSpansShowWhichSideOfTheJoinWasWaitedOn(t *testing.T) {
 		want          string
 	}{{"loop is slower", fast, slow, "loop"}, {"planner is slower", slow, fast, "planner"}} {
 		t.Run(c.name, func(t *testing.T) {
-			req := loopRequest("will it rain?", ToolModeLoop)
-			req.TurnStart = time.Now().Add(-50 * time.Millisecond) // 50 ms of the turn passed before Answer
-			out, err := (&Runtime{LLM: delayLLM{loopLLM: &loopLLM{}, planner: c.planner, loop: c.loop}, Tools: (&recorder{}).run}).Answer(context.Background(), req)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if out.WaitedOn != c.want {
-				t.Fatalf("waited on %q, want %q (spans %+v)", out.WaitedOn, c.want, out.Spans)
-			}
-			planner, loop, answer := spanOf(t, out.Spans, "planner"), spanOf(t, out.Spans, "tool_loop"), spanOf(t, out.Spans, "answer")
-			// offsets count from the turn's start, not from Answer
-			if planner.StartMS < 50 || loop.StartMS < 50 {
-				t.Errorf("spans start before the turn's own 50 ms: %+v %+v", planner, loop)
-			}
-			if min(planner.EndMS-planner.StartMS, loop.EndMS-loop.StartMS) < int(fast.Milliseconds()) {
-				t.Errorf("a span is shorter than the delay it waited: %+v %+v", planner, loop)
-			}
-			slower := max(planner.EndMS, loop.EndMS)
-			if answer.StartMS < slower-2 { // the answer starts after the join released
-				t.Errorf("answer starts at %d ms before the join released at %d ms", answer.StartMS, slower)
-			}
-			if out.Timing["plan"] == 0 && c.planner > 0 || out.Timing["tool_loop"] == 0 && c.loop > 0 {
-				t.Errorf("the old timing keys keep their meaning: %+v", out.Timing)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				req := loopRequest("will it rain?", ToolModeLoop)
+				req.TurnStart = time.Now().Add(-50 * time.Millisecond) // 50 ms of the turn passed before Answer
+				out, err := (&Runtime{LLM: delayLLM{loopLLM: &loopLLM{}, planner: c.planner, loop: c.loop}, Tools: (&recorder{}).run}).Answer(context.Background(), req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if out.WaitedOn != c.want {
+					t.Fatalf("waited on %q, want %q (spans %+v)", out.WaitedOn, c.want, out.Spans)
+				}
+				planner, loop, answer := spanOf(t, out.Spans, "planner"), spanOf(t, out.Spans, "tool_loop"), spanOf(t, out.Spans, "answer")
+				// offsets count from the turn's start, not from Answer
+				if planner.StartMS < 50 || loop.StartMS < 50 {
+					t.Errorf("spans start before the turn's own 50 ms: %+v %+v", planner, loop)
+				}
+				if min(planner.EndMS-planner.StartMS, loop.EndMS-loop.StartMS) < int(fast.Milliseconds()) {
+					t.Errorf("a span is shorter than the delay it waited: %+v %+v", planner, loop)
+				}
+				slower := max(planner.EndMS, loop.EndMS)
+				if answer.StartMS < slower-2 { // the answer starts after the join released
+					t.Errorf("answer starts at %d ms before the join released at %d ms", answer.StartMS, slower)
+				}
+				if out.Timing["plan"] == 0 && c.planner > 0 || out.Timing["tool_loop"] == 0 && c.loop > 0 {
+					t.Errorf("the old timing keys keep their meaning: %+v", out.Timing)
+				}
+			})
 		})
 	}
 }

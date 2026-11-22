@@ -31,6 +31,21 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
+// waitForRelease keeps the fake daemon alive until the test writes a "release" file — the
+// deterministic form of "stay up a while" for a child process. A child left behind by a failed
+// test still gives up on its own.
+func waitForRelease(dir string) {
+	release := filepath.Join(dir, "release")
+	for deadline := time.Now().Add(2 * time.Minute); ; time.Sleep(20 * time.Millisecond) {
+		if _, err := os.Stat(release); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			os.Exit(4)
+		}
+	}
+}
+
 func fakeDaemon(dir string) {
 	root := filepath.Join(dir, "data")
 	got, ok := lastArg(os.Args, "--data-root")
@@ -42,6 +57,7 @@ func fakeDaemon(dir string) {
 	n := len(runs)
 	_ = os.WriteFile(filepath.Join(dir, "runs"), append(runs, 'x'), 0o600)
 	_ = os.Remove(filepath.Join(dir, "data", "daemon.json"))
+	_ = os.Remove(filepath.Join(dir, "release")) // this run is released only for its own reason
 	if pid, _ := strconv.Atoi(os.Getenv(supervisedEnv)); pid != os.Getppid() {
 		os.Exit(99)
 	}
@@ -56,7 +72,7 @@ func fakeDaemon(dir string) {
 		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
 		<-ch
 		_ = os.WriteFile(filepath.Join(dir, "signaled"), nil, 0o600)
-		time.Sleep(800 * time.Millisecond)
+		waitForRelease(dir) // takes after its signal exactly as long as the test allows
 		os.Exit(0)
 	}
 	if code == 78 || code == 79 || code == 80 || code == 82 {
@@ -70,19 +86,15 @@ func fakeDaemon(dir string) {
 		// a daemon without a web address: daemon.json names it but has no bind
 		_ = os.MkdirAll(filepath.Join(dir, "data"), 0o700)
 		_ = launcher.WriteInfo(filepath.Join(dir, "data"), launcher.DaemonInfo{PID: os.Getpid()})
-		time.Sleep(time.Second)
+		time.Sleep(time.Second) // the second of life the backoff count is measured against
 		os.Exit(0)
 	}
 	if code == 75 {
 		// a daemon that served on an address before its operator restart (each run on the next port, as a
-		// restart that found the old one taken would)
+		// restart that found the old one taken would); it ends once the test has seen the address
 		_ = os.MkdirAll(filepath.Join(dir, "data"), 0o700)
 		_ = launcher.WriteInfo(filepath.Join(dir, "data"), launcher.DaemonInfo{PID: os.Getpid(), Bind: "127.0.0.1:" + strconv.Itoa(9911+n)})
-		delay := 1500 * time.Millisecond
-		if ms, err := strconv.Atoi(os.Getenv("MASAMONG_FAKE_SLEEP_MS")); err == nil && ms > 0 {
-			delay = time.Duration(ms) * time.Millisecond
-		}
-		time.Sleep(delay)
+		waitForRelease(dir)
 		_ = os.Remove(filepath.Join(dir, "data", "daemon.json")) // a daemon that ends takes its file along
 	}
 	os.Exit(code)
@@ -91,7 +103,7 @@ func fakeDaemon(dir string) {
 func fakeServingDaemon(dir string, code int) {
 	root := filepath.Join(dir, "data")
 	if code == 78 {
-		time.Sleep(time.Minute)
+		waitForRelease(dir) // a daemon that stays up until the test lets it go
 		os.Exit(0)
 	}
 	token, err := web.EnsureToken(root)
@@ -104,15 +116,10 @@ func fakeServingDaemon(dir string, code int) {
 	}
 	stop := make(chan struct{}, 1)
 	if code == 82 {
+		// answers its stop API at once but stays up until the test releases it
 		go func() {
-			release := filepath.Join(dir, "release")
-			for {
-				if _, err := os.Stat(release); err == nil {
-					stop <- struct{}{}
-					return
-				}
-				time.Sleep(20 * time.Millisecond)
-			}
+			waitForRelease(dir)
+			stop <- struct{}{}
 		}()
 	}
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -264,9 +271,31 @@ func TestSupervisorGivesUpOnADaemonThatKeepsFailing(t *testing.T) {
 }
 
 func TestSupervisorAnswersARestartOnTheSameAddress(t *testing.T) {
-	code, runs, waits, dir := runFake(t, "75,0")
-	if code != 0 || runs != 2 || len(waits) != 0 {
-		t.Fatalf("code %d, runs %d, waits %v", code, runs, waits)
+	dir := t.TempDir()
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(fakeDaemonEnv, dir)
+	t.Setenv("MASAMONG_FAKE_SCRIPT", "75,0")
+	var waits []time.Duration
+	sv := &supervisor{self: self, dataRoot: filepath.Join(dir, "data"), log: &lockedBuffer{}, now: time.Now,
+		sleep:     func(d time.Duration, _ <-chan os.Signal) bool { waits = append(waits, d); return true },
+		watchFrom: 10 * time.Millisecond, watchTo: 40 * time.Millisecond,
+		readInfo: func(root string) (launcher.DaemonInfo, bool) {
+			info, ok := launcher.ReadInfo(root)
+			if ok && info.Bind != "" {
+				// the address is in hand: the release file lets this run end
+				_ = os.WriteFile(filepath.Join(dir, "release"), nil, 0o600)
+			}
+			return info, ok
+		},
+	}
+	if code := sv.run(make(chan os.Signal)); code != 0 {
+		t.Fatalf("supervisor exit code %d", code)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "runs")); len(b) != 2 || len(waits) != 0 {
+		t.Fatalf("runs %d, waits %v", len(b), waits)
 	}
 	if b, _ := os.ReadFile(filepath.Join(dir, "bind")); string(b) != "127.0.0.1:9911" {
 		t.Fatalf("restarted on %q, want the previous address", b)
@@ -286,7 +315,6 @@ func TestSupervisorFollowsTheAddressOfEveryRunAndStopsAskingOnceKnown(t *testing
 	}
 	t.Setenv(fakeDaemonEnv, dir)
 	t.Setenv("MASAMONG_FAKE_SCRIPT", "75,75,0")
-	t.Setenv("MASAMONG_FAKE_SLEEP_MS", "400")
 	hits := 0 // reads that found an address
 	sv := &supervisor{self: self, dataRoot: filepath.Join(dir, "data"), log: &lockedBuffer{}, now: time.Now,
 		sleep:     func(time.Duration, <-chan os.Signal) bool { return true },
@@ -295,6 +323,8 @@ func TestSupervisorFollowsTheAddressOfEveryRunAndStopsAskingOnceKnown(t *testing
 			info, ok := launcher.ReadInfo(root)
 			if ok && info.Bind != "" {
 				hits++
+				// the run's address was seen: the release file lets it end
+				_ = os.WriteFile(filepath.Join(dir, "release"), nil, 0o600)
 			}
 			return info, ok
 		},
@@ -302,7 +332,7 @@ func TestSupervisorFollowsTheAddressOfEveryRunAndStopsAskingOnceKnown(t *testing
 	if code := sv.run(make(chan os.Signal)); code != 0 {
 		t.Fatalf("supervisor exit code %d", code)
 	}
-	// each of the two runs lives 400 ms and writes its address at once; one read finds it, then no more
+	// each run stays up until its address is read once; a read finds it, then no more
 	if hits != 2 {
 		t.Fatalf("daemon.json was read %d times with an address in it, want once per run (2)", hits)
 	}

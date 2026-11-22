@@ -8,6 +8,7 @@ import (
 
 	"masamong/internal/memory/retrieval"
 	"masamong/internal/memory/search"
+	"masamong/internal/testutil"
 )
 
 // A rebuild had no stop between its start and its publish, so a long one held the owner's Close until
@@ -61,10 +62,9 @@ func TestStopReloadEndsARebuildAtTheNextStage(t *testing.T) {
 		})
 	}
 	reloadStageHook.Store(nil)
-	deadline := time.Now().Add(2 * time.Second)
-	for openLexicalDBs() > base && time.Now().Before(deadline) {
-		time.Sleep(50 * time.Millisecond)
-	}
+	testutil.WaitFor(t, 2*time.Second, "the stopped rebuilds to release their indexes", func() bool {
+		return openLexicalDBs() <= base
+	})
 	if got := openLexicalDBs(); got > base {
 		t.Fatalf("in-memory index databases: %d before, %d after stopped rebuilds", base, got)
 	}

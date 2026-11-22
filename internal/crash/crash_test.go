@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"masamong/internal/testutil"
 )
 
 func TestRecoverKeepsTheProcessAndLogsTheStack(t *testing.T) {
@@ -17,14 +19,11 @@ func TestRecoverKeepsTheProcessAndLogsTheStack(t *testing.T) {
 		var m map[string]int
 		m["boom"] = 1 // nil map write panics
 	})
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+	testutil.WaitFor(t, 5*time.Second, "the goroutine crash in the log", func() bool {
 		mu.Lock()
-		logged := strings.Contains(buf.String(), "test goroutine")
-		mu.Unlock()
-		if logged || time.Now().After(deadline) {
-			break
-		}
-	}
+		defer mu.Unlock()
+		return strings.Contains(buf.String(), "test goroutine")
+	})
 	err := Run(log, "test run", func() { panic("bad input") })
 	if err == nil || !strings.Contains(err.Error(), "bad input") {
 		t.Fatalf("Run: %v", err)

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"masamong/internal/errclass"
+	"masamong/internal/testutil"
 )
 
 // Whoever asks for a query's embedding while it is under way waits for that call: the provider is asked
@@ -135,9 +136,9 @@ func TestWaitingCallerAsksWhenTheCallItJoinedIsGivenUp(t *testing.T) {
 	defer giveUp()
 	warmed := make(chan struct{})
 	go func() { e.WarmQuery(warmCtx, "같은 질문"); close(warmed) }()
-	for fp.embedCalls.Load() == before {
-		time.Sleep(time.Millisecond)
-	}
+	testutil.WaitFor(t, 5*time.Second, "the warm call to reach the provider", func() bool {
+		return fp.embedCalls.Load() > before
+	})
 	time.AfterFunc(50*time.Millisecond, giveUp)
 	v, err := e.EmbedQuery(context.Background(), "같은 질문")
 	<-warmed
@@ -159,9 +160,9 @@ func TestWaitingCallerFollowsItsOwnContext(t *testing.T) {
 		_, err := e.EmbedQuery(context.Background(), "기다리는 질문")
 		first <- err
 	}()
-	for fp.embedCalls.Load() == before {
-		time.Sleep(time.Millisecond)
-	}
+	testutil.WaitFor(t, 5*time.Second, "the first call to reach the provider", func() bool {
+		return fp.embedCalls.Load() > before
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
 	if _, err := e.EmbedQuery(ctx, "기다리는 질문"); !errors.Is(err, context.DeadlineExceeded) {
