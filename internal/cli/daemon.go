@@ -34,6 +34,7 @@ func daemonCommand(ctx context.Context, act string, input []byte, opt Options, s
 		return 1
 	}
 	client := launcher.NewClient(info.Bind, token)
+	client.DataRoot = opt.DataRoot // an older running daemon is reached while it holds this folder's lock
 	defer client.Close(context.Background())
 	remote := &daemonExecutor{client: client, catalog: i18n.New()}
 	if opt.Interactive && opt.Output == "rich" {

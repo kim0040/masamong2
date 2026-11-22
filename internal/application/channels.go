@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -521,8 +522,14 @@ func (s *Service) channelsAttachmentRemove(req action.Request, in map[string]any
 	if !res.OK {
 		return res
 	}
+	// Config parsing already drops a stored_name that is not the generated form; check again right
+	// before the delete, the last point where a bad name could point outside the channel's folder.
 	if removed != nil && removed.StoredName != "" {
-		_ = os.Remove(filepath.Join(s.channelRAGDir(guildID, channelID), removed.StoredName))
+		if generatedStoredName.MatchString(removed.StoredName) {
+			_ = os.Remove(filepath.Join(s.channelRAGDir(guildID, channelID), removed.StoredName))
+		} else {
+			s.Log.Warn("attachment file not removed: stored_name is not a generated name", "attachment", attID)
+		}
 	}
 	_ = s.appendChannelOp(guildID, channelID, "attachment_remove", "removed "+attID, s.Revision())
 	res.Output["persisted"] = true
@@ -811,15 +818,32 @@ func (s *Service) resolveStagingPath(source string) (string, error) {
 	if abs != root && !strings.HasPrefix(abs, root+string(os.PathSeparator)) {
 		return "", fmt.Errorf("source_path must be under %s", stagingRoot)
 	}
-	st, err := os.Stat(abs)
+	// Only a regular file that is really inside the staging folder: a link (to a file, or a folder
+	// link on the way) could copy anything this account can read into a channel.
+	st, err := os.Lstat(abs)
 	if err != nil {
 		return "", fmt.Errorf("source file not found under rag_staging")
 	}
 	if st.IsDir() {
 		return "", fmt.Errorf("source_path must be a file")
 	}
+	if !st.Mode().IsRegular() {
+		return "", fmt.Errorf("source_path must be a regular file, not a link or a special file")
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil || !strings.HasPrefix(real, realRoot+string(os.PathSeparator)) {
+		return "", fmt.Errorf("source_path must be under %s", stagingRoot)
+	}
 	return abs, nil
 }
+
+// generatedStoredName is the name channelsAttachmentAdd gives a staged copy: the content's sha256 hex
+// with the original extension (the same form config parsing accepts).
+var generatedStoredName = regexp.MustCompile(`^[0-9a-f]{64}(\.[^/\\\x00]*)?$`)
 
 func (s *Service) appendChannelOp(guildID, channelID, kind, summary string, revision int) error {
 	_, err := s.Store.DB.Exec(

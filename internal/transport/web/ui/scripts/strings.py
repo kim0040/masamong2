@@ -1522,6 +1522,14 @@ add("display_page", {
     "token": ("브라우저를 직접 실행한 경우", "If you opened the browser yourself"),
     "token_where": ("{path} 파일에 기록된 접속 토큰을 로그인 화면에 입력하세요.", "Paste the token from {path} on the sign-in screen."),
 })
+add("token_rotate", {
+    "desc": ("토큰이 새어 나갔을 수 있다면 새로 발급하세요. 예전 토큰과 그 토큰이 든 링크, 이 창을 뺀 모든 로그인이 바로 끊깁니다. 트레이 아이콘과 masamong 명령은 새 토큰을 스스로 읽습니다.", "If the token may have leaked, issue a new one. The old token, links that carry it and every sign-in except this window stop working at once. The tray icon and masamong commands pick up the new token by themselves."),
+    "button": ("새 토큰 발급", "Issue a new token"),
+    "confirm_title": ("접속 토큰을 새로 발급할까요?", "Issue a new access token?"),
+    "confirm_body": ("다른 브라우저와 기기는 다시 로그인해야 합니다. 새 토큰은 이 컴퓨터의 터미널에서 {cmd} 명령으로 확인합니다.", "Other browsers and devices must sign in again. Print the new token in a terminal on this computer with {cmd}."),
+    "done": ("새 토큰을 발급했습니다. 예전 토큰은 더 이상 쓸 수 없습니다.", "New token issued. The old one no longer works."),
+    "failed": ("토큰을 새로 발급하지 못했습니다", "The token could not be re-issued"),
+})
 add("login", {
     "title": ("Masamong 관리 콘솔", "Masamong console"),
     "lead": ("마사몽 관리 콘솔은 마사몽이 실행 중인 로컬 컴퓨터, SSH 터널, 또는 관리자가 허용한 Tailscale 주소로만 안전하게 접속할 수 있습니다.", "This console opens only on the computer running Masamong, through SSH, or at a Tailscale name the admin allowed."),

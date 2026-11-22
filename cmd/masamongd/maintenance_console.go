@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 	"masamong/internal/application"
 	"masamong/internal/config"
 	"masamong/internal/i18n"
+	"masamong/internal/launcher"
 	"masamong/internal/transport/web"
 )
 
@@ -80,7 +82,15 @@ func maintenanceHandler(root string, stop func()) http.Handler {
 	}
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) {
 		if guard(w, r) {
-			writeJSON(w, map[string]any{"ok": true, "maintenance": true, "ready": false, "version": application.Version})
+			out := map[string]any{"ok": true, "maintenance": true, "ready": false, "version": application.Version}
+			// the same proof as the console's health: `masamong stop` sends the token only after it
+			if c := r.URL.Query().Get(launcher.ChallengeParam); launcher.ValidChallenge(c) {
+				addr, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
+				if tok, err := web.ReadToken(root); err == nil && ok {
+					out["proof"] = launcher.EndpointProof(tok, addr.String(), c)
+				}
+			}
+			writeJSON(w, out)
 		}
 	})
 	mux.HandleFunc("POST /api/maintenance/stop", func(w http.ResponseWriter, r *http.Request) {

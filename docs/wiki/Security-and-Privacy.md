@@ -6,6 +6,8 @@
 
 - The console binds **only to the loopback interface (`127.0.0.1`)**. There is no way to open it on a network interface; remote management goes through an encrypted SSH tunnel (`masamong connect`), or through a name the admin listed in `admin.web.hosts` that `tailscale serve` on the server forwards (tailnet only). Requests for any other name are refused before the sign-in screen.
 - Sign-in uses the **one-time links** issued by `masamong open` and `masamong connect`, or the access token (`masamong admin token`, needed on a Tailscale device). There are no fixed admin accounts or passwords. Failed token attempts are limited per minute, separately for this computer and for Tailscale devices, so guessing from the tailnet cannot lock this computer out.
+- If the token may have leaked, issue a new one (the console's **Issue a new token** button or `masamong admin token rotate`): the old token, its links and every other sign-in stop working at once.
+- The launcher, the tray icon and `masamong` commands send the token only to a console on this computer that first proves it knows the token (it answers a random challenge), so a program that took the port of a stopped service does not receive it.
 - The console answers only requests whose `Host` header is this computer (`127.0.0.1`, `localhost`, `::1`) or a name listed in `admin.web.hosts`. This stops a malicious web page from pointing its own domain at 127.0.0.1 (DNS rebinding) to reach the console. Write requests check both the same origin and a CSRF token.
 - Do not share sign-in links or session cookies.
 - On remote servers, turn off SSH password login and use public-key authentication only.

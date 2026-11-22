@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -12,6 +13,8 @@ func TestClientPollHeader(t *testing.T) {
 	var polls []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
+		case "/api/health":
+			writeProvenHealth(w, r, "t", nil)
 		case "/api/login":
 			_, _ = w.Write([]byte(`{"ok":true,"csrf":"c"}`))
 		case "/api/action":
@@ -22,7 +25,7 @@ func TestClientPollHeader(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	c := &Client{Base: srv.URL, token: "t", Via: "tray", http: srv.Client()}
+	c := &Client{Base: srv.URL, bind: strings.TrimPrefix(srv.URL, "http://"), token: "t", Via: "tray", http: srv.Client()}
 	if _, err := c.Action(context.Background(), "runtime.status", nil); err != nil {
 		t.Fatal(err)
 	}

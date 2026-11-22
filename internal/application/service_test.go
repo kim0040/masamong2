@@ -139,18 +139,14 @@ func TestDeferredActionUnavailable(t *testing.T) {
 
 func TestConfigCASStaleRejected(t *testing.T) {
 	svc := setupSvc(t)
-	path := filepath.Join(svc.DataRoot, "candidate.yaml")
 	doc := config.Default("gate", svc.DataRoot)
 	doc.I18n.DefaultLocale = "ko"
 	raw, _ := config.Marshal(doc)
-	if err := os.WriteFile(path, raw, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	stale := exec(svc, "config.apply", map[string]any{"file": path, "base_revision": 0})
+	stale := exec(svc, "config.apply", map[string]any{"yaml": string(raw), "base_revision": 0})
 	if stale.OK || stale.Error.Code != errcode.ConfigConflict {
 		t.Fatalf("stale %+v", stale)
 	}
-	ok := exec(svc, "config.apply", map[string]any{"file": path, "base_revision": 1})
+	ok := exec(svc, "config.apply", map[string]any{"yaml": string(raw), "base_revision": 1})
 	if !ok.OK {
 		t.Fatalf("apply %+v", ok)
 	}

@@ -406,10 +406,16 @@ func (s *Service) createBackupLockedContext(ctx context.Context, kind string) (s
 		return fail(err)
 	}
 	cfgSum := sha256.Sum256(cfg)
+	// keys are kept outside the settings (credential_ref), except a key typed directly into an HTTP
+	// tool: then the copied settings hold it, and the manifest says so
+	secretsIncluded := false
+	if doc, _, err := config.ParseCommitted(cfg); err == nil {
+		secretsIncluded = hasDirectSecrets(doc)
+	}
 	manifest := map[string]any{
 		"name": name, "kind": kind, "instance": s.Doc().Instance.ID, "schema": 1, "config_revision": revision,
 		"config_sha256": hex.EncodeToString(cfgSum[:]), "db_sha256": dbSum, "db_file": dbFile,
-		"backend": s.Store.Backend, "secrets_included": false, "restore_scope": "database_config",
+		"backend": s.Store.Backend, "secrets_included": secretsIncluded, "restore_scope": "database_config",
 		"created_at": s.Clock.Now().UTC().Format(time.RFC3339), "version": Version,
 	}
 	b, _ := json.MarshalIndent(manifest, "", "  ")

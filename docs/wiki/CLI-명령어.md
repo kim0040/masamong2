@@ -53,6 +53,7 @@ echo '{"region":"Seoul"}' | masamong tools test --id weather.query --input-file 
 | `masamong autostart on` / `off` | 로그인·부팅 시 자동 시작 |
 | `masamong doctor` | 진단 (키, 공급자, Discord, 권한, 저장소, 시간대). Discord 시작 중에는 READY/RESUMED 전까지 `pending / gateway_connecting`을 표시합니다. 첫 연결을 재시도 중이면 시도 횟수·마지막 오류·다음 시각을 보여 주고, 거절된 토큰 같은 영구 오류는 재시도하지 않습니다. 데이터 폴더 문제는 `data_folder_warnings`와 `data_folder` 확인 필요 항목에 나옵니다. 복원·초기화·업데이트가 끝나지 못한 상태에서 오프라인으로 실행하면 아래의 복구 필드를 보여 줍니다 |
 | `masamong admin token` | 콘솔 로그인 토큰 출력 (데이터 폴더의 `admin/web-token` 파일) |
+| `masamong admin token rotate` | 로그인 토큰을 새로 발급하고 출력. 예전 토큰, 그 토큰이 든 링크, 아직 쓰지 않은 1회용 링크, 콘솔의 모든 로그인이 바로 끊깁니다. 트레이 아이콘과 다른 `masamong` 명령은 새 토큰을 스스로 읽습니다 |
 | `masamong version` | 버전 |
 | `masamong runtime pause` | 모든 채널 답변 일시 중지 (`--paused false`로 재개, `--scope guild/channel`로 일부만) |
 | `masamong runtime status` | 실행 상태. 유지보수 모드의 JSON에는 `maintenance:true`와 한 줄 `message`가 들어가고, 일반 출력도 같은 문구를 보여 줌 |

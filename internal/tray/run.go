@@ -135,8 +135,7 @@ func (t *trayApp) ensure(browser bool) {
 	t.mu.Lock()
 	t.bind = res.Bind
 	if tok, err := t.o.Token(); err == nil {
-		t.client = launcher.NewClient(res.Bind, tok)
-		t.client.Via = "tray"
+		t.client = t.newClient(res.Bind, tok)
 	}
 	t.mu.Unlock()
 	t.refresh()
@@ -150,12 +149,20 @@ func (t *trayApp) conn() (string, *launcher.Client) {
 		if info, ok := launcher.ReadInfo(t.o.DataRoot); ok {
 			t.bind = info.Bind
 			if tok, err := t.o.Token(); err == nil {
-				t.client = launcher.NewClient(info.Bind, tok)
-				t.client.Via = "tray"
+				t.client = t.newClient(info.Bind, tok)
 			}
 		}
 	}
 	return t.bind, t.client
+}
+
+// newClient connects the icon to the console. It reads the token file again before each sign-in, so
+// the icon keeps working after the token is re-issued (from the console or `masamong admin token
+// rotate`), and it lets a console of an older version in only while this folder's daemon runs.
+func (t *trayApp) newClient(bind, token string) *launcher.Client {
+	c := launcher.NewClient(bind, token)
+	c.Via, c.DataRoot, c.Reload = "tray", t.o.DataRoot, t.o.Token
+	return c
 }
 
 func (t *trayApp) refresh() {

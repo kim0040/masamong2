@@ -4007,5 +4007,11 @@
   "people.news.title": "Novedades por mensaje privado",
   "people.news.chip": "Novedades",
   "people.news.turn_off": "Desactivar",
-  "people.news.off_done": "Novedades por mensaje privado desactivadas"
+  "people.news.off_done": "Novedades por mensaje privado desactivadas",
+  "token_rotate.desc": "Si el token pudo filtrarse, emite uno nuevo. El token anterior, los enlaces que lo llevan y todas las sesiones salvo esta ventana dejan de funcionar al instante. El icono de la bandeja y los comandos masamong leen el nuevo token por sí solos.",
+  "token_rotate.button": "Emitir un token nuevo",
+  "token_rotate.confirm_title": "¿Emitir un nuevo token de acceso?",
+  "token_rotate.confirm_body": "Los demás navegadores y dispositivos tendrán que iniciar sesión de nuevo. Muestra el nuevo token en un terminal de este equipo con {cmd}.",
+  "token_rotate.done": "Token nuevo emitido. El anterior ya no funciona.",
+  "token_rotate.failed": "No se pudo emitir un token nuevo"
 }

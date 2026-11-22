@@ -20,7 +20,7 @@ func TestChildStopRefusesAnotherPIDPortAndDataFolder(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/health":
-			fmtJSON(w, map[string]any{"ok": true})
+			writeProvenHealth(w, r, "test", nil)
 		case "/api/login":
 			fmtJSON(w, map[string]any{"ok": true, "csrf": "test"})
 		case "/api/session":
@@ -145,7 +145,7 @@ func testStopChildReauth(t *testing.T, diverge bool) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/health":
-			fmtJSON(w, map[string]any{"ok": true})
+			writeProvenHealth(w, r, "test", nil)
 		case "/api/login":
 			fmtJSON(w, map[string]any{"ok": true, "csrf": "test"})
 		case "/api/session":

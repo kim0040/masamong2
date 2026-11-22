@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -25,6 +24,7 @@ import (
 	"masamong/internal/action"
 	"masamong/internal/application"
 	"masamong/internal/fsutil"
+	"masamong/internal/launcher"
 )
 
 // Server is the daemon-embedded admin console: a Svelte single-page app (ui/, built into ui/dist and
@@ -36,6 +36,8 @@ type Server struct {
 	tailnet  tailnetName
 	log      *slog.Logger
 	http     *http.Server
+	// tokenMu guards token: a re-issue (rotateToken) replaces it while requests compare against it.
+	tokenMu  sync.RWMutex
 	token    string
 	sessions *sessionStore
 	logins   *loginLimiter
@@ -118,6 +120,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/upload", s.apiUpload)
 	mux.HandleFunc("POST /api/secret", s.apiSecret)
 	mux.HandleFunc("GET /api/export/config", s.exportConfig)
+	mux.HandleFunc("POST "+launcher.RotateTokenPath, s.apiRotateToken)
 	notFound := func(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusNotFound, "NOT_FOUND", "no such endpoint")
 	}
@@ -161,14 +164,17 @@ func loopbackBind(bind string) string {
 }
 
 // UseRestartBind keeps an intentional in-process restart on the address the browser already uses.
-// The caller supplies the address reported by the previous listener before it shut down.
+// The caller supplies the address reported by the previous listener before it shut down. Only a
+// loopback address is kept: the console never listens anywhere else.
 func (s *Server) UseRestartBind(bind string) {
 	if bind == "" {
 		return
 	}
-	if _, _, err := net.SplitHostPort(bind); err == nil {
-		s.addr = bind
+	if !isLoopback(bind) {
+		s.log.Warn("restart address is not a loopback address; using the configured console address", "restart", bind)
+		return
 	}
+	s.addr = bind
 }
 
 func (s *Server) Listen(ctx context.Context) error {
@@ -178,6 +184,12 @@ func (s *Server) Listen(ctx context.Context) error {
 	}
 	if b := s.svc.Doc().Admin.Web.Bind; b != "" && !isLoopback(b) && s.addr == "" {
 		s.log.Warn("admin.web.bind is not a loopback address; the console listens on 127.0.0.1 only (use SSH for remote access)", "configured", b)
+	}
+	if !isLoopback(s.Bind()) {
+		// Bind keeps only loopback addresses, and so does UseRestartBind; this is the last check
+		// before the socket opens
+		s.log.Warn("console address is not a loopback address; listening on 127.0.0.1", "addr", s.Bind())
+		s.addr = loopbackBind(s.addr)
 	}
 	ln, err := net.Listen("tcp", s.Bind())
 	if err != nil && errors.Is(err, syscall.EADDRINUSE) && isLoopback(s.Bind()) {
@@ -411,10 +423,16 @@ func (st *sessionStore) drop(id string) {
 	st.mu.Unlock()
 }
 
-// Sessions outlive only an intentional restart (including restore): that shutdown writes them to
-// sessions.json, and the next start reads and deletes it. The file is 0600 in the data folder, next
-// to the bootstrap token that already grants owner access; a stop, signal or crash loses them.
-func sessionsPath(dataRoot string) string { return filepath.Join(dataRoot, "sessions.json") }
+// dropAllExcept ends every session but keep (which may be empty).
+func (st *sessionStore) dropAllExcept(keep string) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	for id := range st.byID {
+		if id != keep {
+			delete(st.byID, id)
+		}
+	}
+}
 
 func (st *sessionStore) save(dataRoot string, now time.Time) error {
 	st.mu.Lock()
@@ -519,22 +537,27 @@ type loginLimiter struct {
 	window   time.Time
 }
 
-func (l *loginLimiter) allow(now time.Time) bool {
+// attempt checks the limit and counts the try as a failure in one step, so concurrent tries cannot
+// all pass the check before any of them is counted. A sign-in that succeeds calls succeeded to give
+// the try back (only within the same window: a new window has already forgotten it).
+func (l *loginLimiter) attempt(now time.Time) (succeeded func(), ok bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if now.Sub(l.window) > time.Minute {
 		l.failures, l.window = 0, now
 	}
-	return l.failures < 10
-}
-
-func (l *loginLimiter) fail(now time.Time) {
-	l.mu.Lock()
-	if now.Sub(l.window) > time.Minute {
-		l.failures, l.window = 0, now
+	if l.failures >= 10 {
+		return func() {}, false
 	}
 	l.failures++
-	l.mu.Unlock()
+	window := l.window
+	return func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		if l.window.Equal(window) && l.failures > 0 {
+			l.failures--
+		}
+	}, true
 }
 
 func (s *Server) currentSession(r *http.Request) (string, session, bool) {
@@ -559,10 +582,33 @@ func (s *Server) setSessionCookie(w http.ResponseWriter, r *http.Request, id str
 }
 
 func (s *Server) tokenMatches(candidate string) bool {
-	if s.token == "" || candidate == "" {
+	tok := s.currentToken()
+	if tok == "" || candidate == "" {
 		return false
 	}
-	return subtle.ConstantTimeCompare([]byte(candidate), []byte(s.token)) == 1
+	return subtle.ConstantTimeCompare([]byte(candidate), []byte(tok)) == 1
+}
+
+func (s *Server) currentToken() string {
+	s.tokenMu.RLock()
+	defer s.tokenMu.RUnlock()
+	return s.token
+}
+
+// rotateToken re-issues the sign-in token. The old token stops working at once: links and sign-ins
+// that carry it are refused, pending one-time codes are deleted, and every session ends except keep
+// (the console tab that asked; empty for none). The tray and the CLI read the token file again on
+// their next sign-in.
+func (s *Server) rotateToken(keep string) error {
+	s.tokenMu.Lock()
+	defer s.tokenMu.Unlock()
+	tok, err := RotateToken(s.svc.DataRoot)
+	if tok != "" {
+		// the file holds the new token even when a leftover code or session file could not be removed
+		s.token = tok
+		s.sessions.dropAllExcept(keep)
+	}
+	return err
 }
 
 func (s *Server) csrfOK(sess session, got string) bool {
@@ -580,7 +626,8 @@ func (s *Server) loginLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	if !s.logins.allow(s.now()) {
+	succeeded, allowed := s.loginsFor(r).attempt(s.now())
+	if !allowed {
 		http.Redirect(w, r, "/login?error=rate", http.StatusSeeOther)
 		return
 	}
@@ -591,10 +638,10 @@ func (s *Server) loginLink(w http.ResponseWriter, r *http.Request) {
 		ok = s.tokenMatches(tok)
 	}
 	if !ok {
-		s.logins.fail(s.now())
 		http.Redirect(w, r, "/login?error=token", http.StatusSeeOther)
 		return
 	}
+	succeeded()
 	id, _ := s.sessions.create(s.now(), r.UserAgent())
 	s.setSessionCookie(w, r, id, int(sessionTTL.Seconds()))
 	next := loginNext(q.Get("next"))

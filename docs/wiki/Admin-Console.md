@@ -124,6 +124,10 @@ When the server and your device are on the same Tailscale network (tailnet), one
 
 Requests for any name not in `admin.web.hosts` are refused (DNS rebinding). `tailscale serve` is tailnet-only; do not use `tailscale funnel`, which publishes to the internet. To turn it off, run `tailscale serve --http=8787 off` and remove the name.
 
+### Issuing a new access token
+
+If the access token or a link that carries it may have leaked, issue a new one: **Display & access → How to get in → If you opened the browser yourself → Issue a new token**, or `masamong admin token rotate` on the server. The old token, links that carry it, unused one-time links and every sign-in stop working at once. The console window that asked stays signed in; other browsers and devices sign in again with the new token (`masamong admin token` prints it). The tray icon and `masamong` commands read the new token by themselves.
+
 ## Pages
 
 | Home | Room settings |

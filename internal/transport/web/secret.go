@@ -209,6 +209,10 @@ func (s *Server) apiSecret(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusUnprocessableEntity, "INVALID_INPUT", "invalid id")
 		return
 	}
+	// The previous reference is read under the lock: a save that waited for another one must replace
+	// what that one left, or the key file it wrote is never removed.
+	s.secretMu.Lock()
+	defer s.secretMu.Unlock()
 	previous := ""
 	switch body.Target {
 	case "provider":
@@ -228,8 +232,6 @@ func (s *Server) apiSecret(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusUnprocessableEntity, "INVALID_INPUT", "target must be provider, discord, or file")
 		return
 	}
-	s.secretMu.Lock()
-	defer s.secretMu.Unlock()
 	st, err := s.storeSecret(id, value, previous)
 	if err != nil {
 		s.log.Error("store key", "err", err)

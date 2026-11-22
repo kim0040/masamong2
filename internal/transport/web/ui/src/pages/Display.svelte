@@ -1,6 +1,6 @@
 <script lang="ts">
   import { t } from '../lib/i18n.svelte'
-  import { session, can, loadSession } from '../lib/api.svelte'
+  import { session, can, loadSession, postJSON } from '../lib/api.svelte'
   import { patchConfig } from '../lib/config.svelte'
   import { prefs, setPrefs, densities } from '../lib/prefs.svelte'
   import { navigate } from '../lib/router.svelte'
@@ -14,6 +14,7 @@
   import CopyButton from '../components/CopyButton.svelte'
   import SigninHelp from '../components/SigninHelp.svelte'
   import LogoutConfirm from '../components/LogoutConfirm.svelte'
+  import Confirm from '../components/Confirm.svelte'
   import * as I from '../lib/icons'
 
   const connect = 'masamong connect you@server'
@@ -21,6 +22,13 @@
   const port = $derived((session.value?.bind ?? '127.0.0.1:8787').split(':').pop())
   const sshCmd = $derived(`ssh -N -L ${port}:127.0.0.1:${port} <user>@<server>`)
   let logoutOpen = $state(false)
+  // re-issuing the token ends every other sign-in; this tab stays signed in (the server keeps its session)
+  let rotateOpen = $state(false)
+  async function rotateToken() {
+    const r = await postJSON<{ ok: boolean; error?: { message?: string } }>('/api/token/rotate', {})
+    if (r.body.ok) toast('ok', t('token_rotate.done'))
+    else toast('error', t('token_rotate.failed'), r.body.error?.message)
+  }
 
   // Tailscale: tailscale serve forwards the tailnet name to this port, and the console answers to the
   // names listed in admin.web.hosts
@@ -109,6 +117,10 @@
       <details>
         <summary class="xs muted">{t('display_page.token')}</summary>
         <div class="tk"><SigninHelp only="token" /></div>
+        <div class="tk stack">
+          <span class="xs muted">{t('token_rotate.desc')}</span>
+          <div><Button size="sm" variant="ghost" icon={I.RefreshCw} onclick={() => (rotateOpen = true)}>{t('token_rotate.button')}</Button></div>
+        </div>
       </details>
       <div><Button variant="ghost" icon={I.LogOut} onclick={() => (logoutOpen = true)}>{t('topbar.logout')}</Button></div>
     </div>
@@ -123,6 +135,7 @@
 </div>
 
 <LogoutConfirm bind:open={logoutOpen} />
+<Confirm bind:open={rotateOpen} danger title={t('token_rotate.confirm_title')} body={t('token_rotate.confirm_body', { cmd: session.value?.signin?.token ?? 'masamong admin token' })} confirmLabel={t('token_rotate.button')} onconfirm={rotateToken} />
 
 <style>
   .tk {

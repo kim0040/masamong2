@@ -35,6 +35,10 @@ func EnsureToken(dataRoot string) (string, error) {
 			return tok, nil
 		}
 	}
+	return writeNewToken(path)
+}
+
+func writeNewToken(path string) (string, error) {
 	var b [24]byte
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", err
@@ -45,6 +49,36 @@ func EnsureToken(dataRoot string) (string, error) {
 	}
 	return tok, nil
 }
+
+// RotateToken replaces the bootstrap token with a new one and deletes pending one-time codes and the
+// sessions a restart would keep (sessions.json). A running console must do this through
+// Server.rotateToken, which also ends the sessions it holds; the CLI calls it directly only while no
+// daemon holds the data folder.
+func RotateToken(dataRoot string) (string, error) {
+	path := TokenPath(dataRoot)
+	if err := fsutil.PrivateDir(dataRoot); err != nil {
+		return "", err
+	}
+	if err := fsutil.PrivateDir(filepath.Dir(path)); err != nil {
+		return "", err
+	}
+	tok, err := writeNewToken(path)
+	if err != nil {
+		return "", err
+	}
+	// The new token is in place, so the old one already fails; a code or session file that cannot be
+	// removed is reported but does not undo that.
+	err = os.RemoveAll(onceDir(dataRoot))
+	if rmErr := os.Remove(sessionsPath(dataRoot)); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
+		err = errors.Join(err, rmErr)
+	}
+	return tok, err
+}
+
+// Sessions outlive only an intentional restart (including restore): that shutdown writes them to
+// sessions.json, and the next start reads and deletes it. The file is 0600 in the data folder, next
+// to the bootstrap token that already grants owner access; a stop, signal or crash loses them.
+func sessionsPath(dataRoot string) string { return filepath.Join(dataRoot, "sessions.json") }
 
 // ReadToken returns the token without creating one.
 func ReadToken(dataRoot string) (string, error) {

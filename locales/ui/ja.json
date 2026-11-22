@@ -4007,5 +4007,11 @@
   "people.news.title": "更新のお知らせ（DM）",
   "people.news.chip": "更新のお知らせ",
   "people.news.turn_off": "オフにする",
-  "people.news.off_done": "更新のお知らせ（DM）をオフにしました"
+  "people.news.off_done": "更新のお知らせ（DM）をオフにしました",
+  "token_rotate.desc": "トークンが漏れたおそれがあるなら、新しく発行してください。古いトークン、それを含むリンク、このウィンドウ以外のすべてのサインインがすぐに使えなくなります。トレイアイコンと masamong コマンドは新しいトークンを自動で読み込みます。",
+  "token_rotate.button": "新しいトークンを発行",
+  "token_rotate.confirm_title": "アクセストークンを新しく発行しますか？",
+  "token_rotate.confirm_body": "他のブラウザや端末はもう一度サインインが必要です。新しいトークンは、このコンピューターのターミナルで {cmd} を実行して確認します。",
+  "token_rotate.done": "新しいトークンを発行しました。古いトークンはもう使えません。",
+  "token_rotate.failed": "トークンを再発行できませんでした"
 }
