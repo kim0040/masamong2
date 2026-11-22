@@ -111,12 +111,15 @@ export async function logout() {
   await loadSession()
 }
 
-/** Runs an Action. Network failures come back as an error result, never as a thrown exception. */
-export async function call<T = any>(action: string, input: Record<string, unknown> = {}, opts: { base_revision?: number } = {}): Promise<ActionResult<T>> {
+/** Runs an Action. Network failures come back as an error result, never as a thrown exception.
+ * `poll` marks loads made on a timer, so the server's statistics do not count them as console use. */
+export async function call<T = any>(action: string, input: Record<string, unknown> = {}, opts: { base_revision?: number; poll?: boolean } = {}): Promise<ActionResult<T>> {
   try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (opts.poll) headers['X-Masamong-Poll'] = '1'
     const res = await request('/api/action', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ action, input, base_revision: opts.base_revision ?? 0 }),
     })
     const body = (await res.json()) as ActionResult<T>

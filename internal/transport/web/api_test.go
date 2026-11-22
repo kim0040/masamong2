@@ -86,3 +86,28 @@ func TestI18nIsCompressedAndRevalidated(t *testing.T) {
 		t.Fatalf("a client without gzip gets the plain body under the same tag: %v", plain.Header)
 	}
 }
+
+// A timer-driven load is a poll; everything else keeps its source.
+func TestRequestSourcePoll(t *testing.T) {
+	for name, tc := range map[string]struct {
+		via, poll, want string
+	}{
+		"console":      {"", "", "web"},
+		"cli":          {"cli", "", "cli"},
+		"tray":         {"tray", "", "tray"},
+		"console poll": {"", "1", "gui_poll"},
+		"tray poll":    {"tray", "1", "gui_poll"},
+		"unknown via":  {"curl", "", "web"},
+	} {
+		r, _ := http.NewRequest(http.MethodPost, "/api/action", nil)
+		if tc.via != "" {
+			r.Header.Set("X-Masamong-Via", tc.via)
+		}
+		if tc.poll != "" {
+			r.Header.Set("X-Masamong-Poll", tc.poll)
+		}
+		if got := requestSource(r); got != tc.want {
+			t.Errorf("%s: %q, want %q", name, got, tc.want)
+		}
+	}
+}

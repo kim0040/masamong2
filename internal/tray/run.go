@@ -173,7 +173,7 @@ func (t *trayApp) refresh() {
 		t.show(stateSetup)
 		return
 	}
-	out, err := client.Action(t.ctx, "runtime.status", nil)
+	out, err := client.ActionPoll(t.ctx, "runtime.status", nil)
 	if err == nil {
 		if p, ok := out["pause"].(map[string]any); ok && p["all"] == true {
 			t.show(statePaused)

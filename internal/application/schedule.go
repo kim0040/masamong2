@@ -54,6 +54,7 @@ func (s *Service) RunScheduler(ctx context.Context) {
 		case <-t.C:
 			_ = crash.Run(s.Log, "scheduler", func() {
 				s.schedulerTickContext(ctx)
+				s.statsFlushTick(ctx)
 				s.ownedGo("fortune briefings", func(ctx context.Context) { s.runFortuneMorning(ctx) })
 				s.ownedGo("reminders", func(ctx context.Context) { s.deliverReminders(ctx) })
 				if styleTicking.CompareAndSwap(false, true) {

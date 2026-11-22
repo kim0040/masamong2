@@ -178,16 +178,19 @@ type Service struct {
 	visionCooling sync.Map
 	visionAd      visionAdapterCache // the vision role's adapter, kept between turns (vision.go)
 	// visionLocal lets tests serve pictures from a local server (never set in production)
-	visionLocal    bool
-	toolFaults     sync.Map       // test-injected tool outages (toolloop.go; never set in production)
-	style          styleCache     // approved room style notes (roomstyle.go)
-	serverLog      serverLogState // posts to the servers' log channels (serverlog.go)
-	lifeMu         sync.Mutex
-	lifeCtx        context.Context
-	lifeCancel     context.CancelFunc
-	closing        bool
-	workWG         sync.WaitGroup
-	ledger         ledgerWriter // the call ledgers' writer (ledger.go)
+	visionLocal bool
+	toolFaults  sync.Map       // test-injected tool outages (toolloop.go; never set in production)
+	style       styleCache     // approved room style notes (roomstyle.go)
+	serverLog   serverLogState // posts to the servers' log channels (serverlog.go)
+	lifeMu      sync.Mutex
+	lifeCtx     context.Context
+	lifeCancel  context.CancelFunc
+	closing     bool
+	workWG      sync.WaitGroup
+	ledger      ledgerWriter // the call ledgers' writer (ledger.go)
+	// actionStats is the in-memory action counter (stats_counter.go): Execute increments it, the
+	// scheduler and Close flush it into stats_daily.
+	actionStats    statsActionCounter
 	memoryLedgerMu sync.Mutex
 	memoryLedger   map[string]map[string]llmCall // job id → role → aggregated memory-model calls
 	closeOnce      sync.Once
@@ -376,6 +379,7 @@ func (s *Service) Close() error {
 			// ledger writer did, while the database is still open
 			s.flushAllMemoryLLMCalls()
 			s.ledger.drain(s)
+			s.statsFlush(context.Background())
 			adminReady.Delete(s.Store)
 			s.closeErr = s.Store.Close()
 		}
@@ -586,6 +590,7 @@ func (s *Service) Execute(ctx context.Context, req action.Request) action.Result
 	}
 	before := s.Revision()
 	res := s.execute(ctx, req)
+	s.statsCount(req, res)
 	if s.Store != nil {
 		s.startEventWorker() // setup creates the database after Open
 	}

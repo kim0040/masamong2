@@ -30,7 +30,7 @@ export function resource<T = any>(action: string, input: () => Record<string, un
   })
   let key = ''
   let seq = 0
-  async function load() {
+  async function load(poll = false) {
     if (!canLoadProtectedActions(session.value)) {
       s.loading = false
       s.error = undefined
@@ -44,7 +44,7 @@ export function resource<T = any>(action: string, input: () => Record<string, un
       s.loading = false
     } else if (s.data === undefined) s.loading = true
     const my = ++seq
-    const r = await call<T>(action, inp)
+    const r = await call<T>(action, inp, { poll })
     if (my !== seq) return
     s.loading = false
     if (r.ok) {
@@ -67,7 +67,7 @@ export function resource<T = any>(action: string, input: () => Record<string, un
   })
   $effect(() => {
     if (!opts.poll) return
-    const id = setInterval(() => document.visibilityState === 'visible' && load(), opts.poll)
+    const id = setInterval(() => document.visibilityState === 'visible' && load(true), opts.poll)
     return () => clearInterval(id)
   })
   const self = {

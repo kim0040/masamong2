@@ -862,6 +862,48 @@ var auditSafeKeys = map[string]bool{
 	"approve": true, "revoke": true, "block": true, "unblock": true, "targets": true, "server_approval": true, "guild_admins": true, "mode": true, "op": true,
 }
 
+// actionVia is where an Action request came from: the change log's via column and the action
+// counter's via dimension (stats_counter.go). Besides the values the change log has always written
+// it names the sources it never saw (they folded to "api"): the terminal UI, the simulator, the
+// practice instance and polled console reads. An invoker's surface names the member surface the
+// request rides on: Discord commands and replies are discord, a scheduled task's tool calls are the
+// model's (chat) like a chat turn's.
+func actionVia(req action.Request) string {
+	if req.Invoker != nil && req.Invoker.Via != "" {
+		switch req.Invoker.Via {
+		case "command", "reply":
+			return "discord"
+		case viaTask:
+			return viaChat
+		default:
+			return req.Invoker.Via // "chat" and any surface added later
+		}
+	}
+	switch {
+	case strings.HasPrefix(req.RequestID, "system"):
+		return "system" // the service itself (approving the servers it was in when approval began)
+	case strings.HasPrefix(req.RequestID, "dc:"):
+		return "discord" // made from Discord by the admin command
+	case req.RequestID == "web" || strings.HasPrefix(req.RequestID, "web"):
+		return "gui"
+	case req.RequestID == "gui_poll":
+		return "gui_poll" // a console or tray load made on a timer, not by the operator
+	case req.RequestID == "cli":
+		return "cli"
+	case req.RequestID == "tray":
+		return "tray"
+	case req.RequestID == "tui":
+		return "tui"
+	case req.RequestID == "sim":
+		return "sim"
+	case req.RequestID == "practice":
+		return "practice"
+	case req.RequestID == "chat":
+		return viaChat
+	}
+	return "api"
+}
+
 func (s *Service) audit(req action.Request, desc catalog.Descriptor, res action.Result, revBefore int) {
 	if desc.Effects == "read" || desc.Effects == "external_read" || desc.Effects == "none" || s.Store == nil {
 		return
@@ -893,21 +935,7 @@ func (s *Service) audit(req action.Request, desc catalog.Descriptor, res action.
 			parts = append(parts, k)
 		}
 	}
-	via := "api"
-	switch {
-	case req.Invoker != nil && req.Invoker.Via != "":
-		via = req.Invoker.Via
-	case strings.HasPrefix(req.RequestID, "system"):
-		via = "system" // the service itself (approving the servers it was in when approval began)
-	case strings.HasPrefix(req.RequestID, "dc:"):
-		via = "discord" // made from Discord by the admin command
-	case req.RequestID == "web" || strings.HasPrefix(req.RequestID, "web"):
-		via = "gui"
-	case req.RequestID == "cli":
-		via = "cli"
-	case req.RequestID == "tray":
-		via = "tray"
-	}
+	via := actionVia(req)
 	guild := strVal(in, "guild_id", "")
 	if guild == "" && req.Invoker != nil {
 		guild = req.Invoker.GuildID

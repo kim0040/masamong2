@@ -40,6 +40,10 @@ func NewClient(bind, token string) *Client {
 // record a `masamong stop` or the icon's menu as the console.
 const ViaHeader = "X-Masamong-Via"
 
+// PollHeader marks a request made on a timer, not by the operator: the console counts it as a
+// background poll, not as console use (the tray's status poll).
+const PollHeader = "X-Masamong-Poll"
+
 func (c *Client) login(ctx context.Context) error {
 	body, _ := json.Marshal(map[string]string{"token": c.token})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.Base+"/api/login", bytes.NewReader(body))
@@ -78,11 +82,21 @@ var ErrActionFailed = errors.New("action failed")
 
 // Action runs one Application Action and returns its output.
 func (c *Client) Action(ctx context.Context, id string, input map[string]any) (map[string]any, error) {
+	return c.action(ctx, id, input, false)
+}
+
+// ActionPoll is Action for a call made on a timer, not by the operator: it sends PollHeader so the
+// console counts the call as a background poll instead of console use.
+func (c *Client) ActionPoll(ctx context.Context, id string, input map[string]any) (map[string]any, error) {
+	return c.action(ctx, id, input, true)
+}
+
+func (c *Client) action(ctx context.Context, id string, input map[string]any, poll bool) (map[string]any, error) {
 	raw, err := json.Marshal(input)
 	if err != nil {
 		return nil, err
 	}
-	out, err := c.Execute(ctx, action.Request{Action: id, Input: raw})
+	out, err := c.execute(ctx, action.Request{Action: id, Input: raw}, poll)
 	if err != nil {
 		return nil, err
 	}
@@ -99,6 +113,10 @@ func (c *Client) Action(ctx context.Context, id string, input map[string]any) (m
 // Execute preserves the Action envelope, including revision, job and structured errors, for CLI parity.
 // Only authentication failures are retried: an interrupted mutation must never be sent twice.
 func (c *Client) Execute(ctx context.Context, request action.Request) (action.Result, error) {
+	return c.execute(ctx, request, false)
+}
+
+func (c *Client) execute(ctx context.Context, request action.Request, poll bool) (action.Result, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		if c.csrf == "" {
 			if err := c.login(ctx); err != nil {
@@ -114,6 +132,9 @@ func (c *Client) Execute(ctx context.Context, request action.Request) (action.Re
 		req.Header.Set("X-CSRF-Token", c.csrf)
 		req.Header.Set(ViaHeader, c.Via)
 		req.Header.Set("X-Lang", request.Locale)
+		if poll {
+			req.Header.Set(PollHeader, "1")
+		}
 		// Imports, backups and chat can legitimately take longer than the launcher's short timeout.
 		client := *c.http
 		client.Timeout = 0

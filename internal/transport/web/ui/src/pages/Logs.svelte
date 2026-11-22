@@ -32,7 +32,7 @@
   let bufferSize = $state(3000)
   let requestSeq = 0
 
-  async function poll(reset = false) {
+  async function poll(reset = false, timed = false) {
     const seq = ++requestSeq
     if (reset) {
       entries = []
@@ -41,7 +41,7 @@
       loadingLogs = true
     }
     const requestedAfter = lastId
-    const r = await call('runtime.logs', { after_id: requestedAfter, level, q, limit: 400 })
+    const r = await call('runtime.logs', { after_id: requestedAfter, level, q, limit: 400 }, { poll: timed })
     if (seq !== requestSeq) return
     loadingLogs = false
     if (!r.ok) {
@@ -75,7 +75,7 @@
   })
   $effect(() => {
     if (tab !== 'live') return
-    const id = setInterval(() => document.visibilityState === 'visible' && poll(), 2000)
+    const id = setInterval(() => document.visibilityState === 'visible' && poll(false, true), 2000)
     return () => clearInterval(id)
   })
   async function jumpLatest() {
