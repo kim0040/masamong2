@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"masamong/internal/action"
 	"masamong/internal/config"
 )
 
@@ -13,6 +14,20 @@ func forgetCaps(s *Service) {
 	s.caps.mu.Lock()
 	s.caps.slots = nil
 	s.caps.mu.Unlock()
+}
+
+// hookedService is privacyService with a test's hooks given to the constructor.
+func hookedService(t *testing.T, hooks serviceHooks) *Service {
+	t.Helper()
+	s, err := openHooked(t.TempDir(), hooks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if r := s.Execute(context.Background(), action.Request{Action: "setup.resume", Input: []byte(`{"instance":"hooked"}`)}); !r.OK {
+		t.Fatal(r.Error)
+	}
+	return s
 }
 
 // twoServices opens two set-up services side by side, as the daemon runs the real instance and the

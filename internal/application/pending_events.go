@@ -10,9 +10,9 @@ import (
 )
 
 // The idle poll of the pending-event worker backs off from min to max; an enqueue wakes it at once, so
-// the poll is only the safety net for an event file a crash left or a failed replay. Variables so a test
-// can shrink the intervals.
-var (
+// the poll is only the safety net for an event file a crash left or a failed replay. A test shrinks the
+// intervals of its own service (serviceHooks).
+const (
 	pendingEventPollMin = time.Second
 	pendingEventPollMax = 10 * time.Second
 )
@@ -21,14 +21,12 @@ var (
 // test can shorten it.
 var oldEditsDelay = 30 * time.Second
 
-// pendingEventStepHook, when set by a test, runs at the start of every worker pass.
-var pendingEventStepHook func()
-
-func nextPendingEventPoll(current time.Duration, pending bool) time.Duration {
+// nextPendingEventPoll is the wait after a pass: lo with work pending, else twice the last wait, up to hi.
+func nextPendingEventPoll(current time.Duration, pending bool, lo, hi time.Duration) time.Duration {
 	if pending || current <= 0 {
-		return pendingEventPollMin
+		return lo
 	}
-	return min(current*2, pendingEventPollMax)
+	return min(current*2, hi)
 }
 
 func (s *Service) startEventWorker() {
@@ -37,13 +35,15 @@ func (s *Service) startEventWorker() {
 	}
 	s.ownedGo("pending memory events", func(ctx context.Context) {
 		defer s.eventWorker.Store(false)
-		wait := pendingEventPollMin
+		lo := durationOr(s.hooks.pendingPollMin, pendingEventPollMin)
+		hi := durationOr(s.hooks.pendingPollMax, pendingEventPollMax)
+		wait := lo
 		wake := s.Store.EventWake()
 		var lastWarn string
 		started, oldEditsDone := time.Now(), false
 		for {
-			if pendingEventStepHook != nil {
-				pendingEventStepHook()
+			if s.hooks.pendingStep != nil {
+				s.hooks.pendingStep()
 			}
 			// retryEvents replays everything in both directories; when it returns without an error nothing
 			// is left to wait for (an event enqueued meanwhile has already signalled wake), so the
@@ -80,7 +80,7 @@ func (s *Service) startEventWorker() {
 				}
 				pending = true
 			}
-			next := nextPendingEventPoll(wait, pending)
+			next := nextPendingEventPoll(wait, pending, lo, hi)
 			timer := time.NewTimer(wait)
 			select {
 			case <-ctx.Done():
@@ -88,7 +88,7 @@ func (s *Service) startEventWorker() {
 				return
 			case <-wake:
 				timer.Stop()
-				wait = pendingEventPollMin
+				wait = lo
 			case <-timer.C:
 				wait = next
 			}
