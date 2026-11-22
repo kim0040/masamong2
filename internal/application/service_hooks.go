@@ -41,6 +41,8 @@ type serviceHooks struct {
 	probeTimeout atomic.Int64
 	// news replaces the release notes' pace and sends per tick (updatenews_announce.go).
 	news atomic.Pointer[newsLimits]
+	// updateAPI points the release check at a test server (updates.go).
+	updateAPI atomic.Pointer[string]
 	// oldEditsAtOnce settles old edits at the first idle pass instead of oldEditsDelay after the start.
 	oldEditsAtOnce bool
 }

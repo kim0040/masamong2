@@ -222,11 +222,10 @@ func SaveOfferForTest(s *Service, guildID, channelID, text string) (string, erro
 func (s *Service) AlertTickForTest(ctx context.Context) { s.alertTick(ctx) }
 func (s *Service) NoteStartForTest()                    { s.noteUptime("start", "") }
 
-// UseUpdateAPIForTest points the release check at url (with %s for the repository) and sets the version.
-func UseUpdateAPIForTest(url, version string) (restore func()) {
-	oldURL, oldVer := updateAPI, Version
-	updateAPI, Version = url, version
-	return func() { updateAPI, Version = oldURL, oldVer }
+// UseUpdateAPIForTest points s's release check at url (with %s for the repository). The running
+// version is a process value: SetVersionForTest.
+func UseUpdateAPIForTest(s *Service, url string) {
+	s.hooks.updateAPI.Store(&url)
 }
 
 // NewerVersionForTest exposes the version comparison.

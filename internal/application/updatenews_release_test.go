@@ -50,9 +50,10 @@ func TestUpdateCheckReadsTheNewerReleasesNotes(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	defer application.UseUpdateAPIForTest(srv.URL+"/api/%s", "0.2.0")()
+	defer application.SetVersionForTest("0.2.0")()
 	defer application.UseSelfUpdateForTest(srv.URL+"/dl/%s/", t.TempDir())()
 	svc := setupSvc(t)
+	application.UseUpdateAPIForTest(svc, srv.URL+"/api/%s")
 
 	o := out(t, svc, "updates.check", nil)
 	n, ok := o["latest_notes"].(map[string]any)

@@ -25,8 +25,8 @@ import (
 // UpdateRepo is the GitHub repository whose releases are checked (set at build time with -X).
 var UpdateRepo = "kim0040/masamong2"
 
-// updateAPI is the releases endpoint; tests point it at a local server.
-var updateAPI = "https://api.github.com/repos/%s/releases/latest"
+// updateAPI is the releases endpoint; a test points its service at a local server (serviceHooks).
+const updateAPI = "https://api.github.com/repos/%s/releases/latest"
 
 const updateEvery = 24 * time.Hour
 
@@ -70,7 +70,11 @@ func (s *Service) checkUpdate(ctx context.Context) updateState {
 	client := providers.NewClient(15*time.Second, s.Log)
 	client.MaxBody = 1 << 20
 	client.UserAgent = "masamong/" + Version
-	resp, err := client.Get(ctx, strings.Replace(updateAPI, "%s", UpdateRepo, 1), map[string]string{"Accept": "application/vnd.github+json"})
+	api := updateAPI
+	if u := s.hooks.updateAPI.Load(); u != nil {
+		api = *u
+	}
+	resp, err := client.Get(ctx, strings.Replace(api, "%s", UpdateRepo, 1), map[string]string{"Accept": "application/vnd.github+json"})
 	var pe *providers.Error
 	switch {
 	case errors.As(err, &pe) && pe.Status == 404:

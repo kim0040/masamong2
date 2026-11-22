@@ -77,9 +77,10 @@ func TestUpdateApplyInstallsTheReleaseAndRestarts(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	defer application.UseUpdateAPIForTest(srv.URL+"/api/%s", "0.2.0")()
+	defer application.SetVersionForTest("0.2.0")()
 	defer application.UseSelfUpdateForTest(srv.URL+"/dl/%s/", bin)()
 	svc := setupSvc(t)
+	application.UseUpdateAPIForTest(svc, srv.URL+"/api/%s")
 
 	st := out(t, svc, "updates.check", nil)
 	if st["newer"] != true || st["can_apply"] != true {
@@ -139,8 +140,9 @@ func TestUpdateApplyRefusesASourceBuild(t *testing.T) {
 	}))
 	defer srv.Close()
 	// git describe of a clone: not a release version, so the installer updates it
-	defer application.UseUpdateAPIForTest(srv.URL+"/%s", "d1e4e02-dirty")()
+	defer application.SetVersionForTest("d1e4e02-dirty")()
 	svc := setupSvc(t)
+	application.UseUpdateAPIForTest(svc, srv.URL+"/%s")
 	svc.Daemon = true
 	o := out(t, svc, "updates.status", nil)
 	if o["can_apply"] == true {
