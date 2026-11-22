@@ -411,10 +411,17 @@ func TestInterimPostLandingAfterClearDeletesItself(t *testing.T) {
 	<-entered // the post is on its way
 	cleared := make(chan struct{})
 	go func() { ip.clear(); close(cleared) }()
+	// clear has parked on the post in flight when its state is cleared; from there it can only
+	// return once the post has landed
+	waitFor(t, 3*time.Second, func() bool {
+		ip.mu.Lock()
+		defer ip.mu.Unlock()
+		return ip.state == interimCleared
+	})
 	select {
 	case <-cleared:
 		t.Fatal("clear returned while the line was still being sent")
-	case <-time.After(50 * time.Millisecond):
+	default:
 	}
 	close(gate)
 	select {
@@ -758,16 +765,18 @@ func TestInterimAmbiguousSendIsDeletedWhenTheCreateArrives(t *testing.T) {
 			t.Fatalf("the lost send deleted early: %+v", log.list())
 		}
 		g.onMessage(g.sess, botReplyTo(m.ChannelID, m.ID, "late", line(g, m)))
-		deadline := time.Now().Add(3 * time.Second)
-		for time.Now().Before(deadline) && !slices.Equal(log.shape(interimTexts(g, m)), []string{"POST interim", "DELETE late"}) {
-			time.Sleep(10 * time.Millisecond)
-		}
+		waitFor(t, 3*time.Second, func() bool {
+			return slices.Equal(log.shape(interimTexts(g, m)), []string{"POST interim", "DELETE late"})
+		})
 		if got := log.shape(interimTexts(g, m)); !slices.Equal(got, []string{"POST interim", "DELETE late"}) {
 			t.Fatalf("calls %q", got)
 		}
-		// a later bot message that is not the line is left alone
+		// a later bot message that is not the line is left alone: "answer" was never registered for
+		// a line, so no drop-delete could have been launched for it
 		g.onMessage(g.sess, botCreate(m.ChannelID, "answer", "응, 알겠어."))
-		time.Sleep(30 * time.Millisecond)
+		if g.interims.deleted("answer") {
+			t.Fatal("a normal bot message was registered as a line")
+		}
 		if got := log.shape(interimTexts(g, m)); !slices.Equal(got, []string{"POST interim", "DELETE late"}) {
 			t.Fatalf("a normal bot message was deleted: %q", got)
 		}
@@ -863,16 +872,12 @@ func TestBackfillDoesNotCaptureAnInterimLine(t *testing.T) {
 	}
 }
 
-// settleDeletes waits until the fake Discord has seen want deletes (deleteInterimLine runs on a goroutine).
+// waitForShape waits until the fake Discord has seen the calls want (deleteInterimLine runs on a goroutine).
 func waitForShape(t *testing.T, g *Gateway, log *restLog, m *discordgo.MessageCreate, want []string) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) && !slices.Equal(log.shape(interimTexts(g, m)), want) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if got := log.shape(interimTexts(g, m)); !slices.Equal(got, want) {
-		t.Fatalf("calls %q, want %q", got, want)
-	}
+	waitFor(t, 3*time.Second, func() bool {
+		return slices.Equal(log.shape(interimTexts(g, m)), want)
+	})
 }
 
 // The post goes through the nonce path: a resend of it is answered with the first message. It stays a
@@ -906,14 +911,15 @@ func TestInterimOrdinaryBotReplyWithTheSameTextIsLeftAlone(t *testing.T) {
 	line := messages.T(g.noticeLocale(m), "discord.chat.interim.1")
 	g.onMessage(g.sess, botReplyTo(m.ChannelID, "another-message", "other", line))
 	g.onMessage(g.sess, botCreate(m.ChannelID, "no-reply", line))
-	time.Sleep(50 * time.Millisecond)
-	if got := log.shape(interimTexts(g, m)); !slices.Equal(got, []string{"POST interim"}) {
-		t.Fatalf("an ordinary bot message was deleted: %q", got)
-	}
+	// neither was registered for a line, so no drop-delete could have been launched for them: the
+	// log cannot still change
 	for _, id := range []string{"other", "no-reply"} {
 		if g.interims.deleted(id) {
 			t.Fatalf("%s was registered as a line", id)
 		}
+	}
+	if got := log.shape(interimTexts(g, m)); !slices.Equal(got, []string{"POST interim"}) {
+		t.Fatalf("an ordinary bot message was deleted: %q", got)
 	}
 	g.onMessage(g.sess, botReplyTo(m.ChannelID, m.ID, "line", line)) // the real one
 	waitForShape(t, g, log, m, []string{"POST interim", "DELETE line"})
@@ -988,7 +994,6 @@ func TestInterimSameTextTurnsDeleteTheirOwnLines(t *testing.T) {
 	line := messages.T(g.noticeLocale(m1), "discord.chat.interim.1")
 	g.onMessage(g.sess, botReplyTo(m1.ChannelID, m2.ID, "second", line))
 	g.onMessage(g.sess, botReplyTo(m1.ChannelID, m1.ID, "first", line))
-	deadline := time.Now().Add(3 * time.Second)
 	deletes := func() []string {
 		var out []string
 		for _, e := range log.list() {
@@ -999,9 +1004,7 @@ func TestInterimSameTextTurnsDeleteTheirOwnLines(t *testing.T) {
 		slices.Sort(out)
 		return out
 	}
-	for time.Now().Before(deadline) && len(deletes()) < 2 {
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitFor(t, 3*time.Second, func() bool { return len(deletes()) >= 2 })
 	if got := deletes(); !slices.Equal(got, []string{"first", "second"}) {
 		t.Fatalf("deleted %q", got)
 	}
@@ -1027,10 +1030,10 @@ func TestInterimBadGatewayRetriesShareOneNonce(t *testing.T) {
 		}
 	}
 	g.onMessage(g.sess, botReplyTo(m.ChannelID, m.ID, "made", messages.T(g.noticeLocale(m), "discord.chat.interim.1")))
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) && log.list()[len(log.list())-1].Method != http.MethodDelete {
-		time.Sleep(10 * time.Millisecond)
-	}
+	waitFor(t, 3*time.Second, func() bool {
+		evs := log.list()
+		return evs[len(evs)-1].Method == http.MethodDelete
+	})
 	if last := log.list()[len(log.list())-1]; last.Method != http.MethodDelete || !strings.HasSuffix(last.Path, "/made") {
 		t.Fatalf("the created line was not deleted: %+v", log.list())
 	}

@@ -3,6 +3,7 @@ package discord
 import (
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -19,16 +20,20 @@ func shortWindows(t *testing.T) {
 }
 
 type turns struct {
-	mu  sync.Mutex
-	got []string
-	at  []time.Time
+	mu    sync.Mutex
+	got   []string
+	at    []time.Time
+	fired chan struct{} // when set, receives one send per fired turn: the test's end-of-work signal
 }
 
 func (tr *turns) fire(msgs []*discordgo.MessageCreate) {
 	tr.mu.Lock()
-	defer tr.mu.Unlock()
 	tr.got = append(tr.got, mergedText(msgs))
 	tr.at = append(tr.at, time.Now())
+	tr.mu.Unlock()
+	if tr.fired != nil {
+		tr.fired <- struct{}{}
+	}
 }
 
 func (tr *turns) list() []string {
@@ -42,20 +47,23 @@ func TestMergerJoinsACallWithItsQuestion(t *testing.T) {
 	shortWindows(t)
 	tr := &turns{}
 	mg := &merger{fire: tr.fire}
-	start := time.Now()
-	mg.add(msg("a", "마사몽"), true)
-	time.Sleep(100 * time.Millisecond) // longer than the settle window: a bare call waits longer
-	if !mg.waiting(msg("a", "")) || len(tr.list()) != 0 {
-		t.Fatal("a bare call is held for its question")
-	}
-	mg.add(msg("a", "내일 날씨 어때?"), false)
-	time.Sleep(150 * time.Millisecond)
-	if got := tr.list(); len(got) != 1 || got[0] != "마사몽\n내일 날씨 어때?" {
-		t.Fatalf("turns: %q", got)
-	}
-	if d := tr.at[0].Sub(start); d < 100*time.Millisecond {
-		t.Fatalf("answered too early: %v", d)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		tr.fired = make(chan struct{}, 8)
+		start := time.Now()
+		mg.add(msg("a", "마사몽"), true)
+		time.Sleep(100 * time.Millisecond) // fake clock, not a wait: past the settle window, inside the call wait
+		if !mg.waiting(msg("a", "")) || len(tr.list()) != 0 {
+			t.Fatal("a bare call is held for its question")
+		}
+		mg.add(msg("a", "내일 날씨 어때?"), false)
+		<-tr.fired // the settled turn
+		if got := tr.list(); len(got) != 1 || got[0] != "마사몽\n내일 날씨 어때?" {
+			t.Fatalf("turns: %q", got)
+		}
+		if d := tr.at[0].Sub(start); d < 100*time.Millisecond {
+			t.Fatalf("answered too early: %v", d)
+		}
+	})
 }
 
 // A call nobody follows is still answered; another person's messages never join.
@@ -63,13 +71,16 @@ func TestMergerAnswersALoneCallAndKeepsPeopleApart(t *testing.T) {
 	shortWindows(t)
 	tr := &turns{}
 	mg := &merger{fire: tr.fire}
-	mg.add(msg("a", "마사몽"), true)
-	mg.add(msg("b", "마사몽 이거 알아?"), false)
-	time.Sleep(300 * time.Millisecond)
-	got := tr.list()
-	if len(got) != 2 || got[0] != "마사몽 이거 알아?" || got[1] != "마사몽" {
-		t.Fatalf("turns: %q", got)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		tr.fired = make(chan struct{}, 8)
+		mg.add(msg("a", "마사몽"), true)
+		mg.add(msg("b", "마사몽 이거 알아?"), false)
+		<-tr.fired // b's question settles first
+		<-tr.fired // a's bare call at the call wait
+		if got := tr.list(); len(got) != 2 || got[0] != "마사몽 이거 알아?" || got[1] != "마사몽" {
+			t.Fatalf("turns: %q", got)
+		}
+	})
 }
 
 // Fragments keep restarting the wait, but a turn is never held past the cap.
@@ -77,21 +88,21 @@ func TestMergerCapsTheWait(t *testing.T) {
 	shortWindows(t)
 	tr := &turns{}
 	mg := &merger{fire: tr.fire}
-	start := time.Now()
-	for i := 0; i < 20; i++ {
-		mg.add(msg("a", "조각"), false)
-		time.Sleep(25 * time.Millisecond)
-		if len(tr.list()) > 0 {
-			break
+	synctest.Test(t, func(t *testing.T) {
+		tr.fired = make(chan struct{}, 8)
+		start := time.Now()
+		for i := 0; i < 20 && len(tr.fired) == 0; i++ {
+			mg.add(msg("a", "조각"), false)
+			time.Sleep(25 * time.Millisecond) // fake clock, not a wait: the next fragment arrives inside the settle window
 		}
-	}
-	time.Sleep(100 * time.Millisecond)
-	if len(tr.at) == 0 {
-		t.Fatal("no turn")
-	}
-	if d := tr.at[0].Sub(start); d > 480*time.Millisecond {
-		t.Fatalf("held %v, past the cap", d)
-	}
+		<-tr.fired // the cap fired the turn
+		if len(tr.at) == 0 {
+			t.Fatal("no turn")
+		}
+		if d := tr.at[0].Sub(start); d > mergeMax {
+			t.Fatalf("held %v, past the cap", d)
+		}
+	})
 }
 
 func TestBareCall(t *testing.T) {
