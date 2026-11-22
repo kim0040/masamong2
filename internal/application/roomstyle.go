@@ -160,7 +160,14 @@ func (s *Service) roomStyleRules(guildID, channelID string, pol config.ChannelPo
 	if pol.Conversation.RoomStyle != "on" || guildID == "" {
 		return ""
 	}
-	note := s.styleNote(guildID, channelID)
+	room := channelID
+	// a thread without an entry of its own follows its parent channel's setting (channelPolicy): its note too
+	if g, ok := s.Doc().Guilds[guildID]; !ok || g.Channels == nil || !hasChannel(g.Channels, channelID) {
+		if parent := s.threadParent(channelID); parent != "" {
+			room = parent
+		}
+	}
+	note := s.styleNote(guildID, room)
 	if note == "" {
 		return ""
 	}
