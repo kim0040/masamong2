@@ -56,7 +56,12 @@ func PublicURL(raw string) (string, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
 		return "", ErrNotPublic
 	}
-	host := strings.ToLower(u.Hostname())
+	// A name may end in a root dot ("localhost.", "127.0.0.1."): the resolver reads it as the same
+	// host, so the checks below must see it without the dot.
+	host := strings.TrimRight(strings.ToLower(u.Hostname()), ".")
+	if host == "" {
+		return "", ErrNotPublic
+	}
 	if p := u.Port(); p != "" && p != "80" && p != "443" {
 		return "", ErrNotPublic
 	}
@@ -64,12 +69,22 @@ func PublicURL(raw string) (string, error) {
 		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() || ip.IsMulticast() {
 			return "", ErrNotPublic
 		}
-	} else if !strings.Contains(host, ".") || host == "localhost" || strings.HasSuffix(host, ".localhost") ||
+	} else if !strings.Contains(host, ".") || numericTLD(host) || host == "localhost" || strings.HasSuffix(host, ".localhost") ||
 		strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".internal") || strings.HasSuffix(host, ".lan") || strings.HasSuffix(host, ".home.arpa") {
 		return "", ErrNotPublic
 	}
 	u.Fragment = ""
 	return u.String(), nil
+}
+
+// numericTLD is whether the last label of host is all digits or a 0x number. No public name ends that
+// way, but the system resolver reads such a host as an address in a short form ("127.1", "0x7f.0.0.1").
+func numericTLD(host string) bool {
+	last := host[strings.LastIndex(host, ".")+1:]
+	if strings.HasPrefix(last, "0x") {
+		return true
+	}
+	return last != "" && strings.Trim(last, "0123456789") == ""
 }
 
 // Read fetches pageURL as text, cut to maxChars runes.
@@ -93,11 +108,16 @@ func (r *Reader) Read(ctx context.Context, pageURL string, maxChars int) (Page, 
 		}
 		return Page{}, err
 	}
-	return ParseReader(resp.ContentType, resp.Body, maxChars)
+	return parseReader(resp.ContentType, resp.Body, maxChars)
 }
 
 // ParseReader reads {"code":200,"data":{"title","url","content","usage":{"tokens"}}}.
 func ParseReader(contentType string, body []byte, maxChars int) (Page, error) {
+	return parseReader(contentType, body, maxChars)
+}
+
+// parseReader is ParseReader; the message of a refused read has the key values (secrets) cut out.
+func parseReader(contentType string, body []byte, maxChars int, secrets ...string) (Page, error) {
 	obj, err := decode.Object(contentType, body)
 	if err != nil {
 		return Page{}, err
