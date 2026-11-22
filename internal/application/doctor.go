@@ -168,6 +168,15 @@ func (s *Service) doctor(ctx context.Context, req action.Request) action.Result 
 			attention = append(attention, map[string]any{"item": "provider:" + st.ID, "reason": st.Error})
 		}
 	}
+	// operator tools with a key written into their headers or web address (a configuration an earlier release
+	// accepted): the value is exported and backed up as if it were not a secret, so the operator is told which
+	// tools (ids only) to move to credential_ref
+	if ids := s.toolsWithDirectKeys(); len(ids) > 0 {
+		arg := strings.Join(ids, ", ")
+		put("tool_keys", "degraded", "tool_direct_key:"+arg)
+		attention = append(attention, map[string]any{"item": "tool_keys", "reason": "tool_direct_key:" + arg,
+			"reason_text": s.msg(req, "features.reason.tool_direct_key", "arg", arg)})
+	}
 	liveAny := func(feature string, kinds ...string) {
 		if s.Doc().Features != nil && !s.Doc().Features[feature] {
 			put(feature, "disabled", "feature_flag")

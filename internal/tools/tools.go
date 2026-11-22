@@ -355,6 +355,30 @@ var (
 	wholePlaceRE = regexp.MustCompile(`^\{[a-z][a-z0-9_]*\}$`)
 )
 
+// DirectSecretError says which field of an operator tool holds a key written into the configuration. The
+// caller shows it in the person's language from Tool, Field and Param (never the value); Error is the
+// English text for logs and the CLI.
+type DirectSecretError struct {
+	Tool  string
+	Field string // headers.<name>, or url
+	Param string // the query parameter, when Field is url
+}
+
+func (e *DirectSecretError) Error() string {
+	if e.Param != "" {
+		return fmt.Sprintf("tools.%s.http.url: the %s parameter holds a key written into the configuration; put the key in credential_ref and write %s={credential}", e.Tool, e.Param, e.Param)
+	}
+	return fmt.Sprintf("tools.%s.http.%s: holds a key written into the configuration; put the key in credential_ref and write {credential} here", e.Tool, e.Field)
+}
+
+// Where is the field as a person reads it: the header's name, or the web address's parameter.
+func (e *DirectSecretError) Where() string {
+	if e.Param != "" {
+		return "url: " + e.Param
+	}
+	return e.Field
+}
+
 // DirectSecret refuses a key written straight into an operator tool's headers or web address: such a value
 // is exported and backed up as if it were not a secret. A header that carries a key must hold {credential}
 // (the value of credential_ref); a query parameter that carries one must be {credential} or a declared
@@ -368,7 +392,7 @@ func DirectSecret(id string, h *HTTP) error {
 		if v == "" || strings.Contains(v, "{credential}") || !secretHeader(name) {
 			continue
 		}
-		return fmt.Errorf("tools.%s.http.headers.%s: holds a key written into the configuration; put the key in credential_ref and write {credential} here", id, name)
+		return &DirectSecretError{Tool: id, Field: "headers." + name}
 	}
 	if _, query, ok := strings.Cut(h.URL, "?"); ok {
 		query, _, _ = strings.Cut(query, "#")
@@ -377,7 +401,7 @@ func DirectSecret(id string, h *HTTP) error {
 			if v == "" || v == "{credential}" || wholePlaceRE.MatchString(v) || !slices.Contains(secretQuery, strings.ToLower(name)) {
 				continue
 			}
-			return fmt.Errorf("tools.%s.http.url: the %s parameter holds a key written into the configuration; put the key in credential_ref and write %s={credential}", id, name, name)
+			return &DirectSecretError{Tool: id, Field: "url", Param: name}
 		}
 	}
 	return nil

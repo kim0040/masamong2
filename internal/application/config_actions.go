@@ -50,7 +50,7 @@ func (s *Service) configDiff(req action.Request) action.Result {
 	if _, err := config.ValidateCandidate(b); err != nil {
 		out["valid"] = false
 		out["error"] = err.Error()
-		return action.Fail(req, errcode.ConfigInvalid, "generic.error", err.Error(), out)
+		return s.configFail(req, errcode.ConfigInvalid, err, out)
 	}
 	out["valid"] = true
 	out["diff"] = lineDiff(string(cur), string(b))
@@ -248,7 +248,11 @@ func (s *Service) applyCandidateLocked(req action.Request, candidate []byte, bas
 		}
 		details := map[string]any{"expected": s.Revision(), "actual": base, "detail": err.Error()}
 		if code == errcode.ConfigInvalid {
-			// not a conflict with another change: the operator needs the rule that failed
+			// not a conflict with another change: the operator needs the rule that failed (BeginApply keeps
+			// only the text of its cause, so a key written into a tool is looked for in the candidate itself)
+			if _, perr := config.ValidateCandidate(candidate); directKeyOf(perr) != nil {
+				return s.configFail(req, code, perr, details)
+			}
 			return action.Fail(req, code, "generic.error", err.Error(), details)
 		}
 		return action.Fail(req, code, "config.conflict", s.msg(req, "config.conflict"), details)
