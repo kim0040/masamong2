@@ -467,7 +467,7 @@ func (s *Service) MemoryEngine() (*engine.Engine, error) {
 	old.Retire(st.eng)
 	if st.eng.Index() != nil {
 		e := st.eng
-		// Registration happens after releasing lifeMu below.
+		// registered under lifeMu, after the closing check: Close cannot wait before this reload counts
 		s.workWG.Add(1)
 		go func() { defer s.workWG.Done(); defer crash.Recover(s.Log, "memory reload"); _, _ = e.Reload() }()
 	}
