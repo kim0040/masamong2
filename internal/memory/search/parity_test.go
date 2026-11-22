@@ -23,6 +23,9 @@ import (
 //
 //	MASAMONG_SANDBOX_DATA=<test-sandbox/data> MASAMONG_SANDBOX_CONFIG=<config.json>
 //	MASAMONG_PARITY_RETRIEVE=<retrieve_<gold>.json> go test ./internal/memory/search/ -run Parity -v
+//
+// `make parity` (scripts/parity.sh, run by CI) does all of this on a made-up corpus from parity_synth.py, with
+// the planner-intent table (time ranges, people, the recent window) on top of the sampled queries.
 
 type mapEmbedder map[string][]float32
 
@@ -201,6 +204,8 @@ type dumpMode struct {
 	Abstained bool              `json:"abstained"`
 	Queries   map[string]string `json:"queries"`
 	Recovery  bool              `json:"recovery"`
+	Time      map[string]any    `json:"time"`
+	Persons   map[string]any    `json:"persons"`
 }
 
 func TestSandboxRetrieveParity(t *testing.T) {
@@ -216,6 +221,7 @@ func TestSandboxRetrieveParity(t *testing.T) {
 			Query      string              `json:"query"`
 			Room       string              `json:"room"`
 			Intent     *Intent             `json:"intent"`
+			Reference  *dumpReference      `json:"time_reference"`
 			Modes      map[string]dumpMode `json:"modes"`
 		} `json:"rows"`
 		Vectors map[string][]float32 `json:"vectors"`
@@ -233,6 +239,10 @@ func TestSandboxRetrieveParity(t *testing.T) {
 		if row.Room == "" {
 			scope = Scope{All: true}
 		}
+		ref, err := row.Reference.timeReference()
+		if err != nil {
+			t.Fatalf("%s: %v", row.QuestionID, err)
+		}
 		for _, mode := range []string{"hybrid", "auto", "rerank"} {
 			want, exists := row.Modes[mode]
 			if !exists {
@@ -246,14 +256,15 @@ func TestSandboxRetrieveParity(t *testing.T) {
 			stats["runs"]++
 			avail := mode == "rerank"
 			res, err := ix.Retrieve(context.Background(), Request{Query: row.Query, QueryVector: dump.Vectors[row.Query], Intent: it,
-				Ranking: retrieval.RankingMode(mode), Scope: scope, TopK: 5, RemainingUSD: 0.2}, emb, fakeRerank{avail: avail})
+				Ranking: retrieval.RankingMode(mode), Scope: scope, TopK: 5, RemainingUSD: 0.2, TimeReference: ref}, emb, fakeRerank{avail: avail})
 			if err != nil {
 				t.Fatalf("%s %s: %v", row.QuestionID, mode, err)
 			}
 			tag := row.QuestionID + "/" + mode
-			f := parityGenerate(ix, row.Query, dump.Vectors[row.Query], it, scope, emb, res)
+			f := parityGenerate(ix, row.Query, dump.Vectors[row.Query], it, scope, emb, res, ref)
 			proof := parityProof(f, want)
-			if want.Tree == nil || len(want.Scores) == 0 {
+			// an empty scope (an unresolved time range) legitimately has no scores; only a dump without the tree is old
+			if want.Tree == nil || (len(want.Scores) == 0 && len(want.Hits) > 0) {
 				t.Fatal("점수/트리가 없는 덤프입니다: parity_dump.py로 다시 만드세요")
 			}
 			if !proof {
@@ -286,6 +297,9 @@ func TestSandboxRetrieveParity(t *testing.T) {
 				stats["score_proof_diff"]++
 				proof = false
 			}
+			if !proof {
+				t.Logf("%s score proof failed", tag)
+			}
 			if os.Getenv("MASAMONG_PARITY_NUMERIC") != "" {
 				diagnostics = append(diagnostics, parityNumbers(ix, rowNumber+1, mode, f, res, want, proof))
 			}
@@ -297,7 +311,7 @@ func TestSandboxRetrieveParity(t *testing.T) {
 					stats["fusion_epsilon"]++
 				}
 				t.Logf("%s fusion differs at %d", tag, firstDiff(got, want.FusionIDs))
-				parityDiagnose(t, ix, row.Query, dump.Vectors[row.Query], it, scope, emb, res, want)
+				parityDiagnose(t, ix, row.Query, dump.Vectors[row.Query], it, scope, emb, res, want, ref)
 			}
 			if got := asStrings(res.Trace["candidate_pool_ids"]); !reflect.DeepEqual(got, nonEmpty(want.PoolIDs)) {
 				if !proof || !paritySameSet(got, want.PoolIDs) {
@@ -314,8 +328,19 @@ func TestSandboxRetrieveParity(t *testing.T) {
 					stats["reason_diff"]++
 				}
 			}
+			// the intent paths: what each side says it did with the time range and the person targets
+			if d := parityTimeDiff(res.Trace["time"], want.Time); d != "" {
+				stats["time_trace_diff"]++
+				t.Logf("%s time trace differs:\n  %s", tag, d)
+			}
+			if d := parityDiff(parityPersonsTrace(res.Trace["persons"]), parityPersonsTrace(want.Persons)); d != "" {
+				stats["persons_trace_diff"]++
+				t.Logf("%s person trace differs:\n  %s", tag, d)
+			}
 			if res.Trace["applied"] != want.Applied || res.Trace["abstained"] != want.Abstained || res.Trace["recovery_performed"] != want.Recovery {
 				stats["decision_diff"]++
+				t.Logf("%s decision differs: go applied=%v abstained=%v recovery=%v, sandbox applied=%v abstained=%v recovery=%v", tag,
+					res.Trace["applied"], res.Trace["abstained"], res.Trace["recovery_performed"], want.Applied, want.Abstained, want.Recovery)
 			}
 			var gotIDs, wantIDs []string
 			finalScores := map[string]float64{}
@@ -391,7 +416,7 @@ func TestSandboxRetrieveParity(t *testing.T) {
 		stats[k] += 0
 	}
 	t.Logf("parity: %v", stats)
-	for _, k := range []string{"fusion_diff", "pool_diff", "hits_diff", "excerpt_diff", "packing_diff", "packing_variant_missing", "summary_diff", "auto_level_diff", "reason_diff", "date_diff", "decision_diff", "score_proof_diff", "final_score_diff", "missing_mode", "dump_error"} {
+	for _, k := range []string{"fusion_diff", "pool_diff", "hits_diff", "excerpt_diff", "packing_diff", "packing_variant_missing", "summary_diff", "auto_level_diff", "reason_diff", "date_diff", "decision_diff", "time_trace_diff", "persons_trace_diff", "score_proof_diff", "final_score_diff", "missing_mode", "dump_error"} {
 		if stats[k] > 0 {
 			t.Errorf("%s = %d", k, stats[k])
 		}
