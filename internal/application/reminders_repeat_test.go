@@ -429,7 +429,10 @@ func remCtxSvc(t *testing.T, now time.Time) (*application.Service, *postGateway)
 	svc, gw := remindSvc(t, now)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Memory.Capture = true
-		d.Guilds = map[string]config.GuildSettings{"g": {Channels: map[string]config.ChannelPolicy{"c": {Respond: "mention", Capture: true}}}}
+		d.Guilds = map[string]config.GuildSettings{"g": {Channels: map[string]config.ChannelPolicy{
+			"c":     {Respond: "mention", Capture: true},
+			"nocap": {Capture: false},
+		}}}
 	})
 	return svc, gw
 }
@@ -497,6 +500,31 @@ func TestVagueReminderCarriesTheCallersRecentLinesAndShowsThemWhenItFires(t *tes
 	// once the reminder is over its lines are gone
 	if application.ReminderContextForTest(svc, id) != "" {
 		t.Fatal("context lines kept after the reminder was sent")
+	}
+}
+
+// A channel the file never configures is covered by the memory-on default in a served server. A
+// server still waiting for approval is not served at all, so nothing there is kept either way.
+func TestUnconfiguredChannelCapturesByDefaultPendingServerDoesNot(t *testing.T) {
+	now, _ := repSeoulNow()
+	svc, _ := remCtxSvc(t, now)
+	// approval is on for this check: "g" is served because it has settings, "gp" stays pending
+	if r := exec(svc, "access.policy", map[string]any{"server_approval": true}); !r.OK {
+		t.Fatalf("server approval: %+v", r)
+	}
+	base := now.Add(-time.Minute)
+	// "g" is served (channel "c" is configured); "open" is a channel the file never names
+	svc.Observe(application.ObservedMessage{GuildID: "g", ChannelID: "open", MessageID: "o1", AuthorID: "u1", AuthorName: "Alex", Content: "words in an unconfigured channel", At: base})
+	svc.Observe(application.ObservedMessage{GuildID: "g", ChannelID: "open", MessageID: "call", AuthorID: "u1", AuthorName: "Alex", Content: "remind me about that", At: base.Add(10 * time.Second), Mentions: []string{"bot"}})
+	id, _ := remAskVague(t, svc, "open", map[string]any{"when": "tomorrow 9am", "what": "that", "with_context": true})
+	if got := application.ReminderContextForTest(svc, id); !strings.Contains(got, "unconfigured channel") {
+		t.Fatalf("an unconfigured channel in a served server captures by default: %q", got)
+	}
+	// "gp" is not approved and has no settings; approval is required. GuildAllowed is the check the
+	// gateway runs before anything is stored, observed or answered — a pending server fails it, so
+	// the memory-on default never reaches its channels.
+	if svc.GuildAllowed("gp") {
+		t.Fatal("a pending server must not be served")
 	}
 }
 
