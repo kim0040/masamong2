@@ -44,7 +44,7 @@ func toolsetHas(ts chat.Toolset, id string) (chat.ToolInfo, bool) {
 
 // ChatTurn answers one message in a channel: planner → tools → channel memory → friend-like reply.
 // ChatTurn answers one message and records the outcome in the turn log (answered, refused and failed
-// turns alike), so the console can show what the bot did and why.
+// turns alike, recordChatTurn), so the console can show what the bot did and why.
 func (s *Service) ChatTurn(ctx context.Context, in ChatInput) (chat.Result, error) {
 	ctx, done, ok := s.beginWork(ctx)
 	if !ok {
@@ -82,33 +82,40 @@ func (s *Service) ChatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	if (strings.TrimSpace(in.Message) == "" && !in.imageOnly) || in.ChannelID == "" {
 		return res, err
 	}
-	outcome := "answered"
+	s.recordChatTurn(ctx, in, &res, err, started)
+	return res, err
+}
+
+// turnOutcome is how a turn ended, as the turn log names it.
+func turnOutcome(res chat.Result, err error) string {
 	switch {
 	case errors.Is(err, ErrChatPaused):
-		outcome = "paused"
+		return "paused"
 	case errors.Is(err, ErrChatDisabled):
-		outcome = "disabled"
+		return "disabled"
 	case errors.Is(err, ErrChatLimited), errors.Is(err, ErrChatBusy), errors.As(err, new(DMLimited)):
-		outcome = "limited"
+		return "limited"
 	case errors.Is(err, ErrChatBudget):
-		outcome = "budget"
+		return "budget"
 	case errors.Is(err, ErrNotAddressed):
-		outcome = "not_addressed"
+		return "not_addressed"
 	case errors.Is(err, ErrNoVision), errors.Is(err, ErrImageUnreadable):
-		outcome = "no_vision" // a message that was only a picture nobody could look at
+		return "no_vision" // a message that was only a picture nobody could look at
 	case errors.As(err, new(ReactOnly)):
-		outcome = "reacted"
+		return "reacted"
 	case errors.Is(err, context.Canceled): // the person said stop, or the daemon is going down
-		outcome = "canceled"
+		return "canceled"
 	case err != nil:
-		outcome = "error"
+		return "error"
 	case strings.TrimSpace(res.Answer) == "":
-		outcome = "silent"
+		return "silent"
 	}
-	names := []string{}
-	for _, t := range res.Tools {
-		names = append(names, t.Tool)
-	}
+	return "answered"
+}
+
+// chatTurnBody is what the turn log keeps of a turn before the room's logging level applies: the message,
+// the answer, what the turn used and read, and why it failed.
+func chatTurnBody(in ChatInput, res chat.Result, err error, outcome string) map[string]any {
 	message, messageMax := in.Message, 400
 	if in.vision != nil && in.vision.Message != "" {
 		message, messageMax = in.vision.Message, 1200 // with the picture's tag or description
@@ -117,12 +124,9 @@ func (s *Service) ChatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		"answer_preview": clip(res.Answer, 280), "answer": clip(res.Answer, 4000), "timing_ms": res.Timing,
 		"memory_state": res.Assess.MemoryState, "intent_source": res.Intent.Source, "tools": recordTools(res.Tools),
 		"plan": res.Plan.ToolPlan, "hits": hitBrief(res.Hits), "ranking": res.Retrieve["applied"],
-		"context": map[string]any{"observation_ids": uniqueStrings(sources), "attribution": in.context}}
+		"context": map[string]any{"observation_ids": uniqueStrings(*in.sourceRefs), "attribution": in.context}}
 	if err != nil && outcome != "reacted" && outcome != "not_addressed" && outcome != "canceled" && outcome != "no_vision" { // decisions, not failures
 		body["error"] = err.Error()
-	}
-	if outcome == "error" && !in.DryRun {
-		s.LogProblem(in.GuildID, in.ChannelID, logReplyFailed, "", errclass.Of(err))
 	}
 	if len(res.Skipped) > 0 {
 		body["skipped"] = res.Skipped // steps the per-turn limits held back (chat.Guard)
@@ -135,6 +139,21 @@ func (s *Service) ChatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	addTurnSpans(body, res)
 	visionRecord(body, in.vision)
 	noteRoomMemory(body, res)
+	return body
+}
+
+// recordChatTurn records the turn's outcome in the turn log (answered, refused and failed turns alike) and
+// gives the result its turn ID.
+func (s *Service) recordChatTurn(ctx context.Context, in ChatInput, res *chat.Result, err error, started time.Time) {
+	outcome := turnOutcome(*res, err)
+	names := []string{}
+	for _, t := range res.Tools {
+		names = append(names, t.Tool)
+	}
+	body := chatTurnBody(in, *res, err, outcome)
+	if outcome == "error" && !in.DryRun {
+		s.LogProblem(in.GuildID, in.ChannelID, logReplyFailed, "", errclass.Of(err))
+	}
 	res.TurnID = in.turnID
 	for _, step := range res.Skipped { // optional steps the turn's Guard held back stay visible in the call ledger
 		s.noteToolCall(ctx, toolCall{Tool: step, Guard: "skipped", Status: "skipped"})
@@ -146,7 +165,6 @@ func (s *Service) ChatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	}
 	s.recordTurn(TurnRecord{ID: res.TurnID, GuildID: in.GuildID, ChannelID: in.ChannelID, SpeakerID: in.SpeakerID, Outcome: outcome, Tools: names, Hits: len(res.Hits),
 		CostUSD: res.CostUSD, LatencyMS: int(time.Since(started).Milliseconds()), Lab: in.DryRun, ReadAsOf: in.readAsOf, Fragments: in.Fragments, Body: body})
-	return res, err
 }
 
 // chatTurn runs one turn's stages in order: wait for the channel (enterTurn), admit the turn (admitTurn),
