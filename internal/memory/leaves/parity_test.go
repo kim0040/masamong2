@@ -1,7 +1,6 @@
 package leaves
 
 import (
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -9,6 +8,7 @@ import (
 	"testing"
 
 	"masamong/internal/memory/corpus"
+	"masamong/internal/testutil"
 )
 
 // TestSandboxLeafParity rebuilds leaves from each sandbox index's messages.json with that index's
@@ -29,11 +29,11 @@ func TestSandboxLeafParity(t *testing.T) {
 				GapMinutes    float64 `json:"gap_minutes"`
 				ContextPrefix *bool   `json:"context_prefix"`
 			}
-			mustJSON(t, cfgPath, &cfg)
+			testutil.LoadJSON(t, cfgPath, &cfg)
 			var msgs []corpus.Message
 			var want []Leaf
-			mustJSON(t, filepath.Join(dataDir, "messages.json"), &msgs)
-			mustJSON(t, filepath.Join(dataDir, "leaves.json"), &want)
+			testutil.LoadJSON(t, filepath.Join(dataDir, "messages.json"), &msgs)
+			testutil.LoadJSON(t, filepath.Join(dataDir, "leaves.json"), &want)
 			r := Recipe{Size: cfg.LeafSize, Overlap: cfg.LeafOverlap, Split: cfg.LeafSplit, GapMinutes: cfg.GapMinutes, MinSize: 2, WithPrefix: cfg.ContextPrefix == nil || *cfg.ContextPrefix}
 			if r.Split == "" {
 				r.Split = SplitFixed
@@ -49,16 +49,5 @@ func TestSandboxLeafParity(t *testing.T) {
 			}
 			t.Logf("%d leaves identical (%s)", len(got), r.Version())
 		})
-	}
-}
-
-func mustJSON(t *testing.T, path string, v any) {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(raw, v); err != nil {
-		t.Fatal(err)
 	}
 }

@@ -16,6 +16,7 @@ import (
 	"masamong/internal/memory/corpus"
 	"masamong/internal/memory/leaves"
 	"masamong/internal/memory/retrieval"
+	"masamong/internal/testutil"
 )
 
 // Parity with the sandbox engine.retrieve on a real index. Needs a dump made by the sandbox
@@ -73,8 +74,8 @@ func LoadSandboxIndex(t *testing.T, dataDir, cfgPath string, roomFilter ...[]str
 		DocID   string `json:"doc_id"`
 		Summary string `json:"summary"`
 	}
-	readJSON(t, filepath.Join(dataDir, "messages.json"), &msgs)
-	readJSON(t, filepath.Join(dataDir, "leaves.json"), &lv)
+	testutil.LoadJSON(t, filepath.Join(dataDir, "messages.json"), &msgs)
+	testutil.LoadJSON(t, filepath.Join(dataDir, "leaves.json"), &lv)
 	vecs, err := LoadNPY(filepath.Join(dataDir, "leaf_vecs.npy"))
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +83,7 @@ func LoadSandboxIndex(t *testing.T, dataDir, cfgPath string, roomFilter ...[]str
 	var summaries []Summary
 	var svecs Matrix
 	if cfg.SummaryEnabled {
-		readJSON(t, filepath.Join(dataDir, "summaries.json"), &sums)
+		testutil.LoadJSON(t, filepath.Join(dataDir, "summaries.json"), &sums)
 		for _, s := range sums {
 			summaries = append(summaries, Summary{DocID: s.DocID, Text: s.Summary})
 		}
@@ -96,7 +97,7 @@ func LoadSandboxIndex(t *testing.T, dataDir, cfgPath string, roomFilter ...[]str
 	if len(roomFilter) > 0 {
 		selected = roomFilter[0]
 	} else if path := os.Getenv("MASAMONG_SANDBOX_ROOMS_FILE"); path != "" {
-		readJSON(t, path, &selected)
+		testutil.LoadJSON(t, path, &selected)
 		if selected == nil {
 			selected = []string{}
 		}
@@ -165,17 +166,6 @@ func TestSandboxPartialRetrieveParity(t *testing.T) {
 	TestSandboxRetrieveParity(t)
 }
 
-func readJSON(t *testing.T, path string, v any) {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(raw, v); err != nil {
-		t.Fatal(err)
-	}
-}
-
 type dumpHit struct {
 	DocID   string   `json:"doc_id"`
 	Excerpt string   `json:"excerpt"`
@@ -226,7 +216,7 @@ func TestSandboxRetrieveParity(t *testing.T) {
 		} `json:"rows"`
 		Vectors map[string][]float32 `json:"vectors"`
 	}
-	readJSON(t, dumpPath, &dump)
+	testutil.LoadJSON(t, dumpPath, &dump)
 	emb := mapEmbedder(dump.Vectors)
 	stats := map[string]int{}
 	var diagnostics []parityRunDiagnostic

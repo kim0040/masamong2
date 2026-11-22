@@ -19,6 +19,7 @@ import (
 
 	"masamong/internal/errclass"
 	"masamong/internal/providers"
+	"masamong/internal/testutil"
 )
 
 type fakeReq struct {
@@ -122,15 +123,6 @@ func withHost(t *testing.T, h Host) {
 
 func chatItem(id, model string) BatchItem {
 	return BatchItem{ID: id, Chat: &ChatRequest{Model: model, MaxTokens: 16, Messages: []Message{{Role: "user", Content: "hi " + id}}}}
-}
-
-func mustJSON(t *testing.T, v any) []byte {
-	t.Helper()
-	b, err := json.Marshal(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
 }
 
 func decodeLines(t *testing.T, b []byte) []map[string]any {
@@ -391,7 +383,7 @@ func TestSubmitOpenAIWireShape(t *testing.T) {
 	body := rows[0]["body"].(map[string]any)
 	// exactly the body a live call writes: OpenAI's token field, effort and temperature
 	var live map[string]any
-	_ = json.Unmarshal(mustJSON(t, a.payload(*req.Chat, shape{})), &live)
+	_ = json.Unmarshal(testutil.MustJSON(t, a.payload(*req.Chat, shape{})), &live)
 	want, _ := json.Marshal(live)
 	got, _ := json.Marshal(body)
 	if string(want) != string(got) {
