@@ -258,7 +258,9 @@ func (s *Service) runHTTPTool(ctx context.Context, req action.Request, r tools.R
 	}
 	scrub := newScrubber(secret)
 	if secret != "" && !scrub.active() {
-		s.Log.WarnContext(ctx, "tool credential is too short to scrub from responses; use a longer key", "tool", r.ID, "min_chars", minScrubbedSecret)
+		// a key the response cannot be cleaned of could come back to the chat or the console: not sent
+		s.Log.WarnContext(ctx, "tool credential is too short to scrub from responses; the call was not made", "tool", r.ID, "min_chars", minScrubbedSecret)
+		return action.Fail(req, errcode.ConfigInvalid, "tool.key_too_short", s.msg(req, "tool.key_too_short", "tool", r.ID), map[string]any{"tool": r.ID})
 	}
 	client := providers.NewClient(timeout, s.Log)
 	client.MaxBody = 2 << 20

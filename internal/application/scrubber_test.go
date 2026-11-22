@@ -10,7 +10,10 @@ import (
 	"testing"
 
 	"masamong/internal/action"
+	"masamong/internal/errcode"
+	"masamong/internal/i18n"
 	"masamong/internal/tools"
+	"masamong/locales"
 )
 
 // The patterns are built once per tool call; scrubbing each of thousands of strings must not compile.
@@ -27,23 +30,29 @@ func TestScrubberDoesNotCompilePerString(t *testing.T) {
 	}
 }
 
-// A credential shorter than 8 characters would also erase ordinary words, so it is not scrubbed, and
-// the operator is told in the log.
-func TestShortCredentialIsNotScrubbedButWarned(t *testing.T) {
+// A credential shorter than 8 characters would also erase ordinary words, so it cannot be scrubbed
+// from a response: the call is not made, the caller gets a configuration error and the operator a log line.
+func TestShortCredentialIsNotSent(t *testing.T) {
 	t.Setenv("TOOL_SHORT_CREDENTIAL", "abc")
+	hits := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
 		_, _ = w.Write([]byte("abc is the start of the alphabet"))
 	}))
 	defer srv.Close()
 	var logs bytes.Buffer
-	s := &Service{Log: slog.New(slog.NewTextHandler(&logs, nil))}
-	h := &tools.HTTP{URL: srv.URL + "?key={credential}", CredentialRef: "env:TOOL_SHORT_CREDENTIAL"}
-	r := s.runHTTPTool(context.Background(), action.Request{}, tools.Resolved{ID: "echo", HTTP: h})
-	if !r.OK {
-		t.Fatal(r.Error)
+	cat := i18n.New()
+	if err := cat.LoadFS(locales.FS); err != nil {
+		t.Fatal(err)
 	}
-	if out, _ := r.Output["data_text"].(string); !strings.Contains(out, "abc is the start") {
-		t.Fatalf("ordinary text was mangled: %v", r.Output)
+	s := &Service{Log: slog.New(slog.NewTextHandler(&logs, nil)), I18n: cat}
+	h := &tools.HTTP{URL: srv.URL + "?key={credential}", CredentialRef: "env:TOOL_SHORT_CREDENTIAL"}
+	r := s.runHTTPTool(context.Background(), action.Request{Locale: "en"}, tools.Resolved{ID: "echo", HTTP: h})
+	if r.OK || r.Error.Code != errcode.ConfigInvalid || r.Error.MessageKey != "tool.key_too_short" || !strings.Contains(r.Error.Message, "echo") {
+		t.Fatalf("a key too short to scrub was used: %+v", r)
+	}
+	if hits != 0 {
+		t.Fatalf("the server was called %d times", hits)
 	}
 	if !strings.Contains(logs.String(), "too short to scrub") {
 		t.Fatalf("no warning logged: %s", logs.String())
