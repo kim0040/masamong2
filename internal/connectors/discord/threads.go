@@ -49,6 +49,24 @@ func (g *Gateway) storeThreadKind(id string, thread bool, parent string) {
 	g.channelKinds.Store(id, k)
 }
 
+// rememberThread stores a thread's parent for good (application.NoteThreadParent), then the thread's kind
+// here. Room selection and a catch-up read that parent after this cache forgot the thread; a private thread
+// has no other record. It reports false, and caches nothing, when the parent is not known or could not be
+// stored: the next message asks again.
+func (g *Gateway) rememberThread(guildID, threadID, parentID string) bool {
+	if parentID == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(g.runCtx(), 3*time.Second)
+	defer cancel()
+	if err := g.svc.NoteThreadParent(ctx, guildID, threadID, parentID); err != nil {
+		g.log.Warn("discord: thread parent not stored", "err", err)
+		return false
+	}
+	g.storeThreadKind(threadID, true, parentID)
+	return true
+}
+
 // channelKnown reports whether the channel's kind is known, and marks it used now.
 func (g *Gateway) channelKnown(id string) bool {
 	_, ok := g.knownPlace(id)
@@ -126,11 +144,17 @@ func (g *Gateway) noteThread(s *discordgo.Session, guildID, channelID string) ap
 	place := application.ChannelPlace{Known: true}
 	if ch.IsThread() {
 		place.Parent = ch.ParentID
+		if !g.rememberThread(guildID, channelID, ch.ParentID) {
+			// a thread whose parent is not stored is not placed: its message is not stored where a channel
+			// has capture off (application.CapturesIn)
+			return application.ChannelPlace{}
+		}
+	} else {
+		g.storeChannelKind(channelID, false)
 	}
-	g.storeThreadKind(channelID, ch.IsThread(), place.Parent)
 	// a private thread is not the parent's room: only the people in it may read what is said there,
 	// so it does not join its memory rooms (it is a channel of its own); the parent's capture off still
-	// applies to it, through the place returned (application.CapturesIn)
+	// applies to it, through the place returned (application.CapturesIn) and the parent stored above
 	if ch.IsThread() && ch.Type != discordgo.ChannelTypeGuildPrivateThread {
 		g.svc.NoteThread(guildID, channelID, ch.ParentID, ch.OwnerID != "" && ch.OwnerID == g.botUserID())
 	}
@@ -142,7 +166,7 @@ func (g *Gateway) onThreadCreate(s *discordgo.Session, t *discordgo.ThreadCreate
 	if t.Channel == nil || !t.IsThread() {
 		return
 	}
-	g.storeThreadKind(t.ID, true, t.ParentID)
+	g.rememberThread(t.GuildID, t.ID, t.ParentID) // when it fails, noteThread asks again with the first message
 	if t.Type == discordgo.ChannelTypeGuildPrivateThread {
 		return // see noteThread
 	}
@@ -302,7 +326,7 @@ func (g *Gateway) openThread(ctx context.Context, s *discordgo.Session, guildID,
 		g.svc.ThreadOfferDropped(guildID, channelID, "create_failed")
 		return false
 	}
-	g.storeThreadKind(th.ID, true, channelID)
+	g.rememberThread(guildID, th.ID, channelID)
 	first := g.svc.ThreadOpened(ctx, guildID, channelID, th.ID, callerID, turnID)
 	if joiner != "" && joiner != callerID {
 		g.svc.NoteThreadParticipant(th.ID, joiner)

@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -71,5 +72,64 @@ func TestAgedThreadFollowsItsParentsCaptureOff(t *testing.T) {
 		if !got["on"] || !got["plain"] || got["off"] {
 			t.Errorf("channels: %v", got)
 		}
+	}
+}
+
+// A private thread is never registered with the application, so the connector stores its parent the first
+// time it sees the thread (NoteThreadParent). That parent decides the room from then on: under a parent that
+// stores, the thread is a capturing room; once the parent turns capture off, the episode pass, a catch-up and
+// a message the connector could not place all leave the thread alone, with no live list or thread row to ask.
+func TestPrivateThreadFollowsItsStoredParent(t *testing.T) {
+	s, db := smallHostSvc(t)
+	setParent := func(captures bool) {
+		t.Helper()
+		if r := s.mutateConfig(action.Request{}, func(d *config.Document) error {
+			d.Memory.Capture = true
+			d.Guilds = map[string]config.GuildSettings{"g1": {Channels: map[string]config.ChannelPolicy{
+				"parent": {Respond: "command", Capture: captures},
+			}}}
+			return nil
+		}); !r.OK {
+			t.Fatal(r.Error)
+		}
+	}
+	setParent(true)
+	for range 2 { // the connector may see the thread again after it forgot it: the second note changes nothing
+		if err := s.NoteThreadParent(context.Background(), "g1", "priv", "parent"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := s.Clock.Now().UTC().Format(time.RFC3339)
+	for _, room := range []string{"priv", "parent", "plain"} {
+		if _, err := s.Store.DB.Exec(`INSERT INTO memory_rooms(room, collection, platform, updated_at) VALUES(?,?,?,?)`,
+			"discord:g1:"+room, "c", "discord", at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p := s.threadParent("priv"); p != "" {
+		t.Fatalf("precondition: a private thread is not in the live thread list, got parent %q", p)
+	}
+	rooms := func() map[string]bool {
+		got := map[string]bool{}
+		for _, r := range s.capturingRooms(db) {
+			got[r.channel] = true
+		}
+		return got
+	}
+	if got := rooms(); !got["priv"] || !got["parent"] || !got["plain"] {
+		t.Fatalf("under a parent that stores, every room captures: %v", got)
+	}
+	setParent(false)
+	if p := storedThreadParent(db, "g1", "priv"); p != "parent" {
+		t.Fatalf("stored parent of the private thread = %q, want parent", p)
+	}
+	if got := rooms(); got["priv"] || got["parent"] || !got["plain"] {
+		t.Errorf("after the parent turned capture off: %v, want only plain", got)
+	}
+	if s.roomCapturesNow("g1", "priv") {
+		t.Error("a catch-up may still read the private thread of a channel with capture off")
+	}
+	if s.CapturesIn("g1", "priv", ChannelPlace{}) {
+		t.Error("a message the connector could not place is stored in the private thread of a channel with capture off")
 	}
 }

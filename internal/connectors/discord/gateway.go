@@ -156,22 +156,7 @@ func Start(ctx context.Context, svc *application.Service, cfg config.Discord, lo
 	// the last messages of each channel stay in the state cache, so a deleted one still has its author
 	// and text for the server log (serverlog.go)
 	sess.State.MaxMessageCount = stateMessages
-	sess.AddHandler(g.onGatewayEvent)
-	sess.AddHandler(g.onReady)
-	sess.AddHandler(g.onDisconnect)
-	sess.AddHandler(g.onResumed)
-	sess.AddHandler(g.onInteraction)
-	sess.AddHandler(g.onMessage)
-	sess.AddHandler(g.onMessageUpdate)
-	sess.AddHandler(g.onMessageDelete)
-	sess.AddHandler(g.onMessageDeleteBulk)
-	sess.AddHandler(g.onThreadCreate)
-	sess.AddHandler(g.onThreadUpdate)
-	sess.AddHandler(g.onThreadDelete)
-	sess.AddHandler(g.onPollVoteAdd)
-	sess.AddHandler(g.onPollVoteRemove)
-	sess.AddHandler(g.onReactionAdd)
-	sess.AddHandler(g.onReactionRemove)
+	g.registerHandlers(sess)
 	svc.SetDiscord(g)
 	SetCatalog(svc.I18n)
 	svc.SetCommandMenu(commandHints())
@@ -348,7 +333,7 @@ func (g *Gateway) shutdown(sess *discordgo.Session) {
 	if g.cancelWork != nil {
 		g.cancelWork()
 	}
-	_ = sess.Close()
+	g.changes.stopDelivery(sess)
 	g.connected.Store(false)
 }
 
@@ -388,7 +373,8 @@ func (g *Gateway) runCtx() context.Context {
 }
 
 // Wait closes work admission, then blocks until replies, commands and gateway handlers in progress
-// finish, or timeout passes. The daemon calls it on shutdown before the database closes.
+// finish, or timeout passes. The daemon calls it on shutdown before the database closes. Once replies are
+// done it closes the session, so no edit or delete arrives after the last one it joins.
 func (g *Gateway) Wait(timeout time.Duration) bool {
 	g.workMu.Lock()
 	g.draining = true
@@ -404,6 +390,7 @@ func (g *Gateway) Wait(timeout time.Duration) bool {
 		if drainDone != nil {
 			<-drainDone
 		}
+		g.changes.stopDelivery(g.sess)
 		<-g.changes.done() // a delivered edit or delete is applied or queued before the database closes
 		close(done)
 	}()
@@ -1822,7 +1809,6 @@ func (g *Gateway) toSomeone(m *discordgo.MessageCreate) bool {
 // message-content intent). Discord also sends updates when a link preview loads; only real edits
 // (EditedTimestamp set) change anything.
 func (g *Gateway) onMessageUpdate(s *discordgo.Session, m *discordgo.MessageUpdate) {
-	defer g.changes.enter()() // counted even while draining: Wait joins it (change_handlers.go)
 	defer crash.Recover(g.log, "discord message update")
 	if m.Message == nil || (!g.cfg.MessageContent && m.GuildID != "") || m.EditedTimestamp == nil || (m.Author != nil && m.Author.Bot) {
 		return
@@ -1857,9 +1843,9 @@ const stateMessages = 100
 
 // onMessageDelete and onMessageDeleteBulk remove deleted messages from memory. They run whatever the
 // channel's capture setting is now: a message stored while capture was on is still removed. The server
-// log hears of them first, while the stored message still has its author and text.
+// log hears of them first, while the stored message still has its author and text. Wait counts them, and
+// onMessageUpdate, from the moment DiscordGo hands them over (registerHandlers).
 func (g *Gateway) onMessageDelete(s *discordgo.Session, m *discordgo.MessageDelete) {
-	defer g.changes.enter()() // counted even while draining: Wait joins it (change_handlers.go)
 	defer recoverReconciliationPanic(g.log, "delete handler", nil)
 	if m.Message == nil || m.ID == "" {
 		return
@@ -1902,7 +1888,6 @@ func (g *Gateway) cancelPictureJobs(channelID string, messageIDs []string) {
 }
 
 func (g *Gateway) onMessageDeleteBulk(s *discordgo.Session, m *discordgo.MessageDeleteBulk) {
-	defer g.changes.enter()()
 	defer recoverReconciliationPanic(g.log, "bulk delete handler", nil)
 	if kept := g.interims.withoutInterims(m.Messages); len(kept) != len(m.Messages) {
 		if len(kept) == 0 {
