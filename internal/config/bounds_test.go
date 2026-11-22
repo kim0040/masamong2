@@ -88,6 +88,46 @@ func TestSchemaBoundsEnforced(t *testing.T) {
 	}
 }
 
+// A written 0 is a value, not an absent key: it reaches the declared bound (a candidate is
+// rejected naming the key, a committed document is clamped and reported), while a document that
+// omits the key keeps its default.
+func TestExplicitZeroHitsDeclaredBounds(t *testing.T) {
+	for _, tc := range []struct {
+		doc  string
+		path string
+		get  func(Document) int
+	}{
+		{"memory:\n  index_interval_min: 0\n", "memory.index_interval_min", func(d Document) int { return d.Memory.IndexIntervalMin }},
+		{"backup:\n  keep: 0\n", "backup.keep", func(d Document) int { return d.Backup.Keep }},
+	} {
+		raw := []byte(minimalDoc + tc.doc)
+		if _, err := Parse(raw); err == nil || !strings.Contains(err.Error(), tc.path) {
+			t.Fatalf("%s: an explicit 0 must be rejected naming the key: %v", tc.path, err)
+		}
+		got, problems, err := ParseCommitted(raw)
+		if err != nil {
+			t.Fatalf("%s: a committed document must load: %v", tc.path, err)
+		}
+		if v := tc.get(got); v != 1 {
+			t.Fatalf("%s: the stored 0 must be clamped to 1, got %d", tc.path, v)
+		}
+		if !slices.ContainsFunc(problems, func(p Problem) bool { return p.Path == tc.path }) {
+			t.Fatalf("%s: the clamp must be reported: %v", tc.path, problems)
+		}
+	}
+	// a document that omits both keys still parses and keeps its defaults
+	d, err := Parse([]byte(minimalDoc))
+	if err != nil {
+		t.Fatalf("a document without these keys must parse: %v", err)
+	}
+	if d.Backup != DefaultBackup() || d.Memory.IndexIntervalMin != 0 {
+		t.Fatalf("omitted keys must keep their defaults: %+v %+v", d.Backup, d.Memory)
+	}
+	if _, problems, err := ParseCommitted([]byte(minimalDoc)); err != nil || len(problems) != 0 {
+		t.Fatalf("omitted keys must load clean: %v %v", err, problems)
+	}
+}
+
 // A committed document that passes Parse stays a candidate's equal at every bound edge.
 func TestSchemaBoundsEdgesAccepted(t *testing.T) {
 	cases := map[string]func(*Document, float64){
