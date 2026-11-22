@@ -117,7 +117,7 @@ func TestGivingUpAWarmedQueryStopsIt(t *testing.T) {
 	if took := time.Since(started); took >= 300*time.Millisecond {
 		t.Fatalf("giving up took %v", took)
 	}
-	if _, ok := e.qcache[e.queryKey("취소될 질문")]; ok {
+	if e.queries.has(e.queryKey("취소될 질문")) {
 		t.Fatal("a canceled embedding left a vector")
 	}
 	mu.Lock()

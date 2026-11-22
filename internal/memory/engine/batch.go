@@ -46,8 +46,8 @@ import (
 // it a pass may take adaptMu (the one-time space adaptation), messageWidthMu (message vector width
 // reads and the short-width wait), rateMu (call latency samples) and, in Close, reloadMu. reloadMu
 // serializes index rebuilds and under it the rebuild may take adaptMu and closers.mu (the retired
-// index files). qmu (the query-embedding cache) stands outside this order: it is never held while
-// another engine lock is taken and no engine lock is held while it is taken.
+// index files). queries.mu (the query-embedding cache, querycache.go) stands outside this order: it is
+// never held while another engine lock is taken and no engine lock is held while it is taken.
 
 // BatchClient is the provider batch API the engine uses (internal/providers/openai batch.go). An
 // *openai.Adapter satisfies it; tests use a fake.

@@ -107,11 +107,7 @@ type Engine struct {
 	// rule (keptMessageWidth), once read: 0 none; keptMessageRead marks it read (under messageWidthMu)
 	keptMessageDims int
 	keptMessageRead bool
-	qmu             sync.Mutex
-	qcache          map[string][]float32
-	qorder          []string
-	qflights        map[string]*queryFlight // query embeddings under way (under qmu)
-	qunsaved        map[string]bool         // in qcache, not yet in the database (under qmu)
+	queries         queryCache // query embeddings in memory and under way
 	dirtyRoom       sync.Map
 	// OnDirty, when set, is called once when a captured message queues a room that was not waiting
 	// yet, so the queue can outlive the process (set it before the engine is shared).
@@ -176,7 +172,7 @@ func New(st *store.Store, llm *openai.Adapter, m Models, s Settings) *Engine {
 	if s.HedgeAfter == 0 {
 		s.HedgeAfter = 800 * time.Millisecond
 	}
-	return &Engine{Store: st, LLM: llm, Models: m, Settings: s, qcache: map[string][]float32{}, closers: &indexClosers{timers: map[*time.Timer]func(){}}}
+	return &Engine{Store: st, LLM: llm, Models: m, Settings: s, closers: &indexClosers{timers: map[*time.Timer]func(){}}}
 }
 
 // nowT is the engine's current time for stored and behavioural timestamps; durations use time.Since.
@@ -870,21 +866,11 @@ type queryFlight struct {
 // it would have had alone.
 func (e *Engine) queryVector(ctx context.Context, key, text string) ([]float32, error) {
 	for {
-		e.qmu.Lock()
-		if v, ok := e.qcache[key]; ok {
-			e.qmu.Unlock()
+		v, f, own := e.queries.join(key, errors.New("memory: query embedding did not finish"))
+		if f == nil {
 			return v, nil
 		}
-		f, waiting := e.qflights[key]
-		if !waiting {
-			f = &queryFlight{done: make(chan struct{}), err: errors.New("memory: query embedding did not finish")}
-			if e.qflights == nil {
-				e.qflights = map[string]*queryFlight{}
-			}
-			e.qflights[key] = f
-		}
-		e.qmu.Unlock()
-		if !waiting {
+		if own {
 			return e.flyQuery(ctx, key, text, f)
 		}
 		select {
@@ -903,14 +889,12 @@ func (e *Engine) queryVector(ctx context.Context, key, text string) ([]float32, 
 
 func (e *Engine) flyQuery(ctx context.Context, key, text string, f *queryFlight) ([]float32, error) {
 	defer func() {
-		e.qmu.Lock()
-		delete(e.qflights, key)
-		e.qmu.Unlock()
+		e.queries.land(key)
 		close(f.done)
 	}()
 	if raw, ok := e.Store.CachedVector(key); ok {
 		v := search.DecodeFloat16(raw, nil)
-		e.remember(key, v)
+		e.queries.remember(key, v)
 		f.v, f.err = v, nil
 		return v, nil
 	}
@@ -925,39 +909,16 @@ func (e *Engine) flyQuery(ctx context.Context, key, text string, f *queryFlight)
 	}
 	v = e.fitDims(v)
 	search.Normalize(v)
-	e.qmu.Lock()
-	if e.qunsaved == nil {
-		e.qunsaved = map[string]bool{}
-	}
-	e.qunsaved[key] = true
-	e.qmu.Unlock()
-	e.remember(key, v)
+	e.queries.markUnsaved(key)
+	e.queries.remember(key, v)
 	f.v, f.err = v, nil
 	return v, nil
 }
 
 // keepQuery writes a vector the provider made to the query cache in the database, once.
 func (e *Engine) keepQuery(key string, v []float32) {
-	e.qmu.Lock()
-	unsaved := e.qunsaved[key]
-	delete(e.qunsaved, key)
-	e.qmu.Unlock()
-	if unsaved {
+	if e.queries.takeUnsaved(key) {
 		_ = e.Store.PutQueryVectors(map[string][]byte{key: search.EncodeFloat16(v)})
-	}
-}
-
-func (e *Engine) remember(key string, v []float32) {
-	e.qmu.Lock()
-	defer e.qmu.Unlock()
-	if _, ok := e.qcache[key]; !ok {
-		e.qorder = append(e.qorder, key)
-	}
-	e.qcache[key] = v
-	for len(e.qorder) > 512 {
-		delete(e.qcache, e.qorder[0])
-		delete(e.qunsaved, e.qorder[0])
-		e.qorder = e.qorder[1:]
 	}
 }
 
