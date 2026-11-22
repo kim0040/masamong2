@@ -106,14 +106,18 @@ func disasterGuildAllowed(doc config.Document, guildID string) bool {
 	return guildID == "" || !doc.Access.ApprovalRequired() || slices.Contains(doc.Access.Servers, guildID) || guildConfigured(doc, guildID)
 }
 
+// disasterFeatureOff is whether the features.disasters master switch (setup turns it off on installs
+// outside Korea) is off; an unset switch is on.
+func disasterFeatureOff(doc config.Document) bool {
+	on, set := doc.Features["disasters"]
+	return set && !on
+}
+
 // disasterAlertsOn is whether the bot posts disaster alerts on its own: the instance's alert switch
 // and the features.disasters switch (off on installs outside Korea) must both be on. The watcher and the
 // status Action read it the same way.
 func disasterAlertsOn(doc config.Document) bool {
-	if on, set := doc.Features["disasters"]; set && !on {
-		return false
-	}
-	return doc.DisasterAlerts.On()
+	return !disasterFeatureOff(doc) && doc.DisasterAlerts.On()
 }
 
 // disasterTick is one scheduler minute: earthquakes, and warnings when five minutes have passed.
@@ -743,10 +747,15 @@ func (s *Service) disasterAlertsStatus(req action.Request) action.Result {
 	channels := len(s.disasterChannels(doc))
 	r := s.Registry()
 	reason := ""
+	// the console binds its switches to the stored settings (configured, warnings, marine) and shows
+	// the effective state (enabled) separately: configured-on with the master feature off is not "off"
+	configured := cfg.On()
 	on := disasterAlertsOn(doc)
 	switch {
-	case !on:
+	case !configured:
 		reason = "off"
+	case disasterFeatureOff(doc):
+		reason = "feature_off"
 	case r == nil || r.KMA == nil || !r.KMA.Configured():
 		reason = "no_kma_key"
 	case s.Discord() == nil || !s.Discord().Connected():
@@ -758,7 +767,7 @@ func (s *Service) disasterAlertsStatus(req action.Request) action.Result {
 	if regions == nil {
 		regions = []string{}
 	}
-	return action.OK(req, map[string]any{"enabled": on, "warnings": on && cfg.WarningsOn(), "marine": cfg.Marine,
+	return action.OK(req, map[string]any{"enabled": on, "configured": configured, "warnings": cfg.WarningsOn(), "marine": cfg.Marine,
 		"earthquake_min_domestic": cfg.MinMagnitude(true), "earthquake_min_overseas": cfg.MinMagnitude(false),
 		"warning_regions": regions, "channels": channels, "waiting": reason, "state": st})
 }
