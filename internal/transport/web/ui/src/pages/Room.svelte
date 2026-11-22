@@ -61,6 +61,11 @@
   let form = $state({ respond: 'mention', persona_ref: '', rules: '', capture: false, logging_level: 'ops', memory_use: 'on', disaster_alerts: 'on', watch_level: [] as { region: string; level: string }[] })
   let base = $state('')
   let saving = $state(false)
+  // the configuration revision the saved area levels on screen were read at: the loaded document's,
+  // taken only while it holds the same levels as the room list. An edited map is saved against it, so
+  // levels saved elsewhere meanwhile are a conflict instead of being overwritten.
+  let watchRev = 0
+  const levelsKey = (m: Record<string, number> | undefined) => JSON.stringify(Object.entries(m ?? {}).sort(([a], [b]) => a.localeCompare(b)))
   $effect(() => {
     if (!ch) return
     const watch_level = Object.entries(ch.watch_level ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([region, level]) => ({ region, level: String(level) }))
@@ -70,6 +75,7 @@
       form = f
       base = s
     }
+    if (cfg.loaded && levelsKey(pol.watch_level) === levelsKey(ch.watch_level)) watchRev = cfg.revision
   })
   // the area levels are edited only while alerts reach this room; a hidden draft is dropped, never saved
   const watchShown = $derived(form.disaster_alerts === 'on' && form.respond !== 'off')
@@ -87,12 +93,16 @@
       input.watch_level = Object.fromEntries(entries)
     }
     saving = true
-    const r = await call('channels.configure', input)
+    const r = await call('channels.configure', input, input.watch_level ? { base_revision: watchRev } : {})
     saving = false
     if (r.ok) {
       toast('ok', t('rooms.saved'))
       base = ''
-      await list.refresh()
+      await Promise.all([list.refresh(), loadConfig(true)])
+    } else if (r.error?.code === 'CONFIG_CONFLICT') {
+      // the levels were saved elsewhere since this form read them: show the newest, then save again on purpose
+      await Promise.all([list.refresh(), loadConfig(true)])
+      toast('warn', t('config.conflict_title'), t('config.conflict_body'))
     } else toast('error', t('config.save_failed'), r.error?.message)
   }
 

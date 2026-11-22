@@ -279,6 +279,35 @@ func TestDisasterConfigureWatchLevels(t *testing.T) {
 	}
 }
 
+// The console saves an edited area map against the revision it read the levels at: a save based on an
+// older revision is refused (CONFIG_CONFLICT), while one without a revision, or one that leaves the
+// levels out, keeps working as before.
+func TestDisasterConfigureWatchLevelsRefusesAStaleRevision(t *testing.T) {
+	const area = "L1052100"
+	svc := setupSvc(t)
+	if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "a", "respond": "mention", "watch_level": map[string]int{area: 3}}); !r.OK {
+		t.Fatal(r.Error)
+	}
+	read := svc.Revision()
+	if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "a", "watch_level": map[string]int{area: 2}, "base_revision": read}); !r.OK {
+		t.Fatal(r.Error)
+	}
+	if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "a", "rules": "only rules"}); !r.OK || svc.Doc().Guilds["g1"].Channels["a"].WatchLevel[area] != 2 {
+		t.Fatalf("a save without levels changed them: %+v", r)
+	}
+	stale := map[string]any{"guild_id": "g1", "id": "a", "watch_level": map[string]int{area: 5}, "base_revision": read}
+	if r := exec(svc, "channels.configure", stale); r.OK || r.Error == nil || r.Error.Code != "CONFIG_CONFLICT" {
+		t.Fatalf("a save based on an older revision was not refused: %+v", r)
+	}
+	if got := svc.Doc().Guilds["g1"].Channels["a"].WatchLevel[area]; got != 2 {
+		t.Fatalf("the refused save changed the levels to %d", got)
+	}
+	delete(stale, "base_revision")
+	if r := exec(svc, "channels.configure", stale); !r.OK || svc.Doc().Guilds["g1"].Channels["a"].WatchLevel[area] != 5 {
+		t.Fatalf("a save without a revision: %+v", r)
+	}
+}
+
 func TestDisasterWarningUpgrades(t *testing.T) {
 	svc := setupSvc(t)
 	feed := &kmaFeed{}
