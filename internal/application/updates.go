@@ -13,6 +13,7 @@ import (
 	"masamong/internal/action"
 	"masamong/internal/errcode"
 	"masamong/internal/providers"
+	"masamong/internal/relnotes"
 )
 
 // Update check: once a day the daemon asks GitHub for the newest release and the console says when a
@@ -42,7 +43,16 @@ type updateState struct {
 	// this computer's archive and the release's checksum list, for updates.apply
 	Asset   *updateAsset `json:"asset,omitempty"`
 	SumsURL string       `json:"sums_url,omitempty"`
+	// Notes is the newer release's notes file (release-notes.json, canonical form), when the release
+	// has one that reads as valid notes for that very version; "" otherwise.
+	Notes string `json:"notes,omitempty"`
 }
+
+// updateNotesMax bounds the notes asset: a note is at most a few KB (internal/relnotes limits it).
+const updateNotesMax = 128 << 10
+
+// releaseNotesAsset is the release asset the workflow uploads (the notes of that release, as JSON).
+const releaseNotesAsset = "release-notes.json"
 
 func devBuild(v string) bool { return v == "" || strings.Contains(v, "-dev") }
 
@@ -71,6 +81,7 @@ func (s *Service) checkUpdate(ctx context.Context) updateState {
 	case err != nil:
 		st.Status, st.Error = "error", clip(err.Error(), 200)
 	default:
+		var notesURL string
 		var rel struct {
 			Tag       string `json:"tag_name"`
 			URL       string `json:"html_url"`
@@ -96,7 +107,14 @@ func (s *Service) checkUpdate(ctx context.Context) updateState {
 					st.Asset = &updateAsset{Name: a.Name, URL: a.URL, Size: a.Size}
 				case "SHA256SUMS":
 					st.SumsURL = a.URL
+				case releaseNotesAsset:
+					if a.Size <= updateNotesMax {
+						notesURL = a.URL
+					}
 				}
+			}
+			if notesURL != "" {
+				st.Notes = s.fetchReleaseNotes(ctx, notesURL, rel.Tag)
 			}
 		}
 	}
@@ -177,6 +195,8 @@ func (s *Service) updatesAction(ctx context.Context, req action.Request) action.
 	} else {
 		_, _ = s.kvGet("updates:state", &st)
 	}
+	notes := st.Notes
+	st.Notes = "" // the console reads them below, in its language, not as a JSON string
 	out["state"] = st
 	out["newer"] = st.Status == "ok" && newerVersion(st.Latest, Version)
 	// whether the console can install it, or why the installer is needed instead
@@ -185,9 +205,40 @@ func (s *Service) updatesAction(ctx context.Context, req action.Request) action.
 	} else if out["newer"] == true {
 		out["apply_blocked"] = why
 	}
+	if n, err := relnotes.Parse([]byte(notes)); notes != "" && err == nil && out["newer"] == true {
+		lang := relnotes.Lang(req.Locale)
+		out["latest_notes"] = map[string]any{"version": n.Version, "date": n.Date, "language": lang,
+			"user": n.UserItems(lang), "operator": n.OperatorItems(lang)}
+	}
 	var applied map[string]any
 	if ok, _ := s.kvGet("updates:applied", &applied); ok {
 		out["last_applied"] = applied
 	}
 	return action.OK(req, out)
+}
+
+// fetchReleaseNotes reads the release's notes asset. Anything wrong with it (another address, a
+// failure, a size over the limit, notes that do not validate or name another version) gives "" and
+// the console simply shows no notes: they are an extra, never a reason to fail the check.
+func (s *Service) fetchReleaseNotes(ctx context.Context, url, tag string) string {
+	if !strings.HasPrefix(url, strings.Replace(updateDownloadPrefix, "%s", UpdateRepo, 1)) {
+		return ""
+	}
+	client := providers.NewDownloadClient(15*time.Second, s.Log, updateRedirectHost)
+	client.UserAgent = "masamong/" + Version
+	client.MaxRetries = 0
+	client.MaxBody = updateNotesMax
+	resp, err := client.Get(ctx, url, map[string]string{"Accept": "application/octet-stream"})
+	if err != nil {
+		return ""
+	}
+	n, err := relnotes.Parse(resp.Body)
+	if err != nil || n.Version != "v"+strings.TrimPrefix(tag, "v") {
+		return ""
+	}
+	raw, err := relnotes.Marshal(n)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
 }

@@ -3752,5 +3752,20 @@
   "turns.implicit.correction": "纠正了",
   "turns.implicit.retag": "被忽略的消息后再次@",
   "turns.implicit.thread_declined": "拒绝了帖子提议",
-  "conv.d.thread.skip_backoff": "暂停中：最近的提议被忽略"
+  "conv.d.thread.skip_backoff": "暂停中：最近的提议被忽略",
+  "maint.news.title": "更新内容",
+  "maint.news.desc": "正在运行的版本有哪些变化。",
+  "maint.news.version": "{v} · {date}",
+  "maint.news.operator": "面向运维",
+  "maint.news.user": "聊天成员能感受到的变化",
+  "maint.news.earlier": "查看 {v}",
+  "maint.news.current": "回到正在运行的版本",
+  "maint.news.none": "此版本没有可显示的更新内容：可能是本地构建，或该版本没有记录更新内容。",
+  "room.update_news": "在此发布新版本通知",
+  "room.update_news_hint": "机器人以新版本启动且有这里的人能感受到的变化时，会在此房间发布一张卡片。默认关闭。",
+  "room.update_news_off_respond": "机器人不回复的房间也不会收到更新通知。",
+  "people.news.title": "更新通知（私信）",
+  "people.news.chip": "更新通知",
+  "people.news.turn_off": "关闭",
+  "people.news.off_done": "已关闭私信更新通知"
 }

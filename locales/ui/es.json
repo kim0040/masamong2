@@ -3752,5 +3752,20 @@
   "turns.implicit.correction": "corrigió",
   "turns.implicit.retag": "etiquetó de nuevo tras un mensaje omitido",
   "turns.implicit.thread_declined": "rechazó la oferta de hilo",
-  "conv.d.thread.skip_backoff": "En pausa: las ofertas recientes se ignoraron"
+  "conv.d.thread.skip_backoff": "En pausa: las ofertas recientes se ignoraron",
+  "maint.news.title": "Novedades",
+  "maint.news.desc": "Qué cambió en la versión en ejecución.",
+  "maint.news.version": "{v} · {date}",
+  "maint.news.operator": "Para operadores",
+  "maint.news.user": "Lo que notan los miembros del chat",
+  "maint.news.earlier": "Ver {v}",
+  "maint.news.current": "Volver a la versión en ejecución",
+  "maint.news.none": "No hay novedades que mostrar para esta versión: es una compilación local o no se registraron sus novedades.",
+  "room.update_news": "Publicar novedades de versión aquí",
+  "room.update_news_hint": "Cuando el bot arranca con una versión nueva con cambios que se notan aquí, publica una tarjeta en esta sala. Desactivado por defecto.",
+  "room.update_news_off_respond": "Una sala donde el bot no responde tampoco recibe novedades.",
+  "people.news.title": "Novedades por mensaje privado",
+  "people.news.chip": "Novedades",
+  "people.news.turn_off": "Desactivar",
+  "people.news.off_done": "Novedades por mensaje privado desactivadas"
 }

@@ -3752,5 +3752,20 @@
   "turns.implicit.correction": "訂正した",
   "turns.implicit.retag": "見送られた発言のあと再度メンション",
   "turns.implicit.thread_declined": "スレッドの提案を断った",
-  "conv.d.thread.skip_backoff": "休止中：最近の提案が無視された"
+  "conv.d.thread.skip_backoff": "休止中：最近の提案が無視された",
+  "maint.news.title": "新着情報",
+  "maint.news.desc": "実行中のバージョンの変更内容です。",
+  "maint.news.version": "{v} · {date}",
+  "maint.news.operator": "運用者向け",
+  "maint.news.user": "チャットのメンバーが気づく変更",
+  "maint.news.earlier": "{v} を見る",
+  "maint.news.current": "実行中のバージョンに戻る",
+  "maint.news.none": "このバージョンには表示できる情報がありません。ローカルビルドか、情報が記録されていないバージョンです。",
+  "room.update_news": "新バージョンのお知らせをここに投稿",
+  "room.update_news_hint": "ボットが新しいバージョンで起動し、ここの人が気づく変更があるとき、このルームにカードを1枚投稿します。初期設定はオフです。",
+  "room.update_news_off_respond": "ボットが返信しないルームにはお知らせも投稿しません。",
+  "people.news.title": "更新のお知らせ（DM）",
+  "people.news.chip": "更新のお知らせ",
+  "people.news.turn_off": "オフにする",
+  "people.news.off_done": "更新のお知らせ（DM）をオフにしました"
 }

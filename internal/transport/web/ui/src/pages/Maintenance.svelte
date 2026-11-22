@@ -31,6 +31,9 @@
   const backups = resource<any>('backup.list', () => ({}), { live: ['audit'] })
   const autostart = resource<any>('runtime.autostart', () => ({}))
   const updates = resource<any>('updates.status', () => ({}), { live: ['config'] })
+  // what changed in the running version, for operators and for chat members (updates.notes); "earlier" steps back one version
+  let newsVersion = $state('')
+  const news = resource<any>('updates.notes', () => (newsVersion ? { version: newsVersion } : {}))
   let checkingUpdate = $state(false)
   async function checkUpdate() {
     checkingUpdate = true
@@ -245,6 +248,17 @@
         <div class="callout update"><span class="ic"><I.Sparkles size={16} /></span>
           <div class="stack tight">
             <span><strong>{t('maint.update.newer', { v: updates.data.state.latest })}</strong>{#if updates.data.state?.url} · <a href={updates.data.state.url} target="_blank" rel="noopener noreferrer">{t('maint.update.notes')}</a>{/if}</span>
+            {#if updates.data.latest_notes}
+              {@const ln = updates.data.latest_notes}
+              <div class="stack tight">
+                {#each [['operator', ln.operator], ['user', ln.user]] as [who, items]}
+                  {#if (items ?? []).length}
+                    <span class="xs muted">{t(`maint.news.${who}`)}</span>
+                    <ul class="news-list">{#each items as it}<li class="small break">{it}</li>{/each}</ul>
+                  {/if}
+                {/each}
+              </div>
+            {/if}
             {#if updates.data.can_apply}
               <div class="row"><Button size="sm" variant="primary" icon={I.Download} disabled={!can('updates.apply') || practice.on} onclick={() => (installOpen = true)}>{t('maint.update.install')}</Button></div>
             {:else}
@@ -258,6 +272,27 @@
           {#if updates.data.state?.checked_at}<span class="xs muted">{t('maint.update.checked', { when: relative(updates.data.state.checked_at) })}</span>{/if}</div>
       {/if}
     </div>
+  </Card>
+
+  <Card class="a-news" title={t('maint.news.title')} description={news.data?.found ? t('maint.news.version', { v: news.data.version, date: news.data.date }) : t('maint.news.desc')}>
+    {#if news.data?.found}
+      <div class="stack">
+        {#each [['operator', news.data.operator], ['user', news.data.user]] as [who, items]}
+          {#if (items ?? []).length}
+            <section class="news-sec">
+              <h3 class="small h">{t(`maint.news.${who}`)}</h3>
+              <ul class="news-list">{#each items as it}<li class="small break">{it}</li>{/each}</ul>
+            </section>
+          {/if}
+        {/each}
+        <div class="row">
+          {#if news.data.previous}<Button size="sm" variant="ghost" icon={I.History} onclick={() => (newsVersion = news.data.previous)}>{t('maint.news.earlier', { v: news.data.previous })}</Button>{/if}
+          {#if newsVersion}<Button size="sm" variant="ghost" onclick={() => (newsVersion = '')}>{t('maint.news.current')}</Button>{/if}
+        </div>
+      </div>
+    {:else if news.data}
+      <p class="small muted">{t('maint.news.none')}</p>
+    {/if}
   </Card>
 
   <Card class="a-autostart" title={t('maint.autostart')} description={t('maint.autostart_desc', { tray: tp('platform.tray') })}>
@@ -439,10 +474,11 @@
   @media (min-width: 1000px) {
     .cols {
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      grid-template-areas: 'service autostart' 'storage schedule' 'v1 v1';
+      grid-template-areas: 'service autostart' 'news news' 'storage schedule' 'v1 v1';
     }
     .cols > :global(.a-service) { grid-area: service; }
     .cols > :global(.a-autostart) { grid-area: autostart; }
+    .cols > :global(.a-news) { grid-area: news; }
     .cols > :global(.a-storage) { grid-area: storage; }
     .cols > :global(.a-schedule) { grid-area: schedule; }
     .cols > :global(.a-v1) { grid-area: v1; }
@@ -486,6 +522,20 @@
     display: flex;
     justify-content: space-between;
     gap: var(--s-3);
+  }
+  .news-list {
+    margin: 0;
+    padding-inline-start: 1.2em;
+    display: grid;
+    gap: 4px;
+  }
+  .news-sec {
+    display: grid;
+    gap: var(--s-2);
+  }
+  .news-sec .h {
+    margin: 0;
+    font-weight: 600;
   }
   .callout.update {
     background: var(--accent-soft);
