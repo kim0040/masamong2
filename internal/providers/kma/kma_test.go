@@ -6,24 +6,14 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"masamong/internal/providers"
 	"masamong/internal/providers/decode"
+	"masamong/internal/testutil"
 )
-
-func fixture(t *testing.T, name string) []byte {
-	t.Helper()
-	b, err := os.ReadFile(filepath.Join("testdata", name))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
-}
 
 func f(v float64) *float64 { return &v }
 
@@ -38,7 +28,7 @@ func TestParseCurrentFormats(t *testing.T) {
 		{"ncst_single_item.json", "application/json", "openapi", f(24.3), "unknown"},
 	}
 	for _, c := range cases {
-		obs, err := ParseCurrent(c.ct, fixture(t, c.file))
+		obs, err := ParseCurrent(c.ct, testutil.Fixture(t, c.file))
 		if err != nil {
 			t.Fatalf("%s: %v", c.file, err)
 		}
@@ -55,7 +45,7 @@ func TestParseCurrentFormats(t *testing.T) {
 }
 
 func TestParseCurrentSingleItemReportsMissingCategories(t *testing.T) {
-	obs, err := ParseCurrent("application/json", fixture(t, "ncst_single_item.json"))
+	obs, err := ParseCurrent("application/json", testutil.Fixture(t, "ncst_single_item.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,29 +55,29 @@ func TestParseCurrentSingleItemReportsMissingCategories(t *testing.T) {
 }
 
 func TestParseCurrentNoDataAndErrors(t *testing.T) {
-	if _, err := ParseCurrent("application/json", fixture(t, "ncst_nodata.json")); !errors.Is(err, decode.ErrKMANoData) {
+	if _, err := ParseCurrent("application/json", testutil.Fixture(t, "ncst_nodata.json")); !errors.Is(err, decode.ErrKMANoData) {
 		t.Fatalf("nodata: %v", err)
 	}
-	if _, err := ParseCurrent("application/json", fixture(t, "ncst_empty_items.json")); !errors.Is(err, decode.ErrKMANoData) {
+	if _, err := ParseCurrent("application/json", testutil.Fixture(t, "ncst_empty_items.json")); !errors.Is(err, decode.ErrKMANoData) {
 		t.Fatalf("empty items must be NO_DATA, got %v", err)
 	}
-	if _, err := ParseCurrent("application/json", fixture(t, "error_auth.json")); !errors.Is(err, decode.ErrKMAService) {
+	if _, err := ParseCurrent("application/json", testutil.Fixture(t, "error_auth.json")); !errors.Is(err, decode.ErrKMAService) {
 		t.Fatalf("auth error: %v", err)
 	}
-	if _, err := ParseCurrent("application/json", fixture(t, "error_openapi.json")); !errors.Is(err, decode.ErrKMAService) {
+	if _, err := ParseCurrent("application/json", testutil.Fixture(t, "error_openapi.json")); !errors.Is(err, decode.ErrKMAService) {
 		t.Fatalf("openapi error: %v", err)
 	}
-	if _, err := ParseCurrent("text/html", fixture(t, "error_html.html")); !errors.Is(err, decode.ErrHTMLResponse) {
+	if _, err := ParseCurrent("text/html", testutil.Fixture(t, "error_html.html")); !errors.Is(err, decode.ErrHTMLResponse) {
 		t.Fatalf("html: %v", err)
 	}
 	// Sentinel values must never become numbers.
-	if _, err := ParseCurrent("application/json", fixture(t, "ncst_sentinel.json")); !errors.Is(err, decode.ErrUnexpected) {
+	if _, err := ParseCurrent("application/json", testutil.Fixture(t, "ncst_sentinel.json")); !errors.Is(err, decode.ErrUnexpected) {
 		t.Fatalf("sentinel-only payload must be rejected, got %v", err)
 	}
 }
 
 func TestParseEarthquakes(t *testing.T) {
-	list, err := ParseEarthquakes("application/json", fixture(t, "eqk_openapi.json"))
+	list, err := ParseEarthquakes("application/json", testutil.Fixture(t, "eqk_openapi.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,43 +96,43 @@ func TestParseEarthquakes(t *testing.T) {
 	if list[1].EventTime.Format("1504") != "1210" { // 12-digit tmEqk
 		t.Fatalf("12-digit time %v", list[1].EventTime)
 	}
-	one, err := ParseEarthquakes("text/plain", fixture(t, "eqk_flat_single.json"))
+	one, err := ParseEarthquakes("text/plain", testutil.Fixture(t, "eqk_flat_single.json"))
 	if err != nil || len(one) != 1 || !one[0].Domestic {
 		t.Fatalf("flat single: %v %+v", err, one)
 	}
-	none, err := ParseEarthquakes("application/json", fixture(t, "ncst_nodata.json"))
+	none, err := ParseEarthquakes("application/json", testutil.Fixture(t, "ncst_nodata.json"))
 	if err != nil || none != nil {
 		t.Fatalf("NO_DATA must be empty success: %v %v", err, none)
 	}
 }
 
 func TestParseWarnings(t *testing.T) {
-	rows, err := ParseWarnings(fixture(t, "wrn_now.txt"))
+	rows, err := ParseWarnings(testutil.Fixture(t, "wrn_now.txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rows) != 2 || rows[0].KindName != "폭염" || rows[0].LevelName != "주의보" || rows[1].KindName != "풍랑" || rows[1].LevelName != "경보" {
 		t.Fatalf("csv rows: %+v", rows)
 	}
-	sp, err := ParseWarnings(fixture(t, "wrn_now_space.txt"))
+	sp, err := ParseWarnings(testutil.Fixture(t, "wrn_now_space.txt"))
 	if err != nil || len(sp) != 1 || sp[0].Region != "경북북동산지" {
 		t.Fatalf("space rows: %v %+v", err, sp)
 	}
-	empty, err := ParseWarnings(fixture(t, "wrn_now_empty.txt"))
+	empty, err := ParseWarnings(testutil.Fixture(t, "wrn_now_empty.txt"))
 	if err != nil || len(empty) != 0 {
 		t.Fatalf("empty must be success with zero rows: %v %v", err, empty)
 	}
-	if _, err := ParseWarnings(fixture(t, "wrn_error.txt")); !errors.Is(err, decode.ErrKMATextError) {
+	if _, err := ParseWarnings(testutil.Fixture(t, "wrn_error.txt")); !errors.Is(err, decode.ErrKMATextError) {
 		t.Fatalf("error body: %v", err)
 	}
-	if _, err := ParseWarnings(fixture(t, "error_html.html")); !errors.Is(err, decode.ErrHTMLResponse) {
+	if _, err := ParseWarnings(testutil.Fixture(t, "error_html.html")); !errors.Is(err, decode.ErrHTMLResponse) {
 		t.Fatalf("html: %v", err)
 	}
 }
 
 // disp=1 answers JSON with Korean, space-padded names; an empty array is "no active warnings".
 func TestParseWarningsJSON(t *testing.T) {
-	rows, err := ParseWarnings(fixture(t, "wrn_now.json"))
+	rows, err := ParseWarnings(testutil.Fixture(t, "wrn_now.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,11 +148,11 @@ func TestParseWarningsJSON(t *testing.T) {
 	if r := rows[2]; r.Kind != "K" || r.KindName != "열대야" {
 		t.Fatalf("row 2: %+v", r)
 	}
-	empty, err := ParseWarnings(fixture(t, "wrn_now_empty.json"))
+	empty, err := ParseWarnings(testutil.Fixture(t, "wrn_now_empty.json"))
 	if err != nil || len(empty) != 0 {
 		t.Fatalf("[] must be success with zero rows: %v %v", err, empty)
 	}
-	if _, err := ParseWarnings(fixture(t, "error_auth.json")); !errors.Is(err, decode.ErrUnexpected) {
+	if _, err := ParseWarnings(testutil.Fixture(t, "error_auth.json")); !errors.Is(err, decode.ErrUnexpected) {
 		t.Fatalf("json error object: %v", err)
 	}
 }
@@ -170,7 +160,7 @@ func TestParseWarningsJSON(t *testing.T) {
 func TestRetiredFogWarning(t *testing.T) {
 	for _, body := range []string{
 		`[{"WRN":"안개  ","LVL":"경보"},{"WRN":"강풍","LVL":"주의"}]`,
-		strings.Replace(string(fixture(t, "wrn_now.txt")), ",H,2,", ",F,2,", 1),
+		strings.Replace(string(testutil.Fixture(t, "wrn_now.txt")), ",H,2,", ",F,2,", 1),
 	} {
 		rows, err := ParseWarnings([]byte(body))
 		if err != nil || len(rows) != 1 || (rows[0].Kind != "W" && rows[0].Kind != "V") {
@@ -208,7 +198,7 @@ func TestCurrentLiveRoundTripRedactsKey(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.URL.Query().Get("authKey")
 		w.Header().Set("Content-Type", "text/plain") // API Hub quirk
-		_, _ = w.Write(fixture(t, "ncst_flat.json"))
+		_, _ = w.Write(testutil.Fixture(t, "ncst_flat.json"))
 	}))
 	defer srv.Close()
 	t.Setenv("KMA_TEST_KEY", "secret-123")

@@ -1,11 +1,12 @@
 package lexical
 
 import (
-	"encoding/json"
 	"math"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"masamong/internal/testutil"
 )
 
 // TestSandboxFTS5Parity compares this index with the sandbox's SQLite FTS5 output on real leaves.
@@ -25,8 +26,8 @@ func TestSandboxFTS5Parity(t *testing.T) {
 		DocID   string `json:"doc_id"`
 		Summary string `json:"summary"`
 	}
-	readJSON(t, filepath.Join(data, "leaves.json"), &leaves)
-	readJSON(t, filepath.Join(data, "summaries.json"), &summaries)
+	testutil.LoadJSON(t, filepath.Join(data, "leaves.json"), &leaves)
+	testutil.LoadJSON(t, filepath.Join(data, "summaries.json"), &summaries)
 	var dump struct {
 		Queries []struct {
 			Q       string   `json:"q"`
@@ -34,7 +35,7 @@ func TestSandboxFTS5Parity(t *testing.T) {
 			Summary [][2]any `json:"summary"`
 		} `json:"queries"`
 	}
-	readJSON(t, filepath.Join(dir, "lexical.json"), &dump)
+	testutil.LoadJSON(t, filepath.Join(dir, "lexical.json"), &dump)
 	li, _ := NewIndex(2)
 	si, _ := NewIndex(2)
 	var ld, sd []Doc
@@ -98,15 +99,4 @@ func TestSandboxFTS5Parity(t *testing.T) {
 		hits += len(qq.Leaf) + len(qq.Summary)
 	}
 	t.Logf("queries=%d ranked hits compared=%d tie groups in another order=%d", len(dump.Queries), hits, tied)
-}
-
-func readJSON(t *testing.T, path string, v any) {
-	t.Helper()
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := json.Unmarshal(raw, v); err != nil {
-		t.Fatal(err)
-	}
 }

@@ -5,31 +5,21 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"masamong/internal/providers"
 	"masamong/internal/providers/decode"
+	"masamong/internal/testutil"
 )
 
-func fixture(t *testing.T, name string) []byte {
-	t.Helper()
-	b, err := os.ReadFile(filepath.Join("testdata", name))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
-}
-
 func TestParseGeocode(t *testing.T) {
-	p, err := ParseGeocode("application/json", fixture(t, "geo_tokyo.json"))
+	p, err := ParseGeocode("application/json", testutil.Fixture(t, "geo_tokyo.json"))
 	if err != nil || p.Name != "도쿄" || p.Country != "일본" || p.Timezone != "Asia/Tokyo" || p.Latitude != 35.6895 {
 		t.Fatalf("%+v %v", p, err)
 	}
-	if _, err := ParseGeocode("application/json", fixture(t, "geo_none.json")); !errors.Is(err, ErrNotFound) {
+	if _, err := ParseGeocode("application/json", testutil.Fixture(t, "geo_none.json")); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("no results must be ErrNotFound: %v", err)
 	}
 	if _, err := ParseGeocode("text/html", []byte("<html>busy</html>")); !errors.Is(err, decode.ErrHTMLResponse) {
@@ -78,7 +68,7 @@ func TestGeocodeSearchesEveryLocaleAndChoosesLargestPopulatedMatch(t *testing.T)
 }
 
 func TestParseForecast(t *testing.T) {
-	w, err := ParseForecast("application/json", fixture(t, "forecast_tokyo.json"))
+	w, err := ParseForecast("application/json", testutil.Fixture(t, "forecast_tokyo.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +78,7 @@ func TestParseForecast(t *testing.T) {
 	if w.ObservedAt.Format(time.RFC3339) != "2026-09-24T20:45:00+09:00" {
 		t.Fatalf("local observation time %v", w.ObservedAt)
 	}
-	unknownZone := strings.Replace(string(fixture(t, "forecast_tokyo.json")), `"Asia/Tokyo"`, `"Mars/Olympus"`, 1)
+	unknownZone := strings.Replace(string(testutil.Fixture(t, "forecast_tokyo.json")), `"Asia/Tokyo"`, `"Mars/Olympus"`, 1)
 	// a zone name this build does not know: the forecast is kept and read at the offset the API returns
 	odd, err := ParseForecast("application/json", []byte(unknownZone))
 	if err != nil {
@@ -104,7 +94,7 @@ func TestParseForecast(t *testing.T) {
 	if len(w.Days) != 2 || *w.Days[0].MaxC != 28.6 || w.Days[0].Condition != "drizzle" || w.Days[1].MinC != nil || w.Days[1].Condition != "rain" {
 		t.Fatalf("days %+v", w.Days)
 	}
-	if _, err := ParseForecast("application/json", fixture(t, "error.json")); !errors.Is(err, ErrProvider) {
+	if _, err := ParseForecast("application/json", testutil.Fixture(t, "error.json")); !errors.Is(err, ErrProvider) {
 		t.Fatalf("error body: %v", err)
 	}
 	if _, err := ParseForecast("application/json", []byte(`{"current":{"time":"2026-01-01T00:00"}}`)); !errors.Is(err, decode.ErrUnexpected) {
@@ -124,14 +114,14 @@ func TestLiveRoundTripWithKey(t *testing.T) {
 		switch r.URL.Path {
 		case "/v1/search":
 			gotLangs = append(gotLangs, r.URL.Query().Get("language"))
-			_, _ = w.Write(fixture(t, "geo_tokyo.json"))
+			_, _ = w.Write(testutil.Fixture(t, "geo_tokyo.json"))
 		case "/v1/forecast":
 			if r.URL.Query().Get("latitude") == "999.0000" {
 				w.WriteHeader(400)
-				_, _ = w.Write(fixture(t, "error.json"))
+				_, _ = w.Write(testutil.Fixture(t, "error.json"))
 				return
 			}
-			_, _ = w.Write(fixture(t, "forecast_tokyo.json"))
+			_, _ = w.Write(testutil.Fixture(t, "forecast_tokyo.json"))
 		}
 	}))
 	defer srv.Close()

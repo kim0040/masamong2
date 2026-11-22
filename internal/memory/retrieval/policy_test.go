@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"masamong/internal/testutil"
 )
 
 func f(v float64) *float64 { return &v }
@@ -111,7 +113,7 @@ type contractCase struct {
 
 // The contract file is the single source; Go constants must not drift from it.
 func TestParityWithSandboxContract(t *testing.T) {
-	root := findRepoRoot(t)
+	root := testutil.RepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(root, "contracts", "sandbox", "tool-parity.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -213,24 +215,4 @@ func TestParityWithSandboxContract(t *testing.T) {
 			t.Fatalf("memory_requirement[%d]=%s want %s", i, r.MemoryRequirement[i], s)
 		}
 	}
-}
-
-func findRepoRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < 8; i++ {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	t.Fatal("go.mod not found")
-	return ""
 }
