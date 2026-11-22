@@ -390,7 +390,7 @@ add("rooms.respond_hint", {
     "always": ("방의 모든 메시지를 확인하고 답변 여부를 판단합니다. API 비용이 가장 많이 발생합니다.", "Considers every message. Costs the most."),
     "mention": ("봇을 멘션하거나 이름을 부를 때만 답합니다.", "Answers when mentioned or called by name."),
     "command": ("! 명령과 슬래시 명령에만 반응합니다. 대화 답변은 하지 않습니다.", "Reacts to ! and slash commands only; no conversation."),
-    "off": ("이 방에서는 아무 반응도 하지 않습니다.", "Does nothing in this room."),
+    "off": ("이 방에서는 대화에 답하지 않습니다. ! 명령과 슬래시 명령은 계속 동작합니다.", "Does not answer conversation in this room. ! and slash commands still work."),
 })
 add("room", {
     "desc": ("서버: {guild}", "Server: {guild}"), "test_here": ("이 방으로 테스트", "Test in this room"), "pause": ("이 방 일시 중지", "Pause this room"), "resume": ("이 방 다시 켜기", "Resume this room"),
@@ -705,7 +705,7 @@ add("conn", {
     "discord_enabled": ("Discord 연결 활성화", "Connect to Discord"), "restart_needed": ("설정을 변경하면 서비스를 다시 시작해야 적용됩니다.", "Takes effect after a restart."),
     "token": ("봇 토큰", "Bot token"), "set_token": ("토큰 설정", "Set token"), "prefix": ("! 명령어 접두사", "Command prefix"), "prefix_hint": ("! 대신 사용할 다른 기호를 지정할 수 있습니다.", "Use another symbol instead of !."),
     "slash": ("슬래시 명령어 등록", "Register slash commands"), "slash_hint": ("도구 설정이 변경되면 명령어 목록을 자동으로 동기화합니다.", "The command list re-syncs when tool settings change."),
-    "content_intent": ("메시지 내용 읽기 권한 사용", "Use the message content intent"), "content_intent_hint": ("! 명령어 및 '모든 메시지' 응답 처리에 필요합니다. 개발자 포털에서도 활성화해야 합니다.", "Needed for ! commands and 'every message' mode. Also enable it in the developer portal."),
+    "content_intent": ("메시지 내용 읽기 권한 사용", "Use the message content intent"), "content_intent_hint": ("! 명령어, 이름을 부르는 메시지, '모든 메시지' 응답 처리에 필요합니다. 꺼져 있으면 서버에서는 슬래시(/) 명령에만 답합니다. 개발자 포털에서도 활성화해야 합니다.", "Needed for ! commands, mentions and 'every message' mode. Without it the bot answers slash commands only in servers. Also enable it in the developer portal."),
     "discord_saved": ("Discord 설정을 저장했습니다", "Discord settings saved"), "invite_failed": ("초대 링크를 생성할 수 없습니다", "Unable to build the invite link"),
     "remote": ("원격 접속", "Remote access"), "remote_desc": ("원격 서버에서 실행 중인 마사몽 인스턴스를 로컬 브라우저에서 안전하게 관리합니다.", "Manage Masamong running on a server from this computer's browser."),
     "bind": ("관리 화면 주소", "Console address"), "remote_easy": ("간편 접속", "Easy way"),
@@ -1242,7 +1242,6 @@ add("", {
     "conv.follow.label": ("이어 말하기 방식", "Follow-up mode"),
     "conv.follow.hint": ("봇이 방금 답한 사람이 다시 태그하지 않고 말을 이을 때 봇이 답할지 정합니다. 기본은 꺼짐이지만, \"답했을 상황\"은 꺼져 있어도 기록해 두어 나중에 기본값을 맞추는 데 씁니다.", "Sets whether the bot answers when the person it just answered carries on without tagging it. It is off by default, but the moments it would have answered are recorded even while off, to tune the defaults later."),
     "conv.follow.off": ("끔 (기록만)", "Off (record only)"),
-    "conv.follow.reply_only": ("봇 메시지에 답장한 경우만", "Only replies to the bot's message"),
     "conv.follow.window": ("이어 말하기 창 (점수로 판단)", "Follow-up window (scored)"),
     "conv.follow_window_sec": ("창 유지 시간(초)", "Window length (seconds)"),
     "conv.follow_window_sec.hint": ("봇이 답한 뒤 이 시간 동안은 태그 없는 말도 이어 말로 봅니다. 비우면 90초, 최대 600초입니다.", "After a reply, untagged lines inside this time count as carrying on. Empty means 90 seconds; the most is 600."),
@@ -1295,7 +1294,7 @@ add("", {
     "conv.o.reacted": ("이모지만 남김", "Only an emoji"),
     "conv.banter_title": ("봇 놀림에 받아치기", "Answering back when teased"),
     "conv.banter": ("받아치기", "Banter"),
-    "conv.banter.hint": ("누군가 봇을 두고 장난스럽게 말하면(\"마사몽 또 고장났네 ㅋㅋ\") 가볍게 한 줄이나 이모지로 받아칩니다. 진짜 불만에는 답하지 않고, 한 시간에 한 줄 2번·이모지 4번까지, 👎를 받으면 2시간 동안 한 줄은 쉽니다. 기록만 두면 하지 않고 했을 상황만 남깁니다.", "When someone talks about the bot in fun (\"the bot is broken again lol\"), it answers back with one light line or an emoji. A real complaint gets no answer; at most 2 lines and 4 emoji an hour, and after a 👎 no lines for 2 hours. Record only does nothing and keeps the moments it would have answered."),
+    "conv.banter.hint": ("누군가 봇을 두고 장난스럽게 말하면(\"마사몽 또 고장났네 ㅋㅋ\") 가볍게 한 줄이나 이모지로 받아칩니다. 진짜 불만에는 답하지 않고, 한 시간에 한 줄 2번·이모지 4번까지, 👎를 받으면 2시간 동안 한 줄은 쉽니다. 기록만 두면 하지 않고 했을 상황만 남깁니다. 방의 응답이 '부를 때만'이고 이름만 부른 말 처리가 '봇에게 한 말일 때만'(기본)인 방에서만 동작합니다.", "When someone talks about the bot in fun (\"the bot is broken again lol\"), it answers back with one light line or an emoji. A real complaint gets no answer; at most 2 lines and 4 emoji an hour, and after a 👎 no lines for 2 hours. Record only does nothing and keeps the moments it would have answered. It works only in rooms where replies are 'When mentioned' and the bare-name setting is 'Only when said to the bot' (the default)."),
     "conv.banter.off": ("끔 (기본)", "Off (default)"),
     "conv.banter.shadow": ("기록만", "Record only"),
     "conv.banter.on": ("켬", "On"),
@@ -2084,7 +2083,7 @@ add("conn", {
     "bot_check": ("토큰 확인", "Check token"), "bot_checking": ("Discord에 확인하는 중…", "Asking Discord…"),
     "bot_found": ("{name} 봇 (ID {id})", "Bot {name} (ID {id})"), "bot_none": ("토큰을 저장하면 봇 ID를 자동으로 가져옵니다.", "Save the token and the bot ID is filled in for you."),
     "intent_on": ("메시지 읽기 권한(Message Content)이 개발자 포털에서 켜져 있습니다.", "Message Content is on in the Developer Portal."),
-    "intent_off": ("메시지 읽기 권한(Message Content)이 개발자 포털에서 꺼져 있습니다. 부를 때와 명령어로만 답하고, 대화를 기억하지 못합니다.", "Message Content is off in the Developer Portal: the bot answers mentions and commands only and remembers no conversation."),
+    "intent_off": ("메시지 읽기 권한(Message Content)이 개발자 포털에서 꺼져 있습니다. 서버에서는 슬래시(/) 명령에만 답하고, 서버 대화는 읽지도 기억하지도 않습니다. DM은 영향이 없습니다.", "Message Content is off in the Developer Portal: in servers the bot answers slash commands only and neither reads nor remembers conversation. DMs are not affected."),
     "intent_blocked": ("설정은 메시지 읽기를 쓰는데 개발자 포털에서 꺼져 있어 Discord가 연결을 거부합니다. 포털에서 켜거나 아래 스위치를 끄세요.", "Settings use message content but the Developer Portal has it off, so Discord refuses the connection. Turn it on there or switch it off below."),
     "intent_portal": ("개발자 포털 열기", "Open the Developer Portal"),
 })
