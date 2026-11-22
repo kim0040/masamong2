@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"masamong/internal/action"
@@ -200,5 +201,40 @@ func TestAlertQueuedDuringASendGoesOutNextTick(t *testing.T) {
 	}
 	if got := queuedNs(t, s); len(got) != 0 {
 		t.Fatalf("queue after the second tick = %v", got)
+	}
+}
+
+// queueAlert (called from replies) and alerts.test do not wait while a tick sends (fix plan R03).
+func TestAlertQueueDoesNotWaitForAnAlertSend(t *testing.T) {
+	s, dm := alertQueueService(t)
+	ctx := context.Background()
+	s.alertTick(ctx)
+	dm.take()
+	s.queueAlert(alertMemoryScope, map[string]any{"n": 1})
+	entered, free := make(chan struct{}), make(chan struct{})
+	var first atomic.Bool
+	dm.mu.Lock()
+	dm.onSend = func() {
+		if first.CompareAndSwap(false, true) { // only the tick's send waits
+			close(entered)
+			<-free
+		}
+	}
+	dm.mu.Unlock()
+	ticked := make(chan struct{})
+	go func() { defer close(ticked); s.alertTick(ctx) }()
+	<-entered
+	queued := returnsWhileWaiting(t, "queueAlert", func() { s.queueAlert(alertMemoryScope, map[string]any{"n": 2}) })
+	tested := returnsWhileWaiting(t, "alerts.test", func() {
+		if r := s.Execute(ctx, action.Request{Action: "alerts.test"}); !r.OK {
+			t.Errorf("alerts.test: %+v", r.Error)
+		}
+	})
+	close(free)
+	<-ticked
+	<-queued
+	<-tested
+	if got := queuedNs(t, s); len(got) != 1 || got[0] != 2 {
+		t.Fatalf("queue after the tick = %v, want [2]", got)
 	}
 }
