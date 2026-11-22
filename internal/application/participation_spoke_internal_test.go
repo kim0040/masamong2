@@ -5,6 +5,10 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"masamong/internal/config"
+	"masamong/internal/features/privacy"
+	"masamong/internal/testutil"
 )
 
 // These tests pin what the participation back-off keeps and stores, so the change that moved the store
@@ -101,5 +105,111 @@ func TestPartChannelRestoresTheMuteFromTheLog(t *testing.T) {
 		if got != want || !loaded {
 			t.Fatalf("%s: blocked %q (loaded %v), want %q", channel, got, loaded, want)
 		}
+	}
+}
+
+// A channel's participation decision does not wait while another channel's reads or writes the store
+// (fix plan R03).
+func TestParticipationDecisionsDoNotWaitForTheStore(t *testing.T) {
+	t.Run("spoke write", func(t *testing.T) {
+		s, _ := banterLimitsService(t)
+		s.stillCurrent(spokeCandidate("b"))
+		release := takeWriter(t, s)
+		noted := make(chan struct{})
+		go func() { defer close(noted); s.noteSpoke(spokeCandidate("a"), "msg-1", "turn-1") }()
+		waitsInStore(t, "(*Service).noteSpoke(")
+		other := returnsWhileWaiting(t, "another channel's decision", func() { s.stillCurrent(spokeCandidate("b")) })
+		release()
+		<-noted
+		<-other
+		if g, c, ok := s.persistedPartSpoke("turn-1"); !ok || g != "g" || c != "a" {
+			t.Fatal("the remark's turn was not stored once the store was free")
+		}
+	})
+	t.Run("mute restore", func(t *testing.T) {
+		s, _ := banterLimitsService(t)
+		s.stillCurrent(spokeCandidate("b"))
+		release := holdReaders(t, s)
+		made := make(chan struct{})
+		go func() { defer close(made); s.stillCurrent(spokeCandidate("new")) }()
+		waitsInStore(t, "(*Service).stillCurrent(")
+		other := returnsWhileWaiting(t, "another channel's decision", func() { s.stillCurrent(spokeCandidate("b")) })
+		release()
+		<-made
+		<-other
+		s.part.mu.Lock()
+		loaded := s.part.chans["g:new"].backoffLoaded
+		s.part.mu.Unlock()
+		if !loaded {
+			t.Fatal("the new entry's mute was not read once the store was free")
+		}
+	})
+	t.Run("consent read", func(t *testing.T) {
+		s, clk := banterLimitsService(t)
+		_, drain := ManualParticipationForTest(s)
+		doc := s.Doc()
+		doc.Discord.Enabled = true
+		doc.Participation = config.Participation{Enabled: true, Mode: "conservative"}
+		doc.Guilds = map[string]config.GuildSettings{"g": {Locale: "ko", Channels: map[string]config.ChannelPolicy{
+			"a": {Respond: "mention", Participation: "conservative"}, "b": {Respond: "mention", Participation: "conservative"}}}}
+		s.setDoc(doc, s.Revision())
+		// a person who withdrew memory consent: their message is not counted for the ranking, so the
+		// first store access of Observe is the participation consent check
+		if _, err := s.decideConsent("no-memory", privacy.Memory, privacy.Withdrawn, "test"); err != nil {
+			t.Fatal(err)
+		}
+		// the withdrawal's redaction opens the memory engine under the service's life lock, which Observe
+		// takes first (beginWork): let it finish before the store is held
+		testutil.WaitFor(t, lockScopeWait, "the redaction to finish", func() bool {
+			pending, err := s.redactionPending()
+			return err == nil && !pending && !s.redaction.running.Load()
+		})
+		// load what Observe reads before its lock (the opt-out list, the channel's thread lookup) before
+		// the store is held
+		s.MemoryAllowed("no-memory")
+		s.Observe(ObservedMessage{GuildID: "g", ChannelID: "a", MessageID: "m0", AuthorID: "someone", AuthorName: "y", Content: "안녕", At: clk.t})
+		s.stillCurrent(spokeCandidate("b"))
+		release := takeWriter(t, s)
+		observed := make(chan struct{})
+		go func() {
+			defer close(observed)
+			s.Observe(ObservedMessage{GuildID: "g", ChannelID: "a", MessageID: "m1", AuthorID: "no-memory", AuthorName: "x",
+				Content: "누가 텐트 챙기기로 했지?", At: clk.t})
+		}()
+		waitsInStore(t, "(*Service).Observe(")
+		other := returnsWhileWaiting(t, "another channel's decision", func() { s.watching("g:b") })
+		release()
+		<-observed
+		<-other
+		drain()
+		s.part.mu.Lock()
+		pending := s.part.chans["g:a"].pending != nil
+		s.part.mu.Unlock()
+		if !pending {
+			t.Fatal("the question did not become a candidate once the store was free")
+		}
+	})
+}
+
+// Observe reads whether the author may be counted only when a collected row waited before it took the
+// lock (nil otherwise). A row collected since is newer than the message: it is left for the next one,
+// except that a row whose window ended is settled as silent all the same.
+func TestAdvanceWatchesWithoutTheAuthorsAnswer(t *testing.T) {
+	s, clk := banterLimitsService(t)
+	c := &partChannel{watches: []nextWatch{
+		{row: "open", msg: "src-1", author: "u1", until: clk.t.Add(time.Minute)},
+		{row: "ended", msg: "src-2", author: "u1", until: clk.t.Add(-time.Second)},
+	}}
+	m := ObservedMessage{GuildID: "g", ChannelID: "a", MessageID: "m2", AuthorID: "u1", At: clk.t}
+	done := s.advanceWatches(c, m, nil)
+	if len(done) != 1 || done[0].row != "ended" || done[0].next != "silent" {
+		t.Fatalf("settled %+v, want only the ended row as silent", done)
+	}
+	if len(c.watches) != 1 || c.watches[0].row != "open" {
+		t.Fatalf("kept %+v, want the open row", c.watches)
+	}
+	yes := true
+	if done := s.advanceWatches(c, m, &yes); len(done) != 1 || done[0].next != "continued" {
+		t.Fatalf("with the author counted: %+v, want continued", done)
 	}
 }

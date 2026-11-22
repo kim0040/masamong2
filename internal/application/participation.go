@@ -259,6 +259,8 @@ func (s *Service) partGone(messageID string) bool {
 	return s.part.gone[messageID]
 }
 
+// partChannel returns key's entry, made when missing (the caller holds s.part.mu; memory only). Callers
+// that go on to decide take it with lockPartChannel, which also restores a new entry's mute.
 func (s *Service) partChannel(key string) *partChannel {
 	if s.part.chans == nil {
 		s.part.chans = map[string]*partChannel{}
@@ -270,10 +272,6 @@ func (s *Service) partChannel(key string) *partChannel {
 		s.part.chans[key] = c
 	}
 	c.touched = s.Clock.Now()
-	if !c.backoffLoaded && s.Store != nil {
-		guildID, channelID, _ := strings.Cut(key, ":")
-		c.backoffLoaded = s.restorePartMute(guildID, channelID, c)
-	}
 	return c
 }
 
@@ -314,19 +312,19 @@ func (s *Service) Observe(m ObservedMessage) {
 		ok := s.authorCounted(m)
 		counted = &ok
 	}
-	s.part.mu.Lock()
+	r := s.observeReads(m)
+	c := s.lockPartChannel(key)
 	defer s.part.mu.Unlock()
 	startWork := s.ownedGo
 	if s.part.startWork != nil {
 		startWork = s.part.startWork
 	}
-	c := s.partChannel(key)
 	c.version++
 	c.recent = append(c.recent, partMsg{id: m.MessageID, author: m.AuthorID, name: m.AuthorName, text: clip(m.Content, 400), at: m.At, bot: m.FromBot})
 	if len(c.recent) > 20 {
 		c.recent = c.recent[len(c.recent)-20:]
 	}
-	if mode := s.participationModeOf(m.GuildID, m.ChannelID); mode == "shadow" || mode == "conservative" {
+	if r.mode == "shadow" || r.mode == "conservative" {
 		pack := s.voiceFor(m.GuildID, s.channelPolicy(m.GuildID, m.ChannelID)).Pack
 		if react, logged := s.backoffObserve(c, m, pack); logged != "" {
 			startWork("participation back-off", func(_ context.Context) { s.backoffAfter(m, react, logged) })
@@ -362,24 +360,22 @@ func (s *Service) Observe(m ObservedMessage) {
 	if m.FromBot {
 		return
 	}
-	mode := s.participationModeOf(m.GuildID, m.ChannelID)
+	mode := r.mode
 	if mode == "off" {
 		return
 	}
 	// the bot's name said without calling it, where no name-call check runs (name_call off, or a room that
 	// answers everything); with name_call addressed the check itself records it (nameCallGate)
-	if mode == "collect" && m.BotCall == "name" {
-		if pol := s.channelPolicy(m.GuildID, m.ChannelID); !(pol.Respond == "mention" && pol.NameCall == "addressed") {
-			if why := s.collectSkip(m.GuildID, m.ChannelID, m.AuthorID); why != "" {
-				c.filtered[why]++
-			} else {
-				cand := &partCandidate{key: key, guild: m.GuildID, channel: m.ChannelID, kind: "bot_mentioned", collect: true,
-					msg:      partMsg{id: m.MessageID, author: m.AuthorID, name: m.AuthorName, text: m.Content, at: m.At},
-					features: s.momentFeatures(m.GuildID, m.ChannelID, m.At, m.Content)}
-				startWork("participation mention", func(_ context.Context) {
-					s.logParticipation(cand, "collect", partCollected, "bot_mentioned", 0, "", 0)
-				})
-			}
+	if r.nameSaid {
+		if r.nameSkip != "" {
+			c.filtered[r.nameSkip]++
+		} else {
+			cand := &partCandidate{key: key, guild: m.GuildID, channel: m.ChannelID, kind: "bot_mentioned", collect: true,
+				msg:      partMsg{id: m.MessageID, author: m.AuthorID, name: m.AuthorName, text: m.Content, at: m.At},
+				features: s.momentFeatures(m.GuildID, m.ChannelID, m.At, m.Content)}
+			startWork("participation mention", func(_ context.Context) {
+				s.logParticipation(cand, "collect", partCollected, "bot_mentioned", 0, "", 0)
+			})
 		}
 	}
 	if m.Addressed || m.ToSomeone {
@@ -387,9 +383,7 @@ func (s *Service) Observe(m ObservedMessage) {
 	}
 	doc := s.Doc()
 	loc := s.instanceZone()
-	pack := lang.For(s.voiceFor(m.GuildID, s.channelPolicy(m.GuildID, m.ChannelID)).Pack.Tag, doc.I18n.DefaultLocale)
-	sig := participation.Read(m.Content, m.At, loc, pack.Time)
-	kind := sig.Kind()
+	sig, kind := r.sig, r.sig.Kind()
 	if kind == "" {
 		return
 	}
@@ -400,17 +394,8 @@ func (s *Service) Observe(m ObservedMessage) {
 	switch {
 	case c.pending != nil:
 		reason = "candidate_waiting"
-	case s.BlockedIn(m.GuildID, m.AuthorID):
-		// a server's own block list counts as much as the instance's
-		reason = "blocked"
-	case !s.ConsentAllows(m.AuthorID, privacy.Participation):
-		reason = "opted_out"
-	case s.Paused(m.GuildID, m.ChannelID):
-		reason = "paused"
-	case mode == "collect" && !s.captureOn(m.GuildID, m.ChannelID):
-		reason = "capture_off" // collect only records where the channel's memory capture is on
-	case mode == "collect" && !s.MemoryAllowed(m.AuthorID):
-		reason = "opted_out"
+	case r.filter != "":
+		reason = r.filter // blocked, opted out, paused, capture off: what the store says (observeReads)
 	case mode != "collect" && participation.Quiet(now.In(loc), cfg.QuietStart, cfg.QuietEnd):
 		reason = "quiet_hours" // collect says nothing, so quiet hours do not apply to it
 	case mode != "collect" && backoffBlocked(c, now) != "":
@@ -479,8 +464,10 @@ func (s *Service) considerCandidate(cand *partCandidate) {
 	}
 	defer done()
 	gone := s.BlockedIn(cand.guild, cand.msg.author) || !s.ConsentAllows(cand.msg.author, privacy.Participation) || s.Paused(cand.guild, cand.channel) // may change in the wait; asks the store, so before the lock
-	s.part.mu.Lock()
-	c := s.partChannel(cand.key)
+	// what the channel and the person allow for collecting may have changed during the wait; read for every
+	// mode, since the mode is read under the lock (a switch away from collect during the wait still counts)
+	collectWhy := s.collectSkip(cand.guild, cand.channel, cand.msg.author)
+	c := s.lockPartChannel(cand.key)
 	if c.pending != cand {
 		s.part.mu.Unlock()
 		return
@@ -491,9 +478,8 @@ func (s *Service) considerCandidate(cand *partCandidate) {
 	c.inflight.Add(1)
 	defer c.inflight.Add(-1)
 	if s.participationModeOf(cand.guild, cand.channel) == "collect" {
-		// what the channel and the person allow may have changed during the wait
-		if why := s.collectSkip(cand.guild, cand.channel, cand.msg.author); why != "" {
-			c.filtered[why]++
+		if collectWhy != "" {
+			c.filtered[collectWhy]++
 			s.part.mu.Unlock()
 			return
 		}
@@ -686,16 +672,14 @@ func candTimes(w reminders.When) []time.Time {
 // stillCurrent is the final check: nothing was said in the channel since the candidate, and the channel's
 // entry is the one the candidate was made in (a dropped and made-again entry counts versions anew).
 func (s *Service) stillCurrent(cand *partCandidate) bool {
-	s.part.mu.Lock()
+	c := s.lockPartChannel(cand.key)
 	defer s.part.mu.Unlock()
-	c := s.partChannel(cand.key)
 	return c.gen == cand.gen && c.version == cand.version
 }
 
 func (s *Service) noteSpoken(cand *partCandidate) {
-	s.part.mu.Lock()
+	c := s.lockPartChannel(cand.key)
 	defer s.part.mu.Unlock()
-	c := s.partChannel(cand.key)
 	c.spoken = append(c.spoken, s.Clock.Now())
 	if len(c.spoken) > 50 {
 		c.spoken = c.spoken[len(c.spoken)-50:]
@@ -783,8 +767,7 @@ func (s *Service) collectMention(in ChatInput) {
 		return
 	}
 	if why := s.collectSkip(in.GuildID, in.ChannelID, in.SpeakerID); why != "" {
-		s.part.mu.Lock()
-		s.partChannel(in.GuildID + ":" + in.ChannelID).filtered[why]++
+		s.lockPartChannel(in.GuildID + ":" + in.ChannelID).filtered[why]++
 		s.part.mu.Unlock()
 		return
 	}
@@ -799,8 +782,9 @@ func (s *Service) collectMention(in ChatInput) {
 // source message replied to by someone else, or the same author speaking again. Watches past their window
 // end as silent. It returns the rows to write (the caller holds s.part.mu and writes them after).
 //
-// Whether the author may be counted is the same for every watch, so it is asked once (the caller passes the
-// answer when it read it before taking the lock; nil asks here).
+// Whether the author may be counted is the same for every watch; the caller reads it before taking the lock
+// when rows were waiting. nil means none was waiting then: a row collected since is newer than this message,
+// which settles it only when its window has ended (the store is not asked under the lock).
 func (s *Service) advanceWatches(c *partChannel, m ObservedMessage, counted *bool) []nextResult {
 	if len(c.watches) == 0 || m.FromBot {
 		return nil
@@ -822,14 +806,8 @@ func (s *Service) advanceWatches(c *partChannel, m ObservedMessage, counted *boo
 			next = "continued"
 		}
 		// what a blocked person or one who withdrew did next is not recorded
-		if next != "" && next != "silent" {
-			if counted == nil {
-				ok := s.authorCounted(m)
-				counted = &ok
-			}
-			if !*counted {
-				next = ""
-			}
+		if next != "" && next != "silent" && (counted == nil || !*counted) {
+			next = ""
 		}
 		if next == "" {
 			kept = append(kept, w)
@@ -941,12 +919,11 @@ func partLimitsLive(c *partChannel, now time.Time, window time.Duration) bool {
 // watchNext follows a collected row for what happens next, for a bounded window.
 func (s *Service) watchNext(cand *partCandidate, rowID string) {
 	window := collectNextWindow
-	s.part.mu.Lock()
+	c := s.lockPartChannel(cand.guild + ":" + cand.channel)
 	defer s.part.mu.Unlock()
 	if s.part.nextWindow > 0 {
 		window = s.part.nextWindow
 	}
-	c := s.partChannel(cand.guild + ":" + cand.channel)
 	c.watches = append(c.watches, nextWatch{row: rowID, msg: cand.msg.id, author: cand.msg.author, until: s.Clock.Now().Add(window)})
 	if len(c.watches) > collectWatchCap {
 		c.watches = c.watches[len(c.watches)-collectWatchCap:]
@@ -986,8 +963,7 @@ func (s *Service) logParticipation(cand *partCandidate, mode, state, reason stri
 		// whatever path got here (the wait ending, a cancellation, a mention), what the person and the
 		// channel allow is read again now: consent may have been withdrawn while the moment waited
 		if why := s.collectSkip(cand.guild, cand.channel, cand.msg.author); why != "" {
-			s.part.mu.Lock()
-			s.partChannel(cand.guild + ":" + cand.channel).filtered[why]++
+			s.lockPartChannel(cand.guild + ":" + cand.channel).filtered[why]++
 			s.part.mu.Unlock()
 			return ""
 		}
