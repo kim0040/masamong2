@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"slices"
 	"strconv"
 	"strings"
@@ -1992,7 +1991,7 @@ func (s *Service) logTurn(in ChatInput, res chat.Result) {
 		return indexCopy(tx, "trace", id, keys, false)
 	})
 	if err != nil {
-		s.Log.Debug("trace write failed", slog.String("err", err.Error()))
+		s.warnRecordFailed("trace write failed", err)
 	}
 }
 
