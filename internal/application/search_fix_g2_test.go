@@ -93,7 +93,7 @@ func TestSearchWithoutReportedCostIsRecordedAtListPrice(t *testing.T) {
 		return `{"results":[{"type":"text","name":"L","url":"https://l.example/1","content":"본문"}]}`
 	})
 	svc := setupSvc(t)
-	pointAt(t, svc, "linkup", linkup.srv.URL, "L_KEY", "k")
+	pointAt(t, svc, "linkup", linkup.srv.URL, "L_KEY", "key-k1")
 	g := &chat.Guard{MaxUSD: 1}
 	res := searchWith(svc, g, map[string]any{"query": "캠핑", "depth": "deep"})
 	if !res.OK || res.Output["provider"] != "linkup" {
@@ -113,8 +113,8 @@ func TestSearchWithoutReportedCostIsRecordedAtListPrice(t *testing.T) {
 	empty := newRecorder(t, func(string) string { return emptyLinkup })
 	serper := newRecorder(t, func(string) string { return `{"organic":[{"title":"S","link":"https://s.example/1","snippet":"s"}]}` })
 	svc = setupSvc(t)
-	pointAt(t, svc, "linkup", empty.srv.URL, "L_KEY", "k")
-	pointAt(t, svc, "serper", serper.srv.URL, "S_KEY", "k")
+	pointAt(t, svc, "linkup", empty.srv.URL, "L_KEY", "key-k1")
+	pointAt(t, svc, "serper", serper.srv.URL, "S_KEY", "key-k1")
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"web_search", "order"}, "value": []any{"linkup", "serper"}}}}); !r.OK {
 		t.Fatalf("order: %+v", r.Error)
 	}
@@ -132,8 +132,8 @@ func TestSearchWithoutReportedCostIsRecordedAtListPrice(t *testing.T) {
 	defer bad.Close()
 	tf := newRecorder(t, func(string) string { return `{"results":[{"title":"T","url":"https://t.example/1","snippet":"s"}]}` })
 	svc = setupSvc(t)
-	pointAt(t, svc, "linkup", bad.URL, "L_KEY", "k")
-	pointAt(t, svc, "tinyfish", tf.srv.URL, "TF_KEY", "k")
+	pointAt(t, svc, "linkup", bad.URL, "L_KEY", "key-k1")
+	pointAt(t, svc, "tinyfish", tf.srv.URL, "TF_KEY", "key-k1")
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"web_search", "order"}, "value": []any{"linkup", "tinyfish"}}}}); !r.OK {
 		t.Fatalf("order: %+v", r.Error)
 	}
@@ -151,7 +151,7 @@ func TestSearchWithoutReportedCostIsRecordedAtListPrice(t *testing.T) {
 func TestRewordedQueriesAreRequestsInQuotaAndFee(t *testing.T) {
 	tav := newRecorder(t, tavilyReply)
 	svc := setupSvc(t)
-	pointAt(t, svc, "tavily", tav.srv.URL, "T_KEY", "k")
+	pointAt(t, svc, "tavily", tav.srv.URL, "T_KEY", "key-k1")
 	g := &chat.Guard{MaxUSD: 1}
 	res := searchWith(svc, g, map[string]any{"query": "캠핑 장비", "depth": "deep", "queries": []string{"캠핑 텐트", "캠핑 의자", "캠핑 버너"}})
 	if !res.OK || res.Output["provider"] != "tavily" {
@@ -174,7 +174,7 @@ func TestRewordedQueriesAreRequestsInQuotaAndFee(t *testing.T) {
 	// with only some units left the service sends fewer requests, the main query first
 	tav = newRecorder(t, tavilyReply)
 	svc = setupSvc(t)
-	pointAt(t, svc, "tavily", tav.srv.URL, "T_KEY", "k")
+	pointAt(t, svc, "tavily", tav.srv.URL, "T_KEY", "key-k1")
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"providers", "tavily", "daily_limit"}, "value": 2}}}); !r.OK {
 		t.Fatalf("limit: %+v", r.Error)
 	}
@@ -198,7 +198,7 @@ func TestRewordedQueriesAreRequestsInQuotaAndFee(t *testing.T) {
 		return `{"documents":[{"title":"k","contents":"c","url":"https://k.example/1","datetime":""}],"meta":{}}`
 	})
 	svc = setupSvc(t)
-	pointAt(t, svc, "kakao", kak.srv.URL, "K_KEY", "k")
+	pointAt(t, svc, "kakao", kak.srv.URL, "K_KEY", "key-k1")
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"providers", "kakao", "daily_limit"}, "value": 3}}}); !r.OK {
 		t.Fatalf("limit: %+v", r.Error)
 	}
@@ -233,9 +233,9 @@ func TestSearchHasOneTotalTimeLimit(t *testing.T) {
 	b := hungService(t, 30*time.Second, "")
 	c := hungService(t, 30*time.Second, "")
 	svc := setupSvc(t)
-	pointAt(t, svc, "tavily", a.srv.URL, "T_KEY", "k")
-	pointAt(t, svc, "serper", b.srv.URL, "S_KEY", "k")
-	pointAt(t, svc, "tinyfish", c.srv.URL, "TF_KEY", "k")
+	pointAt(t, svc, "tavily", a.srv.URL, "T_KEY", "key-k1")
+	pointAt(t, svc, "serper", b.srv.URL, "S_KEY", "key-k1")
+	pointAt(t, svc, "tinyfish", c.srv.URL, "TF_KEY", "key-k1")
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"web_search", "order"}, "value": []any{"tavily", "serper", "tinyfish"}}}}); !r.OK {
 		t.Fatalf("order: %+v", r.Error)
 	}
@@ -261,8 +261,8 @@ func TestSearchTimeLimitKeepsAnEmptyAnswer(t *testing.T) {
 	first := hungService(t, 400*time.Millisecond, `{"organic":[]}`)
 	second := hungService(t, 0, `{"organic":[{"title":"B","link":"https://b.example/1","snippet":"s"}]}`)
 	svc := setupSvc(t)
-	pointAt(t, svc, "serper", first.srv.URL, "S_KEY", "k")
-	pointAt(t, svc, "tinyfish", second.srv.URL, "TF_KEY", "k")
+	pointAt(t, svc, "serper", first.srv.URL, "S_KEY", "key-k1")
+	pointAt(t, svc, "tinyfish", second.srv.URL, "TF_KEY", "key-k1")
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"web_search", "order"}, "value": []any{"serper", "tinyfish"}}}}); !r.OK {
 		t.Fatalf("order: %+v", r.Error)
 	}
@@ -277,7 +277,7 @@ func TestProbeHasItsOwnTimeLimit(t *testing.T) {
 	defer application.SetProbeTimeoutForTest(300 * time.Millisecond)()
 	hung := hungService(t, 30*time.Second, "")
 	svc := setupSvc(t)
-	pointAt(t, svc, "tavily", hung.srv.URL, "T_KEY", "k")
+	pointAt(t, svc, "tavily", hung.srv.URL, "T_KEY", "key-k1")
 	started := time.Now()
 	_, err := svc.Registry().Probe(context.Background(), "tavily")
 	if err == nil || time.Since(started) > 3*time.Second {
@@ -384,7 +384,7 @@ func TestKeylessJinaReadsFewPages(t *testing.T) {
 	}))
 	defer jsrv.Close()
 	svc := setupSvc(t)
-	pointAt(t, svc, "serper", serperServer(t, 6, hostOf).URL, "S_KEY", "k")
+	pointAt(t, svc, "serper", serperServer(t, 6, hostOf).URL, "S_KEY", "key-k1")
 	if r := exec(svc, "providers.add", map[string]any{"kind": "jina_reader"}); !r.OK {
 		t.Fatalf("add reader: %+v", r)
 	}
@@ -426,8 +426,8 @@ func TestSearchRequestIsSentOnceAndALostAnswerIsCharged(t *testing.T) {
 	hung := hungService(t, 30*time.Second, "")
 	tf := newRecorder(t, func(string) string { return `{"results":[{"title":"T","url":"https://t.example/1","snippet":"s"}]}` })
 	svc := setupSvc(t)
-	pointAt(t, svc, "linkup", hung.srv.URL, "L_KEY", "k")
-	pointAt(t, svc, "tinyfish", tf.srv.URL, "TF_KEY", "k")
+	pointAt(t, svc, "linkup", hung.srv.URL, "L_KEY", "key-k1")
+	pointAt(t, svc, "tinyfish", tf.srv.URL, "TF_KEY", "key-k1")
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"web_search", "order"}, "value": []any{"linkup", "tinyfish"}}}}); !r.OK {
 		t.Fatalf("order: %+v", r.Error)
 	}
@@ -446,8 +446,8 @@ func TestSearchRequestIsSentOnceAndALostAnswerIsCharged(t *testing.T) {
 	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { hits.Add(1); w.WriteHeader(502) }))
 	defer bad.Close()
 	svc = setupSvc(t)
-	pointAt(t, svc, "linkup", bad.URL, "L_KEY", "k")
-	pointAt(t, svc, "tinyfish", tf.srv.URL, "TF_KEY", "k")
+	pointAt(t, svc, "linkup", bad.URL, "L_KEY", "key-k1")
+	pointAt(t, svc, "tinyfish", tf.srv.URL, "TF_KEY", "key-k1")
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"web_search", "order"}, "value": []any{"linkup", "tinyfish"}}}}); !r.OK {
 		t.Fatalf("order: %+v", r.Error)
 	}
@@ -466,8 +466,8 @@ func TestSearchRequestIsSentOnceAndALostAnswerIsCharged(t *testing.T) {
 	}))
 	defer odd.Close()
 	svc = setupSvc(t)
-	pointAt(t, svc, "linkup", odd.URL, "L_KEY", "k")
-	pointAt(t, svc, "tinyfish", tf.srv.URL, "TF_KEY", "k")
+	pointAt(t, svc, "linkup", odd.URL, "L_KEY", "key-k1")
+	pointAt(t, svc, "tinyfish", tf.srv.URL, "TF_KEY", "key-k1")
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"web_search", "order"}, "value": []any{"linkup", "tinyfish"}}}}); !r.OK {
 		t.Fatalf("order: %+v", r.Error)
 	}
@@ -493,7 +493,7 @@ func TestSearchAsksWithoutTheBotsNameAndForPapers(t *testing.T) {
 	}))
 	defer tf.Close()
 	svc := setupSvc(t)
-	pointAt(t, svc, "tinyfish", tf.URL, "TF_KEY", "k")
+	pointAt(t, svc, "tinyfish", tf.URL, "TF_KEY", "key-k1")
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"web_search", "order"}, "value": []any{"tinyfish"}}}}); !r.OK {
 		t.Fatalf("order: %+v", r.Error)
 	}
@@ -527,8 +527,8 @@ func TestResearchSearchAsksTheServicesWithPapersFirst(t *testing.T) {
 	}))
 	defer tinyfish.Close()
 	svc := setupSvc(t)
-	pointAt(t, svc, "tavily", tavily.URL, "T_KEY", "k")
-	pointAt(t, svc, "tinyfish", tinyfish.URL, "TF_KEY", "k")
+	pointAt(t, svc, "tavily", tavily.URL, "T_KEY", "key-k1")
+	pointAt(t, svc, "tinyfish", tinyfish.URL, "TF_KEY", "key-k1")
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"web_search", "order"}, "value": []any{"tavily", "tinyfish"}}}}); !r.OK {
 		t.Fatalf("order: %+v", r.Error)
 	}
