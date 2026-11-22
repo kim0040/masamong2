@@ -209,6 +209,7 @@ type Service struct {
 	credit      creditCache                   // OpenRouter keys' own spending limits (credit.go)
 	caps        capsState                     // the providers' capability caches (model_caps.go)
 	priceLists  priceState                    // the providers' price lists (pricing.go)
+	optOutIDs   optOutCache                   // who withdrew consent to being remembered (privacy.go)
 	// leftovers are files of a finished restore or an interrupted backup that could not be removed
 	// (CleanDataLeftovers); doctor lists them and the scheduler retries.
 	leftovers atomic.Pointer[[]string]
@@ -386,7 +387,7 @@ func (s *Service) Close() error {
 			r.entries = nil
 			r.mu.Unlock()
 		}
-		for _, m := range []*sync.Map{&memoryOptOuts, &lifecycles, &summaryRevs, &toolUsages} {
+		for _, m := range []*sync.Map{&lifecycles, &summaryRevs, &toolUsages} {
 			m.Delete(s)
 		}
 		s.mu.Lock()

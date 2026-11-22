@@ -50,4 +50,14 @@ func TestTwoServicesKeepTheirOwnState(t *testing.T) {
 			t.Fatal("a price list of one service shows up in the other")
 		}
 	})
+
+	t.Run("consent cache", func(t *testing.T) {
+		c := a.optOuts()
+		c.mu.Lock()
+		c.loaded, c.ids = true, map[string]bool{"100000000000000001": true}
+		c.mu.Unlock()
+		if b.optOuts() == c || b.optOuts().ids["100000000000000001"] {
+			t.Fatal("one service's withdrawn people show up in the other")
+		}
+	})
 }
