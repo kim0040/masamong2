@@ -1,6 +1,7 @@
 # The test gate. It runs in two sizes so a push gets a quick answer:
-#   push / pull request -> the quick gate: go vet + go test (+ noweb), and the console check only when the
-#                          console or its strings changed, the license audit only when dependencies changed.
+#   push / pull request -> the quick gate: go vet + go test (+ noweb), the sandbox-vs-Go parity check (make parity),
+#                          and the console check only when the console or its strings changed, the license audit
+#                          only when dependencies changed.
 #                          Windows and macOS verification run on every push/PR; a newer push cancels the older run.
 #   weekly, Run workflow, release -> the full gate: also the race detector, the 45 s load test, the large-input
 #                          perf tests (MASAMONG_PERF_TESTS=1; MASAMONG_PERF is the host tier), every release platform's build and the license audit.
@@ -73,6 +74,22 @@ jobs:
             echo "== $t"
             CGO_ENABLED=0 GOOS=${t%/*} GOARCH=${t#*/} GOARM=7 go build -o /dev/null ./cmd/masamong ./cmd/masamongd
           done
+
+  # The Python sandbox against the Go port on a made-up corpus (make parity): leaves, full-text ranking and
+  # retrieval, the time-range, person and recent cases included. No stored chat, no keys; takes seconds.
+  parity:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install numpy
+      - run: make parity
 
   windows:
     runs-on: windows-latest
