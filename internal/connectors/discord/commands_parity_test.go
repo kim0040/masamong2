@@ -5,10 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"masamong/internal/testutil"
 )
 
 func TestBangAliasesMatchSandboxParity(t *testing.T) {
-	root := findRepoRoot(t)
+	root := testutil.RepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(root, "contracts", "sandbox", "tool-parity.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -73,30 +75,10 @@ func TestBangAliasesMatchSandboxParity(t *testing.T) {
 	}
 }
 
-func findRepoRoot(t *testing.T) string {
-	t.Helper()
-	dir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := 0; i < 8; i++ {
-		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	t.Fatal("go.mod not found")
-	return ""
-}
-
 // Reverse direction: every sandbox `!` alias in the contract must be a Discord alias for the same
 // Action, so anything a tester types in the sandbox works the same way on the real bot.
 func TestSandboxBangAliasesExistOnDiscord(t *testing.T) {
-	root := findRepoRoot(t)
+	root := testutil.RepoRoot(t)
 	raw, err := os.ReadFile(filepath.Join(root, "contracts", "sandbox", "tool-parity.json"))
 	if err != nil {
 		t.Fatal(err)

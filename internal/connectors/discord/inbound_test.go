@@ -16,6 +16,7 @@ import (
 	"masamong/internal/action"
 	"masamong/internal/application"
 	"masamong/internal/config"
+	"masamong/internal/testutil"
 )
 
 func TestBodyOfForwardsAndStickers(t *testing.T) {
@@ -359,16 +360,6 @@ func awaitTurn(t *testing.T, tr *turns) {
 	}
 }
 
-func waitFor(t *testing.T, d time.Duration, ok func() bool) {
-	t.Helper()
-	for end := time.Now().Add(d); time.Now().Before(end); time.Sleep(20 * time.Millisecond) {
-		if ok() {
-			return
-		}
-	}
-	t.Fatal("condition not reached in time")
-}
-
 // The merger must hold nothing for a request that left without firing.
 func mergerIsEmpty(g *Gateway) bool {
 	g.merge.mu.Lock()
@@ -431,7 +422,7 @@ func TestStopWordClearsTheFollowMarksOfThePendingRequest(t *testing.T) {
 	g.merge.add(&discordgo.MessageCreate{Message: &discordgo.Message{ID: "follow-stop", GuildID: "g", ChannelID: "c", Content: "carrying on", Author: &discordgo.User{ID: "u"}}}, false)
 	g.onMessage(nil, mention("stop-follow", "u", "그만"))
 	// a stop word that was not recognised would sit in the merger as a request of its own
-	waitFor(t, 5*time.Second, func() bool { return mergerIsEmpty(g) })
+	testutil.WaitFor(t, 5*time.Second, "the merger to empty", func() bool { return mergerIsEmpty(g) })
 	if followMark(g, "follow-stop") || !mergerIsEmpty(g) || len(tr.list()) != 0 {
 		t.Fatalf("follow mark %v, merger empty %v, turns %q", followMark(g, "follow-stop"), mergerIsEmpty(g), tr.list())
 	}
@@ -505,7 +496,7 @@ func TestPendingMessageChangesRaceWithFlush(t *testing.T) {
 		wg.Wait()
 	}
 	// every request has conclusively ended: it either fired or was forgotten by a delete
-	waitFor(t, 8*time.Second, func() bool {
+	testutil.WaitFor(t, 8*time.Second, "every request to fire or be forgotten", func() bool {
 		mu.Lock()
 		defer mu.Unlock()
 		return fires+forgotten >= rounds
