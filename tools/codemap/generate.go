@@ -170,8 +170,9 @@ func receiverName(fd *ast.FuncDecl) string {
 	return fd.Recv.List[0].Names[0].Name
 }
 
-// collectSites finds the package's dispatch sites for catalog Actions: the case clauses of a
-// switch on the request's Action and the map entries keyed by an Action ID. A site counts only
+// collectSites finds the package's dispatch sites for catalog Actions: the register calls of the
+// Action handler table, the case clauses of a switch on the request's Action and the map entries
+// keyed by an Action ID. A site counts only
 // inside a function returning action.Result — the switches on req.Action in a guard, audit or
 // predicate (gateDiscord, audit, readForm) never handle the request, and a package-level table
 // like practiceBlocked is data, not dispatch.
@@ -209,6 +210,28 @@ func collectSites(idx *pkgIndex, ids map[string]bool) map[string][]*dispatchSite
 				for _, expr := range x.List {
 					if v, ok := match(expr); ok {
 						out[v] = append(out[v], &dispatchSite{id: v, file: pf, enc: enc, encFn: encFn, body: x.Body, pos: expr.Pos()})
+					}
+				}
+			case *ast.CallExpr:
+				// the Action handler table: register(handler, "id", ...) inside the table builder, where
+				// the handler is a method reference like (*Service).images, maybe wrapped in plainHandler.
+				fn, ok := x.Fun.(*ast.Ident)
+				if !ok || fn.Name != "register" || len(x.Args) < 2 {
+					break
+				}
+				enc, encFn := idx.enclosing(stack)
+				if encFn == nil {
+					break
+				}
+				h := x.Args[0]
+				if w, ok := h.(*ast.CallExpr); ok && len(w.Args) == 1 {
+					if wid, ok := w.Fun.(*ast.Ident); ok && wid.Name == "plainHandler" {
+						h = w.Args[0]
+					}
+				}
+				for _, a := range x.Args[1:] {
+					if v, ok := match(a); ok {
+						out[v] = append(out[v], &dispatchSite{id: v, file: pf, enc: enc, encFn: encFn, value: h, pos: a.Pos()})
 					}
 				}
 			case *ast.KeyValueExpr:
