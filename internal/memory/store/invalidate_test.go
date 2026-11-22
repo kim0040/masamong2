@@ -45,7 +45,7 @@ func TestInvalidateLeavesFindsExactlyTheLeavesHoldingTheMessages(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := invalidateLeaves(tx, ids...); err != nil {
+		if err := st.invalidateLeaves(tx, ids...); err != nil {
 			t.Fatal(err)
 		}
 		if err := tx.Commit(); err != nil {

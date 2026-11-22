@@ -13,7 +13,7 @@ func TestRunRetentionPrunesFinishedJobsAndKeepsLatestPreparePerRoom(t *testing.T
 	insert := func(id, typ, status, payload, created string) {
 		t.Helper()
 		j := jobs.Job{ID: id, Type: typ, Status: jobs.Status(status), Payload: payload}
-		if err := insertJob(s.Store, j); err != nil {
+		if err := s.insertJob(j); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := s.Store.DB.Exec(`UPDATE jobs SET created_at=?, updated_at=? WHERE id=?`, created, created, id); err != nil {

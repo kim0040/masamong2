@@ -452,14 +452,14 @@ func (s *Store) syncLeavesFrom(room string, r leaves.Recipe, nowT time.Time, nai
 					st.New++
 					if _, err := tx.Exec(`INSERT INTO memory_leaves(leaf_id, room, recipe, first_observation_id, observation_ids, n, body, body_hash, speakers,
 						end_time, closed, summary, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-						id, room, r.Version(), l.ObservationIDs[0], string(ids), l.N, l.Body, h, string(sp), last.ParsedTime, b2i(closed), "", now()); err != nil {
+						id, room, r.Version(), l.ObservationIDs[0], string(ids), l.N, l.Body, h, string(sp), last.ParsedTime, b2i(closed), "", s.now()); err != nil {
 						return err
 					}
 				case old != h:
 					st.Changed++
 					if _, err := tx.Exec(`UPDATE memory_leaves SET observation_ids=?, n=?, body=?, body_hash=?, speakers=?, end_time=?, closed=?,
 						summary='', leaf_vec=NULL, summary_vec=NULL, updated_at=? WHERE leaf_id=?`,
-						string(ids), l.N, l.Body, h, string(sp), last.ParsedTime, b2i(closed), now(), id); err != nil {
+						string(ids), l.N, l.Body, h, string(sp), last.ParsedTime, b2i(closed), s.now(), id); err != nil {
 						return err
 					}
 				default:

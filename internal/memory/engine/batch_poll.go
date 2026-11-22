@@ -243,7 +243,7 @@ func (g *BatchGroup) deadline(created time.Time) time.Time {
 // gone, or that another host's adapter would have to read, ends the round with ErrBatchProviderGone.
 func (e *Engine) pollPlan(ctx context.Context, plan *BatchPlan) (bool, error) {
 	open := false
-	now := time.Now()
+	now := e.nowT()
 	for i := range plan.Groups {
 		g := &plan.Groups[i]
 		if g.Applied || g.State.Final() || g.Submit != "" {

@@ -70,7 +70,7 @@ func (s *Store) bumpRoomRevision(ctx context.Context, tx *sql.Tx, room string, i
 	// Captures can reuse all existing evidence while an open tail waits. Edits,
 	// deletions and replacement rooms invalidate snapshots older than this guard.
 	_, err := tx.ExecContext(ctx, `UPDATE memory_rooms SET revision=?,updated_at=?,pending_sync=1,
-		evidence_revision=CASE WHEN ? OR evidence_revision<0 THEN ? ELSE evidence_revision END WHERE room=?`, revision, now(), invalidate, revision, room)
+		evidence_revision=CASE WHEN ? OR evidence_revision<0 THEN ? ELSE evidence_revision END WHERE room=?`, revision, s.now(), invalidate, revision, room)
 	return revision, err
 }
 

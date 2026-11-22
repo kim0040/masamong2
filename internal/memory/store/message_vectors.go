@@ -350,7 +350,7 @@ func (s *Store) saveMessageVectorsTx(tx *sql.Tx, items []MessageVector) (int, er
 			q = `INSERT INTO memory_message_vectors(observation_id, room, embed_space, text_hash, label, fmt, vec, updated_at) VALUES(?,?,?,?,?,?,?,?)
 				ON DUPLICATE KEY UPDATE room=VALUES(room), embed_space=VALUES(embed_space), text_hash=VALUES(text_hash), label=VALUES(label), fmt=VALUES(fmt), vec=VALUES(vec), updated_at=VALUES(updated_at)`
 		}
-		if _, err := tx.Exec(q, it.ObservationID, room, it.Space, it.TextHash, label, MessageFormatInt8, it.Vec, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		if _, err := tx.Exec(q, it.ObservationID, room, it.Space, it.TextHash, label, MessageFormatInt8, it.Vec, s.nowT().UTC().Format(time.RFC3339Nano)); err != nil {
 			return 0, err
 		}
 		saved++

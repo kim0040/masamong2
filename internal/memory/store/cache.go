@@ -32,7 +32,7 @@ func (s *Store) putCached(items map[string][]byte, kind string) error {
 			q = `INSERT IGNORE INTO memory_embed_cache(cache_key, vec, created_at, kind) VALUES(?,?,?,?)`
 		}
 		for k, v := range items {
-			_, err := s.DB.DB.Exec(q, k, v, now(), kind)
+			_, err := s.DB.DB.Exec(q, k, v, s.now(), kind)
 			return err
 		}
 	}
@@ -52,7 +52,7 @@ func (s *Store) putCachedTx(tx *sql.Tx, items map[string][]byte, kind string) er
 		return err
 	}
 	defer stmt.Close()
-	ts := now()
+	ts := s.now()
 	for k, v := range items {
 		if _, err := stmt.Exec(k, v, ts, kind); err != nil {
 			return err

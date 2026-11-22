@@ -407,7 +407,7 @@ func (s *Store) AppendDecidedChatTurns(channelKey string, decide func() []ChatTu
 						continue
 					}
 				}
-				result, err := tx.Exec(`INSERT INTO chat_turns(channel_key,role,speaker,content,created_at,spoken_at,native_id,speaker_id,delivery_turn,delivery_spans,call_address,evidence_state) VALUES(?,?,?,?,?,?,?,?,?,?,?,1)`, channelKey, t.Role, t.Speaker, t.Content, now(), t.SpokenAt, t.NativeID, t.SpeakerID, t.DeliveryTurn, t.DeliverySpans, t.CallAddress)
+				result, err := tx.Exec(`INSERT INTO chat_turns(channel_key,role,speaker,content,created_at,spoken_at,native_id,speaker_id,delivery_turn,delivery_spans,call_address,evidence_state) VALUES(?,?,?,?,?,?,?,?,?,?,?,1)`, channelKey, t.Role, t.Speaker, t.Content, s.now(), t.SpokenAt, t.NativeID, t.SpeakerID, t.DeliveryTurn, t.DeliverySpans, t.CallAddress)
 				if err != nil {
 					return err
 				}

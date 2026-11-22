@@ -945,7 +945,7 @@ func (s *Service) finishJob(id, token string, attempt int, result map[string]any
 			cur.Result = string(raw)
 			// only while it is still this attempt's cancel: a retry made in between must not be turned
 			// back, nor a later attempt's cancelled result overwritten
-			if saveRunJob(s.Store, cur, cur.LeaseToken, jobs.Cancelled, attempt) == nil {
+			if s.saveRunJob(cur, cur.LeaseToken, jobs.Cancelled, attempt) == nil {
 				s.jobChanged(cur)
 			}
 		}
@@ -959,7 +959,7 @@ func (s *Service) finishJob(id, token string, attempt int, result map[string]any
 	if runErr == nil {
 		j, err := jobs.Complete(cur, token, s.Clock.Now(), string(raw))
 		if err == nil {
-			err = saveRunJob(s.Store, j, token, "", attempt)
+			err = s.saveRunJob(j, token, "", attempt)
 		}
 		if err != nil {
 			s.Log.Warn("job completion not saved", "id", id, "err", err)
@@ -979,7 +979,7 @@ func (s *Service) finishJob(id, token string, attempt int, result map[string]any
 	result["error"] = clip(runErr.Error(), 300)
 	raw, _ = json.Marshal(result)
 	j.Result = string(raw)
-	if err := saveRunJob(s.Store, j, token, "", attempt); err == nil {
+	if err := s.saveRunJob(j, token, "", attempt); err == nil {
 		s.jobChanged(j)
 	}
 }
@@ -1026,14 +1026,14 @@ func (s *Service) ResumeJobs(ctx context.Context) {
 			j.Result = `{"stopped_by":"interrupted"}`
 			if planned {
 				// a new attempt: the dead run's lease is gone, and the batches are polled, not sent again
-				if again, err := jobs.Retry(j); err == nil && saveJob(s.Store, again, prev) == nil {
+				if again, err := jobs.Retry(j); err == nil && s.saveJob(again, prev) == nil {
 					owned[p.SourceRoom] = true
 					s.jobChanged(again)
 					s.goJob(again.ID)
 				}
 				continue
 			}
-			if saveJob(s.Store, j, prev) == nil {
+			if s.saveJob(j, prev) == nil {
 				s.jobChanged(j)
 			}
 		case jobs.Pending:
@@ -1056,7 +1056,7 @@ func (s *Service) ResumeJobs(ctx context.Context) {
 		}
 		// a plan whose job ended without finishing it: resume it, or the room would stay held
 		if j, ok := latest[room]; ok && j.Status == jobs.Failed {
-			if again, err := jobs.Retry(j); err == nil && saveJob(s.Store, again, j.LeaseToken) == nil {
+			if again, err := jobs.Retry(j); err == nil && s.saveJob(again, j.LeaseToken) == nil {
 				s.jobChanged(again)
 				s.goJob(again.ID)
 				continue

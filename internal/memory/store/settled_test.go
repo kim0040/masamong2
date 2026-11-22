@@ -70,12 +70,20 @@ func TestASettledSourceExcusesOnlyLaterTurns(t *testing.T) {
 
 // Every later tombstone of the source, by any writer, takes the excuse back.
 func TestALaterTombstoneUndoesASettledSource(t *testing.T) {
-	writers := map[string]func(tx *sql.Tx, id string) error{
-		"source":  func(tx *sql.Tx, id string) error { return Tombstone(tx, "source", id, "2020-01-01T00:00:00Z") },
-		"message": func(tx *sql.Tx, id string) error { return Tombstone(tx, "message", id, "2020-01-01T00:00:00Z") },
-		"erased":  func(tx *sql.Tx, id string) error { return Tombstone(tx, "erased", id, "2020-01-01T00:00:00Z") },
-		"lineage": func(tx *sql.Tx, id string) error { return TombstoneSources(tx, []string{id}, "2020-01-01T00:00:00Z") },
-		"leaves":  func(tx *sql.Tx, id string) error { return invalidateLeaves(tx, id) },
+	writers := map[string]func(st *Store, tx *sql.Tx, id string) error{
+		"source": func(_ *Store, tx *sql.Tx, id string) error {
+			return Tombstone(tx, "source", id, "2020-01-01T00:00:00Z")
+		},
+		"message": func(_ *Store, tx *sql.Tx, id string) error {
+			return Tombstone(tx, "message", id, "2020-01-01T00:00:00Z")
+		},
+		"erased": func(_ *Store, tx *sql.Tx, id string) error {
+			return Tombstone(tx, "erased", id, "2020-01-01T00:00:00Z")
+		},
+		"lineage": func(_ *Store, tx *sql.Tx, id string) error {
+			return TombstoneSources(tx, []string{id}, "2020-01-01T00:00:00Z")
+		},
+		"leaves": func(st *Store, tx *sql.Tx, id string) error { return st.invalidateLeaves(tx, id) },
 	}
 	for name, write := range writers {
 		t.Run(name, func(t *testing.T) {
@@ -87,7 +95,7 @@ func TestALaterTombstoneUndoesASettledSource(t *testing.T) {
 				t.Fatal("the settled source blocks")
 			}
 			// older than what is there: the row's time does not move, the source has changed all the same
-			if err := st.DB.WithWriter(func(tx *sql.Tx) error { return write(tx, "m") }); err != nil {
+			if err := st.DB.WithWriter(func(tx *sql.Tx) error { return write(st, tx, "m") }); err != nil {
 				t.Fatal(err)
 			}
 			if !blockedAsOf(t, st, mark, "m") {

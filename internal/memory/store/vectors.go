@@ -162,7 +162,7 @@ func (s *Store) saveLeafVectorTx(tx *sql.Tx, id, space string, vec []byte, expec
 		}
 		oldSum = nil
 	}
-	if _, err = tx.Exec(`UPDATE memory_leaves SET leaf_vec=?, summary_vec=?, embed_space=?, updated_at=? WHERE leaf_id=?`, vec, oldSum, space, now(), id); err != nil {
+	if _, err = tx.Exec(`UPDATE memory_leaves SET leaf_vec=?, summary_vec=?, embed_space=?, updated_at=? WHERE leaf_id=?`, vec, oldSum, space, s.now(), id); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -227,7 +227,7 @@ func (s *Store) ShrinkSpace(from, to string, shrink func([]byte) []byte) (int, e
 		err = s.DB.WithWriter(func(tx *sql.Tx) error {
 			for _, u := range batch {
 				if _, err := tx.Exec(`UPDATE memory_leaves SET leaf_vec=?, summary_vec=?, embed_space=?, updated_at=? WHERE leaf_id=? AND embed_space=?`,
-					u.leaf, u.sm, to, now(), u.id, from); err != nil {
+					u.leaf, u.sm, to, s.now(), u.id, from); err != nil {
 					return err
 				}
 			}
@@ -261,18 +261,18 @@ func (s *Store) Spaces() ([]string, error) {
 // SaveSummary stores a summary and (optionally) its vector.
 func (s *Store) SaveSummary(id, summary string, vec []byte, expectedBody ...string) error {
 	return s.DB.WithWriter(func(tx *sql.Tx) error {
-		_, err := saveSummaryTx(tx, id, summary, vec, expectedBody)
+		_, err := s.saveSummaryTx(tx, id, summary, vec, expectedBody)
 		return err
 	})
 }
 
 // saveSummaryTx is SaveSummary in tx; written is false when the leaf is gone or its text changed.
-func saveSummaryTx(tx *sql.Tx, id, summary string, vec []byte, expectedBody []string) (written bool, err error) {
+func (s *Store) saveSummaryTx(tx *sql.Tx, id, summary string, vec []byte, expectedBody []string) (written bool, err error) {
 	ok, err := leafSnapshotCurrent(tx, id, expectedBody)
 	if err != nil || !ok {
 		return false, err
 	}
-	if _, err = tx.Exec(`UPDATE memory_leaves SET summary=?, summary_vec=?, updated_at=? WHERE leaf_id=?`, summary, vec, now(), id); err != nil {
+	if _, err = tx.Exec(`UPDATE memory_leaves SET summary=?, summary_vec=?, updated_at=? WHERE leaf_id=?`, summary, vec, s.now(), id); err != nil {
 		return false, err
 	}
 	return true, nil

@@ -439,7 +439,7 @@ func (e *Engine) syncRooms(rooms []string, rep *IndexReport, progress Progress) 
 		if tz == nil {
 			tz = e.Settings.NaiveTZ
 		}
-		st, err := e.Store.SyncLeaves(room, e.Settings.Recipe, time.Now(), tz)
+		st, err := e.Store.SyncLeaves(room, e.Settings.Recipe, e.nowT(), tz)
 		if err != nil {
 			// one room's failure (a dropped connection, a damaged row) must not hold every other room back
 			if rep.FailedRooms == nil {

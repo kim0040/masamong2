@@ -91,6 +91,9 @@ type Engine struct {
 	// address and family), for its polls, results, cancel and cleanup; nil uses the role's current client
 	// when it is still that provider
 	ResolveBatcher BatchResolver
+	// Now is the engine's clock for stored times and time references (nil = wall clock). Durations and
+	// real waits still measure the wall clock.
+	Now func() time.Time
 
 	idx      atomic.Pointer[search.Index]
 	loadedAt atomic.Int64
@@ -174,6 +177,14 @@ func New(st *store.Store, llm *openai.Adapter, m Models, s Settings) *Engine {
 		s.HedgeAfter = 800 * time.Millisecond
 	}
 	return &Engine{Store: st, LLM: llm, Models: m, Settings: s, qcache: map[string][]float32{}, closers: &indexClosers{timers: map[*time.Timer]func(){}}}
+}
+
+// nowT is the engine's current time for stored and behavioural timestamps; durations use time.Since.
+func (e *Engine) nowT() time.Time {
+	if e.Now != nil {
+		return e.Now()
+	}
+	return time.Now()
 }
 
 // EmbedSpace identifies vectors that are comparable (model + dims + normalization).
@@ -1111,7 +1122,7 @@ func (e *Engine) Search(ctx context.Context, req SearchRequest) (search.Result, 
 	}
 	nowT := req.Now
 	if nowT.IsZero() {
-		nowT = time.Now()
+		nowT = e.nowT()
 	}
 	tz := e.Settings.RefTZ
 	if tz == nil {
@@ -1415,7 +1426,7 @@ func (e *Engine) Resync(rooms []string) error {
 		return nil
 	}
 	for _, room := range rooms {
-		if _, err := e.Store.SyncLeaves(room, e.Settings.Recipe, time.Now(), e.Settings.NaiveTZ); err != nil {
+		if _, err := e.Store.SyncLeaves(room, e.Settings.Recipe, e.nowT(), e.Settings.NaiveTZ); err != nil {
 			e.MarkDirty(rooms...)
 			e.indexMu.Unlock()
 			return err

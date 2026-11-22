@@ -160,6 +160,9 @@ type Store struct {
 	// WHY immutable after Open: optional migration failure disables only the
 	// optimization; source writes and full cuts must remain available.
 	leafSyncEnabled bool
+	// Now is the clock the stored times come from; nil is the wall clock. The
+	// product sets it from the service clock so a fixed clock lands in the rows.
+	Now func() time.Time
 }
 
 // Open migrates the memory tables (idempotent).
@@ -279,6 +282,19 @@ func Open(db *storage.Store) (*Store, error) {
 
 func now() string { return time.Now().UTC().Format(time.RFC3339) }
 
+// nowT is the store's clock (Now when set, else the wall clock). Stored times
+// are UTC RFC3339; day values (memory_spend) are UTC YYYY-MM-DD.
+func (s *Store) nowT() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
+}
+
+func (s *Store) now() string { return s.nowT().UTC().Format(time.RFC3339) }
+
+func (s *Store) day() string { return s.nowT().UTC().Format("2006-01-02") }
+
 func (s *Store) tidb() bool { return s.DB.Backend == storage.BackendTiDB }
 
 func toAny(ss []string) []any {
@@ -326,7 +342,7 @@ func (s *Store) Counts() (map[string]int, error) {
 // AddSpend records provider spend (USD, as reported or estimated) under a kind (chat, embed, rerank,
 // summary) for today (UTC).
 func (s *Store) AddSpend(kind string, usd float64, calls int) error {
-	day := time.Now().UTC().Format("2006-01-02")
+	day := s.day()
 	// one atomic statement: no transaction needed (each would cost two more round trips on TiDB)
 	q := `INSERT INTO memory_spend(day, kind, usd, calls) VALUES(?,?,?,?) ON CONFLICT(day, kind) DO UPDATE SET usd=memory_spend.usd+excluded.usd, calls=memory_spend.calls+excluded.calls`
 	if s.tidb() {

@@ -284,6 +284,7 @@ func (s *Service) MemoryEngine() (*engine.Engine, error) {
 	if err != nil {
 		return nil, err
 	}
+	ms.Now = s.Clock.Now
 	var llm *openai.Adapter
 	if a, err := s.llmAdapterFor(doc, "embed"); err == nil {
 		llm = a
@@ -341,6 +342,7 @@ func (s *Service) MemoryEngine() (*engine.Engine, error) {
 	}
 	old := st.eng
 	st.eng = engine.New(ms, llm, models, settings)
+	st.eng.Now = s.Clock.Now
 	// roles on another provider than embedding get that provider's adapter (Gemini embeddings with
 	// OpenRouter reranking, say); on the same provider the embed adapter serves them
 	embedProvider := doc.Models["embed"].Provider
