@@ -125,9 +125,15 @@ func (t *trayApp) ready() {
 	go t.loop()
 }
 
+// openOptions is how the icon opens the console. Token is what lets Open prove the recorded address is this
+// data folder's console before it builds a sign-in link for it.
+func (t *trayApp) openOptions(browser bool) launcher.Options {
+	return launcher.Options{DataRoot: t.o.DataRoot, NoBrowser: !browser, OnceURL: t.o.OnceURL, Token: t.o.Token}
+}
+
 // ensure starts (or finds) the service; browser=true also opens the console.
 func (t *trayApp) ensure(browser bool) {
-	res, err := launcher.Open(t.ctx, launcher.Options{DataRoot: t.o.DataRoot, NoBrowser: !browser, OnceURL: t.o.OnceURL})
+	res, err := launcher.Open(t.ctx, t.openOptions(browser))
 	if err != nil {
 		t.show(stateDown)
 		return

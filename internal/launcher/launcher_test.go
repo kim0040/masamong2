@@ -14,7 +14,7 @@ import (
 // A second click must reuse the running console instead of starting another daemon.
 func TestOpenReusesRunningDaemon(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"ok":true,"ready":true}`))
+		writeProvenHealth(w, r, "synthetic-token", map[string]any{"ready": true})
 	}))
 	defer srv.Close()
 	dir := t.TempDir()
@@ -23,7 +23,7 @@ func TestOpenReusesRunningDaemon(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := Open(context.Background(), Options{DataRoot: dir, NoBrowser: true, Daemon: "/nonexistent/masamongd",
-		OnceURL: func(b string) (string, error) { return "http://" + b + "/login?once=x", nil }})
+		OnceURL: func(b string) (string, error) { return "http://" + b + "/login?once=x", nil }, Token: openToken})
 	if err != nil {
 		t.Fatal(err)
 	}

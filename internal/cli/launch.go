@@ -125,7 +125,7 @@ func launchCommand(ctx context.Context, act string, opt Options, input json.RawM
 		act = "launcher.start" // not running: start it
 		fallthrough
 	case "launcher.start", "launcher.open":
-		res, err := launcher.Open(ctx, launcher.Options{DataRoot: root, NoBrowser: act == "launcher.start" || flag("no_browser"), Log: progress, OnceURL: onceURL})
+		res, err := launcher.Open(ctx, launcher.Options{DataRoot: root, NoBrowser: act == "launcher.start" || flag("no_browser"), Log: progress, OnceURL: onceURL, Token: token})
 		out := action.Result{OK: err == nil, Action: act, Output: map[string]any{"url": res.URL, "bind": res.Bind, "started": res.Started,
 			"browser_opened": res.Browser, "data_root": res.DataRoot, "log_file": res.LogFile, "maintenance": res.Maintenance}}
 		if res.Maintenance {
@@ -190,7 +190,7 @@ func launchCommand(ctx context.Context, act string, opt Options, input json.RawM
 	case "launcher.tray":
 		if !tray.Supported() {
 			// no icon in this build or session: behave like start
-			res, err := launcher.Open(ctx, launcher.Options{DataRoot: root, NoBrowser: true, Log: progress, OnceURL: onceURL})
+			res, err := launcher.Open(ctx, launcher.Options{DataRoot: root, NoBrowser: true, Log: progress, OnceURL: onceURL, Token: token})
 			if err != nil {
 				return emit(fail(err), "")
 			}
