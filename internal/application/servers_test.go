@@ -234,7 +234,7 @@ func TestServerManagersRunTheirServerFromDiscord(t *testing.T) {
 	}
 
 	// every change made from Discord says who, where and how in the change log
-	rows := out(t, svc, "audit.list", map[string]any{"via": "discord", "limit": 50})["entries"].([]any)
+	rows := out(t, svc, "audit.list", map[string]any{"via": "discord", "actor": "user01", "limit": 50})["entries"].([]any)
 	if len(rows) < 4 {
 		t.Fatalf("discord changes logged: %d", len(rows))
 	}
