@@ -20,7 +20,7 @@ func TestReconciliationDrainSurvivesMigrationPanic(t *testing.T) {
 	var logs bytes.Buffer
 	g.log = slog.New(slog.NewTextHandler(&logs, nil))
 	steps, applied := 0, 0
-	g.legacyReconciliationStep = func(int) {
+	g.recon.legacyStep = func(int) {
 		steps++
 		if steps == 1 {
 			panic("private-migration-marker")
@@ -30,7 +30,7 @@ func TestReconciliationDrainSurvivesMigrationPanic(t *testing.T) {
 	defer cancel()
 	g.messageEventApply = func(messageReconciliation) error { applied++; cancel(); return nil }
 	done := make(chan struct{})
-	go func() { g.runReconciliationDrain(ctx); close(done) }()
+	go func() { g.reconciler().runReconciliationDrain(ctx); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(5 * time.Second):

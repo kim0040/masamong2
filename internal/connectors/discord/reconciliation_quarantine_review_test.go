@@ -18,16 +18,16 @@ func TestReconciliationLegacyQuarantineScanOutsideQueueLock(t *testing.T) {
 	}
 	queueLocked := false
 	scans := 0
-	g.legacyReconciliationReader = func(r io.Reader) io.Reader {
+	g.recon.legacyReader = func(r io.Reader) io.Reader {
 		scans++
-		if g.reconciliationMu.TryLock() {
-			g.reconciliationMu.Unlock()
+		if g.recon.mu.TryLock() {
+			g.recon.mu.Unlock()
 		} else {
 			queueLocked = true
 		}
 		return r
 	}
-	if err := g.refreshReconciliationBlocked(g.svc.DataRoot, dir); err != nil {
+	if err := g.reconciler().refreshReconciliationBlocked(g.svc.DataRoot, dir); err != nil {
 		t.Fatal(err)
 	}
 	if scans != 1 || queueLocked {
@@ -43,13 +43,13 @@ func TestReconciliationLegacyQuarantineClassificationUsesSizeAndMtime(t *testing
 		t.Fatal(err)
 	}
 	scans := 0
-	g.legacyReconciliationReader = func(r io.Reader) io.Reader { scans++; return r }
+	g.recon.legacyReader = func(r io.Reader) io.Reader { scans++; return r }
 	refresh := func(wantScans int, wantBlocked int64) {
 		t.Helper()
-		if err := g.refreshReconciliationBlocked(g.svc.DataRoot, dir); err != nil {
+		if err := g.reconciler().refreshReconciliationBlocked(g.svc.DataRoot, dir); err != nil {
 			t.Fatal(err)
 		}
-		if scans != wantScans || g.reconciliationBlocked.Load() != wantBlocked {
+		if scans != wantScans || g.recon.blocked.Load() != wantBlocked {
 			t.Fatal("legacy classification was rescanned or stale")
 		}
 	}

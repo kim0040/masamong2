@@ -52,7 +52,7 @@ func TestReconciliationDeleteCleanupPanicKeepsDurableIntent(t *testing.T) {
 					t.Fatal("cleanup panic value reached logs")
 				}
 				g.messageEventApply = func(messageReconciliation) error { return nil }
-				if err := g.drainMessageReconciliation(); err != nil || len(reconciliationNames(t, dir)) != 0 {
+				if err := g.reconciler().drainMessageReconciliation(); err != nil || len(reconciliationNames(t, dir)) != 0 {
 					t.Fatal("delete did not replay")
 				}
 			})
@@ -75,7 +75,7 @@ func TestReconciliationMalformedLegacyTimestampIsBlockedWithoutLoggingValues(t *
 			var logs bytes.Buffer
 			g.log = slog.New(slog.NewTextHandler(&logs, nil))
 			for pass := 0; pass < 3; pass++ {
-				if err := g.drainMessageReconciliation(); !errors.Is(err, errReconciliationBlocked) || g.reconciliationBlocked.Load() != 1 {
+				if err := g.reconciler().drainMessageReconciliation(); !errors.Is(err, errReconciliationBlocked) || g.recon.blocked.Load() != 1 {
 					t.Fatal("malformed timestamp was retried instead of quarantined and counted")
 				}
 			}

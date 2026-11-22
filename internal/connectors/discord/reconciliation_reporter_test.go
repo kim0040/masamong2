@@ -27,7 +27,7 @@ func TestGatewayReportsBlockedReconciliationFiles(t *testing.T) {
 	if err := fsutil.WriteAtomic(file, []byte("not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := g.refreshReconciliationBlocked(g.svc.DataRoot, dir); err != nil {
+	if err := g.reconciler().refreshReconciliationBlocked(g.svc.DataRoot, dir); err != nil {
 		t.Fatal(err)
 	}
 	if n := g.ReconciliationBlocked(); n != 1 {
@@ -40,7 +40,7 @@ func TestGatewayReportsBlockedReconciliationFiles(t *testing.T) {
 	if err := os.Rename(file, filepath.Join(resolved, filepath.Base(file))); err != nil {
 		t.Fatal(err)
 	}
-	if err := g.refreshReconciliationBlocked(g.svc.DataRoot, dir); err != nil {
+	if err := g.reconciler().refreshReconciliationBlocked(g.svc.DataRoot, dir); err != nil {
 		t.Fatal(err)
 	}
 	if n := g.ReconciliationBlocked(); n != 0 {

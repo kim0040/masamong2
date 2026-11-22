@@ -38,69 +38,42 @@ import (
 // Gateway is the live Discord connector (09). It is the single sender for this instance: every outbound
 // message goes through this session, with mentions disabled, and every command is an Application Action.
 type Gateway struct {
-	svc                        *application.Service
-	cfg                        config.Discord
-	log                        *slog.Logger
-	sess                       *discordgo.Session
-	connected                  atomic.Bool
-	botID                      atomic.Pointer[string]
-	dmMembers                  sync.Map // guild:user -> short-lived membership result
-	dmSweptAt                  atomic.Int64
-	followIDs                  sync.Map        // message IDs the follow-up window accepted, until their turn starts
-	pictureFollowIDs           sync.Map        // picture-only message ID → the words of the call it continues (lookback.go)
-	pictures                   recentPictures  // each channel's last few messages, for pictures sent apart from the words (lookback.go)
-	seen                       seenSet         // message IDs handled lately: a replayed MESSAGE_CREATE is dropped (inbound.go)
-	turns                      turnRegistry    // replies in flight, by channel and person, for a stop word (inbound.go)
-	channelKinds               sync.Map        // channel ID → *channelKind: is it a thread (threads.go)
-	kindSweptAt                atomic.Int64    // unix nanoseconds of the last channelKinds sweep
-	workCtx                    context.Context // replies and commands; cancelled after the shutdown grace
-	cancelWork                 context.CancelFunc
-	stopping                   atomic.Bool
-	more                       moreStore       // the rest of trimmed replies (shape.go)
-	interims                   interimRegistry // the bot's "still looking" lines: never captured, their delete never reconciled (interim.go)
-	interimHook                func(*interim)  // tests: sees each turn's line as it is made
-	botName                    atomic.Pointer[string]
-	mu                         sync.Mutex
-	lastSync                   string
-	startupMu                  sync.RWMutex
-	startup                    application.DiscordStartupStatus
-	open                       func() error
-	token                      string
-	retryWait                  func(context.Context, time.Duration) bool
-	retryJitter                func(time.Duration) time.Duration
-	messageEventApply          func(messageReconciliation) error
-	cancelPictures             func(channelID string, messageIDs []string) // tests; nil means the service's queue
-	reactForTest               func(context.Context, string, string, string) error
-	reconciliationWait         func(context.Context, time.Duration) bool
-	reconciliationMu           sync.Mutex
-	reconciliationRefreshMu    sync.Mutex                                // orders snapshots without holding up queue writes during legacy scans
-	legacyQuarantineCache      map[string]legacyQuarantineClassification // guarded by reconciliationRefreshMu
-	reconciliationRemove       func(string) error                        // tests; nil uses durable removal
-	reconciliationWrite        func(string, messageReconciliation) error // tests; nil uses atomic writes
-	reconciliationRead         func(string) ([]byte, error)              // tests; nil reads the queued file
-	legacyReconciliationStep   func(int)                                 // tests; pauses migration before a record is queued
-	legacyReconciliationReader func(io.Reader) io.Reader                 // tests; observes legacy scans and injects decoder read failures
-	// editOrderMu orders a live edit against the drain's apply of a queued one for the same bot: without
-	// it a queued older edit read just before a newer live edit went through could be applied after it
-	// and bring back the words the newer edit removed.
-	editOrderMu sync.Mutex
-	// reconciliationSeq names delete files; reconciliationPending is true while a deferred change may be
-	// on disk (so a delete that succeeds knows to look for edits it supersedes); reconciliationWake
-	// tells the background drain a delete or an idle queue needs work (nil in tests that drain by hand).
-	reconciliationSeq        atomic.Uint64
-	reconciliationPending    atomic.Bool
-	reconciliationBlocked    atomic.Int64
-	reconciliationDeletes    atomic.Bool
-	reconciliationLegacy     atomic.Bool
-	reconciliationStateReady bool      // guarded by reconciliationMu
-	reconciliationBlockedLog time.Time // guarded by reconciliationMu
-	reconciliationWake       chan struct{}
-	reconciliationBackingOff atomic.Bool
-	reconciliationCtx        context.Context
-	reconciliationCancel     context.CancelFunc
-	reconciliationDone       chan struct{}
-	noticeMu                 sync.Mutex
-	notices                  map[string]time.Time // "user:channel" and "channel" -> last refusal notice
+	svc               *application.Service
+	cfg               config.Discord
+	log               *slog.Logger
+	sess              *discordgo.Session
+	connected         atomic.Bool
+	botID             atomic.Pointer[string]
+	dmMembers         sync.Map // guild:user -> short-lived membership result
+	dmSweptAt         atomic.Int64
+	followIDs         sync.Map        // message IDs the follow-up window accepted, until their turn starts
+	pictureFollowIDs  sync.Map        // picture-only message ID → the words of the call it continues (lookback.go)
+	pictures          recentPictures  // each channel's last few messages, for pictures sent apart from the words (lookback.go)
+	seen              seenSet         // message IDs handled lately: a replayed MESSAGE_CREATE is dropped (inbound.go)
+	turns             turnRegistry    // replies in flight, by channel and person, for a stop word (inbound.go)
+	channelKinds      sync.Map        // channel ID → *channelKind: is it a thread (threads.go)
+	kindSweptAt       atomic.Int64    // unix nanoseconds of the last channelKinds sweep
+	workCtx           context.Context // replies and commands; cancelled after the shutdown grace
+	cancelWork        context.CancelFunc
+	stopping          atomic.Bool
+	more              moreStore       // the rest of trimmed replies (shape.go)
+	interims          interimRegistry // the bot's "still looking" lines: never captured, their delete never reconciled (interim.go)
+	interimHook       func(*interim)  // tests: sees each turn's line as it is made
+	botName           atomic.Pointer[string]
+	mu                sync.Mutex
+	lastSync          string
+	startupMu         sync.RWMutex
+	startup           application.DiscordStartupStatus
+	open              func() error
+	token             string
+	retryWait         func(context.Context, time.Duration) bool
+	retryJitter       func(time.Duration) time.Duration
+	messageEventApply func(messageReconciliation) error
+	cancelPictures    func(channelID string, messageIDs []string) // tests; nil means the service's queue
+	reactForTest      func(context.Context, string, string, string) error
+	recon             messageReconciler // edits and deletes that could not be applied yet (reconciliation.go)
+	noticeMu          sync.Mutex
+	notices           map[string]time.Time // "user:channel" and "channel" -> last refusal notice
 	// timeout for one Action execution. The reply that follows (the result, or the error card after a
 	// timeout) is sent with a fresh context of finalDeliveryTimeout, so a timed-out action still shows
 	// its failure.
@@ -165,8 +138,8 @@ func Start(ctx context.Context, svc *application.Service, cfg config.Discord, lo
 	g.workCtx, g.cancelWork = context.WithCancel(context.WithoutCancel(ctx))
 	// Changes deferred by an earlier run (or an older file format) are applied in the background: the
 	// gateway and the console must not wait on a store that may be slow or still failing.
-	g.reconciliationPending.Store(true)
-	g.reconciliationWake = make(chan struct{}, 1)
+	g.recon.pending.Store(true)
+	g.recon.wake = make(chan struct{}, 1)
 	g.startReconciliationDrain(ctx)
 	g.merge.fire = g.answerHeld
 	g.merge.forget = g.forgetFollow
@@ -349,7 +322,7 @@ var (
 func (g *Gateway) shutdown(sess *discordgo.Session) {
 	g.workMu.Lock()
 	g.draining = true
-	drainDone := g.reconciliationDone
+	drainDone := g.recon.done
 	g.workMu.Unlock()
 	g.stopping.Store(true)
 	done := make(chan struct{})
@@ -418,7 +391,7 @@ func (g *Gateway) runCtx() context.Context {
 func (g *Gateway) Wait(timeout time.Duration) bool {
 	g.workMu.Lock()
 	g.draining = true
-	drainDone, cancelDrain := g.reconciliationDone, g.reconciliationCancel
+	drainDone, cancelDrain := g.recon.done, g.recon.cancel
 	g.workMu.Unlock()
 	if cancelDrain != nil {
 		cancelDrain()
@@ -1417,37 +1390,12 @@ func buttonRequest(parts []string, ictx InvokeContext, requestID string) (Comman
 	return Command{}, action.Request{}, false
 }
 
-// onMessage bridges conversation and prefix commands; DMs need no message-content intent.
+// onMessage bridges conversation and prefix commands; DMs need no message-content intent. It runs in
+// stages: drop what is not a person's new message, hold a server that waits for approval, then handle a
+// direct message or a server message.
 func (g *Gateway) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	defer crash.Recover(g.log, "discord message")
-	if m.Author == nil || (!g.cfg.MessageContent && m.GuildID != "") {
-		return
-	}
-	if !g.seen.first(m.ID, time.Now()) {
-		return // Discord replayed it (RESUME): no second capture, no second reply
-	}
-	if m.Author.Bot {
-		if p := g.botID.Load(); p != nil && *p == m.Author.ID {
-			refID := ""
-			if m.MessageReference != nil {
-				refID = m.MessageReference.MessageID
-			}
-			if ours, drop := g.interims.ownCreate(m.ChannelID, refID, m.ID, m.Content); ours {
-				if drop {
-					// the send returned no answer, but Discord still created the line. Take it
-					// back and do not count it as the channel moving on.
-					g.deleteInterimLine(s, m.ChannelID, m.ID)
-				}
-				return
-			}
-		}
-		if p := g.botID.Load(); p != nil && *p == m.Author.ID && m.GuildID != "" {
-			// the bot's own message: participation counts it as the channel moving on
-			o := application.ObservedMessage{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID, AuthorID: m.Author.ID,
-				AuthorName: displayName(m), Content: m.Content, At: m.Timestamp, FromBot: true}
-			linksOf(m, &o)
-			g.svc.Observe(o)
-		}
+	if !g.admitMessage(s, m) {
 		return
 	}
 	cmd, opts, isCmd := g.prefixTable().Parse(g.cfg.CommandPrefix, m.Content)
@@ -1463,38 +1411,81 @@ func (g *Gateway) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 	g.pictures.note(m, time.Now()) // early: the order calls and pictures are seen in should be Discord's
 	if m.GuildID == "" {
-		if g.svc.BlockedIn("", m.Author.ID) {
-			return
-		}
-		if isCmd {
-			g.runCommand(s, m, cmd, opts)
-			return
-		}
-		// held here, in arrival order; whether DM chat is open is checked when the held turn starts
-		// (answerHeld), off the event loop, since it may ask Discord
-		if !g.stopTurn(m) {
-			g.notePictureFollow(m)
-			g.pictures.used(m.ChannelID, []string{m.ID})
-			g.merge.add(m, false)
-		}
+		g.onDirectMessage(s, m, cmd, opts, isCmd)
 		return
 	}
-	g.noteThread(s, m.GuildID, m.ChannelID) // before the policy: a thread follows its parent's
-	pol := g.svc.ChannelPolicyFor(m.GuildID, m.ChannelID)
-	g.capture(m, pol)
-	answer := !isCmd && g.shouldAnswer(m, pol)
-	// the rest of a split request: the same person's next message while their call is being held, or
-	// the picture they send right after a call that came without one
-	follows := !isCmd && !answer && pol.Respond == "mention" && !g.toSomeone(m) && g.merge.waiting(m)
-	if !isCmd && !follows && !g.toSomeone(m) && g.notePictureFollow(m) {
-		follows = !answer // a room that answers everything answers it anyway; the mark makes it addressed
+	g.onServerMessage(s, m, cmd, opts, isCmd)
+}
+
+// admitMessage drops what is not a person's new message: a server message without the content intent, a
+// replay, and every bot message (the bot's own "still looking" lines are recognised here, and its other
+// messages are observed as the channel moving on).
+func (g *Gateway) admitMessage(s *discordgo.Session, m *discordgo.MessageCreate) bool {
+	if m.Author == nil || (!g.cfg.MessageContent && m.GuildID != "") {
+		return false
 	}
-	if m.GuildID != "" {
+	if !g.seen.first(m.ID, time.Now()) {
+		return false // Discord replayed it (RESUME): no second capture, no second reply
+	}
+	if m.Author.Bot {
+		g.onBotMessage(s, m)
+		return false
+	}
+	return true
+}
+
+func (g *Gateway) onBotMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
+	if p := g.botID.Load(); p != nil && *p == m.Author.ID {
+		refID := ""
+		if m.MessageReference != nil {
+			refID = m.MessageReference.MessageID
+		}
+		if ours, drop := g.interims.ownCreate(m.ChannelID, refID, m.ID, m.Content); ours {
+			if drop {
+				// the send returned no answer, but Discord still created the line. Take it
+				// back and do not count it as the channel moving on.
+				g.deleteInterimLine(s, m.ChannelID, m.ID)
+			}
+			return
+		}
+	}
+	if p := g.botID.Load(); p != nil && *p == m.Author.ID && m.GuildID != "" {
+		// the bot's own message: participation counts it as the channel moving on
 		o := application.ObservedMessage{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID, AuthorID: m.Author.ID,
-			AuthorName: displayName(m), Content: bodyOf(m.Message), At: m.Timestamp, Addressed: isCmd || answer || follows || pol.Respond == "always", ToSomeone: g.toSomeone(m), BotCall: g.botCallKind(m)}
+			AuthorName: displayName(m), Content: m.Content, At: m.Timestamp, FromBot: true}
 		linksOf(m, &o)
 		g.svc.Observe(o)
 	}
+}
+
+func (g *Gateway) onDirectMessage(s *discordgo.Session, m *discordgo.MessageCreate, cmd Command, opts map[string]string, isCmd bool) {
+	if g.svc.BlockedIn("", m.Author.ID) {
+		return
+	}
+	if isCmd {
+		g.runCommand(s, m, cmd, opts)
+		return
+	}
+	// held here, in arrival order; whether DM chat is open is checked when the held turn starts
+	// (answerHeld), off the event loop, since it may ask Discord
+	if !g.stopTurn(m) {
+		g.notePictureFollow(m)
+		g.pictures.used(m.ChannelID, []string{m.ID})
+		g.merge.add(m, false)
+	}
+}
+
+// onServerMessage handles a person's message in an approved server: capture and observe it, then run the
+// command, hold the call, or let the follow-up window decide.
+func (g *Gateway) onServerMessage(s *discordgo.Session, m *discordgo.MessageCreate, cmd Command, opts map[string]string, isCmd bool) {
+	g.noteThread(s, m.GuildID, m.ChannelID) // before the policy: a thread follows its parent's
+	pol := g.svc.ChannelPolicyFor(m.GuildID, m.ChannelID)
+	g.capture(m, pol)
+	answer, follows := g.classifyServerMessage(m, pol, isCmd)
+	o := application.ObservedMessage{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID, AuthorID: m.Author.ID,
+		AuthorName: displayName(m), Content: bodyOf(m.Message), At: m.Timestamp, Addressed: isCmd || answer || follows || pol.Respond == "always", ToSomeone: g.toSomeone(m), BotCall: g.botCallKind(m)}
+	linksOf(m, &o)
+	g.svc.Observe(o)
 	if g.svc.BlockedIn(m.GuildID, m.Author.ID) {
 		return // ignored: no commands, no replies
 	}
@@ -1520,20 +1511,37 @@ func (g *Gateway) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		g.merge.add(m, answer && g.isBareCall(m))
 		return
 	}
-	// the person the bot just answered, carrying on without a tag: the follow-up window decides (it is
-	// off by default and then only records what it would have done)
-	if m.GuildID != "" && pol.Respond == "mention" && g.svc.FollowWindowOpen(m.GuildID, m.ChannelID, m.Author.ID) {
-		o := application.ObservedMessage{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID, AuthorID: m.Author.ID,
-			AuthorName: displayName(m), Content: bodyOf(m.Message), At: m.Timestamp}
-		linksOf(m, &o)
-		g.work(func(ctx context.Context) {
-			if g.svc.FollowUp(ctx, o) {
-				g.followIDs.Store(m.ID, true)
-				g.pictures.used(m.ChannelID, []string{m.ID})
-				g.merge.add(m, false)
-			}
-		})
+	g.offerFollowUp(m, pol)
+}
+
+// classifyServerMessage says whether a server message is a call the bot answers, or the rest of a split
+// request: the same person's next message while their call is being held, or the picture they send right
+// after a call that came without one.
+func (g *Gateway) classifyServerMessage(m *discordgo.MessageCreate, pol config.ChannelPolicy, isCmd bool) (answer, follows bool) {
+	answer = !isCmd && g.shouldAnswer(m, pol)
+	follows = !isCmd && !answer && pol.Respond == "mention" && !g.toSomeone(m) && g.merge.waiting(m)
+	if !isCmd && !follows && !g.toSomeone(m) && g.notePictureFollow(m) {
+		follows = !answer // a room that answers everything answers it anyway; the mark makes it addressed
 	}
+	return answer, follows
+}
+
+// offerFollowUp hands the person the bot just answered, carrying on without a tag, to the follow-up window
+// (it is off by default and then only records what it would have done).
+func (g *Gateway) offerFollowUp(m *discordgo.MessageCreate, pol config.ChannelPolicy) {
+	if pol.Respond != "mention" || !g.svc.FollowWindowOpen(m.GuildID, m.ChannelID, m.Author.ID) {
+		return
+	}
+	o := application.ObservedMessage{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID, AuthorID: m.Author.ID,
+		AuthorName: displayName(m), Content: bodyOf(m.Message), At: m.Timestamp}
+	linksOf(m, &o)
+	g.work(func(ctx context.Context) {
+		if g.svc.FollowUp(ctx, o) {
+			g.followIDs.Store(m.ID, true)
+			g.pictures.used(m.ChannelID, []string{m.ID})
+			g.merge.add(m, false)
+		}
+	})
 }
 
 // linksOf copies what a message points at — the message it replies to and the accounts, roles or
@@ -1848,14 +1856,14 @@ const stateMessages = 100
 // channel's capture setting is now: a message stored while capture was on is still removed. The server
 // log hears of them first, while the stored message still has its author and text.
 func (g *Gateway) onMessageDelete(s *discordgo.Session, m *discordgo.MessageDelete) {
-	defer g.recoverReconciliationPanic("delete handler", nil)
+	defer recoverReconciliationPanic(g.log, "delete handler", nil)
 	if m.Message == nil || m.ID == "" {
 		return
 	}
 	if g.interims.deleted(m.ID) {
 		return // the bot took its own "still looking" line back: nothing to log, forget or reconcile
 	}
-	_ = g.runReconciliationStep("server log", func() error {
+	_ = runReconciliationStep(g.log, "server log", func() error {
 		d := application.DeletedMessage{ID: m.ID}
 		if b := m.BeforeDelete; b != nil && b.Author != nil {
 			d.AuthorID, d.AuthorBot, d.Text = b.Author.ID, b.Author.Bot, b.Content
@@ -1871,8 +1879,8 @@ func (g *Gateway) onMessageDelete(s *discordgo.Session, m *discordgo.MessageDele
 	// Take the message out of a pending merged request first, or a merge window ending while the delete is
 	// being stored sends its words to the model. Each cleanup recovers on its own, so a panic there cannot
 	// skip storing the privacy intent.
-	_ = g.runReconciliationStep("merge cleanup", func() error { g.merge.remove(m.ID); return nil })
-	_ = g.runReconciliationStep("picture cleanup", func() error {
+	_ = runReconciliationStep(g.log, "merge cleanup", func() error { g.merge.remove(m.ID); return nil })
+	_ = runReconciliationStep(g.log, "picture cleanup", func() error {
 		g.pictures.forget(m.ChannelID, []string{m.ID})
 		g.cancelPictureJobs(m.ChannelID, []string{m.ID})
 		return nil
@@ -1890,7 +1898,7 @@ func (g *Gateway) cancelPictureJobs(channelID string, messageIDs []string) {
 }
 
 func (g *Gateway) onMessageDeleteBulk(s *discordgo.Session, m *discordgo.MessageDeleteBulk) {
-	defer g.recoverReconciliationPanic("bulk delete handler", nil)
+	defer recoverReconciliationPanic(g.log, "bulk delete handler", nil)
 	if kept := g.interims.withoutInterims(m.Messages); len(kept) != len(m.Messages) {
 		if len(kept) == 0 {
 			return
@@ -1899,7 +1907,7 @@ func (g *Gateway) onMessageDeleteBulk(s *discordgo.Session, m *discordgo.Message
 		copied.Messages = kept
 		m = &copied
 	}
-	_ = g.runReconciliationStep("server log", func() error {
+	_ = runReconciliationStep(g.log, "server log", func() error {
 		msgs := make([]application.DeletedMessage, len(m.Messages))
 		for i, id := range m.Messages {
 			msgs[i] = application.DeletedMessage{ID: id}
@@ -1910,9 +1918,9 @@ func (g *Gateway) onMessageDeleteBulk(s *discordgo.Session, m *discordgo.Message
 		return nil
 	})
 	for _, id := range m.Messages { // first, as in onMessageDelete
-		_ = g.runReconciliationStep("merge cleanup", func() error { g.merge.remove(id); return nil })
+		_ = runReconciliationStep(g.log, "merge cleanup", func() error { g.merge.remove(id); return nil })
 	}
-	_ = g.runReconciliationStep("picture cleanup", func() error {
+	_ = runReconciliationStep(g.log, "picture cleanup", func() error {
 		g.pictures.forget(m.ChannelID, m.Messages)
 		g.cancelPictureJobs(m.ChannelID, m.Messages)
 		return nil
@@ -2107,148 +2115,6 @@ func (g *Gateway) sendCommandCard(base context.Context, s *discordgo.Session, m 
 	}
 	if msg.Poll != nil {
 		g.svc.LinkPollMessage(pollIDOf(res.Output), m.ChannelID, sent.ID)
-	}
-}
-
-// answer runs one chat turn and replies. Mentions stay disabled; long answers are split at 2000 chars.
-// Turns in different channels run in parallel; the application keeps each channel in arrival order.
-func (g *Gateway) answer(base context.Context, s *discordgo.Session, m *discordgo.MessageCreate, text string, call turnCall) {
-	nameOnly, followUp := call.nameOnly, call.followUp
-	// addressed: the person called the bot. A name alone is not a call until the name check says it was
-	// one (the Addressed callback below, which the turn calls from its own goroutine); a notice goes only
-	// to someone who called.
-	var addressed atomic.Bool
-	addressed.Store(call.addressed)
-	visionNotice := ""
-	// the turn's own time (chatTurnTimeout, the previous bot's pictures: p90 88 s) starts when it has its
-	// place in the channel, not while it waits (ChatInput.TurnTimeout)
-	ctx, cancel := context.WithTimeout(base, chatTurnCeiling)
-	defer cancel()
-	ctx, stopReply := context.WithCancelCause(ctx)
-	defer stopReply(nil)
-	defer g.turns.add(m.ChannelID, m.Author.ID, stopReply)()
-	typing := newTypingKeepalive(s, m.ChannelID, g.log)
-	startTyping := func() { typing.start(ctx) }
-	defer typing.stop()
-	// the "still looking" line of a turn that searches long. Every way out of this function deletes it (on
-	// a context of its own: the turn's is cancelled by the stop word and expires on its timeout).
-	still := g.newInterim(base, s, m)
-	defer still.clear()
-	// a call by name alone types only once the bot knows it was said to it (else it would type, then
-	// stay quiet)
-	if !nameOnly {
-		startTyping()
-	}
-	// replied: something of the answer reached the channel (a part of the text or a post of a tool).
-	// unsent: there was an answer to post and none of it did.
-	delivered, replied, unsent := false, false, false
-	turnDone := make(chan struct{})
-	defer close(turnDone)
-	// the reply is posted inside the turn, so the channel's next turn starts after it and the
-	// conversation keeps only what reached Discord
-	_, err := g.svc.ChatTurn(ctx, application.ChatInput{GuildID: m.GuildID, ChannelID: m.ChannelID, MessageID: m.ID, Message: text,
-		Speaker: displayName(m), SpeakerID: m.Author.ID, MaxWait: chatQueueWait, TurnTimeout: chatTurnTimeout, NameOnly: nameOnly, FollowUp: followUp, Addressed: func() { addressed.Store(true); startTyping() },
-		Images: call.images, ImageOnly: call.imageOnly, ImageEarlier: call.imageEarlier, ImageTotal: call.imageTotal, ImageSkipped: call.imageSkipped,
-		Fragments: call.fragments, ReadFrom: call.readFrom,
-		OnVisionNotice: func(note string) { visionNotice = note },
-		OnProgress:     still.show,
-		Deliver: func(deliverCtx context.Context, res chat.Result) string {
-			typing.stop()
-			still.clear() // first: the line is gone before any part of the answer is posted
-			if deliverCtx.Err() != nil {
-				g.dropThreadOffer(res.TurnID, "not_sent")
-				unsent = strings.TrimSpace(res.Answer) != ""
-				return ""
-			}
-			posted := g.postToolArtifacts(deliverCtx, s, m.GuildID, m.ChannelID, m.Reference(), res.Tools)
-			replied = posted
-			if strings.TrimSpace(res.Answer) == "" {
-				g.log.Warn("discord: chat turn produced no reply text", "tools", len(res.Tools))
-				delivered = true // nothing to say is not a cut-off reply
-				replied = true   // nor an answer that did not come: there was none to send
-				return ""
-			}
-			shape := g.svc.ChannelPolicyFor(m.GuildID, m.ChannelID).Conversation.ReplyShape
-			sent, ids, rep := g.sendShapedFor(deliverCtx, s, m.GuildID, m.ChannelID, m.Reference(), res.Answer, visionNotice, shape, deepSearched(res.Tools), turnDone)
-			g.svc.NoteReplyMessages(res.TurnID, m.GuildID, m.ChannelID, ids, rep.PartEnds...)
-			g.svc.NoteDelivery(res.TurnID, m.GuildID, m.ChannelID, rep)
-			delivered = rep.Sent == rep.Parts && rep.Parts > 0
-			if sent != "" || rep.Sent > 0 {
-				replied = true // from here on the person has been answered, in whole or in part
-			}
-			unsent = !replied
-			if sent != "" && m.GuildID != "" {
-				g.offerThread(deliverCtx, s, m, res.TurnID, ids)
-			} else {
-				g.dropThreadOffer(res.TurnID, "not_sent")
-			}
-			return sent
-		}})
-	still.clear() // before any notice below: a refusal or a failure line must not stand next to "still looking"
-	if errors.Is(context.Cause(ctx), errTurnStopped) {
-		g.log.Debug("discord: reply stopped by the person") // quiet: no notice, no "restarting"
-		return
-	}
-	var react application.ReactOnly
-	var dmLimit application.DMLimited
-	switch {
-	case errors.As(err, &dmLimit):
-		g.sendDMNotice(ctx, s, m, "discord.chat.dm_limited", dmLimit.Scope)
-		return
-	case errors.Is(err, application.ErrDMClosedChat):
-		g.sendDMNotice(ctx, s, m, "discord.chat.dm_closed", "closed")
-		return
-	case errors.As(err, &react):
-		// a playful mention answered with an emoji on the message (banter, experimental)
-		g.sendBanterReaction(ctx, s, m.ChannelID, m.ID, react)
-		return
-	case errors.Is(err, application.ErrNotAddressed):
-		g.log.Debug("discord: reply skipped", "reason", "name mentioned, not addressed")
-		return
-	case errors.Is(err, application.ErrChatDisabled):
-		g.log.Debug("discord: reply skipped", "reason", err)
-		return
-	case errors.Is(err, application.ErrNoVision), errors.Is(err, application.ErrImageUnreadable):
-		// only a picture, and nothing could look at it: a short honest line instead of a guess
-		g.sendChatNotice(ctx, s, m, chatNoticeKey(err), addressed.Load())
-		return
-	case errors.Is(err, application.ErrChatLimited), errors.Is(err, application.ErrChatBusy),
-		errors.Is(err, application.ErrChatPaused):
-		g.log.Debug("discord: reply skipped", "reason", err)
-		g.sendChatNotice(ctx, s, m, chatNoticeKey(err), addressed.Load())
-		return
-	case base.Err() != nil && g.stopping.Load() && !delivered && (err == nil || errors.Is(err, context.Canceled)):
-		// the daemon is stopping and this turn ran out of grace — while thinking, or while its reply was
-		// going out: say so instead of going quiet
-		nctx, ncancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer ncancel()
-		g.sendChatNotice(nctx, s, m, "discord.chat.restarting", addressed.Load())
-		return
-	case errors.Is(err, context.Canceled) && base.Err() != nil:
-		return
-	case errors.Is(err, application.ErrChatBudget):
-		g.log.Warn("discord: reply skipped: monthly model budget reached")
-		g.sendChatNotice(ctx, s, m, chatNoticeKey(err), addressed.Load())
-		return
-	case err == nil && unsent && !replied:
-		// the answer was made and none of it reached the channel (the first send failed, or the turn's time
-		// ran out before it): the person called the bot and got nothing, so the same short line as for a turn
-		// that failed, on a context that does not carry the turn's own (possibly expired) deadline
-		g.log.Warn("discord: chat answer not delivered")
-		if key := chatFailureKey(errNothingDelivered, replied); key != "" && base.Err() == nil && !g.stopping.Load() {
-			nctx, ncancel := g.finalContext(base)
-			defer ncancel()
-			g.sendChatNotice(nctx, s, m, key, addressed.Load())
-		}
-	case err != nil:
-		g.log.Warn("discord: chat turn failed", "err", err)
-		// the person called the bot and got nothing: one short line, on a context that does not carry the
-		// turn's own (possibly expired) deadline. Not when the turn already answered, or the daemon stops.
-		if key := chatFailureKey(err, replied); key != "" && base.Err() == nil && !g.stopping.Load() {
-			nctx, ncancel := g.finalContext(base)
-			defer ncancel()
-			g.sendChatNotice(nctx, s, m, key, addressed.Load())
-		}
 	}
 }
 

@@ -74,322 +74,35 @@ func Render(res action.Result, cmd Command, locale string) Rendered {
 	}
 	status, _ := out["status"].(string)
 	live, _ := out["live"].(bool)
+	in := renderInput{out: out, status: status, live: live, cmd: cmd, locale: locale, t: t}
 	e := &discordgo.MessageEmbed{Color: colorOK}
 	switch res.Action {
 	case "weather.query":
-		region := fmt.Sprint(out["region"])
-		e.Title = t("weather.title", "region", region)
-		switch status {
-		case "unconfigured":
-			e.Color, e.Description = colorWarn, t("weather.unconfigured")
-		case "empty":
-			e.Color, e.Description = colorWarn, t("weather.empty")
-		default:
-			var lines []string
-			if c, _ := out["condition"].(string); c != "" {
-				lines = append(lines, "🌤 "+t("weather.cond."+c))
-			}
-			if v, ok := out["temp_c"]; ok && v != nil {
-				line := fmt.Sprintf("🌡 %s %.1f°C", t("weather.temperature"), toF(v))
-				if f, ok := out["feels_like_c"]; ok && f != nil {
-					line += fmt.Sprintf(" (%s %.1f°C)", t("weather.feels"), toF(f))
-				}
-				lines = append(lines, line)
-			}
-			if v, ok := out["humidity_pct"]; ok && v != nil {
-				lines = append(lines, fmt.Sprintf("💧 %s %.0f%%", t("weather.humidity"), toF(v)))
-			}
-			if v, ok := out["wind_ms"]; ok && v != nil {
-				lines = append(lines, fmt.Sprintf("🍃 %s %.1f m/s", t("weather.wind"), toF(v)))
-			}
-			if p, _ := out["precip"].(string); p != "" && p != "none" && p != "unknown" {
-				lines = append(lines, "☔ "+t("weather.precipitation", "value", precipText(p, locale)))
-			}
-			if fc, ok := out["forecast"].(map[string]any); ok {
-				var f []string
-				if fc["max_c"] != nil && fc["min_c"] != nil {
-					f = append(f, t("weather.range", "max", fmt.Sprintf("%.0f", toF(fc["max_c"])), "min", fmt.Sprintf("%.0f", toF(fc["min_c"]))))
-				}
-				if fc["precip_prob_pct"] != nil {
-					f = append(f, t("weather.rain_chance", "value", fmt.Sprintf("%.0f", toF(fc["precip_prob_pct"]))))
-				}
-				if c, _ := fc["condition"].(string); c != "" {
-					f = append([]string{t("weather.cond." + c)}, f...)
-				}
-				if len(f) > 0 {
-					title := "📅 " + strings.Join(f, " · ")
-					if day, _ := out["day_offset"].(int); day > 0 {
-						title = "📅 " + t("weather.forecast_title", "date", fmt.Sprint(fc["date"])) + " — " + strings.Join(f, " · ")
-					}
-					lines = append(lines, title)
-				}
-			}
-			e.Description = strings.Join(lines, "\n")
-			if s, _ := out["source"].(string); s == "fixture" {
-				e.Color = colorNeutral
-				e.Description += "\n\n" + t("weather.sample")
-			}
-		}
-		if at, _ := out["observed_at"].(string); at != "" && live {
-			// Timestamp markdown is parsed in description/fields, not footers.
-			e.Fields = append(e.Fields, &discordgo.MessageEmbedField{
-				Name: t("weather.observed"), Value: discordTime(at), Inline: true,
-			})
-			footer := "KMA"
-			if src, _ := out["source"].(string); src == "open_meteo" {
-				footer = "Open-Meteo.com · CC BY 4.0" // the free API asks for credit under CC BY 4.0
-			}
-			e.Footer = &discordgo.MessageEmbedFooter{Text: footer}
-		}
+		return renderWeather(in, e)
 	case "disasters.query":
-		e.Title = t("alerts.title")
-		switch status {
-		case "unconfigured":
-			e.Color, e.Description = colorWarn, t("alerts.unconfigured")
-		case "unconfirmed":
-			e.Color, e.Description = colorWarn, t("alerts.unconfirmed")
-		case "none":
-			e.Description = t("alerts.none")
-		default:
-			e.Color = colorWarn
-			var lines []string
-			if ws, ok := out["warnings"].([]any); ok {
-				for i, w := range ws {
-					if i >= 8 {
-						lines = append(lines, t("alerts.more", "n", len(ws)-8))
-						break
-					}
-					m, _ := w.(map[string]any)
-					lines = append(lines, fmt.Sprintf("⚠️ %v: %v %v", m["region"], m["kind"], m["level"]))
-				}
-			}
-			if qs, ok := out["earthquakes"].([]any); ok {
-				for i, q := range qs {
-					if i >= 5 {
-						break
-					}
-					m, _ := q.(map[string]any)
-					mag := "?"
-					if v, ok := m["magnitude"]; ok && v != nil {
-						mag = fmt.Sprintf("%.1f", toF(v))
-					}
-					when := discordTime(fmt.Sprint(m["time"]))
-					lines = append(lines, fmt.Sprintf("🌐 M%s · %v · %s", mag, m["location"], when))
-				}
-			}
-			e.Description = strings.Join(lines, "\n")
-		}
+		return renderDisasters(in, e)
 	case "finance.quote":
-		sym := fmt.Sprint(out["symbol"])
-		e.Title = sym
-		if status == "unconfigured" {
-			e.Color, e.Description = colorWarn, t("quote.unconfigured")
-			break
-		}
-		e.Description = fmt.Sprintf("%v %v (%v%%)", out["price"], out["currency"], out["change_pct"])
-		if krw, ok := out["price_krw"]; ok {
-			e.Description += fmt.Sprintf("\n≈ ₩%v", krw)
-		}
-		if status == "partial" {
-			e.Color = colorWarn
-			e.Description += "\n" + t("quote.fx_missing")
-		}
-		if at, _ := out["at"].(string); at != "" {
-			e.Fields = []*discordgo.MessageEmbedField{{Name: t("quote.as_of"), Value: discordTime(at), Inline: true}}
-			e.Footer = &discordgo.MessageEmbedFooter{Text: "Finnhub"}
-		}
+		return renderQuote(in, e)
 	case "finance.fx":
-		base, _ := out["base"].(string)
-		e.Title = t("fx.title", "base", base)
-		if status == "unconfigured" {
-			e.Color, e.Description = colorWarn, t("fx.unconfigured")
-			break
-		}
-		// the action states each rate in words ("100엔 ≈ 930.2원"); the card only lists them
-		var lines []string
-		switch quotes := out["quotes"].(type) {
-		case []map[string]any:
-			for _, q := range quotes {
-				lines = append(lines, fmt.Sprint(q["text"]))
-			}
-		case []any:
-			for _, q := range quotes {
-				if m, ok := q.(map[string]any); ok {
-					lines = append(lines, fmt.Sprint(m["text"]))
-				}
-			}
-		}
-		e.Description = strings.Join(lines, "\n")
-		if e.Description == "" {
-			e.Description = t("fx.no_rates")
-		}
-		if at, _ := out["updated_at"].(string); at != "" {
-			e.Fields = []*discordgo.MessageEmbedField{{Name: t("fx.updated"), Value: discordTime(at), Inline: true}}
-			e.Footer = &discordgo.MessageEmbedFooter{Text: fmt.Sprint(out["source"])}
-		}
+		return renderFX(in, e)
 	case "search.web":
-		e.Title = t("search.title", "query", fmt.Sprint(out["query"]))
-		if status == "unconfigured" {
-			e.Color, e.Description = colorWarn, t("search.unconfigured")
-			break
-		}
-		results, _ := out["results"].([]any)
-		if len(results) == 0 {
-			e.Description = t("search.none")
-			break
-		}
-		var row discordgo.ActionsRow
-		for i, r := range results {
-			if i >= 5 {
-				break
-			}
-			m, _ := r.(map[string]any)
-			title := truncate(fmt.Sprint(m["title"]), 256)
-			url := strings.TrimSpace(fmt.Sprint(m["url"]))
-			e.Fields = append(e.Fields, &discordgo.MessageEmbedField{
-				Name:  title,
-				Value: truncate(fmt.Sprint(m["snippet"]), 1024),
-			})
-			if url != "" && strings.HasPrefix(url, "http") && len(row.Components) < 5 {
-				row.Components = append(row.Components, discordgo.Button{
-					Label: truncate(title, 80),
-					Style: discordgo.LinkButton,
-					URL:   url,
-				})
-			}
-		}
-		if len(row.Components) > 0 {
-			return Rendered{Embed: e, Components: []discordgo.MessageComponent{row}, Ephemeral: cmd.Ephemeral}
-		}
+		return renderSearch(in, e)
 	case "activity.ranking":
-		e.Title = t("ranking.title." + fmt.Sprint(out["period"]))
-		top, _ := out["top"].([]any)
-		if len(top) == 0 {
-			if l, ok := out["top"].([]map[string]any); ok {
-				for _, m := range l {
-					top = append(top, m)
-				}
-			}
-		}
-		if len(top) == 0 {
-			e.Description = t("ranking.none")
-			break
-		}
-		medals := []string{"🥇", "🥈", "🥉"}
-		var lines []string
-		for i, r := range top {
-			m, _ := r.(map[string]any)
-			mark := fmt.Sprintf("%d.", i+1)
-			if i < len(medals) {
-				mark = medals[i]
-			}
-			lines = append(lines, t("ranking.line", "mark", mark, "name", fmt.Sprint(m["name"]), "count", fmt.Sprint(m["count"]), "share", fmt.Sprint(m["share"])))
-		}
-		e.Description = strings.Join(lines, "\n")
-		e.Footer = &discordgo.MessageEmbedFooter{Text: t("ranking.footer", "total", fmt.Sprint(out["total_messages"]), "people", fmt.Sprint(out["people"]))}
+		return renderRanking(in, e)
 	case "places.search":
-		e.Title = t("places.title", "query", fmt.Sprint(out["query"]))
-		if status == "unconfigured" {
-			e.Color, e.Description = colorWarn, t("places.unconfigured")
-			break
-		}
-		places, _ := out["places"].([]map[string]any)
-		if places == nil {
-			for _, p := range func() []any { l, _ := out["places"].([]any); return l }() {
-				if m, ok := p.(map[string]any); ok {
-					places = append(places, m)
-				}
-			}
-		}
-		if len(places) == 0 {
-			e.Description = t("places.none")
-			break
-		}
-		var row discordgo.ActionsRow
-		for i, m := range places {
-			if i >= 5 {
-				break
-			}
-			name := truncate(fmt.Sprint(m["name"]), 256)
-			lines := []string{fmt.Sprint(m["address"])}
-			if c, _ := m["category"].(string); c != "" {
-				lines = append(lines, c)
-			}
-			if ph, _ := m["phone"].(string); ph != "" {
-				lines = append(lines, ph)
-			}
-			e.Fields = append(e.Fields, &discordgo.MessageEmbedField{Name: name, Value: truncate(strings.Join(lines, "\n"), 1024)})
-			if u, _ := m["url"].(string); strings.HasPrefix(u, "http") && len(row.Components) < 5 {
-				row.Components = append(row.Components, discordgo.Button{Label: truncate(name, 80), Style: discordgo.LinkButton, URL: u})
-			}
-		}
-		if len(row.Components) > 0 {
-			return Rendered{Embed: e, Components: []discordgo.MessageComponent{row}, Ephemeral: cmd.Ephemeral}
-		}
+		return renderPlaces(in, e)
 	case "polls.create":
-		p := nativeDiscordPoll(out, locale)
-		e.Title = t("poll.posted")
-		e.Description = t("poll.how")
-		if closes, _ := out["closes_at"].(string); closes != "" {
-			e.Fields = []*discordgo.MessageEmbedField{{Name: t("poll.closes"), Value: discordTime(closes), Inline: true}}
-		}
-		e.Footer = &discordgo.MessageEmbedFooter{Text: t("poll.label", "id", out["id"])}
-		return Rendered{Embed: e, Poll: p}
+		return renderPollCreate(in, e)
 	case "polls.vote":
-		e.Title = t("poll.voted")
-		e.Description = t("poll.revision", "n", out["revision"])
-		return Rendered{Embed: e, Ephemeral: true}
+		return renderPollVote(in, e)
 	case "polls.close":
-		e.Title = t("poll.closed")
-		e.Color = colorNeutral
+		return renderPollClose(in, e)
 	case "polls.result":
-		e.Title = "📊 " + fmt.Sprint(out["question"])
-		by, _ := out["by_option"].([]any)
-		var lines []string
-		for _, row := range by {
-			m, _ := row.(map[string]any)
-			label := fmt.Sprint(m["label"])
-			if label == "" || label == "<nil>" {
-				label = fmt.Sprint(m["option_id"])
-			}
-			lines = append(lines, fmt.Sprintf("%s — %v", label, toInt(m["votes"])))
-		}
-		lines = append(lines, "", t("poll.voters", "n", out["unique_voters"], "status", pollStatus(fmt.Sprint(out["status"]), locale)))
-		if closes, _ := out["closes_at"].(string); closes != "" {
-			lines = append(lines, t("poll.closes_at", "when", discordTime(closes)))
-		}
-		e.Description = strings.Join(lines, "\n")
+		return renderPollResult(in, e)
 	case "runtime.doctor":
-		e.Title = t("status.title")
-		feats, _ := out["features"].(map[string]any)
-		keys := make([]string, 0, len(feats))
-		for k := range feats {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		var lines []string
-		for _, k := range keys {
-			m, _ := feats[k].(map[string]any)
-			name := k
-			if messages.Has("feature.name." + k) {
-				name = messages.T(locale, "feature.name."+k)
-			}
-			line := fmt.Sprintf("%s %s", statusIcon(fmt.Sprint(m["status"])), name)
-			if why, _ := m["reason_text"].(string); why != "" && m["status"] != "ready" {
-				line += " — " + why
-			}
-			lines = append(lines, line)
-		}
-		e.Description = strings.Join(lines, "\n")
-		e.Footer = &discordgo.MessageEmbedFooter{Text: fmt.Sprintf("v%v · rev %v", out["version"], out["revision"])}
-		return Rendered{Embed: e, Ephemeral: true}
+		return renderDoctor(in, e)
 	case "images.generate":
-		e.Title = t("image.title")
-		if status == "not_implemented" || status == "unconfigured" {
-			e.Color, e.Description = colorWarn, t("image.unconfigured")
-			break
-		}
-		e.Description = truncate(fmt.Sprint(out["url"]), 1000)
+		return renderImage(in, e)
 	case "help.version":
 		return RenderHelp(locale, nil, nil)
 	default:
@@ -399,27 +112,19 @@ func Render(res action.Result, cmd Command, locale string) Rendered {
 	return Rendered{Embed: e, Ephemeral: cmd.Ephemeral}
 }
 
-// RenderHelp renders only the command surfaces supplied by the live gateway plus the message menu
-// action that is always registered.
-func RenderHelp(locale string, slash, prefix []string) Rendered {
-	t := func(key string) string { return messages.T(locale, "discord.render.help."+key) }
-	var lines []string
-	if len(slash) > 0 {
-		lines = append(lines, "**"+t("slash")+"**")
-		lines = append(lines, slash...)
-	}
-	if len(prefix) > 0 {
-		if len(lines) > 0 {
-			lines = append(lines, "")
-		}
-		lines = append(lines, "**"+t("prefixes")+"**")
-		lines = append(lines, prefix...)
-	}
-	if len(lines) > 0 {
-		lines = append(lines, "")
-	}
-	lines = append(lines, "**"+t("message")+"**", messages.T(locale, "discord.feedback.command"))
-	return Rendered{Embed: &discordgo.MessageEmbed{Title: t("title"), Color: colorNeutral, Description: strings.Join(lines, "\n")}, Ephemeral: true}
+// renderInput is what every result renderer reads: the Action's output and the command it answers.
+type renderInput struct {
+	out    map[string]any
+	status string
+	live   bool
+	cmd    Command
+	locale string
+	t      func(key string, args ...any) string // a discord.render.* text in locale
+}
+
+// embedOnly is a result shown as its embed alone, private when the command is.
+func (in renderInput) embedOnly(e *discordgo.MessageEmbed) Rendered {
+	return Rendered{Embed: e, Ephemeral: in.cmd.Ephemeral}
 }
 
 // errorMessageArgs picks the values of an error that a member may be shown. It keeps ordinary values
@@ -511,34 +216,6 @@ func unsafeErrorArgValue(value any) bool {
 	return false
 }
 
-func statusIcon(s string) string {
-	switch s {
-	case "ready":
-		return "🟢"
-	case "disabled":
-		return "⚪"
-	case "unconfigured", "pending":
-		return "🟡"
-	case "error":
-		return "🔴"
-	}
-	return "⚫"
-}
-
-func pollStatus(s, locale string) string {
-	if v, ok := messages.Lookup(locale, "discord.render.poll.status."+s); ok {
-		return v
-	}
-	return s
-}
-
-func precipText(p, locale string) string {
-	if v, ok := messages.Lookup(locale, "discord.render.precip."+p); ok {
-		return v
-	}
-	return p
-}
-
 func toF(v any) float64 {
 	switch n := v.(type) {
 	case float64:
@@ -562,51 +239,6 @@ func discordTime(raw string) string {
 		return raw
 	}
 	return fmt.Sprintf("<t:%d:f> (<t:%d:R>)", t.Unix(), t.Unix())
-}
-
-func nativeDiscordPoll(out map[string]any, locale string) *discordgo.Poll {
-	q := truncate(fmt.Sprint(out["question"]), 300)
-	hours := toInt(out["duration_hours"])
-	if hours < 1 {
-		hours = 24
-	}
-	if hours > 768 {
-		hours = 768
-	}
-	multi, _ := out["allow_multiselect"].(bool)
-	if !multi && toInt(out["max_select"]) > 1 {
-		multi = true
-	}
-	emojis := []string{"1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"}
-	var answers []discordgo.PollAnswer
-	if opts, ok := out["options"].([]any); ok {
-		for i, o := range opts {
-			if i >= 10 {
-				break
-			}
-			m, _ := o.(map[string]any)
-			label := truncate(fmt.Sprint(m["label"]), 55)
-			ans := discordgo.PollAnswer{Media: &discordgo.PollMedia{Text: label}}
-			if i < len(emojis) {
-				ans.Media.Emoji = &discordgo.ComponentEmoji{Name: emojis[i]}
-			}
-			answers = append(answers, ans)
-		}
-	}
-	if len(answers) < 2 {
-		yes, no := messages.T(locale, "poll.yes"), messages.T(locale, "poll.no")
-		answers = []discordgo.PollAnswer{
-			{Media: &discordgo.PollMedia{Text: yes, Emoji: &discordgo.ComponentEmoji{Name: "👍"}}},
-			{Media: &discordgo.PollMedia{Text: no, Emoji: &discordgo.ComponentEmoji{Name: "👎"}}},
-		}
-	}
-	return &discordgo.Poll{
-		Question:         discordgo.PollMedia{Text: q},
-		Answers:          answers,
-		Duration:         hours,
-		AllowMultiselect: multi,
-		LayoutType:       discordgo.PollLayoutTypeDefault,
-	}
 }
 
 func truncate(s string, n int) string {

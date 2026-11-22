@@ -17,7 +17,7 @@ import (
 func TestDeleteAfterServiceCloseIsQueuedAndAppliedOnRestart(t *testing.T) {
 	g, dir := reconciliationTestGateway(t)
 	waits := 0
-	g.reconciliationWait = func(context.Context, time.Duration) bool { waits++; return true }
+	g.recon.wait = func(context.Context, time.Duration) bool { waits++; return true }
 	root := g.svc.DataRoot
 	eng, err := g.svc.MemoryEngine()
 	if err != nil {
@@ -60,8 +60,8 @@ func TestDeleteAfterServiceCloseIsQueuedAndAppliedOnRestart(t *testing.T) {
 		t.Fatalf("the message is already marked deleted before the queue ran (deleted_at=%q); the check below proves nothing", live)
 	}
 	g2 := &Gateway{svc: svc2, ctx: context.Background(), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	g2.reconciliationWait = func(context.Context, time.Duration) bool { return true }
-	if err := g2.drainMessageReconciliation(); err != nil {
+	g2.recon.wait = func(context.Context, time.Duration) bool { return true }
+	if err := g2.reconciler().drainMessageReconciliation(); err != nil {
 		t.Fatal(err)
 	}
 	var deleted string
