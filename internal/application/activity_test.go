@@ -79,6 +79,10 @@ func TestActivityRankingShowsLastNameAndLeavesOutWithdrawn(t *testing.T) {
 	}
 	_ = asUser(svc, "1002", "privacy.consent", map[string]any{"scope": "memory", "decision": "withdraw"})
 	svc.MemoryAllowed("warm") // load the opt-out cache before the ranking reads
+	waitFor(t, "the withdrawn person's rows to go", func() bool {
+		var n int
+		return svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM activity_counts WHERE user_id='1002'`).Scan(&n) == nil && n == 0
+	})
 	// a row of the withdrawn person that the deletion has not reached (or that was written before it)
 	if _, err := svc.Store.DB.Exec(`INSERT INTO activity_counts(day, guild_id, channel_id, user_id, name, n, last_at) VALUES('2026-10-01','g1','c1','1002','Bob',7,'2026-10-01T11:00:00Z')`); err != nil {
 		t.Fatal(err)
