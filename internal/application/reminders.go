@@ -867,7 +867,9 @@ func (s *Service) deliverRows(ctx context.Context, due []reminder, now time.Time
 		loc := s.reminderLoc(r)
 		if r.Repeat == nil {
 			if now.Sub(at) > grace {
-				_, _ = db.DB.Exec(`UPDATE reminders SET status='missed', updated_at=? WHERE id=? AND status='scheduled'`, stamp, r.ID)
+				if _, err := db.DB.Exec(`UPDATE reminders SET status='missed', updated_at=? WHERE id=? AND status='scheduled'`, stamp, r.ID); err != nil {
+					s.warnRecordFailed("reminders: missed mark failed", err)
+				}
 				s.dropReminderContext(r.ID)
 				continue
 			}
@@ -884,7 +886,9 @@ func (s *Service) deliverRows(ctx context.Context, due []reminder, now time.Time
 		if r.Destination == "dm" {
 			if until := s.quietUntil(s.userPrefs(r.OwnerID), now); until.After(now) {
 				// quiet hours: later, not missed (the wait does not count against grace)
-				_, _ = db.DB.Exec(`UPDATE reminders SET due_at=?, updated_at=? WHERE id=? AND status='scheduled' AND version=?`, until.UTC().Format(time.RFC3339), stamp, r.ID, r.Version)
+				if _, err := db.DB.Exec(`UPDATE reminders SET due_at=?, updated_at=? WHERE id=? AND status='scheduled' AND version=?`, until.UTC().Format(time.RFC3339), stamp, r.ID, r.Version); err != nil {
+					s.warnRecordFailed("reminders: quiet-hours defer failed", err)
+				}
 				continue
 			}
 		}
@@ -950,18 +954,28 @@ func (s *Service) deliverRows(ctx context.Context, due []reminder, now time.Time
 		} else {
 			switch {
 			case err == nil:
-				_, _ = db.DB.Exec(`UPDATE reminders SET status='sent', delivered_id=?, error='', updated_at=? WHERE id=?`, msgID, stamp, r.ID)
+				if _, err := db.DB.Exec(`UPDATE reminders SET status='sent', delivered_id=?, error='', updated_at=? WHERE id=?`, msgID, stamp, r.ID); err != nil {
+					s.warnRecordFailed("reminders: sent mark failed", err)
+				}
 			case errors.Is(err, ErrDMClosed):
-				_, _ = db.DB.Exec(`UPDATE reminders SET status='failed', error='dm_closed', updated_at=? WHERE id=?`, stamp, r.ID)
+				if _, err := db.DB.Exec(`UPDATE reminders SET status='failed', error='dm_closed', updated_at=? WHERE id=?`, stamp, r.ID); err != nil {
+					s.warnRecordFailed("reminders: failed mark failed", err)
+				}
 			case errors.Is(err, ErrNotDelivered) && r.Attempts < 3:
 				// Discord answered with a refusal: nothing was posted, try again a little later
 				next := s.Clock.Now().Add(time.Duration(r.Attempts*r.Attempts) * time.Minute).UTC().Format(time.RFC3339)
-				_, _ = db.DB.Exec(`UPDATE reminders SET status='scheduled', due_at=?, error=?, updated_at=? WHERE id=?`, next, clip(err.Error(), 300), stamp, r.ID)
+				if _, err := db.DB.Exec(`UPDATE reminders SET status='scheduled', due_at=?, error=?, updated_at=? WHERE id=?`, next, clip(err.Error(), 300), stamp, r.ID); err != nil {
+					s.warnRecordFailed("reminders: retry mark failed", err)
+				}
 			case errors.Is(err, ErrNotDelivered):
-				_, _ = db.DB.Exec(`UPDATE reminders SET status='failed', error=?, updated_at=? WHERE id=?`, clip(err.Error(), 300), stamp, r.ID)
+				if _, err := db.DB.Exec(`UPDATE reminders SET status='failed', error=?, updated_at=? WHERE id=?`, clip(err.Error(), 300), stamp, r.ID); err != nil {
+					s.warnRecordFailed("reminders: failed mark failed", err)
+				}
 			default:
 				// the connection broke: it may have been posted, and sending again could post it twice
-				_, _ = db.DB.Exec(`UPDATE reminders SET status='unknown', error=?, updated_at=? WHERE id=?`, clip(err.Error(), 300), stamp, r.ID)
+				if _, err := db.DB.Exec(`UPDATE reminders SET status='unknown', error=?, updated_at=? WHERE id=?`, clip(err.Error(), 300), stamp, r.ID); err != nil {
+					s.warnRecordFailed("reminders: unknown mark failed", err)
+				}
 			}
 		}
 		if s.reminderEnded(r.ID) {
