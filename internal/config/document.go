@@ -1089,6 +1089,9 @@ type MemoryFlags struct {
 // OnOff are the values of the memory.episodes, memory.state, memory.cards and memory.warm_query switches.
 var OnOff = []string{"on", "off"}
 
+// LeafSplitModes are the values of memory.leaf_split; the first is the default.
+var LeafSplitModes = []string{"time_gap", "fixed"}
+
 // WarmQueryOn reports whether a turn may embed its message ahead of the plan (memory.warm_query, default
 // on). The turn's own conditions (practice, a daily_limit, withdrawn consent) still apply on top of it.
 func (m MemoryFlags) WarmQueryOn() bool { return m.WarmQuery != "off" }

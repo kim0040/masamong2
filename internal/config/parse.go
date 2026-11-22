@@ -457,7 +457,7 @@ func (p *parser) memoryFormats() error {
 			return fmt.Errorf("%s must be on or off", key)
 		}
 	}
-	if d.Memory.LeafSplit != "" && d.Memory.LeafSplit != "time_gap" && d.Memory.LeafSplit != "fixed" {
+	if d.Memory.LeafSplit != "" && !slices.Contains(LeafSplitModes, d.Memory.LeafSplit) {
 		return fmt.Errorf("memory.leaf_split must be time_gap or fixed")
 	}
 	return nil
