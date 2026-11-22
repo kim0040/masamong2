@@ -30,6 +30,9 @@ type serviceHooks struct {
 	zodiac zodiacHooks
 	// imageConnectWait and imageConnectPoll shorten a picture job's wait for the gateway (imagequeue.go).
 	imageConnectWait, imageConnectPoll time.Duration
+	// chatDeadlines replace chatDeadline's limits for the roles they name (chat_input.go); a test may
+	// change them while the service runs.
+	chatDeadlines atomic.Pointer[map[string]time.Duration]
 	// oldEditsAtOnce settles old edits at the first idle pass instead of oldEditsDelay after the start.
 	oldEditsAtOnce bool
 }

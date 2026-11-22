@@ -165,11 +165,11 @@ func (s *Service) batchResolver(doc config.Document, eng *engine.Engine) engine.
 
 // roleTimeout is how long one call of role may take before its fallback is asked: the model's own
 // limit, else chatDeadline's, else a minute (summaries, features).
-func roleTimeout(role string, seconds int) time.Duration {
+func (s *Service) roleTimeout(role string, seconds int) time.Duration {
 	if seconds > 0 {
 		return time.Duration(seconds) * time.Second
 	}
-	if d, ok := chatDeadline[role]; ok {
+	if d, ok := s.roleDeadline(role); ok {
 		return d
 	}
 	return time.Minute
@@ -178,7 +178,7 @@ func roleTimeout(role string, seconds int) time.Duration {
 // failoverFor builds role's fallback chain. A fallback whose provider cannot be reached now (no key, not
 // an openai_compat host, disabled) is left out rather than failing the role.
 func (s *Service) failoverFor(doc config.Document, role string, m config.Model) *openai.Failover {
-	f := &openai.Failover{Provider: m.Provider, Model: m.Model, Timeout: roleTimeout(role, m.TimeoutSeconds), Breaker: s.breaker(),
+	f := &openai.Failover{Provider: m.Provider, Model: m.Model, Timeout: s.roleTimeout(role, m.TimeoutSeconds), Breaker: s.breaker(),
 		OnFail: func(provider, model string, err error) {
 			s.Log.Warn("model failed, its fallback answers", "role", role, "provider", provider, "model", model, "class", errclass.Of(err))
 			s.noteProvider(provider, err)
@@ -201,7 +201,7 @@ func (s *Service) failoverFor(doc config.Document, role string, m config.Model) 
 		// the fallback's own effort, else the role's, for its Quick calls (capped as the role's are); its
 		// other calls take fb.Effort when set (openai.Fallback.Effort), else the role's level the request carries
 		a.RoleEffort = quickEffort(role, cmp.Or(fb.Effort, m.Effort))
-		f.Fallbacks = append(f.Fallbacks, openai.Fallback{A: a, Provider: fb.Provider, Model: fb.Model, Timeout: roleTimeout(role, fb.TimeoutSeconds), Effort: fb.Effort})
+		f.Fallbacks = append(f.Fallbacks, openai.Fallback{A: a, Provider: fb.Provider, Model: fb.Model, Timeout: s.roleTimeout(role, fb.TimeoutSeconds), Effort: fb.Effort})
 	}
 	return f
 }

@@ -70,11 +70,18 @@ func SetImageConnectWaitForTest(s *Service, wait, poll time.Duration) {
 // RunFortuneMorning runs one pass of the morning briefings (the scheduler runs it every minute).
 func RunFortuneMorning(s *Service, ctx context.Context) { s.runFortuneMorning(ctx) }
 
-// SetChatDeadlineForTest shortens how long one model call of a role may take; it returns the restore.
-func SetChatDeadlineForTest(role string, d time.Duration) func() {
-	old := chatDeadline[role]
-	chatDeadline[role] = d
-	return func() { chatDeadline[role] = old }
+// SetChatDeadlineForTest shortens how long one model call of a role may take in s; it returns the restore.
+func SetChatDeadlineForTest(s *Service, role string, d time.Duration) func() {
+	old := s.hooks.chatDeadlines.Load()
+	m := map[string]time.Duration{}
+	if old != nil {
+		for k, v := range *old {
+			m[k] = v
+		}
+	}
+	m[role] = d
+	s.hooks.chatDeadlines.Store(&m)
+	return func() { s.hooks.chatDeadlines.Store(old) }
 }
 
 // FailChatToolForTest makes a chat tool answer "unavailable" in one channel; it returns the undo.
