@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"masamong/internal/application"
+	"masamong/internal/config"
 )
 
 // Hosts that sell models without listing prices (CometAPI) get a reference price from the same model
@@ -78,5 +79,56 @@ func TestPricesForHostsWithoutPriceLists(t *testing.T) {
 	}
 	if warned != "image" {
 		t.Fatalf("only the image model is priced nowhere: %q", warned)
+	}
+}
+
+// A fallback model that is priced nowhere counts as free just like a main model does, so the dashboard
+// names its role; setting the fallback's own price clears the alert.
+func TestUnpricedFallbackModelIsAnAlert(t *testing.T) {
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek-v4-flash","object":"model","owned_by":"deepseek","supported_endpoint_types":["openai"]},{"id":"mystery-chat-1","object":"model","owned_by":"custom","supported_endpoint_types":["openai"]}],"object":"list"}`))
+	}))
+	defer host.Close()
+	ref := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek/deepseek-v4-flash","pricing":{"prompt":"0.00000014","completion":"0.00000028"}}]}`))
+	}))
+	defer ref.Close()
+	svc := setupSvc(t)
+	application.SetReferencePricesForTest(svc, ref.URL)
+	t.Setenv("COMET_KEY", "c")
+	out(t, svc, "providers.add", map[string]any{"api": "compatible", "id": "cometapi", "base_url": host.URL + "/v1"})
+	out(t, svc, "providers.credentials", map[string]any{"id": "cometapi", "credential_ref": "env:COMET_KEY"})
+	out(t, svc, "models.select", map[string]any{"role": "response", "provider": "cometapi", "model": "deepseek-v4-flash"})
+	roles := func() string {
+		for _, raw := range out(t, svc, "dashboard.overview", nil)["attention"].([]any) {
+			if a := raw.(map[string]any); a["key"] == "price_unknown" {
+				return a["args"].(map[string]any)["roles"].(string)
+			}
+		}
+		return ""
+	}
+	// the main model's price arrives from the reference list
+	deadline := time.Now().Add(5 * time.Second)
+	for roles() != "" && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if got := roles(); got != "" {
+		t.Fatalf("the main model is priced: %q", got)
+	}
+	applyDoc(t, svc, func(d *config.Document) {
+		m := d.Models["response"]
+		m.Fallbacks = []config.ModelFallback{{Provider: "cometapi", Model: "mystery-chat-1"}}
+		d.Models["response"] = m
+	})
+	if got := roles(); got != "response" {
+		t.Fatalf("an unpriced fallback must be named: %q", got)
+	}
+	applyDoc(t, svc, func(d *config.Document) {
+		m := d.Models["response"]
+		m.Fallbacks = []config.ModelFallback{{Provider: "cometapi", Model: "mystery-chat-1", PriceInPerMTok: 1, PriceOutPerMTok: 2}}
+		d.Models["response"] = m
+	})
+	if got := roles(); got != "" {
+		t.Fatalf("a fallback with its own price is priced: %q", got)
 	}
 }
