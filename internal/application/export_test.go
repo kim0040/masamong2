@@ -384,11 +384,19 @@ func (s *Service) RunRetentionForTest(ctx context.Context) (map[string]int64, er
 	return s.runRetention(ctx)
 }
 
-// SetSearchDeadlineForTest shortens how long search.web waits for one service at a depth; it returns the restore.
-func SetSearchDeadlineForTest(depth string, d time.Duration) func() {
-	old := searchDeadline[depth]
-	searchDeadline[depth] = d
-	return func() { searchDeadline[depth] = old }
+// SetSearchDeadlineForTest shortens how long s's search.web waits for one service at a depth; it returns
+// the restore.
+func SetSearchDeadlineForTest(s *Service, depth string, d time.Duration) func() {
+	return s.changeSearchLimits(func(l *searchLimits) { l.deadline[depth] = d })
+}
+
+// changeSearchLimits gives s a changed copy of its search limits; it returns the restore.
+func (s *Service) changeSearchLimits(change func(*searchLimits)) func() {
+	old := s.hooks.search.Load()
+	l := s.searchLimits().clone()
+	change(l)
+	s.hooks.search.Store(l)
+	return func() { s.hooks.search.Store(old) }
 }
 
 // UseVersionForTest sets the running version for a test (the update-news notes follow it).

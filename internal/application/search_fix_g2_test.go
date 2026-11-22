@@ -228,11 +228,11 @@ func hungService(t *testing.T, delay time.Duration, body string) *slowSearch {
 // The whole search has one time limit: the next service gets what is left (at most its own limit) and is
 // not asked when too little is left.
 func TestSearchHasOneTotalTimeLimit(t *testing.T) {
-	defer application.SetSearchLimitsForTest("deep", 400*time.Millisecond, 700*time.Millisecond, 150*time.Millisecond)()
 	a := hungService(t, 30*time.Second, "")
 	b := hungService(t, 30*time.Second, "")
 	c := hungService(t, 30*time.Second, "")
 	svc := setupSvc(t)
+	defer application.SetSearchLimitsForTest(svc, "deep", 400*time.Millisecond, 700*time.Millisecond, 150*time.Millisecond)()
 	pointAt(t, svc, "tavily", a.srv.URL, "T_KEY", "k")
 	pointAt(t, svc, "serper", b.srv.URL, "S_KEY", "k")
 	pointAt(t, svc, "tinyfish", c.srv.URL, "TF_KEY", "k")
@@ -257,10 +257,10 @@ func TestSearchHasOneTotalTimeLimit(t *testing.T) {
 func TestSearchTimeLimitKeepsAnEmptyAnswer(t *testing.T) {
 	// the first service answers (empty) after 400 ms, well inside its 1.5 s limit; the search has 1 s in
 	// all, so at most 600 ms is left, under the 700 ms the next one needs, however slow the answer was
-	defer application.SetSearchLimitsForTest("standard", 1500*time.Millisecond, time.Second, 700*time.Millisecond)()
 	first := hungService(t, 400*time.Millisecond, `{"organic":[]}`)
 	second := hungService(t, 0, `{"organic":[{"title":"B","link":"https://b.example/1","snippet":"s"}]}`)
 	svc := setupSvc(t)
+	defer application.SetSearchLimitsForTest(svc, "standard", 1500*time.Millisecond, time.Second, 700*time.Millisecond)()
 	pointAt(t, svc, "serper", first.srv.URL, "S_KEY", "k")
 	pointAt(t, svc, "tinyfish", second.srv.URL, "TF_KEY", "k")
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"web_search", "order"}, "value": []any{"serper", "tinyfish"}}}}); !r.OK {
@@ -289,13 +289,13 @@ func TestProbeHasItsOwnTimeLimit(t *testing.T) {
 
 // A host is remembered only for what the fetch service said about it; our own cut-offs say nothing.
 func TestHostCacheIgnoresOurCutOffs(t *testing.T) {
-	defer application.SetFetchSoftForTest(120 * time.Millisecond)()
 	svc, fake := withFetch(t, 3, hostOf, func(u string) (int, string, time.Duration) {
 		if strings.Contains(u, "site1.") {
 			return 200, okPage(campPage), 5 * time.Second // slow: the soft deadline cuts it, the host is not at fault
 		}
 		return 200, okPage(campPage), 0
 	})
+	defer application.SetFetchSoftForTest(svc, 120*time.Millisecond)()
 	for i := 0; i < 4; i++ {
 		res := runVia(svc, "chat", map[string]any{"query": fmt.Sprintf("가평 캠핑장 요금 %d", i)})
 		if !res.OK {
@@ -422,10 +422,10 @@ func TestScheduledTaskSearchReadsNoPages(t *testing.T) {
 // attempt beyond the turn's hold). One that timed out after it was sent may have been charged, so it is
 // counted at list price; one the service refused with an HTTP error is not.
 func TestSearchRequestIsSentOnceAndALostAnswerIsCharged(t *testing.T) {
-	defer application.SetSearchLimitsForTest("standard", 300*time.Millisecond, 2*time.Second, 50*time.Millisecond)()
 	hung := hungService(t, 30*time.Second, "")
 	tf := newRecorder(t, func(string) string { return `{"results":[{"title":"T","url":"https://t.example/1","snippet":"s"}]}` })
 	svc := setupSvc(t)
+	defer application.SetSearchLimitsForTest(svc, "standard", 300*time.Millisecond, 2*time.Second, 50*time.Millisecond)()
 	pointAt(t, svc, "linkup", hung.srv.URL, "L_KEY", "k")
 	pointAt(t, svc, "tinyfish", tf.srv.URL, "TF_KEY", "k")
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"web_search", "order"}, "value": []any{"linkup", "tinyfish"}}}}); !r.OK {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -623,51 +624,72 @@ func (s *Service) quoteBySearch(ctx context.Context, req action.Request, symbol,
 // its own limit, and is not asked when under searchMinLeft is left. The search services' HTTP limit
 // (searchHTTPTimeout, registry.go) sits above the longest of them.
 //
-// Variables so tests can shorten them.
-var (
-	searchDeadline = map[string]time.Duration{
+// The limits are one read-only table (defaultSearchLimits); a test shortens them for its own service
+// (serviceHooks.search).
+type searchLimits struct {
+	deadline map[string]time.Duration // searchDeadline: one service, by depth
+	// deadlineKind overrides deadline of the deep search for a service kind.
+	deadlineKind map[string]time.Duration
+	total        map[string]time.Duration // searchTotal: the whole search, by depth
+	minLeft      time.Duration            // searchMinLeft
+	// fetchSoft: once two pages are in, the pages still missing get this long.
+	fetchSoft time.Duration
+	// fetchHard is the longest the page reading of one search takes, by depth ("" is standard).
+	fetchHard map[string]time.Duration
+}
+
+var defaultSearchLimits = &searchLimits{
+	deadline: map[string]time.Duration{
 		websearch.DepthQuick:    8 * time.Second,
 		websearch.DepthStandard: 10 * time.Second,
 		websearch.DepthDeep:     15 * time.Second,
-	}
-	// searchDeadlineKind overrides searchDeadline of the deep search for a service kind.
-	searchDeadlineKind = map[string]time.Duration{"linkup": 45 * time.Second}
-	searchTotal        = map[string]time.Duration{
+	},
+	deadlineKind: map[string]time.Duration{"linkup": 45 * time.Second},
+	total: map[string]time.Duration{
 		websearch.DepthQuick:    8 * time.Second,
 		websearch.DepthStandard: 15 * time.Second,
 		websearch.DepthDeep:     50 * time.Second,
-	}
-	searchMinLeft = 2 * time.Second
-)
+	},
+	minLeft:   2 * time.Second,
+	fetchSoft: 2500 * time.Millisecond,
+	fetchHard: map[string]time.Duration{websearch.DepthStandard: 5 * time.Second, websearch.DepthDeep: 8 * time.Second},
+}
 
-// searchTimeout is how long one service of this kind gets at a depth ("" is standard).
-func searchTimeout(kind, depth string) time.Duration {
+// searchLimits are the service's search time limits: the defaults, or what a test set.
+func (s *Service) searchLimits() *searchLimits {
+	if l := s.hooks.search.Load(); l != nil {
+		return l
+	}
+	return defaultSearchLimits
+}
+
+// clone is a copy whose maps can be changed (a test's limits).
+func (l *searchLimits) clone() *searchLimits {
+	c := *l
+	c.deadline, c.deadlineKind, c.total, c.fetchHard = maps.Clone(l.deadline), maps.Clone(l.deadlineKind), maps.Clone(l.total), maps.Clone(l.fetchHard)
+	return &c
+}
+
+// timeout is how long one service of this kind gets at a depth ("" is standard).
+func (l *searchLimits) timeout(kind, depth string) time.Duration {
 	if depth == websearch.DepthDeep {
-		if d, ok := searchDeadlineKind[kind]; ok {
+		if d, ok := l.deadlineKind[kind]; ok {
 			return d
 		}
 	}
-	if d, ok := searchDeadline[depth]; ok {
+	if d, ok := l.deadline[depth]; ok {
 		return d
 	}
-	return searchDeadline[websearch.DepthStandard]
+	return l.deadline[websearch.DepthStandard]
 }
 
-// searchTotalTimeout is how long a whole search gets, all the services it tries together.
-func searchTotalTimeout(depth string) time.Duration {
-	if d, ok := searchTotal[depth]; ok {
+// totalTimeout is how long a whole search gets, all the services it tries together.
+func (l *searchLimits) totalTimeout(depth string) time.Duration {
+	if d, ok := l.total[depth]; ok {
 		return d
 	}
-	return searchTotal[websearch.DepthStandard]
+	return l.total[websearch.DepthStandard]
 }
-
-// Timings of the page reading of a search. Variables so tests can shorten them.
-var (
-	// fetchSoftAfter: once two pages are in, the pages still missing get this long.
-	fetchSoftAfter = 2500 * time.Millisecond
-	// fetchHardDeadline is the longest the page reading of one search takes, by depth ("" is standard).
-	fetchHardDeadline = map[string]time.Duration{websearch.DepthStandard: 5 * time.Second, websearch.DepthDeep: 8 * time.Second}
-)
 
 const (
 	// passageMinText is how much service text a result needs to be cut into a passage without opening
@@ -786,19 +808,20 @@ func (r *searchRun) absorb(t searchTry, more bool) bool {
 // limit or what is left of it, whichever is less, and the ones after that are not asked when less than
 // searchMinLeft is left (an empty answer from the last service asked is then the search's answer).
 func (s *Service) searchSequential(ctx context.Context, order []string, q websearch.Query, depth string, run *searchRun) (searchTry, bool) {
-	end := time.Now().Add(searchTotalTimeout(depth))
+	limits := s.searchLimits()
+	end := time.Now().Add(limits.totalTimeout(depth))
 	for i, id := range order {
 		if err := ctx.Err(); err != nil {
 			// the turn has ended: the services left are not asked, and none of them is to blame
 			run.lastID, run.lastErr, run.lastIsProviders = id, err, false
 			return searchTry{}, false
 		}
-		limit := searchTimeout(s.Registry().Search[id].Kind(), depth)
+		limit := limits.timeout(s.Registry().Search[id].Kind(), depth)
 		if i > 0 {
 			limit = min(limit, time.Until(end))
 		}
 		t := s.askService(ctx, id, q, limit)
-		more := i+1 < len(order) && time.Until(end) >= searchMinLeft
+		more := i+1 < len(order) && time.Until(end) >= limits.minLeft
 		if run.absorb(t, more) {
 			return t, true
 		}
@@ -913,13 +936,14 @@ func (s *Service) readPages(ctx context.Context, query, depth string, results []
 	if len(need) == 0 {
 		return reads
 	}
-	hard := fetchHardDeadline[depth]
+	limits := s.searchLimits()
+	hard := limits.fetchHard[depth]
 	if hard == 0 {
-		hard = fetchHardDeadline[websearch.DepthStandard]
+		hard = limits.fetchHard[websearch.DepthStandard]
 	}
 	fctx, cancel := context.WithTimeout(ctx, hard)
 	defer cancel()
-	fctx = websearch.WithSoftDeadline(fctx, 2-have, fetchSoftAfter)
+	fctx = websearch.WithSoftDeadline(fctx, 2-have, limits.fetchSoft)
 	got, err := fetcher.Fetch(fctx, urls, fetchPageRunes)
 	if err != nil {
 		s.noteProvider(fetchQuotaKey, err) // the service's own failure; a page's never reaches here

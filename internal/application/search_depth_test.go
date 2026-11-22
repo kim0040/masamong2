@@ -284,14 +284,14 @@ func countOf(f *fetchFake, sub string) int {
 
 // A slow page does not hold the answer: the soft deadline (once two pages are in) cuts it off.
 func TestSearchFetchSoftDeadline(t *testing.T) {
-	defer application.SetFetchSoftForTest(150 * time.Millisecond)()
-	defer application.SetFetchDeadlineForTest("", 5*time.Second)()
 	svc, _ := withFetch(t, 3, hostOf, func(u string) (int, string, time.Duration) {
 		if strings.Contains(u, "site1.") {
 			return 200, okPage(campPage), 8 * time.Second
 		}
 		return 200, okPage(campPage), 0
 	})
+	defer application.SetFetchSoftForTest(svc, 150*time.Millisecond)()
+	defer application.SetFetchDeadlineForTest(svc, "", 5*time.Second)()
 	started := time.Now()
 	res := runVia(svc, "chat", map[string]any{"query": "가평 캠핑장 요금"})
 	if took := time.Since(started); took > 3*time.Second {
