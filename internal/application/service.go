@@ -213,6 +213,7 @@ type Service struct {
 	toolUses    atomic.Pointer[tools.Usage]   // the tools' usage counter, opened on first use (tools.go)
 	summaryRevs roomRevisions                 // edits and deletions seen per room (summaries.go)
 	lifeReqs    lifecycleQueue                // restart/stop requests for the daemon (admin.go)
+	logs        logRing                       // the console's live log (logring.go)
 	// leftovers are files of a finished restore or an interrupted backup that could not be removed
 	// (CleanDataLeftovers); doctor lists them and the scheduler retries.
 	leftovers atomic.Pointer[[]string]
@@ -383,13 +384,7 @@ func (s *Service) Close() error {
 			}
 			st.mu.Unlock()
 		}
-		if v, ok := rings.LoadAndDelete(s); ok {
-			r := v.(*logRing)
-			r.mu.Lock()
-			r.closed = true
-			r.entries = nil
-			r.mu.Unlock()
-		}
+		s.logs.close()
 		s.mu.Lock()
 		for ch := range s.watchers {
 			close(ch)

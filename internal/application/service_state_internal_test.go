@@ -76,6 +76,17 @@ func TestTwoServicesKeepTheirOwnState(t *testing.T) {
 		}
 	})
 
+	t.Run("live log", func(t *testing.T) {
+		a.ring().add(logEntry{Msg: "only in a"})
+		b.ring().mu.Lock()
+		defer b.ring().mu.Unlock()
+		for _, e := range b.ring().entries {
+			if e.Msg == "only in a" {
+				t.Fatal("one service's log line shows up in the other's live log")
+			}
+		}
+	})
+
 	t.Run("tool usage", func(t *testing.T) {
 		if a.toolUsage() == nil || a.toolUsage() == b.toolUsage() || a.toolUsage() != a.toolUsage() {
 			t.Fatal("each service opens and keeps its own tool usage counter")
