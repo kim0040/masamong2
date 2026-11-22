@@ -51,8 +51,8 @@ const (
 )
 
 // How long a job waits for the gateway (reconnecting) and the server list before it gives up, and how
-// often it looks. Variables so tests can shorten them.
-var (
+// often it looks. A test shortens them for its own service (serviceHooks).
+const (
 	imageConnectWait = 30 * time.Second
 	imageConnectPoll = 250 * time.Millisecond
 )
@@ -331,9 +331,9 @@ func (s *Service) imageReady(j *imageJob) bool {
 // waitImageReady waits, at most imageConnectWait, until Discord is ready for the job. It returns early
 // when the service stops or a policy reason ends the job; the caller looks at both.
 func (s *Service) waitImageReady(ctx context.Context, j *imageJob) bool {
-	deadline := time.NewTimer(imageConnectWait)
+	deadline := time.NewTimer(durationOr(s.hooks.imageConnectWait, imageConnectWait))
 	defer deadline.Stop()
-	tick := time.NewTicker(imageConnectPoll)
+	tick := time.NewTicker(durationOr(s.hooks.imageConnectPoll, imageConnectPoll))
 	defer tick.Stop()
 	for !s.imageReady(j) {
 		if s.imagePolicySkip(j) != "" {

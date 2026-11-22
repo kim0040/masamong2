@@ -28,6 +28,8 @@ type serviceHooks struct {
 	threads threadHooks
 	// zodiac stop a zodiac request where another can slip in (fortune.go).
 	zodiac zodiacHooks
+	// imageConnectWait and imageConnectPoll shorten a picture job's wait for the gateway (imagequeue.go).
+	imageConnectWait, imageConnectPoll time.Duration
 	// oldEditsAtOnce settles old edits at the first idle pass instead of oldEditsDelay after the start.
 	oldEditsAtOnce bool
 }

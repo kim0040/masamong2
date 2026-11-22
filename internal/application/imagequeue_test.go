@@ -466,9 +466,8 @@ func TestPictureWaitsOutAReconnectBeforePosting(t *testing.T) {
 // Discord stays away for good: the picture that is already paid for is still tried (posting is REST), and
 // the job that has not started is not drawn; its person hears image.failed.
 func TestPictureThatCannotStartForADisconnectedGatewaySaysFailed(t *testing.T) {
-	restore := application.SetImageConnectWaitForTest(150*time.Millisecond, 10*time.Millisecond)
-	defer restore()
 	svc, img, gw := imageChatSvc(t)
+	application.SetImageConnectWaitForTest(svc, 150*time.Millisecond, 10*time.Millisecond)
 	drawFor(svc, "u1", "m1", "a cat")
 	waitFor(t, "the first draw to start", func() bool { return img.calls.Load() == 1 })
 	if r := drawFor(svc, "u2", "m2", "a dog"); r.Status != "queued" {

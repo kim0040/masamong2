@@ -61,11 +61,10 @@ func ImageDropsForTest(s *Service) int64 { return s.imgDrops.Load() }
 // ImageQueueStateForTest is how many picture jobs wait and whether one is being drawn.
 func ImageQueueStateForTest(s *Service) (waiting int, running bool) { return s.imageQueueState() }
 
-// SetImageConnectWaitForTest shortens how long a picture job waits for a reconnecting gateway.
-func SetImageConnectWaitForTest(wait, poll time.Duration) (restore func()) {
-	w, p := imageConnectWait, imageConnectPoll
-	imageConnectWait, imageConnectPoll = wait, poll
-	return func() { imageConnectWait, imageConnectPoll = w, p }
+// SetImageConnectWaitForTest shortens how long the service's picture jobs wait for a reconnecting
+// gateway. Call it before the jobs start.
+func SetImageConnectWaitForTest(s *Service, wait, poll time.Duration) {
+	s.hooks.imageConnectWait, s.hooks.imageConnectPoll = wait, poll
 }
 
 // RunFortuneMorning runs one pass of the morning briefings (the scheduler runs it every minute).
