@@ -7,6 +7,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 
+	"masamong/internal/action"
 	"masamong/internal/application"
 )
 
@@ -185,6 +186,10 @@ func TestASlashCommandTurnAfterASettledEdit(t *testing.T) {
 	g, _ := dmGateway(t, true)
 	g.notices = map[string]time.Time{}
 	ctx := context.Background()
+	// a command carries on into a turn only in a room that talks (a commands-only room keeps its card)
+	if r := g.svc.Execute(ctx, action.Request{Action: "channels.configure", Input: mustJSON(map[string]any{"guild_id": "g1", "id": "c1", "respond": "mention"})}); !r.OK {
+		t.Fatalf("configure: %+v", r.Error)
+	}
 	if _, err := g.svc.ChatTurn(ctx, application.ChatInput{GuildID: "g1", ChannelID: "c1", MessageID: "secret", Message: "Synthetic old words", Speaker: "u", SpeakerID: "11111"}); err != nil {
 		t.Fatal(err)
 	}
