@@ -12,6 +12,7 @@
   import KeyValue from './KeyValue.svelte'
   import Skeleton from './Skeleton.svelte'
   import LoadState from './LoadState.svelte'
+  import Confirm from './Confirm.svelte'
   import * as I from '../lib/icons'
 
   // Earthquakes and weather warnings the bot announces on its own (disaster_alerts): the switches,
@@ -51,10 +52,18 @@
     busy = false
     void st.refresh()
   }
+  // the switches write the stored disaster_alerts settings (configured); enabled is the effective
+  // state, which also needs features.disasters. Configured-on with the feature off shows why.
+  let featureOpen = $state(false)
+  async function turnFeatureOn() {
+    await patchConfig([{ path: ['features', 'disasters'], value: true }], { success: t('disaster.feature_on') })
+    void st.refresh()
+  }
   const status = $derived.by(() => {
     const d = st.data
     if (!d) return { tone: 'neutral', label: '' }
-    if (!d.enabled) return { tone: 'neutral', label: t('disaster.state.off') }
+    if (!d.configured) return { tone: 'neutral', label: t('disaster.state.off') }
+    if (!d.enabled) return { tone: 'warn', label: t(`disaster.waiting.${d.waiting || 'off'}`) }
     if (d.waiting) return { tone: 'warn', label: t(`disaster.waiting.${d.waiting}`) }
     return { tone: 'ok', label: t('disaster.state.on', { n: d.channels }) }
   })
@@ -66,9 +75,12 @@
     {@const d = st.data}
     <div class="stack">
       <div class="row"><Status tone={status.tone as any} label={status.label} /></div>
-      <Switch checked={d.enabled} disabled={busy} onchange={(v) => set(['enabled'], v)} label={t('disaster.enabled')} hint={t('disaster.enabled_hint')} />
-      <Switch checked={d.warnings} disabled={busy || !d.enabled} onchange={(v) => set(['warnings'], v)} label={t('disaster.warnings')} hint={t('disaster.warnings_hint')} />
-      <Switch checked={d.marine} disabled={busy || !d.enabled || !d.warnings} onchange={(v) => set(['marine'], v)} label={t('disaster.marine')} hint={t('disaster.marine_hint')} />
+      <Switch checked={d.configured} disabled={busy} onchange={(v) => set(['enabled'], v)} label={t('disaster.enabled')} hint={t('disaster.enabled_hint')} />
+      <Switch checked={d.warnings} disabled={busy || !d.configured} onchange={(v) => set(['warnings'], v)} label={t('disaster.warnings')} hint={t('disaster.warnings_hint')} />
+      <Switch checked={d.marine} disabled={busy || !d.configured || !d.warnings} onchange={(v) => set(['marine'], v)} label={t('disaster.marine')} hint={t('disaster.marine_hint')} />
+      {#if d.configured && !d.enabled && d.waiting === 'feature_off'}
+        <div class="callout warn"><span class="ic"><I.TriangleAlert size={16} /></span><span>{t('disaster.feature_off')}</span><Button size="sm" variant="primary" onclick={() => (featureOpen = true)}>{t('disaster.feature_turn_on')}</Button></div>
+      {/if}
       {#if (d.warning_regions ?? []).length}
         <div class="callout warn"><span class="ic"><I.TriangleAlert size={16} /></span><span>{t('disaster.legacy_regions', { regions: d.warning_regions.join(', ') })}</span><Button size="sm" variant="ghost" disabled={busy} onclick={() => patchConfig([{ path: ['disaster_alerts', 'warning_regions'], op: 'unset' }], { success: t('disaster.saved') })}>{t('disaster.legacy_regions_clear')}</Button></div>
       {/if}
@@ -85,3 +97,5 @@
     </div>
   {/if}
 </Card>
+
+<Confirm bind:open={featureOpen} title={t('disaster.feature_confirm_title')} body={t('disaster.feature_confirm_body')} confirmLabel={t('disaster.feature_turn_on')} onconfirm={turnFeatureOn} />

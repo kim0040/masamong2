@@ -2,7 +2,6 @@ package application_test
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -42,8 +41,36 @@ func TestDisasterFeatureSwitchStopsTheWatcher(t *testing.T) {
 	if len(gw.posts) != 0 {
 		t.Fatalf("features.disasters=false must stop automatic posts: %v", gw.posts)
 	}
+	// the stored switch is on (unset), the effective state is off, and the status names the master
+	// feature as the reason — the console shows all three instead of a bare "off"
 	st = out(t, svc, "disasters.alerts", nil)
-	if st["enabled"] != false || st["warnings"] != false || !strings.EqualFold(st["waiting"].(string), "off") {
-		t.Fatalf("the status must show the switch: %v", st)
+	if st["configured"] != true || st["enabled"] != false || st["warnings"] != true || st["waiting"] != "feature_off" {
+		t.Fatalf("the status must show configured-on, effective-off and the master switch: %v", st)
+	}
+	// the console's enable switch writes only disaster_alerts.enabled: the patch succeeds, and the
+	// refreshed status must still say the master feature is what is off
+	patch := func(path []any, value any) {
+		t.Helper()
+		if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": path, "value": value}}}); !r.OK {
+			t.Fatal(r.Error)
+		}
+	}
+	patch([]any{"disaster_alerts", "enabled"}, true)
+	st = out(t, svc, "disasters.alerts", nil)
+	if st["configured"] != true || st["enabled"] != false || st["waiting"] != "feature_off" {
+		t.Fatalf("after the switch's save the status must keep naming the master feature: %v", st)
+	}
+	// the control: with the alerts switch itself off the reason is the switch, not the master feature
+	patch([]any{"disaster_alerts", "enabled"}, false)
+	st = out(t, svc, "disasters.alerts", nil)
+	if st["configured"] != false || st["enabled"] != false || st["waiting"] != "off" {
+		t.Fatalf("with the switch off the reason is the switch itself: %v", st)
+	}
+	patch([]any{"disaster_alerts", "enabled"}, true)
+	// turning features.disasters on is what makes the stored switch take effect
+	patch([]any{"features", "disasters"}, true)
+	st = out(t, svc, "disasters.alerts", nil)
+	if st["configured"] != true || st["enabled"] != true || st["waiting"] != "" {
+		t.Fatalf("with the feature on the stored switch takes effect: %v", st)
 	}
 }
