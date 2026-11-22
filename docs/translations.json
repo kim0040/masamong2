@@ -9,8 +9,8 @@
       "README.zh-Hans.md": "e2c2d1fbde865a37"
     },
     "wiki/CLI-명령어": {
-      "docs/wiki/CLI-Commands.md": "c18cfcb9365ee475",
-      "docs/wiki/CLI-명령어.md": "ee635c44e4ecd399"
+      "docs/wiki/CLI-Commands.md": "a6860444aae9d031",
+      "docs/wiki/CLI-명령어.md": "2e6a6ac2bbf82afc"
     },
     "wiki/Discord-연결": {
       "docs/wiki/Connecting-Discord.md": "2a38fb674d6f5e35",
@@ -25,8 +25,8 @@
       "docs/wiki/개발-가이드.md": "6af821f1d373cdb5"
     },
     "wiki/관리-콘솔": {
-      "docs/wiki/Admin-Console.md": "d623434c8d710e34",
-      "docs/wiki/관리-콘솔.md": "507b72503c07cf64"
+      "docs/wiki/Admin-Console.md": "56aed41f7d1ec529",
+      "docs/wiki/관리-콘솔.md": "015cfd81e1388463"
     },
     "wiki/기억-블록": {
       "docs/wiki/Memory-Blocks.md": "cb1e1ffb5c7f6bd9",
@@ -53,8 +53,8 @@
       "docs/wiki/보류-중인-결정.md": "82e4b3bec4270bcd"
     },
     "wiki/보안과-개인정보": {
-      "docs/wiki/Security-and-Privacy.md": "20114aa0a51a213f",
-      "docs/wiki/보안과-개인정보.md": "51eb7e916d4817b1"
+      "docs/wiki/Security-and-Privacy.md": "4288b5d24de45a84",
+      "docs/wiki/보안과-개인정보.md": "cd6db8b51d9c08ce"
     },
     "wiki/부하-테스트와-장기-운영": {
       "docs/wiki/Load-Testing-and-Long-Running.md": "5c947bb91af06284",
