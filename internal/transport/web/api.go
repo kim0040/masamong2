@@ -61,8 +61,13 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 func versionOf() string { return appVersion() }
 
 // requestSource is "web" for the console, or "cli"/"tray" when the launcher's client says so (the change
-// log names where a stop or restart came from). Other values are ignored.
+// log names where a stop or restart came from). A load made on a timer (the console's and the tray's
+// status polls) sends X-Masamong-Poll: 1 so the action counter files it under gui_poll instead of
+// counting how long a window stayed open as console use. Other values are ignored.
 func requestSource(r *http.Request) string {
+	if r.Header.Get("X-Masamong-Poll") == "1" {
+		return "gui_poll"
+	}
 	switch v := r.Header.Get("X-Masamong-Via"); v {
 	case "cli", "tray":
 		return v

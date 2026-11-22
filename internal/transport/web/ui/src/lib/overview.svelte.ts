@@ -6,11 +6,11 @@ export const overview = $state<{ data: any; at: number; error?: string }>({ data
 let inflight: Promise<void> | null = null
 let started = false
 
-export function refreshOverview(): Promise<void> {
+export function refreshOverview(poll = false): Promise<void> {
   if (!canLoadProtectedActions(session.value)) return Promise.resolve()
   if (inflight) return inflight
   inflight = (async () => {
-    const r = await call('dashboard.overview')
+    const r = await call('dashboard.overview', {}, { poll })
     if (r.ok) {
       overview.data = r.output
       overview.at = Date.now()
@@ -37,5 +37,5 @@ export function startOverview() {
   started = true
   void refreshOverview()
   onLive(['config', 'job', 'turn', 'runtime', 'audit', 'provider', 'discord'], () => void refreshOverview())
-  setInterval(() => document.visibilityState === 'visible' && refreshOverview(), 30000)
+  setInterval(() => document.visibilityState === 'visible' && refreshOverview(true), 30000)
 }
