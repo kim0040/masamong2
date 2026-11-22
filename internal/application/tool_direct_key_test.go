@@ -74,3 +74,43 @@ func TestDoctorNamesToolsWithDirectKeys(t *testing.T) {
 		t.Fatalf("a clean configuration lists no tool: %v", res["features"])
 	}
 }
+
+// The spellings a service gives one credential field — authKey, X-Auth-Key, a cookie mixing the
+// reference with a second literal — are flagged everywhere the same: the doctor lists the tool and
+// config.show masks the literal, while a value that is the reference alone ({credential}, or a
+// scheme/name beside it) stays.
+func TestDirectKeySpellingsAreDoctoredAndMasked(t *testing.T) {
+	svc := setupSvc(t)
+	direct := "synthetic" + "-direct-value"
+	d := svc.Doc()
+	d.Tools = map[string]tools.Settings{"ops.lookup": {
+		Description: "d", Params: []tools.Param{{Name: "q"}},
+		HTTP: &tools.HTTP{URL: "https://api.example.com/v1?q={q}&authKey=" + direct, CredentialRef: "env:OPS_KEY",
+			Headers: map[string]string{"X-Auth-Key": direct, "Cookie": "session={credential}; fallback=" + direct,
+				"Authorization": "Bearer {credential}"}},
+	}}
+	svc.SetDocForTest(d)
+
+	res := out(t, svc, "runtime.doctor", nil)
+	found := ""
+	for _, raw := range res["attention"].([]any) {
+		if a := raw.(map[string]any); a["item"] == "tool_keys" {
+			found, _ = a["reason"].(string)
+		}
+	}
+	if found != "tool_direct_key:ops.lookup" {
+		t.Fatalf("the doctor must name the tool: %q", found)
+	}
+
+	show := out(t, svc, "config.show", nil)
+	yaml, _ := show["yaml"].(string)
+	if strings.Contains(yaml, direct) {
+		t.Fatalf("the export carries the literal key:\n%s", yaml)
+	}
+	if !strings.Contains(yaml, "Bearer {credential}") {
+		t.Fatalf("the export lost the reference it should keep:\n%s", yaml)
+	}
+	if got := svc.Doc().Tools["ops.lookup"].HTTP.Headers["X-Auth-Key"]; got != direct {
+		t.Fatal("the stored settings were changed")
+	}
+}

@@ -87,31 +87,11 @@ func hasDirectSecrets(d config.Document) bool {
 	return false
 }
 
-// directSecretHeader reports whether a header carries a key itself: an authorization or key-like
-// header whose value does not come from {credential}.
+// directSecretHeader reports whether a header carries a key itself (tools.SecretHeaderName names one,
+// tools.DirectHeaderValue a value that is not only the {credential} reference): validation, the doctor
+// and this masking share the same classification.
 func directSecretHeader(name, value string) bool {
-	if strings.TrimSpace(value) == "" || strings.Contains(value, "{credential}") {
-		return false
-	}
-	n := strings.ToLower(name)
-	switch n {
-	case "authorization", "proxy-authorization", "cookie":
-		return true
-	}
-	for _, part := range []string{"key", "token", "secret", "auth", "signature", "password"} {
-		if strings.Contains(n, part) {
-			return true
-		}
-	}
-	return false
-}
-
-// secretQueryNames are URL query names that carry a key (lowercase, with - and _ removed). It keeps
-// the same spellings the save-time validator knows (tools.secretQuery), passwd included.
-var secretQueryNames = map[string]bool{
-	"key": true, "apikey": true, "token": true, "accesstoken": true, "authtoken": true, "auth": true,
-	"authkey": true, "servicekey": true, "secret": true, "clientsecret": true, "password": true,
-	"passwd": true, "signature": true, "sig": true, "appkey": true, "appsecret": true,
+	return tools.SecretHeaderName(name) && tools.DirectHeaderValue(value)
 }
 
 // redactSecretQuery masks the values of key-carrying query parameters that are written directly
@@ -138,8 +118,7 @@ func redactSecretQuery(raw string) string {
 		if unescaped, err := url.QueryUnescape(name); err == nil {
 			decoded = unescaped
 		}
-		key := strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(decoded))
-		if secretQueryNames[key] {
+		if tools.SecretQueryName(decoded) {
 			parts[i] = name + "=" + url.QueryEscape(redactedValue)
 			changed = true
 		}
