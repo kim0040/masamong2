@@ -53,6 +53,7 @@ The file or input must hold one JSON object. `--input-file` accepts UTF-8 with o
 | `masamong autostart on` / `off` | Start at login and boot |
 | `masamong doctor` | Diagnostics (keys, providers, Discord, permissions, storage, time zones). During Discord startup it reports `pending / gateway_connecting` until READY/RESUMED; while the first connection is being retried it includes the attempt count, last error and next try, and permanent failures such as a rejected token stop retrying. Data-folder warnings appear as `data_folder_warnings` and a `data_folder` attention item. Offline, with a restore, reset or update waiting to finish, it shows the maintenance fields below |
 | `masamong admin token` | Print the console sign-in token (the file `admin/web-token` in the data folder) |
+| `masamong admin token rotate` | Issue a new sign-in token and print it. The old token, links that carry it, unused one-time links and every console sign-in stop working at once; the tray icon and other `masamong` commands read the new token by themselves |
 | `masamong version` | Version |
 | `masamong runtime pause` | Pause replies everywhere (`--paused false` resumes; `--scope guild/channel` for part) |
 | `masamong runtime status` | Runtime state; in maintenance mode it includes `maintenance:true` and a one-line `message` in JSON, or shows that message in human output |

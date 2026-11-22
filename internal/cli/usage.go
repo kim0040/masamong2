@@ -37,6 +37,7 @@ Start and stop
 
 Sign in and check
   masamong admin token       print the console sign-in token
+  masamong admin token rotate   issue a new sign-in token; the old one stops working
   masamong doctor            what works and what still needs setup
 
 Everything the console does
