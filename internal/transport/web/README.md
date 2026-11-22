@@ -23,6 +23,7 @@
 - 쓰기 요청은 authenticated session, exact same-origin, `X-CSRF-Token`을 모두 검사합니다.
 - session cookie는 `HttpOnly`, TLS에서는 `Secure`이며 기본 수명은 7일입니다.
 - 정상 `restart`만 `<data-root>/sessions.json`을 `0600`으로 저장합니다. 새 daemon이 만료 session을 제외하고 읽은 뒤 파일을 즉시 삭제합니다. stop, signal, logout 뒤에는 세션을 넘기지 않습니다. 세션 목록 API는 제공하지 않습니다.
+- session과 1회용 code는 자신을 만든 token의 tag(token의 hash 일부)를 기록하고, 현재 token의 tag와 같을 때만 통합니다. 그래서 token 재발급이 중간에 끊겨 code 파일이나 `sessions.json`이 남아도, 재발급과 동시에 진행되던 로그인이 session을 만들어도 쓸 수 없습니다. tag가 없는 이전 버전의 것은 token 파일보다 나중에 만들어졌을 때만 통합니다.
 - 설치 소유자 한 명이 관리하며 초대·역할·비밀번호 로그인은 제공하지 않습니다. `masamong open`은 이 컴퓨터에서, `masamong connect`는 SSH를 통해 원격 daemon에 연결합니다.
 - `/api/secret`은 macOS Keychain을 우선 사용하고 사용할 수 없으면 data root 아래 권한 제한 파일에 저장합니다. Action과 config에는 `keychain:` 또는 `file:` 참조만 전달합니다. 값은 표준입력으로 keychain 도구에 넘겨 프로세스 목록에 노출하지 않습니다.
 - `/api/upload`의 기존 `attachment` 목적과 `channels.attachments.*` Action은 서버 호환을 위해 유지하지만, 새 콘솔의 기본 자료 흐름은 `/blocks`에서 CSV·Discord 원문을 가져와 준비한 뒤 채널에 연결하는 방식입니다.

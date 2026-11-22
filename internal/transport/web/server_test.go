@@ -218,7 +218,7 @@ func TestOneTimeLoginLinkWorksOnce(t *testing.T) {
 	stale, _ := CreateOnce(s.svc.DataRoot)
 	old := time.Now().Add(-5 * time.Minute)
 	_ = os.Chtimes(filepath.Join(onceDir(s.svc.DataRoot), stale), old, old)
-	if ConsumeOnce(s.svc.DataRoot, stale, time.Now()) {
+	if ConsumeOnce(s.svc.DataRoot, stale, s.currentTag(), time.Now()) {
 		t.Fatal("stale codes expire")
 	}
 }

@@ -91,7 +91,7 @@ func (w *stallWriter) Write([]byte) (int, error) {
 func TestEventStreamWriteDeadlineReleasesUnreadClient(t *testing.T) {
 	s, _ := testServer(t)
 	s.eventWrite = 300 * time.Millisecond
-	id, _ := s.sessions.create(s.now(), "test")
+	id, _ := s.sessions.create(s.now(), "test", s.currentTag())
 	ctx, cancel := context.WithCancel(context.Background())
 	stall := &stallWriter{entered: make(chan struct{}), observed: make(chan struct{}), stop: make(chan struct{})}
 	t.Cleanup(func() {
@@ -296,7 +296,7 @@ func (w *deadlineWriter) Write([]byte) (int, error) {
 func TestEventStreamEvictUnblocksStuckWrite(t *testing.T) {
 	s, _ := testServer(t)
 	s.eventWrite = 30 * time.Second
-	id, _ := s.sessions.create(s.now(), "test")
+	id, _ := s.sessions.create(s.now(), "test", s.currentTag())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	stall := newDeadlineWriter()

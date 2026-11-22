@@ -132,7 +132,7 @@ func TestRotateTokenWhileSigningIn(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			_ = s.rotateToken("")
+			_, _ = s.rotateToken()
 		}()
 		go func() {
 			defer wg.Done()

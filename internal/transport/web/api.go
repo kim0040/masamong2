@@ -141,12 +141,13 @@ func (s *Server) apiLogin(w http.ResponseWriter, r *http.Request) {
 		apiError(w, http.StatusBadRequest, "INVALID_INPUT", "bad request")
 		return
 	}
-	if !s.tokenMatches(strings.TrimSpace(body.Token)) {
+	tag, ok := s.checkToken(strings.TrimSpace(body.Token))
+	if !ok {
 		apiError(w, http.StatusUnauthorized, "UNAUTHORIZED", "token does not match")
 		return
 	}
 	succeeded()
-	id, sess := s.sessions.create(s.now(), r.UserAgent())
+	id, sess := s.sessions.create(s.now(), r.UserAgent(), tag)
 	s.setSessionCookie(w, r, id, int(sessionTTL.Seconds()))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "csrf": sess.CSRF})
 }
@@ -162,21 +163,31 @@ func (s *Server) apiLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 // apiRotateToken re-issues the sign-in token (the console's button, `masamong admin token rotate`).
-// The tab that asked stays signed in; every other session, link and code made with the old token
-// stops working. The new token is not in the reply: `masamong admin token` prints it.
+// Every session, link and code made with the old token stops working, the asker's own session too. A
+// browser that asked stays signed in under a new session cookie, so a copy of its old cookie ends with
+// the rest; the CLI and the tray sign in again with the new token. The new token is not in the reply:
+// `masamong admin token` prints it.
 func (s *Server) apiRotateToken(w http.ResponseWriter, r *http.Request) {
-	id, _, ok := s.requireAPI(w, r, true)
+	_, asker, ok := s.requireAPI(w, r, true)
 	if !ok {
 		return
 	}
-	keep := id
-	if requestSource(r) != "web" {
-		keep = "" // the CLI and the tray sign in again with the new token
-	}
-	if err := s.rotateToken(keep); err != nil {
+	tag, err := s.rotateToken()
+	if tag == "" {
 		s.log.Error("re-issue console token", "err", err)
 		apiError(w, http.StatusInternalServerError, "IO", "cannot re-issue the token")
 		return
+	}
+	if err != nil {
+		// the new token is in place; the leftover file was made with the old one and is refused for it
+		s.log.Warn("console sign-in token re-issued; a leftover sign-in file was not removed", "err", err)
+	}
+	if requestSource(r) == "web" {
+		// The new cookie is the credential. The CSRF value stays, since every open tab of this browser
+		// sends it; without the new cookie it signs nobody in.
+		now := s.now()
+		id, _ := s.sessions.add(now, session{CSRF: asker.CSRF, Created: now, Expires: now.Add(sessionTTL), Agent: asker.Agent, Tag: tag})
+		s.setSessionCookie(w, r, id, int(sessionTTL.Seconds()))
 	}
 	s.log.Info("console sign-in token re-issued", "via", requestSource(r))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
@@ -528,6 +539,10 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	rc := http.NewResponseController(w)
 	end := s.beginEventStream(id, cancel, func() { _ = rc.SetWriteDeadline(time.Now()) })
 	defer end()
+	// A re-issue that ended this session just before the stream registered did not see it to close it.
+	if _, ok := s.liveSession(id); !ok {
+		return
+	}
 	ch, unsub := src.Subscribe()
 	defer unsub()
 	h := w.Header()
@@ -554,7 +569,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		case <-streamCtx.Done():
 			return
 		case <-ping.C:
-			if _, ok := s.sessions.get(id, s.now()); !ok {
+			if _, ok := s.liveSession(id); !ok {
 				return // signed out or expired: the stream ends with the session
 			}
 			if err := write(": ping\n\n"); err != nil {
