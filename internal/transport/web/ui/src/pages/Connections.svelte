@@ -3,7 +3,9 @@
   import { t, has } from '../lib/i18n.svelte'
   import { scrollable } from '../lib/scrollable'
   import { tp, platform } from '../lib/platform'
-  import { call, postJSON, can } from '../lib/api.svelte'
+  import { call, can } from '../lib/api.svelte'
+  import { saveSecret, validRef } from '../lib/secret'
+  import { checkBot as askBot, makeInvite as fetchInvite } from '../lib/discord'
   import { resource } from '../lib/resource.svelte'
   import { onLive } from '../lib/live.svelte'
   import { navigate } from '../lib/router.svelte'
@@ -72,10 +74,10 @@
     try {
       if (keyMode === 'value') {
         if (!keyValue.trim()) return (keyErr = t('conn.key_required'))
-        const res = await postJSON('/api/secret', keyFor === 'discord' ? { target: 'discord', value: keyValue.trim() } : { target: 'provider', id: keyFor, value: keyValue.trim() })
-        r = res.body
+        const saved = await saveSecret(keyFor === 'discord' ? { target: 'discord' } : { target: 'provider', id: keyFor }, keyValue)
+        r = { ok: saved.ok, error: { message: saved.message || undefined }, output: { stored_in: saved.storedIn || undefined } }
       } else {
-        if (!(providers.data?.keychain ? /^(env|file|keychain):.+/ : /^(env|file):.+/).test(keyRef)) return (keyErr = t('toolnew.err.cred_ref'))
+        if (!validRef(keyRef, !!providers.data?.keychain)) return (keyErr = t('toolnew.err.cred_ref'))
         r = keyFor === 'discord' ? await patchConfig([{ path: ['discord', 'token_ref'], value: keyRef }], { quiet: true }) : await call('providers.credentials', { id: keyFor, credential_ref: keyRef })
       }
     } finally {
@@ -793,9 +795,9 @@
   }
   let invite = $state('')
   async function makeInvite() {
-    const r = await call('channels.invite')
-    if (r.ok) invite = r.output.url
-    else toast('warn', t('conn.invite_failed'), r.error?.message)
+    const r = await fetchInvite()
+    if (r.url) invite = r.url
+    else toast('warn', t('conn.invite_failed'), r.message || undefined)
   }
   // who the stored token belongs to, asked from Discord (the bot id is stored for the invite link)
   let bot = $state<any>(null)
@@ -804,13 +806,10 @@
   async function checkBot() {
     botBusy = true
     botErr = ''
-    const r = await call('discord.check', { apply: true })
+    const checked = await askBot()
     botBusy = false
-    if (r.ok) bot = r.output
-    else {
-      bot = null
-      if (r.error?.args?.reason !== 'no_token') botErr = r.error?.message ?? t('common.failed')
-    }
+    bot = checked.bot
+    if (checked.message !== undefined) botErr = checked.message || t('common.failed')
   }
 </script>
 

@@ -4,9 +4,10 @@
   import { t, toolName } from '../lib/i18n.svelte'
   import { navigate } from '../lib/router.svelte'
   import { call, practice, setPractice, can } from '../lib/api.svelte'
+  import { setPaused, allPaused, PAUSE_ALL } from '../lib/pause'
   import { setPrefs } from '../lib/prefs.svelte'
   import { toast } from '../lib/toast.svelte'
-  import { refreshOverview, overview } from '../lib/overview.svelte'
+  import { overview } from '../lib/overview.svelte'
   import { cfg } from '../lib/config.svelte'
   import * as I from '../lib/icons'
 
@@ -34,8 +35,8 @@
     const out: Item[] = []
     for (const g of nav) for (const it of g.items) out.push({ id: 'p' + it.href, group: t('palette.pages'), label: t(`nav.${it.key}`), hint: t(`nav.group.${g.key}`), icon: it.icon, keywords: it.key, run: () => navigate(it.href) })
     for (const it of extraPages) out.push({ id: 'p' + it.href, group: t('palette.pages'), label: t(`nav.${it.key}`), icon: it.icon, keywords: it.key, run: () => navigate(it.href) })
-    const paused = !!overview.data?.pause?.all
-    out.push({ id: 'c-pause', group: t('palette.commands'), label: paused ? t('pause.resume') : t('pause.pause_all'), icon: paused ? I.Play : I.Pause, keywords: 'pause resume stop', run: async () => { await call('runtime.pause', { scope: 'all', paused: paused ? 'false' : 'true' }); await refreshOverview(); toast('ok', paused ? t('pause.resumed') : t('pause.paused')) } })
+    const paused = allPaused(overview.data?.pause)
+    out.push({ id: 'c-pause', group: t('palette.commands'), label: paused ? t('pause.resume') : t('pause.pause_all'), icon: paused ? I.Play : I.Pause, keywords: 'pause resume stop', run: async () => { const r = await setPaused(PAUSE_ALL, !paused); r.ok ? toast('ok', paused ? t('pause.resumed') : t('pause.paused')) : toast('error', t('pause.failed'), r.message) } })
     out.push({ id: 'c-backup', group: t('palette.commands'), label: t('palette.cmd_backup'), icon: I.Save, keywords: 'backup', run: async () => { const r = await call('backup.create'); r.ok ? toast('ok', t('maint.backup_done'), r.output?.name) : toast('error', t('maint.backup_failed'), r.error?.message) } })
     out.push({ id: 'c-dark', group: t('palette.commands'), label: t('palette.cmd_dark'), icon: I.Moon, keywords: 'theme dark', run: () => setPrefs({ theme: 'dark' }) })
     out.push({ id: 'c-light', group: t('palette.commands'), label: t('palette.cmd_light'), icon: I.Sun, keywords: 'theme light', run: () => setPrefs({ theme: 'light' }) })

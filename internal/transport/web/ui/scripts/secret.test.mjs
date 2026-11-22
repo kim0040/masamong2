@@ -1,7 +1,26 @@
 // The one place a typed key is sent to /api/secret and the answer read.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { loadLib } from './lib-load.mjs'
+
+const root = fileURLToPath(new URL('../src', import.meta.url))
+
+// every .svelte and .ts file of the console, for the "no screen builds this by hand any more" checks
+function sources() {
+  const out = []
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (/\.(svelte|ts)$/.test(e.name)) out.push([relative(root, p), readFileSync(p, 'utf8')])
+    }
+  }
+  walk(root)
+  return out
+}
 
 const sent = []
 globalThis.__postJSON = async (path, body) => {
@@ -57,4 +76,8 @@ test('a reference must be env:, file: or (with a keychain) keychain:, and name s
   assert.equal(validRef('keychain:k', true), true)
   assert.equal(validRef('env:', true), false)
   assert.equal(validRef('plain', true), false)
+})
+
+test('only the secret lib talks to /api/secret', () => {
+  for (const [file, text] of sources()) if (file !== 'lib/secret.ts') assert.doesNotMatch(text, /\/api\/secret/, `${file} sends a key itself`)
 })

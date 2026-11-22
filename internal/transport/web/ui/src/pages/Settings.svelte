@@ -11,6 +11,7 @@
   import { route, setQuery } from '../lib/router.svelte'
   import { toast } from '../lib/toast.svelte'
   import { datetime, relative } from '../lib/format'
+  import { saveFile, csvText, datedName, BOM } from '../lib/download'
   import PageHeader from '../components/PageHeader.svelte'
   import Card from '../components/Card.svelte'
   import Tabs from '../components/Tabs.svelte'
@@ -163,15 +164,8 @@
     olderNext = r.output.next_before_id ?? 0
   }
   function exportCSV() {
-    const cell = (v: unknown) => `"${String(v ?? '').replaceAll('"', '""')}"`
     const head = ['at', 'action', 'via', 'ok', 'code', 'revision_before', 'revision_after', 'actor', 'actor_id', 'guild_id', 'summary']
-    const lines = [head.join(','), ...history.map((e) => head.map((k) => cell(e[k])).join(','))]
-    const url = URL.createObjectURL(new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' }))
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `masamong-changes-${new Date().toISOString().slice(0, 10)}.csv`
-    a.click()
-    URL.revokeObjectURL(url)
+    saveFile(datedName('changes', 'csv'), BOM + csvText([head, ...history.map((e) => head.map((k) => e[k]))], 'all'), 'text/csv;charset=utf-8')
   }
   let rollbackTo = $state(0)
   let rbOpen = $state(false)

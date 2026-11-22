@@ -18,6 +18,7 @@
   import StatsExport from '../components/StatsExport.svelte'
   import { call } from '../lib/api.svelte'
   import { toast } from '../lib/toast.svelte'
+  import { saveFile, csvText } from '../lib/download'
   import * as I from '../lib/icons'
   import { outcomeColor } from '../lib/outcomes'
 
@@ -66,23 +67,13 @@
   }
   function download(kind: 'md' | 'json') {
     const body = kind === 'md' ? reportMarkdown(rep) : JSON.stringify(rep, null, 2)
-    const blob = new Blob([body], { type: kind === 'md' ? 'text/markdown' : 'application/json' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `masamong-report-${rep.period.from}-${rep.period.to}.${kind}`
-    a.click()
-    URL.revokeObjectURL(a.href)
+    saveFile(`masamong-report-${rep.period.from}-${rep.period.to}.${kind}`, body, kind === 'md' ? 'text/markdown' : 'application/json')
   }
 
   function csv() {
     const rows = [['day', ...turnSeries.map((x) => 'turns_' + x.key), ...costSeries.map((x) => 'usd_' + x.key), ...toolSeries.map((x) => 'tool_' + x.key)]]
     ;(s.data?.days ?? []).forEach((day: string, i: number) => rows.push([day, ...turnSeries.map((x) => String(x.data[i] ?? 0)), ...costSeries.map((x) => String(x.data[i] ?? 0)), ...toolSeries.map((x) => String(x.data[i] ?? 0))]))
-    const blob = new Blob([rows.map((r) => r.join(',')).join('\n')], { type: 'text/csv' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `masamong-stats-${days}d.csv`
-    a.click()
-    URL.revokeObjectURL(a.href)
+    saveFile(`masamong-stats-${days}d.csv`, csvText(rows), 'text/csv')
   }
 </script>
 

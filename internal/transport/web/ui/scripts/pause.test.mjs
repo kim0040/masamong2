@@ -1,7 +1,26 @@
 // Pause and resume: one input shape, one reading of the pause state, one answer.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { loadLib } from './lib-load.mjs'
+
+const root = fileURLToPath(new URL('../src', import.meta.url))
+
+// every .svelte and .ts file of the console, for the "no screen builds this by hand any more" checks
+function sources() {
+  const out = []
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (/\.(svelte|ts)$/.test(e.name)) out.push([relative(root, p), readFileSync(p, 'utf8')])
+    }
+  }
+  walk(root)
+  return out
+}
 
 const log = []
 globalThis.__call = async (action, input) => {
@@ -44,4 +63,8 @@ test('a failed pause is not ok (the old palette and banner said "resumed" anyway
   globalThis.__answer = { ok: false, error: { code: 'X', message: 'nope' } }
   assert.deepEqual(await m.setPaused(m.PAUSE_ALL, false), { ok: false, message: 'nope' })
   assert.equal(log.at(-1)[0], 'refresh')
+})
+
+test('only the pause lib calls runtime.pause', () => {
+  for (const [file, text] of sources()) if (file !== 'lib/pause.ts') assert.doesNotMatch(text, /call\(\s*'runtime\.pause'/, `${file} pauses the bot itself`)
 })

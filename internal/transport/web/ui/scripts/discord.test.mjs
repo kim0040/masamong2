@@ -1,7 +1,26 @@
 // Asking Discord who the token belongs to, and for an invite link.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { loadLib } from './lib-load.mjs'
+
+const root = fileURLToPath(new URL('../src', import.meta.url))
+
+// every .svelte and .ts file of the console, for the "no screen builds this by hand any more" checks
+function sources() {
+  const out = []
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (/\.(svelte|ts)$/.test(e.name)) out.push([relative(root, p), readFileSync(p, 'utf8')])
+    }
+  }
+  walk(root)
+  return out
+}
 
 const sent = []
 globalThis.__call = async (action, input) => {
@@ -39,4 +58,8 @@ test('makeInvite asks for a link, naming the server only when one is given', asy
   assert.deepEqual(sent.map((s) => s.input), [{}, { guild_id: '777' }])
   globalThis.__answer = { ok: false, error: { message: 'no bot id yet' } }
   assert.deepEqual(await makeInvite(), { url: '', message: 'no bot id yet' })
+})
+
+test('only the discord lib asks Discord to check the token or make an invite', () => {
+  for (const [file, text] of sources()) if (file !== 'lib/discord.ts') assert.doesNotMatch(text, /'(discord\.check|channels\.invite)'/, `${file} asks Discord itself`)
 })

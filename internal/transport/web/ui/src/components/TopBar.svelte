@@ -1,9 +1,10 @@
 <script lang="ts">
   import { t } from '../lib/i18n.svelte'
-  import { session, call, practice, setPractice, can } from '../lib/api.svelte'
+  import { session, practice, setPractice, can } from '../lib/api.svelte'
+  import { setPaused, allPaused, PAUSE_ALL } from '../lib/pause'
   import { live } from '../lib/live.svelte'
   import { prefs, setPrefs, densities } from '../lib/prefs.svelte'
-  import { overview, refreshOverview } from '../lib/overview.svelte'
+  import { overview } from '../lib/overview.svelte'
   import { attentionText, isAttentionRead, markAllAttentionRead, markAttentionRead, syncAttentionReads, type Attention } from '../lib/attention.svelte'
   import { usd } from '../lib/format'
   import { toast } from '../lib/toast.svelte'
@@ -47,7 +48,7 @@
     return () => delete root.dataset.topbar
   })
   const month = $derived(overview.data?.month)
-  const paused = $derived(!!overview.data?.pause?.all)
+  const paused = $derived(allPaused(overview.data?.pause))
   const attention = $derived((overview.data?.attention ?? []) as Attention[])
   const unread = $derived(attention.filter((a) => !isAttentionRead(a)))
   const isMac = /Mac|iPhone|iPad/.test(navigator.platform)
@@ -70,11 +71,10 @@
   async function togglePause() {
     pausing = true
     const was = paused
-    const r = await call('runtime.pause', { scope: 'all', paused: was ? 'false' : 'true' })
+    const r = await setPaused(PAUSE_ALL, !was)
     pausing = false
-    await refreshOverview()
-    if (r.ok) toast(was ? 'ok' : 'warn', was ? t('pause.resumed') : t('pause.paused'), was ? undefined : t('pause.paused_body'), was ? undefined : { label: t('pause.undo'), run: () => void call('runtime.pause', { scope: 'all', paused: 'false' }).then(() => refreshOverview()) })
-    else toast('error', t('pause.failed'), r.error?.message)
+    if (r.ok) toast(was ? 'ok' : 'warn', was ? t('pause.resumed') : t('pause.paused'), was ? undefined : t('pause.paused_body'), was ? undefined : { label: t('pause.undo'), run: () => void setPaused(PAUSE_ALL, false) })
+    else toast('error', t('pause.failed'), r.message)
   }
 </script>
 

@@ -1,7 +1,26 @@
 // Handing out a file, and the two ways the console writes CSV.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join, relative } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { loadLib } from './lib-load.mjs'
+
+const root = fileURLToPath(new URL('../src', import.meta.url))
+
+// every .svelte and .ts file of the console, for the "no screen builds this by hand any more" checks
+function sources() {
+  const out = []
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (/\.(svelte|ts)$/.test(e.name)) out.push([relative(root, p), readFileSync(p, 'utf8')])
+    }
+  }
+  walk(root)
+  return out
+}
 
 const m = await loadLib('download.ts')
 
@@ -61,4 +80,8 @@ test('datedName puts the UTC day in the file name', () => {
 
 test('the byte order mark is the one a spreadsheet looks for', () => {
   assert.equal(m.BOM, '﻿')
+})
+
+test('only the download lib builds a download link', () => {
+  for (const [file, text] of sources()) if (file !== 'lib/download.ts') assert.doesNotMatch(text, /createObjectURL/, `${file} builds a download link itself`)
 })

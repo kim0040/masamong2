@@ -4,6 +4,7 @@
   import { useConfig } from '../lib/config.svelte'
   import { toast } from '../lib/toast.svelte'
   import { num } from '../lib/format'
+  import { saveFile } from '../lib/download'
   import * as I from '../lib/icons'
   import Card from './Card.svelte'
   import Button from './Button.svelte'
@@ -40,12 +41,7 @@
   }
 
   function download() {
-    const blob = new Blob([text + '\n'], { type: 'application/json' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `masamong-stats-${file.period.from || 'none'}-${file.period.to || 'none'}.json`
-    a.click()
-    URL.revokeObjectURL(a.href)
+    saveFile(`masamong-stats-${file.period.from || 'none'}-${file.period.to || 'none'}.json`, text + '\n', 'application/json')
   }
 </script>
 
