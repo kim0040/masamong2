@@ -206,15 +206,16 @@ func mention(id, user, text string) *discordgo.MessageCreate {
 
 func TestReplayedMessageCreateAnswersOnce(t *testing.T) {
 	g, tr := inboundGateway(t)
+	tr.fired = make(chan struct{}, 8)
 	g.onMessage(nil, mention("m1", "u", "내일 날씨 어때?"))
 	g.onMessage(nil, mention("m1", "u", "내일 날씨 어때?")) // Discord's replay after a RESUME
-	time.Sleep(300 * time.Millisecond)
+	awaitTurn(t, tr)
 	// a replayed message would join the first as a second fragment of the same request
 	if got := tr.list(); len(got) != 1 || got[0] != "<@bot> 내일 날씨 어때?" {
 		t.Fatalf("turns: %q", got)
 	}
 	g.onMessage(nil, mention("m2", "u", "내일 날씨 어때?")) // a new message with the same words is a new request
-	time.Sleep(300 * time.Millisecond)
+	awaitTurn(t, tr)
 	if got := tr.list(); len(got) != 2 {
 		t.Fatalf("turns: %q", got)
 	}
@@ -222,12 +223,25 @@ func TestReplayedMessageCreateAnswersOnce(t *testing.T) {
 
 func TestStopWordCancelsTheReplyInFlightAndStartsNoTurn(t *testing.T) {
 	g, tr := inboundGateway(t)
+	tr.fired = make(chan struct{}, 8)
 	mine, cancelMine := context.WithCancelCause(context.Background())
 	theirs, cancelTheirs := context.WithCancelCause(context.Background())
 	g.turns.add("c", "u", cancelMine)
 	g.turns.add("c", "v", cancelTheirs)
+	acked := make(chan struct{}, 1)
+	g.reactForTest = func(_ context.Context, _, _, emoji string) error {
+		if emoji != "✋" {
+			t.Errorf("stop acknowledgement = %q", emoji)
+		}
+		acked <- struct{}{}
+		return nil
+	}
 	g.onMessage(nil, mention("s1", "u", "그만!"))
-	time.Sleep(300 * time.Millisecond)
+	select {
+	case <-acked: // the ✋ acknowledgement is the stop path's end signal
+	case <-time.After(8 * time.Second):
+		t.Fatal("stop acknowledgement was not sent")
+	}
 	if context.Cause(mine) != errTurnStopped {
 		t.Fatalf("the person's reply was not stopped: %v", context.Cause(mine))
 	}
@@ -242,7 +256,10 @@ func TestStopWordCancelsTheReplyInFlightAndStartsNoTurn(t *testing.T) {
 	g.onMessage(nil, mention("s2", "v", "그만 좀 웃겨"))
 	g.onMessage(nil, &discordgo.MessageCreate{Message: &discordgo.Message{ID: "s3", GuildID: "g", ChannelID: "c", Content: "<@bot> <@other> stop",
 		Author: &discordgo.User{ID: "v"}, Mentions: []*discordgo.User{{ID: "bot"}, {ID: "other"}}}})
-	time.Sleep(300 * time.Millisecond)
+	awaitTurn(t, tr) // both were requests of the same person: one merged turn, not stops
+	if got := tr.list(); len(got) != 1 {
+		t.Fatalf("the two messages became turns: %q", got)
+	}
 	if theirs.Err() != nil {
 		t.Fatal("only the whole message is a stop word, and only when meant for the bot")
 	}
@@ -250,8 +267,9 @@ func TestStopWordCancelsTheReplyInFlightAndStartsNoTurn(t *testing.T) {
 
 func TestStopWordWithNothingInFlightIsOrdinaryTalk(t *testing.T) {
 	g, tr := inboundGateway(t)
+	tr.fired = make(chan struct{}, 8)
 	g.onMessage(nil, mention("n1", "u", "stop"))
-	time.Sleep(300 * time.Millisecond)
+	awaitTurn(t, tr)
 	if got := tr.list(); len(got) != 1 || !strings.Contains(got[0], "stop") {
 		t.Fatalf("with nothing to stop the message is answered as usual: %q", got)
 	}
@@ -259,10 +277,11 @@ func TestStopWordWithNothingInFlightIsOrdinaryTalk(t *testing.T) {
 
 func TestPendingMessageEditReplacesItsTextBeforeFlush(t *testing.T) {
 	g, tr := inboundGateway(t)
+	tr.fired = make(chan struct{}, 8)
 	g.onMessage(nil, mention("edit-me", "u", "old text"))
 	at := time.Now().UTC()
 	g.onMessageUpdate(nil, &discordgo.MessageUpdate{Message: &discordgo.Message{ID: "edit-me", GuildID: "g", ChannelID: "c", Content: "<@bot> revised text", EditedTimestamp: &at}})
-	time.Sleep(150 * time.Millisecond)
+	awaitTurn(t, tr)
 	if got := tr.list(); len(got) != 1 || got[0] != "<@bot> revised text" {
 		t.Fatalf("edited pending request = %q", got)
 	}
@@ -272,7 +291,10 @@ func TestDeletingTheOnlyPendingMessageDropsTheRequest(t *testing.T) {
 	g, tr := inboundGateway(t)
 	g.onMessage(nil, mention("delete-only", "u", "answer this"))
 	g.onMessageDelete(nil, &discordgo.MessageDelete{Message: &discordgo.Message{ID: "delete-only", GuildID: "g", ChannelID: "c"}})
-	time.Sleep(150 * time.Millisecond)
+	// the delete dropped the only piece: nothing is left that could start a turn
+	if !mergerIsEmpty(g) {
+		t.Fatal("a deleted piece is still held")
+	}
 	if got := tr.list(); len(got) != 0 {
 		t.Fatalf("deleted pending request was answered: %q", got)
 	}
@@ -280,12 +302,13 @@ func TestDeletingTheOnlyPendingMessageDropsTheRequest(t *testing.T) {
 
 func TestDeletingOnePendingMessageKeepsTheOtherPiece(t *testing.T) {
 	g, tr := inboundGateway(t)
+	tr.fired = make(chan struct{}, 8)
 	holdWindows(t) // a slow runner could end the window before the deletion arrived, and both pieces went out
 	g.onMessage(nil, mention("delete-first", "u", "first piece"))
 	follow := &discordgo.MessageCreate{Message: &discordgo.Message{ID: "keep-second", GuildID: "g", ChannelID: "c", Content: "second piece", Author: &discordgo.User{ID: "u"}}}
 	g.onMessage(nil, follow)
 	g.onMessageDelete(nil, &discordgo.MessageDelete{Message: &discordgo.Message{ID: "delete-first", GuildID: "g", ChannelID: "c"}})
-	waitFor(t, 8*time.Second, func() bool { return len(tr.list()) > 0 })
+	awaitTurn(t, tr)
 	if got := tr.list(); len(got) != 1 || got[0] != "second piece" {
 		t.Fatalf("remaining pending request = %q", got)
 	}
@@ -293,6 +316,7 @@ func TestDeletingOnePendingMessageKeepsTheOtherPiece(t *testing.T) {
 
 func TestStopWordCancelsOnlyThatPersonsPendingRequest(t *testing.T) {
 	g, tr := inboundGateway(t)
+	tr.fired = make(chan struct{}, 8)
 	acked := make(chan struct{}, 1)
 	g.reactForTest = func(_ context.Context, _, _, emoji string) error {
 		if emoji != "✋" {
@@ -311,7 +335,7 @@ func TestStopWordCancelsOnlyThatPersonsPendingRequest(t *testing.T) {
 		t.Fatal("stop acknowledgement was not sent")
 	}
 	// v's request fires when its window ends; u's was cancelled and the stop word is not a request
-	waitFor(t, 8*time.Second, func() bool { return len(tr.list()) > 0 })
+	awaitTurn(t, tr)
 	if got := tr.list(); len(got) != 1 || got[0] != "<@bot> keep me" {
 		t.Fatalf("pending requests after stop = %q", got)
 	}
@@ -323,6 +347,16 @@ func holdWindows(t *testing.T) {
 	old := [3]time.Duration{mergeSettle, mergeCallWait, mergeMax}
 	mergeSettle, mergeCallWait, mergeMax = 2*time.Second, 2*time.Second, 4*time.Second
 	t.Cleanup(func() { mergeSettle, mergeCallWait, mergeMax = old[0], old[1], old[2] })
+}
+
+// awaitTurn waits for the fire of one held request: its end signal, with a deadline.
+func awaitTurn(t *testing.T, tr *turns) {
+	t.Helper()
+	select {
+	case <-tr.fired:
+	case <-time.After(8 * time.Second):
+		t.Fatal("no turn fired")
+	}
 }
 
 func waitFor(t *testing.T, d time.Duration, ok func() bool) {
@@ -349,27 +383,28 @@ func followMark(g *Gateway, id string) bool {
 
 func TestBulkDeleteDropsPendingPiecesAndTheirFollowMarks(t *testing.T) {
 	g, tr := inboundGateway(t)
-	holdWindows(t) // the window must outlast the deletion on a slow runner
+	tr.fired = make(chan struct{}, 8)
 	g.messageEventApply = func(messageReconciliation) error { return nil }
 	g.cancelPictures = func(string, []string) {}
+	holdWindows(t) // the window must outlast the deletion on a slow runner
 	g.onMessage(nil, mention("bulk-1", "u", "first piece"))
 	second := &discordgo.MessageCreate{Message: &discordgo.Message{ID: "bulk-2", GuildID: "g", ChannelID: "c", Content: "second piece", Author: &discordgo.User{ID: "u"}}}
 	g.followIDs.Store("bulk-2", true) // the follow-up window accepted it
 	g.merge.add(second, false)
 	g.onMessageDeleteBulk(nil, &discordgo.MessageDeleteBulk{Messages: []string{"bulk-1", "bulk-2"}, GuildID: "g", ChannelID: "c"})
-	time.Sleep(150 * time.Millisecond)
-	if got := tr.list(); len(got) != 0 {
-		t.Fatalf("bulk-deleted pending request was answered: %q", got)
-	}
+	// the bulk delete took both pieces out: nothing is left that could start a turn
 	if followMark(g, "bulk-2") || !mergerIsEmpty(g) {
 		t.Fatalf("state left behind: follow mark %v, merger empty %v", followMark(g, "bulk-2"), mergerIsEmpty(g))
+	}
+	if got := tr.list(); len(got) != 0 {
+		t.Fatalf("bulk-deleted pending request was answered: %q", got)
 	}
 
 	// deleting only one of two pieces keeps the other
 	g.onMessage(nil, mention("bulk-3", "u", "kept piece"))
 	g.merge.add(&discordgo.MessageCreate{Message: &discordgo.Message{ID: "bulk-4", GuildID: "g", ChannelID: "c", Content: "dropped piece", Author: &discordgo.User{ID: "u"}}}, false)
 	g.onMessageDeleteBulk(nil, &discordgo.MessageDeleteBulk{Messages: []string{"bulk-4", "unrelated"}, GuildID: "g", ChannelID: "c"})
-	waitFor(t, 8*time.Second, func() bool { return len(tr.list()) > 0 })
+	awaitTurn(t, tr)
 	if got := tr.list(); len(got) != 1 || got[0] != "<@bot> kept piece" {
 		t.Fatalf("remaining request after a partial bulk delete = %q", got)
 	}
@@ -382,7 +417,7 @@ func TestDeletingAFollowUpPieceClearsItsFollowMark(t *testing.T) {
 	g.followIDs.Store("follow-1", true)
 	g.merge.add(&discordgo.MessageCreate{Message: &discordgo.Message{ID: "follow-1", GuildID: "g", ChannelID: "c", Content: "carrying on", Author: &discordgo.User{ID: "u"}}}, false)
 	g.onMessageDelete(nil, &discordgo.MessageDelete{Message: &discordgo.Message{ID: "follow-1", GuildID: "g", ChannelID: "c"}})
-	time.Sleep(100 * time.Millisecond)
+	// the delete dropped the held piece: nothing is left that could fire or stay marked
 	if followMark(g, "follow-1") || !mergerIsEmpty(g) || len(tr.list()) != 0 {
 		t.Fatalf("follow mark %v, merger empty %v, turns %q", followMark(g, "follow-1"), mergerIsEmpty(g), tr.list())
 	}
@@ -406,9 +441,10 @@ func TestStopWordClearsTheFollowMarksOfThePendingRequest(t *testing.T) {
 // it does not fire the request a second time or leave an index entry behind.
 func TestEditAfterFlushDoesNotRefireOrLeaveState(t *testing.T) {
 	g, tr := inboundGateway(t)
+	tr.fired = make(chan struct{}, 8)
 	g.messageEventApply = func(messageReconciliation) error { return nil }
 	g.onMessage(nil, mention("flushed", "u", "original text"))
-	time.Sleep(200 * time.Millisecond) // past the settle window: the turn has started
+	awaitTurn(t, tr) // the turn has started
 	if got := tr.list(); len(got) != 1 || got[0] != "<@bot> original text" {
 		t.Fatalf("turns before the edit: %q", got)
 	}
@@ -417,12 +453,12 @@ func TestEditAfterFlushDoesNotRefireOrLeaveState(t *testing.T) {
 	}
 	at := time.Now().UTC()
 	g.onMessageUpdate(nil, &discordgo.MessageUpdate{Message: &discordgo.Message{ID: "flushed", GuildID: "g", ChannelID: "c", Content: "edited text", EditedTimestamp: &at}})
-	time.Sleep(150 * time.Millisecond)
-	if got := tr.list(); len(got) != 1 {
-		t.Fatalf("the edit started another turn: %q", got)
-	}
+	// the edit found nothing pending: no second turn can start from it
 	if !mergerIsEmpty(g) {
 		t.Fatal("the merger kept state for a flushed request")
+	}
+	if got := tr.list(); len(got) != 1 {
+		t.Fatalf("the edit started another turn: %q", got)
 	}
 }
 
@@ -435,10 +471,18 @@ func TestPendingMessageChangesRaceWithFlush(t *testing.T) {
 	g.cancelPictures = func(string, []string) {}
 	var mu sync.Mutex
 	fired := map[string][]string{} // author → the text of each turn started for them
+	fires, forgotten := 0, 0       // a request ends exactly once: it fires, or a delete forgets it
 	g.merge.fire = func(msgs []*discordgo.MessageCreate) {
 		mu.Lock()
 		defer mu.Unlock()
+		fires++
 		fired[msgs[0].Author.ID] = append(fired[msgs[0].Author.ID], mergedText(msgs))
+	}
+	g.merge.forget = func(id string) {
+		mu.Lock()
+		forgotten++
+		mu.Unlock()
+		g.forgetFollow(id)
 	}
 	mergeSettle = time.Millisecond // the flush lands among the edits and deletes
 	const rounds = 40
@@ -460,7 +504,12 @@ func TestPendingMessageChangesRaceWithFlush(t *testing.T) {
 		}
 		wg.Wait()
 	}
-	time.Sleep(200 * time.Millisecond)
+	// every request has conclusively ended: it either fired or was forgotten by a delete
+	waitFor(t, 8*time.Second, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return fires+forgotten >= rounds
+	})
 	mu.Lock()
 	defer mu.Unlock()
 	for user, texts := range fired {
