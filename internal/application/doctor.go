@@ -20,10 +20,6 @@ import (
 	"masamong/internal/storage"
 )
 
-// warnedZoneSettings keeps a bad configured zone to one log line per setting and value: the console
-// and the CLI poll doctor, so logging on every call would fill the rotating log.
-var warnedZoneSettings sync.Map
-
 // doctor reports one status per capability; the GUI and CLI render the reason next to the status. A
 // feature without its key does not answer (no_key): only the practice instance answers from built-in
 // samples (practice_sample), so a real instance never shows sample data as if it were live.
@@ -194,7 +190,9 @@ func (r *doctorRun) checkTimezone(feature, tz string) {
 	if tz == "" {
 		r.put(feature, "ready", "")
 	} else if _, err := time.LoadLocation(tz); err != nil {
-		if _, warned := warnedZoneSettings.LoadOrStore(feature+"="+tz, true); !warned {
+		// one log line per setting and value (Service.loggedOnce): the console and the CLI poll doctor, so
+		// logging on every call would fill the rotating log
+		if r.s.loggedOnce.first("doctor:" + feature + "=" + tz) {
 			r.s.Log.Error("unknown configured timezone", "setting", feature, "timezone", tz, "err", err)
 		}
 		r.put(feature, "error", "timezone_invalid:"+tz)
