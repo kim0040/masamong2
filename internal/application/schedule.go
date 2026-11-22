@@ -73,8 +73,8 @@ func (s *Service) RunScheduler(ctx context.Context) {
 				if s.retentionDue(s.Clock.Now(), started) {
 					s.startRetentionPass(ctx)
 				}
-				if s.updateDue() && updateChecking.CompareAndSwap(false, true) {
-					s.ownedGo("update check", func(ctx context.Context) { defer updateChecking.Store(false); s.checkUpdate(ctx) })
+				if s.updateDue() && s.runs.updateCheck.CompareAndSwap(false, true) {
+					s.ownedGo("update check", func(ctx context.Context) { defer s.runs.updateCheck.Store(false); s.checkUpdate(ctx) })
 				}
 				s.ownedGo("update news", func(ctx context.Context) { s.updateNewsTick(ctx) })
 				if now := s.Clock.Now(); now.Sub(lastClean) >= time.Hour && len(s.leftoverList()) > 0 {

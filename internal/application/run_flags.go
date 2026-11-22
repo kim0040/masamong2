@@ -15,4 +15,5 @@ type runFlags struct {
 	notices     atomic.Bool // the notice pass is running (notices.go)
 	noticesTick atomic.Bool // the scheduler's notice tick is running (schedule.go)
 	updateNews  atomic.Bool // the release notes announcement is running (updatenews_announce.go)
+	updateCheck atomic.Bool // the update check is running (updates.go)
 }

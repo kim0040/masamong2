@@ -31,7 +31,7 @@ var updateAPI = "https://api.github.com/repos/%s/releases/latest"
 
 const updateEvery = 24 * time.Hour
 
-var updateChecking, updateApplying atomic.Bool
+var updateApplying atomic.Bool
 
 type updateState struct {
 	CheckedAt string `json:"checked_at,omitempty"`
