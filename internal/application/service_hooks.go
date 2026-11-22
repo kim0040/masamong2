@@ -37,6 +37,8 @@ type serviceHooks struct {
 	search atomic.Pointer[searchLimits]
 	// fetchBase points TinyFish Fetch at a test server (registry.go); read when the fetcher is made.
 	fetchBase atomic.Pointer[string]
+	// probeTimeout shortens a connection check (Registry.Probe), in nanoseconds; 0 = probeTimeout.
+	probeTimeout atomic.Int64
 	// oldEditsAtOnce settles old edits at the first idle pass instead of oldEditsDelay after the start.
 	oldEditsAtOnce bool
 }

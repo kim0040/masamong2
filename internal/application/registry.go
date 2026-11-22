@@ -329,8 +329,8 @@ func (r *Registry) reserve(id string) error {
 
 // probeTimeout bounds one connection check, whatever the caller's context allows: the search services'
 // HTTP limit is 50 s and the client retries, so a hung service would otherwise keep the console button
-// waiting for minutes. A variable so a test can shorten it.
-var probeTimeout = 15 * time.Second
+// waiting for minutes. A test shortens it for its own service (serviceHooks.probeTimeout).
+const probeTimeout = 15 * time.Second
 
 // Probe makes the cheapest real request for provider id so 'providers test' proves the credential works.
 func (r *Registry) Probe(ctx context.Context, id string) (map[string]any, error) {
@@ -341,7 +341,11 @@ func (r *Registry) Probe(ctx context.Context, id string) (map[string]any, error)
 	if err := r.reserve(id); err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	limit := probeTimeout
+	if r.hooks != nil {
+		limit = durationOr(time.Duration(r.hooks.probeTimeout.Load()), probeTimeout)
+	}
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	start := time.Now()
 	out := map[string]any{"id": id, "kind": st.Kind}

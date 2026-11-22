@@ -35,9 +35,7 @@ func SetFetchBaseForTest(s *Service, url string) {
 	s.hooks.fetchBase.Store(&url)
 }
 
-// SetProbeTimeoutForTest shortens the limit of a connection check; it returns the restore.
-func SetProbeTimeoutForTest(d time.Duration) func() {
-	old := probeTimeout
-	probeTimeout = d
-	return func() { probeTimeout = old }
+// SetProbeTimeoutForTest shortens the limit of s's connection checks.
+func SetProbeTimeoutForTest(s *Service, d time.Duration) {
+	s.hooks.probeTimeout.Store(int64(d))
 }

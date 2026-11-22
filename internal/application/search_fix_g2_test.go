@@ -274,9 +274,9 @@ func TestSearchTimeLimitKeepsAnEmptyAnswer(t *testing.T) {
 
 // The console's connection check gets its own time limit, whatever the caller's context allows.
 func TestProbeHasItsOwnTimeLimit(t *testing.T) {
-	defer application.SetProbeTimeoutForTest(300 * time.Millisecond)()
 	hung := hungService(t, 30*time.Second, "")
 	svc := setupSvc(t)
+	application.SetProbeTimeoutForTest(svc, 300*time.Millisecond)
 	pointAt(t, svc, "tavily", hung.srv.URL, "T_KEY", "k")
 	started := time.Now()
 	_, err := svc.Registry().Probe(context.Background(), "tavily")
