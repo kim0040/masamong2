@@ -578,20 +578,23 @@ func noteRoomMemory(body map[string]any, res chat.Result) {
 	}
 }
 
-// storedThreadParent is a thread's parent channel from the thread table, for threads the in-memory list
-// no longer holds (closed more than a month ago).
+// storedThreadParent is a thread's parent channel as stored, for threads the in-memory list does not hold:
+// the thread table (closed more than a month ago), then the parents the connector stored when it first saw a
+// thread (NoteThreadParent: a private thread, which has no thread row, or one whose row retention removed).
 func storedThreadParent(db *storage.Store, guild, channel string) string {
 	var parent string
-	if err := db.Reader().QueryRow(`SELECT parent_id FROM channel_threads WHERE thread_id=? AND guild_id=? AND `+threadVisibleSQL("channel_threads"), channel, guild).Scan(&parent); err != nil {
+	if err := db.Reader().QueryRow(`SELECT COALESCE(
+		(SELECT parent_id FROM channel_threads WHERE thread_id=? AND guild_id=? AND `+threadVisibleSQL("channel_threads")+`),
+		(SELECT parent_id FROM thread_parents WHERE thread_id=? AND guild_id=?), '')`, channel, guild, channel, guild).Scan(&parent); err != nil {
 		return ""
 	}
 	return parent
 }
 
 // roomCaptures reports whether a Discord room's messages are stored now (captureAllowed): neither its own
-// entry nor, for a thread, its parent channel's turns capture off. The parent is found first, from the
-// thread table when the in-memory list no longer holds the thread (closed more than a month ago), so an old
-// thread is not taken for an unconfigured channel that stores by default.
+// entry nor, for a thread, its parent channel's turns capture off. The parent is found first, from what is
+// stored when the in-memory list does not hold the thread (storedThreadParent: an old or a private thread),
+// so such a thread is not taken for an unconfigured channel that stores by default.
 func (s *Service) roomCaptures(db *storage.Store, guild, channel string) bool {
 	parent := ""
 	if s.captureOffInGuild(guild) { // only a channel with capture off can stop a room that has no off of its own

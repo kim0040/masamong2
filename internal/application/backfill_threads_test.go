@@ -26,8 +26,8 @@ func (h *channelHistoryGateway) History(_ context.Context, channelID, _ string, 
 }
 
 // A catch-up never reads a thread under a channel with capture off: not one named by the console (a thread
-// closed long ago, with a message stored before the parent was turned off), and not one whose own entry
-// says capture: true. A thread under a channel that stores is still read.
+// closed long ago, or a private thread the application only knows by its stored parent, with a message
+// stored before the parent was turned off), and not one whose own entry says capture: true. A thread under a channel that stores is still read.
 func TestBackfillSkipsThreadsOfACaptureOffParent(t *testing.T) {
 	svc := setupSvc(t)
 	applyDoc(t, svc, func(d *config.Document) {
@@ -58,9 +58,18 @@ func TestBackfillSkipsThreadsOfACaptureOffParent(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// a private thread has no thread row: the connector stored its parent when it first saw it
+	if err := svc.NoteThreadParent(context.Background(), "g", "priv", "off"); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().Add(-time.Hour + 10*time.Second)
+	if _, err := eng.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "priv", MessageID: snowflake(at), AuthorID: "u",
+		AuthorName: "member", Content: "a synthetic line in priv", At: at}); err != nil {
+		t.Fatal(err)
+	}
 	gw := &channelHistoryGateway{}
 	svc.SetDiscord(gw)
-	for _, ch := range []string{"old", "kid"} {
+	for _, ch := range []string{"old", "kid", "priv"} {
 		if r := exec(svc, "memory.backfill", map[string]any{"guild_id": "g", "channel_id": ch}); r.OK {
 			t.Errorf("a catch-up of thread %s under a channel with capture off was not refused: %+v", ch, r.Output)
 		}
@@ -77,7 +86,7 @@ func TestBackfillSkipsThreadsOfACaptureOffParent(t *testing.T) {
 	for _, ch := range gw.asked {
 		seen[ch] = true
 	}
-	if seen["old"] || seen["kid"] || seen["off"] {
+	if seen["old"] || seen["kid"] || seen["priv"] || seen["off"] {
 		t.Fatalf("history read for a room under capture off: %v", gw.asked)
 	}
 	if !seen["on"] || !seen["oldon"] {
