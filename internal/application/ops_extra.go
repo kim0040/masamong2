@@ -8,7 +8,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"masamong/internal/action"
@@ -34,16 +33,14 @@ type ProviderHealth struct {
 	KeyUpdatedAt string `json:"key_updated_at,omitempty"`
 }
 
-var providerHealthMu sync.Mutex
-
 // noteProvider records the outcome of a live provider call. Writes are skipped while nothing changes
 // (a success within the last ten minutes), so busy tools do not write on every call.
 func (s *Service) noteProvider(id string, err error) {
 	if id == "" || s.Store == nil || s.practice {
 		return
 	}
-	providerHealthMu.Lock()
-	defer providerHealthMu.Unlock()
+	s.stateLocks.providerHealth.Lock()
+	defer s.stateLocks.providerHealth.Unlock()
 	key := "provider:" + id
 	var h ProviderHealth
 	_, _ = s.kvGet(key, &h)

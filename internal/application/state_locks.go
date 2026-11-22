@@ -7,4 +7,5 @@ import "sync"
 // instance in the same process never waits for the real one.
 type stateLocks struct {
 	deliveryAlerted sync.Mutex // delivery:alerted (NoteDeliveryProblem, delivery.go)
+	providerHealth  sync.Mutex // provider:<id> (noteProvider, ops_extra.go)
 }
