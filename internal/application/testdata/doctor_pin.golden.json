@@ -1,0 +1,1707 @@
+{
+  "bad timezones": {
+    "attention": [
+      {
+        "item": "timezone",
+        "reason": "timezone_invalid:Nowhere/Land"
+      },
+      {
+        "item": "memory_timezone",
+        "reason": "timezone_invalid:Also/Nowhere"
+      }
+    ],
+    "features": {
+      "config": {
+        "status": "ready"
+      },
+      "disasters": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "discord": {
+        "reason": "discord.enabled=false",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "eval": {
+        "status": "ready"
+      },
+      "finance": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "fortune": {
+        "reason": "needs_chat_model",
+        "reason_text": "Needs the chat model's key",
+        "status": "unconfigured"
+      },
+      "identity": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "images": {
+        "reason": "needs_image_model",
+        "reason_text": "No image model chosen (Connections → Models)",
+        "status": "unconfigured"
+      },
+      "jobs": {
+        "status": "ready"
+      },
+      "llm": {
+        "reason": "provider_key_missing",
+        "reason_text": "The model provider has no key",
+        "status": "unconfigured"
+      },
+      "memory": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "memory_timezone": {
+        "reason": "timezone_invalid:Also/Nowhere",
+        "reason_text": "Unknown time zone: Also/Nowhere",
+        "status": "error"
+      },
+      "notices": {
+        "status": "ready"
+      },
+      "participation": {
+        "reason": "participation_off",
+        "reason_text": "Turned off in settings",
+        "status": "off"
+      },
+      "polls": {
+        "status": "ready"
+      },
+      "retrieval": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "search": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "storage": {
+        "reason": "sqlite",
+        "reason_text": "SQLite",
+        "status": "ready"
+      },
+      "timezone": {
+        "reason": "timezone_invalid:Nowhere/Land",
+        "reason_text": "Unknown time zone: Nowhere/Land",
+        "status": "error"
+      },
+      "vision": {
+        "reason": "vision_unset",
+        "reason_text": "No image-recognition model chosen (optional)",
+        "status": "off"
+      },
+      "weather": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "web": {
+        "reason": "noweb_build",
+        "reason_text": "Built without the web console",
+        "status": "disabled"
+      }
+    },
+    "memory_complete": false,
+    "profile": "lite",
+    "single_ready": false,
+    "storage_backend": "sqlite",
+    "title": "Instance status"
+  },
+  "discord enabled, no gateway": {
+    "attention": [],
+    "features": {
+      "config": {
+        "status": "ready"
+      },
+      "disasters": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "discord": {
+        "reason": "gateway_not_started",
+        "reason_text": "Gateway not started",
+        "status": "pending"
+      },
+      "eval": {
+        "status": "ready"
+      },
+      "finance": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "fortune": {
+        "reason": "needs_chat_model",
+        "reason_text": "Needs the chat model's key",
+        "status": "unconfigured"
+      },
+      "identity": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "images": {
+        "reason": "needs_image_model",
+        "reason_text": "No image model chosen (Connections → Models)",
+        "status": "unconfigured"
+      },
+      "jobs": {
+        "status": "ready"
+      },
+      "llm": {
+        "reason": "provider_key_missing",
+        "reason_text": "The model provider has no key",
+        "status": "unconfigured"
+      },
+      "memory": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "memory_timezone": {
+        "status": "ready"
+      },
+      "notices": {
+        "status": "ready"
+      },
+      "participation": {
+        "reason": "participation_off",
+        "reason_text": "Turned off in settings",
+        "status": "off"
+      },
+      "polls": {
+        "status": "ready"
+      },
+      "retrieval": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "search": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "storage": {
+        "reason": "sqlite",
+        "reason_text": "SQLite",
+        "status": "ready"
+      },
+      "timezone": {
+        "status": "ready"
+      },
+      "vision": {
+        "reason": "vision_unset",
+        "reason_text": "No image-recognition model chosen (optional)",
+        "status": "off"
+      },
+      "weather": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "web": {
+        "reason": "noweb_build",
+        "reason_text": "Built without the web console",
+        "status": "disabled"
+      }
+    },
+    "memory_complete": false,
+    "profile": "lite",
+    "single_ready": false,
+    "storage_backend": "sqlite",
+    "title": "Instance status"
+  },
+  "features off": {
+    "attention": [],
+    "features": {
+      "config": {
+        "status": "ready"
+      },
+      "disasters": {
+        "reason": "feature_flag",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "discord": {
+        "reason": "discord.enabled=false",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "eval": {
+        "status": "ready"
+      },
+      "finance": {
+        "reason": "feature_flag",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "fortune": {
+        "reason": "feature_flag",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "identity": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "images": {
+        "reason": "feature_flag",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "jobs": {
+        "status": "ready"
+      },
+      "llm": {
+        "reason": "provider_key_missing",
+        "reason_text": "The model provider has no key",
+        "status": "unconfigured"
+      },
+      "memory": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "memory_timezone": {
+        "status": "ready"
+      },
+      "notices": {
+        "reason": "feature_flag",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "participation": {
+        "reason": "participation_off",
+        "reason_text": "Turned off in settings",
+        "status": "off"
+      },
+      "polls": {
+        "reason": "feature_flag",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "retrieval": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "search": {
+        "reason": "feature_flag",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "storage": {
+        "reason": "sqlite",
+        "reason_text": "SQLite",
+        "status": "ready"
+      },
+      "timezone": {
+        "status": "ready"
+      },
+      "vision": {
+        "reason": "vision_unset",
+        "reason_text": "No image-recognition model chosen (optional)",
+        "status": "off"
+      },
+      "weather": {
+        "reason": "feature_flag",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "web": {
+        "reason": "noweb_build",
+        "reason_text": "Built without the web console",
+        "status": "disabled"
+      }
+    },
+    "memory_complete": false,
+    "profile": "lite",
+    "single_ready": false,
+    "storage_backend": "sqlite",
+    "title": "Instance status"
+  },
+  "fresh instance": {
+    "attention": [],
+    "features": {
+      "config": {
+        "status": "ready"
+      },
+      "disasters": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "discord": {
+        "reason": "discord.enabled=false",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "eval": {
+        "status": "ready"
+      },
+      "finance": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "fortune": {
+        "reason": "needs_chat_model",
+        "reason_text": "Needs the chat model's key",
+        "status": "unconfigured"
+      },
+      "identity": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "images": {
+        "reason": "needs_image_model",
+        "reason_text": "No image model chosen (Connections → Models)",
+        "status": "unconfigured"
+      },
+      "jobs": {
+        "status": "ready"
+      },
+      "llm": {
+        "reason": "provider_key_missing",
+        "reason_text": "The model provider has no key",
+        "status": "unconfigured"
+      },
+      "memory": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "memory_timezone": {
+        "status": "ready"
+      },
+      "notices": {
+        "status": "ready"
+      },
+      "participation": {
+        "reason": "participation_off",
+        "reason_text": "Turned off in settings",
+        "status": "off"
+      },
+      "polls": {
+        "status": "ready"
+      },
+      "retrieval": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "search": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "storage": {
+        "reason": "sqlite",
+        "reason_text": "SQLite",
+        "status": "ready"
+      },
+      "timezone": {
+        "status": "ready"
+      },
+      "vision": {
+        "reason": "vision_unset",
+        "reason_text": "No image-recognition model chosen (optional)",
+        "status": "off"
+      },
+      "weather": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "web": {
+        "reason": "noweb_build",
+        "reason_text": "Built without the web console",
+        "status": "disabled"
+      }
+    },
+    "memory_complete": false,
+    "profile": "lite",
+    "single_ready": false,
+    "storage_backend": "sqlite",
+    "title": "Instance status"
+  },
+  "keys present": {
+    "attention": [],
+    "features": {
+      "config": {
+        "status": "ready"
+      },
+      "disasters": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "discord": {
+        "reason": "discord.enabled=false",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "eval": {
+        "status": "ready"
+      },
+      "finance": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "fortune": {
+        "status": "ready"
+      },
+      "identity": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "images": {
+        "reason": "needs_image_model",
+        "reason_text": "No image model chosen (Connections → Models)",
+        "status": "unconfigured"
+      },
+      "jobs": {
+        "status": "ready"
+      },
+      "llm": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "memory": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "memory_timezone": {
+        "status": "ready"
+      },
+      "notices": {
+        "status": "ready"
+      },
+      "participation": {
+        "reason": "participation_off",
+        "reason_text": "Turned off in settings",
+        "status": "off"
+      },
+      "polls": {
+        "status": "ready"
+      },
+      "retrieval": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "search": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "storage": {
+        "reason": "sqlite",
+        "reason_text": "SQLite",
+        "status": "ready"
+      },
+      "timezone": {
+        "status": "ready"
+      },
+      "vision": {
+        "reason": "vision_unset",
+        "reason_text": "No image-recognition model chosen (optional)",
+        "status": "off"
+      },
+      "weather": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "web": {
+        "reason": "noweb_build",
+        "reason_text": "Built without the web console",
+        "status": "disabled"
+      }
+    },
+    "memory_complete": false,
+    "profile": "lite",
+    "single_ready": false,
+    "storage_backend": "sqlite",
+    "title": "Instance status"
+  },
+  "keys present, features off": {
+    "attention": [],
+    "features": {
+      "config": {
+        "status": "ready"
+      },
+      "disasters": {
+        "reason": "feature_flag",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "discord": {
+        "reason": "discord.enabled=false",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "eval": {
+        "status": "ready"
+      },
+      "finance": {
+        "reason": "feature_flag",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "fortune": {
+        "reason": "feature_flag",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "identity": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "images": {
+        "reason": "feature_flag",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "jobs": {
+        "status": "ready"
+      },
+      "llm": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "memory": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "memory_timezone": {
+        "status": "ready"
+      },
+      "notices": {
+        "reason": "feature_flag",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "participation": {
+        "reason": "participation_off",
+        "reason_text": "Turned off in settings",
+        "status": "off"
+      },
+      "polls": {
+        "reason": "feature_flag",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "retrieval": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "search": {
+        "reason": "feature_flag",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "storage": {
+        "reason": "sqlite",
+        "reason_text": "SQLite",
+        "status": "ready"
+      },
+      "timezone": {
+        "status": "ready"
+      },
+      "vision": {
+        "reason": "vision_unset",
+        "reason_text": "No image-recognition model chosen (optional)",
+        "status": "off"
+      },
+      "weather": {
+        "reason": "feature_flag",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "web": {
+        "reason": "noweb_build",
+        "reason_text": "Built without the web console",
+        "status": "disabled"
+      }
+    },
+    "memory_complete": false,
+    "profile": "lite",
+    "single_ready": false,
+    "storage_backend": "sqlite",
+    "title": "Instance status"
+  },
+  "keys present, image model": {
+    "attention": [],
+    "features": {
+      "config": {
+        "status": "ready"
+      },
+      "disasters": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "discord": {
+        "reason": "discord.enabled=false",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "eval": {
+        "status": "ready"
+      },
+      "finance": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "fortune": {
+        "status": "ready"
+      },
+      "identity": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "images": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "jobs": {
+        "status": "ready"
+      },
+      "llm": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "memory": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "memory_timezone": {
+        "status": "ready"
+      },
+      "notices": {
+        "status": "ready"
+      },
+      "participation": {
+        "reason": "participation_off",
+        "reason_text": "Turned off in settings",
+        "status": "off"
+      },
+      "polls": {
+        "status": "ready"
+      },
+      "retrieval": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "search": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "storage": {
+        "reason": "sqlite",
+        "reason_text": "SQLite",
+        "status": "ready"
+      },
+      "timezone": {
+        "status": "ready"
+      },
+      "vision": {
+        "reason": "vision_unset",
+        "reason_text": "No image-recognition model chosen (optional)",
+        "status": "off"
+      },
+      "weather": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "web": {
+        "reason": "noweb_build",
+        "reason_text": "Built without the web console",
+        "status": "disabled"
+      }
+    },
+    "memory_complete": false,
+    "profile": "lite",
+    "single_ready": false,
+    "storage_backend": "sqlite",
+    "title": "Instance status"
+  },
+  "keys present, participation conservative": {
+    "attention": [],
+    "features": {
+      "config": {
+        "status": "ready"
+      },
+      "disasters": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "discord": {
+        "reason": "discord.enabled=false",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "eval": {
+        "status": "ready"
+      },
+      "finance": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "fortune": {
+        "status": "ready"
+      },
+      "identity": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "images": {
+        "reason": "needs_image_model",
+        "reason_text": "No image model chosen (Connections → Models)",
+        "status": "unconfigured"
+      },
+      "jobs": {
+        "status": "ready"
+      },
+      "llm": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "memory": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "memory_timezone": {
+        "status": "ready"
+      },
+      "notices": {
+        "status": "ready"
+      },
+      "participation": {
+        "reason": "participation_conservative",
+        "reason_text": "Speak (conservative)",
+        "status": "ready"
+      },
+      "polls": {
+        "status": "ready"
+      },
+      "retrieval": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "search": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "storage": {
+        "reason": "sqlite",
+        "reason_text": "SQLite",
+        "status": "ready"
+      },
+      "timezone": {
+        "status": "ready"
+      },
+      "vision": {
+        "reason": "vision_unset",
+        "reason_text": "No image-recognition model chosen (optional)",
+        "status": "off"
+      },
+      "weather": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "web": {
+        "reason": "noweb_build",
+        "reason_text": "Built without the web console",
+        "status": "disabled"
+      }
+    },
+    "memory_complete": false,
+    "profile": "lite",
+    "single_ready": false,
+    "storage_backend": "sqlite",
+    "title": "Instance status"
+  },
+  "keys present, retrieval off": {
+    "attention": [],
+    "features": {
+      "config": {
+        "status": "ready"
+      },
+      "disasters": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "discord": {
+        "reason": "discord.enabled=false",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "eval": {
+        "status": "ready"
+      },
+      "finance": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "fortune": {
+        "status": "ready"
+      },
+      "identity": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "images": {
+        "reason": "needs_image_model",
+        "reason_text": "No image model chosen (Connections → Models)",
+        "status": "unconfigured"
+      },
+      "jobs": {
+        "status": "ready"
+      },
+      "llm": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "memory": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "memory_timezone": {
+        "status": "ready"
+      },
+      "notices": {
+        "status": "ready"
+      },
+      "participation": {
+        "reason": "participation_off",
+        "reason_text": "Turned off in settings",
+        "status": "off"
+      },
+      "polls": {
+        "status": "ready"
+      },
+      "retrieval": {
+        "reason": "memory.retrieve=off",
+        "reason_text": "Memory search is off",
+        "status": "off"
+      },
+      "search": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "storage": {
+        "reason": "sqlite",
+        "reason_text": "SQLite",
+        "status": "ready"
+      },
+      "timezone": {
+        "status": "ready"
+      },
+      "vision": {
+        "reason": "vision_unset",
+        "reason_text": "No image-recognition model chosen (optional)",
+        "status": "off"
+      },
+      "weather": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "web": {
+        "reason": "noweb_build",
+        "reason_text": "Built without the web console",
+        "status": "disabled"
+      }
+    },
+    "memory_complete": false,
+    "profile": "lite",
+    "single_ready": false,
+    "storage_backend": "sqlite",
+    "title": "Instance status"
+  },
+  "keys present, vision set": {
+    "attention": [],
+    "features": {
+      "config": {
+        "status": "ready"
+      },
+      "disasters": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "discord": {
+        "reason": "discord.enabled=false",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "eval": {
+        "status": "ready"
+      },
+      "finance": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "fortune": {
+        "status": "ready"
+      },
+      "identity": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "images": {
+        "reason": "needs_image_model",
+        "reason_text": "No image model chosen (Connections → Models)",
+        "status": "unconfigured"
+      },
+      "jobs": {
+        "status": "ready"
+      },
+      "llm": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "memory": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "memory_timezone": {
+        "status": "ready"
+      },
+      "notices": {
+        "status": "ready"
+      },
+      "participation": {
+        "reason": "participation_off",
+        "reason_text": "Turned off in settings",
+        "status": "off"
+      },
+      "polls": {
+        "status": "ready"
+      },
+      "retrieval": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "search": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "storage": {
+        "reason": "sqlite",
+        "reason_text": "SQLite",
+        "status": "ready"
+      },
+      "timezone": {
+        "status": "ready"
+      },
+      "vision": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "weather": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "web": {
+        "reason": "noweb_build",
+        "reason_text": "Built without the web console",
+        "status": "disabled"
+      }
+    },
+    "memory_complete": false,
+    "profile": "lite",
+    "single_ready": false,
+    "storage_backend": "sqlite",
+    "title": "Instance status"
+  },
+  "keys present, vision switch off": {
+    "attention": [],
+    "features": {
+      "config": {
+        "status": "ready"
+      },
+      "disasters": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "discord": {
+        "reason": "discord.enabled=false",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "eval": {
+        "status": "ready"
+      },
+      "finance": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "fortune": {
+        "status": "ready"
+      },
+      "identity": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "images": {
+        "reason": "needs_image_model",
+        "reason_text": "No image model chosen (Connections → Models)",
+        "status": "unconfigured"
+      },
+      "jobs": {
+        "status": "ready"
+      },
+      "llm": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "memory": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "memory_timezone": {
+        "status": "ready"
+      },
+      "notices": {
+        "status": "ready"
+      },
+      "participation": {
+        "reason": "participation_off",
+        "reason_text": "Turned off in settings",
+        "status": "off"
+      },
+      "polls": {
+        "status": "ready"
+      },
+      "retrieval": {
+        "reason": "no_messages",
+        "reason_text": "No conversation imported or captured yet",
+        "status": "empty"
+      },
+      "search": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "storage": {
+        "reason": "sqlite",
+        "reason_text": "SQLite",
+        "status": "ready"
+      },
+      "timezone": {
+        "status": "ready"
+      },
+      "vision": {
+        "reason": "vision_off",
+        "reason_text": "Picture reading is turned off in the chat settings",
+        "status": "off"
+      },
+      "weather": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "web": {
+        "reason": "noweb_build",
+        "reason_text": "Built without the web console",
+        "status": "disabled"
+      }
+    },
+    "memory_complete": false,
+    "profile": "lite",
+    "single_ready": false,
+    "storage_backend": "sqlite",
+    "title": "Instance status"
+  },
+  "message vectors off": {
+    "attention": [],
+    "features": {
+      "config": {
+        "status": "ready"
+      },
+      "disasters": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "discord": {
+        "reason": "discord.enabled=false",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "eval": {
+        "status": "ready"
+      },
+      "finance": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "fortune": {
+        "reason": "needs_chat_model",
+        "reason_text": "Needs the chat model's key",
+        "status": "unconfigured"
+      },
+      "identity": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "images": {
+        "reason": "needs_image_model",
+        "reason_text": "No image model chosen (Connections → Models)",
+        "status": "unconfigured"
+      },
+      "jobs": {
+        "status": "ready"
+      },
+      "llm": {
+        "reason": "provider_key_missing",
+        "reason_text": "The model provider has no key",
+        "status": "unconfigured"
+      },
+      "memory": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "memory_timezone": {
+        "status": "ready"
+      },
+      "notices": {
+        "status": "ready"
+      },
+      "participation": {
+        "reason": "participation_off",
+        "reason_text": "Turned off in settings",
+        "status": "off"
+      },
+      "polls": {
+        "status": "ready"
+      },
+      "retrieval": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "search": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "storage": {
+        "reason": "sqlite",
+        "reason_text": "SQLite",
+        "status": "ready"
+      },
+      "timezone": {
+        "status": "ready"
+      },
+      "vision": {
+        "reason": "vision_unset",
+        "reason_text": "No image-recognition model chosen (optional)",
+        "status": "off"
+      },
+      "weather": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "web": {
+        "reason": "noweb_build",
+        "reason_text": "Built without the web console",
+        "status": "disabled"
+      }
+    },
+    "memory_complete": false,
+    "profile": "lite",
+    "single_ready": false,
+    "storage_backend": "sqlite",
+    "title": "Instance status"
+  },
+  "participation shadow": {
+    "attention": [],
+    "features": {
+      "config": {
+        "status": "ready"
+      },
+      "disasters": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "discord": {
+        "reason": "discord.enabled=false",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "eval": {
+        "status": "ready"
+      },
+      "finance": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "fortune": {
+        "reason": "needs_chat_model",
+        "reason_text": "Needs the chat model's key",
+        "status": "unconfigured"
+      },
+      "identity": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "images": {
+        "reason": "needs_image_model",
+        "reason_text": "No image model chosen (Connections → Models)",
+        "status": "unconfigured"
+      },
+      "jobs": {
+        "status": "ready"
+      },
+      "llm": {
+        "reason": "provider_key_missing",
+        "reason_text": "The model provider has no key",
+        "status": "unconfigured"
+      },
+      "memory": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "memory_timezone": {
+        "status": "ready"
+      },
+      "notices": {
+        "status": "ready"
+      },
+      "participation": {
+        "reason": "needs_chat_model",
+        "reason_text": "Needs the chat model's key",
+        "status": "unconfigured"
+      },
+      "polls": {
+        "status": "ready"
+      },
+      "retrieval": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "search": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "storage": {
+        "reason": "sqlite",
+        "reason_text": "SQLite",
+        "status": "ready"
+      },
+      "timezone": {
+        "status": "ready"
+      },
+      "vision": {
+        "reason": "vision_unset",
+        "reason_text": "No image-recognition model chosen (optional)",
+        "status": "off"
+      },
+      "weather": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "web": {
+        "reason": "noweb_build",
+        "reason_text": "Built without the web console",
+        "status": "disabled"
+      }
+    },
+    "memory_complete": false,
+    "profile": "lite",
+    "single_ready": false,
+    "storage_backend": "sqlite",
+    "title": "Instance status"
+  },
+  "retrieval off": {
+    "attention": [],
+    "features": {
+      "config": {
+        "status": "ready"
+      },
+      "disasters": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "discord": {
+        "reason": "discord.enabled=false",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "eval": {
+        "status": "ready"
+      },
+      "finance": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "fortune": {
+        "reason": "needs_chat_model",
+        "reason_text": "Needs the chat model's key",
+        "status": "unconfigured"
+      },
+      "identity": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "images": {
+        "reason": "needs_image_model",
+        "reason_text": "No image model chosen (Connections → Models)",
+        "status": "unconfigured"
+      },
+      "jobs": {
+        "status": "ready"
+      },
+      "llm": {
+        "reason": "provider_key_missing",
+        "reason_text": "The model provider has no key",
+        "status": "unconfigured"
+      },
+      "memory": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "memory_timezone": {
+        "status": "ready"
+      },
+      "notices": {
+        "status": "ready"
+      },
+      "participation": {
+        "reason": "participation_off",
+        "reason_text": "Turned off in settings",
+        "status": "off"
+      },
+      "polls": {
+        "status": "ready"
+      },
+      "retrieval": {
+        "reason": "memory.retrieve=off",
+        "reason_text": "Memory search is off",
+        "status": "off"
+      },
+      "search": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "storage": {
+        "reason": "sqlite",
+        "reason_text": "SQLite",
+        "status": "ready"
+      },
+      "timezone": {
+        "status": "ready"
+      },
+      "vision": {
+        "reason": "vision_unset",
+        "reason_text": "No image-recognition model chosen (optional)",
+        "status": "off"
+      },
+      "weather": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "web": {
+        "reason": "noweb_build",
+        "reason_text": "Built without the web console",
+        "status": "disabled"
+      }
+    },
+    "memory_complete": false,
+    "profile": "lite",
+    "single_ready": false,
+    "storage_backend": "sqlite",
+    "title": "Instance status"
+  },
+  "vision role set": {
+    "attention": [],
+    "features": {
+      "config": {
+        "status": "ready"
+      },
+      "disasters": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "discord": {
+        "reason": "discord.enabled=false",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "eval": {
+        "status": "ready"
+      },
+      "finance": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "fortune": {
+        "reason": "needs_chat_model",
+        "reason_text": "Needs the chat model's key",
+        "status": "unconfigured"
+      },
+      "identity": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "images": {
+        "reason": "needs_image_model",
+        "reason_text": "No image model chosen (Connections → Models)",
+        "status": "unconfigured"
+      },
+      "jobs": {
+        "status": "ready"
+      },
+      "llm": {
+        "reason": "provider_key_missing",
+        "reason_text": "The model provider has no key",
+        "status": "unconfigured"
+      },
+      "memory": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "memory_timezone": {
+        "status": "ready"
+      },
+      "notices": {
+        "status": "ready"
+      },
+      "participation": {
+        "reason": "participation_off",
+        "reason_text": "Turned off in settings",
+        "status": "off"
+      },
+      "polls": {
+        "status": "ready"
+      },
+      "retrieval": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "search": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "storage": {
+        "reason": "sqlite",
+        "reason_text": "SQLite",
+        "status": "ready"
+      },
+      "timezone": {
+        "status": "ready"
+      },
+      "vision": {
+        "reason": "provider_key_missing",
+        "reason_text": "The model provider has no key",
+        "status": "unconfigured"
+      },
+      "weather": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "web": {
+        "reason": "noweb_build",
+        "reason_text": "Built without the web console",
+        "status": "disabled"
+      }
+    },
+    "memory_complete": false,
+    "profile": "lite",
+    "single_ready": false,
+    "storage_backend": "sqlite",
+    "title": "Instance status"
+  },
+  "web admin off": {
+    "attention": [],
+    "features": {
+      "config": {
+        "status": "ready"
+      },
+      "disasters": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "discord": {
+        "reason": "discord.enabled=false",
+        "reason_text": "Turned off in settings",
+        "status": "disabled"
+      },
+      "eval": {
+        "status": "ready"
+      },
+      "finance": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "fortune": {
+        "reason": "needs_chat_model",
+        "reason_text": "Needs the chat model's key",
+        "status": "unconfigured"
+      },
+      "identity": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "images": {
+        "reason": "needs_image_model",
+        "reason_text": "No image model chosen (Connections → Models)",
+        "status": "unconfigured"
+      },
+      "jobs": {
+        "status": "ready"
+      },
+      "llm": {
+        "reason": "provider_key_missing",
+        "reason_text": "The model provider has no key",
+        "status": "unconfigured"
+      },
+      "memory": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "memory_timezone": {
+        "status": "ready"
+      },
+      "notices": {
+        "status": "ready"
+      },
+      "participation": {
+        "reason": "participation_off",
+        "reason_text": "Turned off in settings",
+        "status": "off"
+      },
+      "polls": {
+        "status": "ready"
+      },
+      "retrieval": {
+        "reason": "embed_key_missing",
+        "reason_text": "The embedding model has no key",
+        "status": "unconfigured"
+      },
+      "search": {
+        "reason": "no_key",
+        "reason_text": "No API key (this feature does not answer)",
+        "status": "unconfigured"
+      },
+      "storage": {
+        "reason": "sqlite",
+        "reason_text": "SQLite",
+        "status": "ready"
+      },
+      "timezone": {
+        "status": "ready"
+      },
+      "vision": {
+        "reason": "vision_unset",
+        "reason_text": "No image-recognition model chosen (optional)",
+        "status": "off"
+      },
+      "weather": {
+        "reason": "configured",
+        "reason_text": "Connected",
+        "status": "ready"
+      },
+      "web": {
+        "reason": "noweb_build",
+        "reason_text": "Built without the web console",
+        "status": "disabled"
+      }
+    },
+    "memory_complete": false,
+    "profile": "lite",
+    "single_ready": false,
+    "storage_backend": "sqlite",
+    "title": "Instance status"
+  }
+}
