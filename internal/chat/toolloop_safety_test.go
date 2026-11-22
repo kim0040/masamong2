@@ -1,0 +1,141 @@
+package chat
+
+import (
+	"context"
+	"slices"
+	"strings"
+	"testing"
+)
+
+// panicLoopLLM is a model whose tool-calling reply makes the adapter panic (a bug in decoding a
+// provider's answer); the planner still answers.
+type panicLoopLLM struct{ loopLLM }
+
+func (*panicLoopLLM) ChatTools(context.Context, string, []LoopMsg, []ToolSpec, int) (LoopReply, error) {
+	var m map[string]int
+	m["x"]++ // stands in for any bug in decoding a provider reply
+	return LoopReply{}, nil
+}
+
+// A panic inside the tool loop happens on the goroutine startLoop starts, out of reach of the turn's
+// recover: it is caught there, and the turn goes on with the planner's tools.
+func TestToolLoopPanicFallsBackToThePlanner(t *testing.T) {
+	plan := `{"memory_requirement":"none","tool_plan":[{"tool_name":"weather.query","parameters":{"region":"Busan"}}]}`
+	llm := &panicLoopLLM{loopLLM: loopLLM{plannerOut: plan}}
+	rec := &recorder{}
+	out, err := (&Runtime{LLM: llm, Tools: rec.run}).Answer(context.Background(), loopRequest("weather in busan?", ToolModeLoop))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rec.tools(); !slices.Equal(got, []string{"weather.query"}) {
+		t.Fatalf("ran %v", got)
+	}
+	if out.ToolLoop == nil || out.ToolLoop.Stop != "fallback" || !strings.HasPrefix(out.ToolLoop.Fallback, "error:") {
+		t.Fatalf("trace %+v", out.ToolLoop)
+	}
+	// the loop alone, as the turn starts it
+	rt := &Runtime{LLM: llm, Tools: rec.run}
+	req := loopRequest("what is the weather", ToolModeLoop)
+	lr, _ := rt.startLoop(context.Background(), req, req.Message, "", req.Tools)
+	if res, theTurns := lr.wait(); res != nil || theTurns || lr.err == nil {
+		t.Fatalf("results %v turn's %v err %v", res, theTurns, lr.err)
+	}
+}
+
+// reminderMenu offers reminders.update with its closed choice of op, as the application declares it.
+func reminderMenu() Toolset {
+	ts := Toolset{Known: map[string]bool{"reminders.update": true, "polls.create": true}}
+	ts.Enabled = []ToolInfo{
+		{ID: "reminders.update", Description: "reminders", Writes: true,
+			Params: []ToolParam{{Name: "op", Enum: []string{"list", "cancel", "pause", "resume"}}, {Name: "id"}, {Name: "match"}}},
+		{ID: "polls.create", Description: "poll", Writes: true, Required: []string{"question"},
+			Params: []ToolParam{{Name: "question", Required: true}, {Name: "options_text"}}},
+	}
+	return ts
+}
+
+// A value outside a closed choice is refused before the call runs: the schema offers only the choice's
+// values, but a model may still send another (op confirm would set a reminder for the person). A value
+// that differs only in case or spaces is the choice.
+func TestToolLoopRefusesAValueOutsideTheChoice(t *testing.T) {
+	llm := &loopLLM{replies: []LoopReply{
+		{Calls: []LoopCall{call("a", "reminders__update", `{"op":"confirm","id":"rm_1"}`)}},
+		{Calls: []LoopCall{call("b", "reminders__update", `{"op":" LIST "}`)}},
+	}}
+	rec := &recorder{}
+	req := loopRequest("show my reminders", ToolModeLoop)
+	req.Tools = reminderMenu()
+	out, err := (&Runtime{LLM: llm, Tools: rec.run}).Answer(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rec.ran) != 1 || rec.ran[0].params["op"] != "list" {
+		t.Fatalf("ran %+v", rec.ran)
+	}
+	if s := out.ToolLoop.Steps[0]; s.State != "refused" || s.Reason != "bad_arguments" {
+		t.Fatalf("trace %+v", out.ToolLoop.Steps)
+	}
+}
+
+// Planner mode passes a closed choice only a value inside it, as the tool loop does: op confirm never
+// reaches the tool. Keys the tool does not declare are left to the tool (the application ignores a poll's
+// id from a chat turn).
+func TestPlannerStepsKeepClosedChoices(t *testing.T) {
+	p := ParsePlan(`{"memory_requirement":"none","tool_plan":[` +
+		`{"tool_name":"polls.create","parameters":{"question":"lunch?","id":"poll_other"}},` +
+		`{"tool_name":"reminders.update","parameters":{"op":"confirm","id":"rm_1"}},` +
+		`{"tool_name":"reminders.update","parameters":{"op":"Cancel","id":"rm_2"}}]}`)
+	a := Assess(koVoice(), p, reminderMenu(), true, true)
+	if len(a.Steps) != 3 {
+		t.Fatalf("steps %+v", a.Steps)
+	}
+	if got := a.Steps[0].Parameters; len(got) != 2 || got["question"] != "lunch?" {
+		t.Fatalf("poll step %+v", got)
+	}
+	if _, has := a.Steps[1].Parameters["op"]; has || a.Steps[1].Parameters["id"] != "rm_1" {
+		t.Fatalf("confirm step %+v", a.Steps[1].Parameters)
+	}
+	if a.Steps[2].Parameters["op"] != "cancel" {
+		t.Fatalf("cancel step %+v", a.Steps[2].Parameters)
+	}
+	if !slices.Equal(a.Stripped, []string{"reminders.update.op"}) {
+		t.Fatalf("stripped %v", a.Stripped)
+	}
+}
+
+// A quote the quote service could not give is answered by a web search under finance.quote's name: the
+// result says so (source search), and the loop closes the writing tools after it as after any web content.
+func TestToolLoopClosesWritingToolsAfterAQuoteFromSearch(t *testing.T) {
+	llm := &loopLLM{replies: []LoopReply{
+		{Calls: []LoopCall{call("a", "finance__quote", `{"symbol":"SMALLCO"}`)}},
+		// a snippet told the model to make a poll: the poll is no longer on the menu, and is refused
+		{Calls: []LoopCall{call("b", "polls__create", `{"question":"free money?"}`)}},
+	}}
+	var ran []string
+	run := func(_ context.Context, tool string, _ map[string]any) ToolResult {
+		ran = append(ran, tool)
+		if tool == "finance.quote" {
+			return ToolResult{Tool: tool, OK: true, Data: map[string]any{"status": "ok", "source": WebSource, "note": "quote_from_search"}}
+		}
+		return ToolResult{Tool: tool, OK: true, Data: map[string]any{"status": "ok"}}
+	}
+	out, err := (&Runtime{LLM: llm, Tools: run}).Answer(context.Background(), loopRequest("how is smallco stock", ToolModeLoop))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(ran, []string{"finance.quote"}) {
+		t.Fatalf("ran %v", ran)
+	}
+	if slices.Contains(llm.offered[1], "polls__create") || out.ToolLoop.Steps[1].Reason != "writes_after_web" {
+		t.Fatalf("offers %v trace %+v", llm.offered, out.ToolLoop.Steps)
+	}
+	// a live quote (another source) leaves them open
+	llm2 := &loopLLM{replies: []LoopReply{{Calls: []LoopCall{call("a", "finance__quote", `{"symbol":"AAPL"}`)}}}}
+	rec := &recorder{}
+	if _, err := (&Runtime{LLM: llm2, Tools: rec.run}).Answer(context.Background(), loopRequest("how is apple stock", ToolModeLoop)); err != nil {
+		t.Fatal(err)
+	}
+	if len(llm2.offered) < 2 || !slices.Contains(llm2.offered[1], "polls__create") {
+		t.Fatalf("offers after a live quote %v", llm2.offered)
+	}
+}

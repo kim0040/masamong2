@@ -595,7 +595,8 @@ func (s *Service) quoteBySearch(ctx context.Context, req action.Request, symbol,
 	if !res.OK {
 		return action.Result{}, false
 	}
-	out := map[string]any{"status": "ok", "live": false, "source": "search", "symbol": symbol, "note": "quote_from_search", "reason": why, "query": query}
+	// source search: the tool loop counts this as web content and closes the writing tools after it
+	out := map[string]any{"status": "ok", "live": false, "source": chat.WebSource, "symbol": symbol, "note": "quote_from_search", "reason": why, "query": query}
 	for k, v := range res.Output {
 		if k == "results" || k == "answer" || k == "provider" {
 			out[k] = v
@@ -1202,7 +1203,12 @@ func (s *Service) polls(req action.Request) action.Result {
 		if boolVal(in, "allow_multiselect") {
 			maxSel = len(opts)
 		}
-		id := strVal(in, "id", newID("poll_"))
+		id := newID("poll_")
+		if req.Invoker == nil {
+			// the console and the CLI may name the poll; a chat turn or a command always makes a new one, so a
+			// model that read another poll's id cannot write over it
+			id = strVal(in, "id", id)
+		}
 		p, err := poll.Create(poll.CreateCmd{
 			ID: id, ScopeKey: strVal(in, "scope", "default"), Question: strVal(in, "question", ""),
 			Options: opts, MaxSelect: maxSel, ClosesAt: &closes,
@@ -1210,7 +1216,10 @@ func (s *Service) polls(req action.Request) action.Result {
 		if err != nil {
 			return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
 		}
-		if err := s.savePoll(p); err != nil {
+		if err := s.createPoll(p); err != nil {
+			if errors.Is(err, errPollExists) {
+				return action.Fail(req, errcode.InvalidInput, "generic.error", s.msg(req, "generic.error"), map[string]any{"id": p.ID})
+			}
 			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
 		}
 		out := pollOut(p)
@@ -1284,6 +1293,31 @@ func (s *Service) polls(req action.Request) action.Result {
 		return action.OK(req, out)
 	}
 	return action.Fail(req, errcode.ActionUnknown, "action.unknown", s.msg(req, "action.unknown"), nil)
+}
+
+// errPollExists refuses polls.create for an id that is already taken: making a poll never replaces one.
+var errPollExists = errors.New("a poll with this id exists")
+
+// createPoll stores a new poll; an id already in use is refused (errPollExists) in the same write.
+func (s *Service) createPoll(p poll.Poll) error {
+	raw, err := poll.Marshal(p)
+	if err != nil {
+		return err
+	}
+	err = s.Store.WithWriter(func(tx *sql.Tx) error {
+		var n int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM polls WHERE id=?`, p.ID).Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			return errPollExists
+		}
+		return s.Store.UpsertPoll(tx, p.ID, p.ScopeKey, p.Revision, string(raw), s.Clock.Now().UTC().Format(time.RFC3339))
+	})
+	if err == nil {
+		s.emit("poll", p.ID, map[string]any{"status": string(p.Status), "revision": p.Revision})
+	}
+	return err
 }
 
 func (s *Service) savePoll(p poll.Poll) error {

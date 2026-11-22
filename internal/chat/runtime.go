@@ -504,6 +504,13 @@ func (rt *Runtime) startEarlyMemory(ctx context.Context, req Request, msg string
 	e := &earlyMemory{intent: intent, cancel: cancel, done: make(chan struct{})}
 	go func() {
 		defer close(e.done)
+		defer func() {
+			// searchMemory recovers the search itself; this covers the admission and budget steps before it,
+			// which also run on this goroutine, out of reach of the turn's recover
+			if p := recover(); p != nil {
+				e.mem = memoryRun{ran: true, intent: intent, err: crash.Error(nil, "chat early memory", p)}
+			}
+		}()
 		if req.Guard.AllowMoneyContext(ctx, "memory.search") {
 			// a model call or a fee still on its way is part of what the search may count on being spent, and the
 			// first call of the loop is the only thing the turn can price the rest of the loop by. The tools of a

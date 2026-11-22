@@ -196,12 +196,12 @@ func (s *Service) gateTool(req action.Request) (action.Request, *action.Result) 
 	if r.ID == "images.generate" && s.imageQueueRefuses(req) {
 		return req, nil // the queue answers a repeat or a full line without drawing: not a use of the tool
 	}
+	// the switches above and the caller's access come first, then the input: a request refused for who asks
+	// (a blocked member, a server waiting for approval) or as malformed uses none of the tool's allowance
+	if refused := s.gateDiscord(req); refused != nil {
+		return req, refused
+	}
 	if check := toolInputChecks[r.ID]; check != nil {
-		// the switches above and the caller's access come first, then the input: a request the tool would
-		// refuse as malformed uses none of the caller's allowance
-		if refused := s.gateDiscord(req); refused != nil {
-			return req, refused
-		}
 		if refused := check(s, req); refused != nil {
 			return req, refused
 		}
@@ -234,6 +234,11 @@ func (s *Service) runHTTPTool(ctx context.Context, req action.Request, r tools.R
 	if len(missing) > 0 {
 		return action.Fail(req, errcode.InvalidInput, "tool.missing_params", s.msg(req, "tool.missing_params", "tool", r.ID, "params", strings.Join(missing, ", ")), map[string]any{"missing": missing})
 	}
+	if err := tools.DirectSecret(r.ID, h); err != nil {
+		// a configuration an earlier release accepted: it still runs, and the operator is told (the message
+		// names the field, never the value); saving a change refuses it (tools.Validate)
+		s.Log.WarnContext(ctx, "operator tool keeps a key in its configuration", "tool", r.ID, "problem", err.Error())
+	}
 	secret := ""
 	if h.CredentialRef != "" {
 		cred, err := providers.Resolve(h.CredentialRef)
@@ -258,7 +263,9 @@ func (s *Service) runHTTPTool(ctx context.Context, req action.Request, r tools.R
 	}
 	scrub := newScrubber(secret)
 	if secret != "" && !scrub.active() {
-		s.Log.WarnContext(ctx, "tool credential is too short to scrub from responses; use a longer key", "tool", r.ID, "min_chars", minScrubbedSecret)
+		// a key the response cannot be cleaned of could come back to the chat or the console: not sent
+		s.Log.WarnContext(ctx, "tool credential is too short to scrub from responses; the call was not made", "tool", r.ID, "min_chars", minScrubbedSecret)
+		return action.Fail(req, errcode.ConfigInvalid, "tool.key_too_short", s.msg(req, "tool.key_too_short", "tool", r.ID), map[string]any{"tool": r.ID})
 	}
 	client := providers.NewClient(timeout, s.Log)
 	client.MaxBody = 2 << 20

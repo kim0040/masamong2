@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode"
 
+	"masamong/internal/crash"
 	"masamong/internal/errclass"
 	"masamong/internal/lang"
 )
@@ -588,7 +589,7 @@ func (l ToolLoop) Do(ctx context.Context, menu Toolset, history []Turn, message,
 						remove(lc.id)
 					}
 				}
-				if infos[lc.id].Web {
+				if readWeb(infos[lc.id], r) {
 					webSeen = true
 				}
 				if r.OK && infos[lc.id].Once {
@@ -694,6 +695,21 @@ func (l ToolLoop) prepare(c LoopCall, round, idx int, byName map[string]string, 
 			}
 		}
 	}
+	for _, p := range allowedParams(info) {
+		// a closed choice is checked before the call runs: the schema offers only its values, but a model
+		// may still send another one (reminders.update {op: confirm} would agree for the person)
+		if v, ok := params[p.Name]; ok && len(p.Enum) > 0 {
+			if s, isText := v.(string); isText && strings.TrimSpace(s) == "" {
+				delete(params, p.Name) // left empty: as if not given
+				continue
+			}
+			choice, ok := enumChoice(v, p.Enum)
+			if !ok {
+				return refuse("bad_arguments", p.Name+" must be one of: "+strings.Join(p.Enum, ", "))
+			}
+			params[p.Name] = choice
+		}
+	}
 	lc.params = params
 	lc.step.Params = params
 	var missing []string
@@ -721,6 +737,33 @@ func (l ToolLoop) prepare(c LoopCall, round, idx int, byName map[string]string, 
 	}
 	lc.run = true // the turn's limits are checked right before it runs (Guard)
 	return lc
+}
+
+// WebSource is the "source" of a result whose content was read from the web although its tool is not a
+// web tool (a quote the quote service could not give, answered by a web search).
+const WebSource = "search"
+
+// readWeb reports whether a call's result holds web content: its tool's (ToolInfo.Web), or a result that
+// says it came from a search. After it the writing tools are closed for the turn.
+func readWeb(info ToolInfo, r ToolResult) bool {
+	src, _ := r.Data["source"].(string)
+	return info.Web || src == WebSource
+}
+
+// enumChoice is v as one of the closed values: a text equal to one of them, ignoring case and spaces
+// around it. Anything else is not a choice.
+func enumChoice(v any, values []string) (string, bool) {
+	s, ok := v.(string)
+	if !ok {
+		return "", false
+	}
+	s = strings.TrimSpace(s)
+	for _, e := range values {
+		if strings.EqualFold(s, e) {
+			return e, true
+		}
+	}
+	return "", false
 }
 
 // stringList is an array parameter as the tool takes it: its texts trimmed, empty ones and anything but
@@ -1050,6 +1093,12 @@ func (rt *Runtime) startLoop(ctx context.Context, req Request, msg, timeRef stri
 		}
 		go func() {
 			defer close(lr.done)
+			defer func() {
+				if p := recover(); p != nil { // the loop runs on its own goroutine, out of reach of the turn's recover
+					lr.results, lr.err = nil, crash.Error(nil, "chat tool loop", p)
+					lr.trace = &LoopTrace{Mode: mode, Stop: "fallback", Fallback: fallbackReason(lr.err)}
+				}
+			}()
 			lr.results, lr.trace, lr.err = l.Do(ctx, others, req.History, msg, timeRef)
 		}()
 	}

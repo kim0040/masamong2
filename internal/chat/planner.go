@@ -731,6 +731,25 @@ func isPlaceholder(re *regexp.Regexp, v any) bool {
 	return t == "" || re.MatchString(t)
 }
 
+// closedChoices checks a planned step's closed choices as the tool loop does (prepare): a value outside
+// a declared choice (reminders.update op confirm) is removed and named in stripped. Keys the tool does not
+// declare are kept: the language packs' planner prompts name some the tools take without declaring them
+// (polls.create options), and the tool reads only what it knows.
+func closedChoices(tool string, info ToolInfo, params map[string]any, stripped *[]string) {
+	for _, p := range allowedParams(info) {
+		v, ok := params[p.Name]
+		if !ok || len(p.Enum) == 0 {
+			continue
+		}
+		if choice, ok := enumChoice(v, p.Enum); ok {
+			params[p.Name] = choice
+		} else {
+			delete(params, p.Name)
+			*stripped = append(*stripped, tool+"."+p.Name)
+		}
+	}
+}
+
 // Assessment is what the caller may do with a plan (planner_context.assess_plan).
 type Assessment struct {
 	MemoryState string           `json:"memory_state"` // search | skip | optional_unplanned | blocked_disabled | unparsed
@@ -782,6 +801,7 @@ func Assess(v Voice, p Plan, ts Toolset, memoryOn, hasTimeRef bool) Assessment {
 		case !enabled:
 			st.State = "disabled"
 		default:
+			closedChoices(s.Tool, info, params, &a.Stripped)
 			for _, k := range info.Required {
 				if isPlaceholder(ph, params[k]) {
 					st.Missing = append(st.Missing, k)

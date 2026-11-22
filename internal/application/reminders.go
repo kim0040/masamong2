@@ -428,6 +428,11 @@ func (s *Service) remindersUpdate(req action.Request) action.Result {
 	if op == "list" {
 		return s.myReminders(req, userID)
 	}
+	if (op == "pick" || op == "confirm" || op == "reschedule") && req.Invoker.Via != "command" {
+		// agreeing to a time is the person's own press of a button (or a command): a model in a chat turn
+		// that read the proposal's id must not set the reminder for them
+		return action.Fail(req, errcode.InvalidInput, "generic.error", s.msg(req, "generic.error"), map[string]any{"op": op})
+	}
 	id := strVal(in, "id", "")
 	if id == "" && (op == "cancel" || op == "pause" || op == "resume") {
 		// said in words ("아침 뉴스 예약 취소해 줘"): the person's own reminder the words point at
@@ -644,7 +649,13 @@ func (s *Service) reminderStateCard(req action.Request, r reminder) action.Resul
 }
 
 func (s *Service) myReminders(req action.Request, userID string) action.Result {
-	list, err := s.listReminders(`owner_id=? AND `+reminderLive, []any{userID}, 25)
+	where, args := `owner_id=? AND `+reminderLive, []any{userID}
+	if inv := req.Invoker; inv != nil && inv.Via == viaChat && !inv.Private {
+		// a chat turn in a room answers in that room: the model is given that room's reminders only, not
+		// the ones the person made in other rooms or in DMs (the command's card is shown to them alone)
+		where, args = where+` AND channel_id=?`, append(args, inv.ChannelID)
+	}
+	list, err := s.listReminders(where, args, 25)
 	if err != nil {
 		s.Log.Error("reminders: list read failed", "err", err)
 		return action.Fail(req, errcode.IO, "generic.error", s.msg(req, "generic.error"), nil)
