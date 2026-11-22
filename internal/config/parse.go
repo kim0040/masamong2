@@ -54,6 +54,11 @@ func decodeDocument(raw []byte) (Document, []byte, error) {
 	if trimmed := bytes.TrimSpace(raw); len(trimmed) > 0 && trimmed[0] == '{' {
 		var v any
 		if err := json.Unmarshal(trimmed, &v); err == nil {
+			// the map keeps only the last of a repeated object key, which the YAML decoder would
+			// refuse as a repeated mapping key: refuse it the same way here
+			if err := rejectDuplicateJSONKeys(trimmed); err != nil {
+				return Document{}, nil, err
+			}
 			if y, err := yaml.Marshal(v); err == nil {
 				raw = y
 			}
@@ -68,10 +73,59 @@ func decodeDocument(raw []byte) (Document, []byte, error) {
 	return d, raw, nil
 }
 
+// rejectDuplicateJSONKeys walks real JSON as tokens, since decoding into a map silently keeps only
+// the last of a repeated object key. A repeated key is an error naming the path it was read at.
+func rejectDuplicateJSONKeys(raw []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	return scanJSONValue(dec, "")
+}
+
+func scanJSONValue(dec *json.Decoder, path string) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
+	}
+	delim, ok := tok.(json.Delim)
+	if !ok {
+		return nil
+	}
+	switch delim {
+	case '{':
+		seen := map[string]bool{}
+		for dec.More() {
+			k, err := dec.Token()
+			if err != nil {
+				return err
+			}
+			key, _ := k.(string)
+			p := key
+			if path != "" {
+				p = path + "." + key
+			}
+			if seen[key] {
+				return fmt.Errorf("config parse: duplicate object key %q", p)
+			}
+			seen[key] = true
+			if err := scanJSONValue(dec, p); err != nil {
+				return err
+			}
+		}
+	case '[':
+		for dec.More() {
+			if err := scanJSONValue(dec, path); err != nil {
+				return err
+			}
+		}
+	}
+	_, err = dec.Token() // the closing delimiter
+	return err
+}
+
 // parseKeys are the keys a file names explicitly, for the defaults that depend on absence.
 type parseKeys struct {
 	Memory map[string]any `yaml:"memory"`
 	Chat   map[string]any `yaml:"chat"`
+	Backup map[string]any `yaml:"backup"`
 	Guilds map[string]struct {
 		Channels map[string]map[string]any `yaml:"channels"`
 	} `yaml:"guilds"`
@@ -330,8 +384,28 @@ func (p *parser) instance() error {
 
 func (p *parser) backup() error {
 	d := p.d
-	if d.Backup == (Backup{}) {
-		d.Backup = DefaultBackup() // documents written before backup existed
+	def := DefaultBackup()
+	// A key the file does not write gets the default: a map holding only `keep: 0` used to read as
+	// an absent section, so the explicit 0 never reached its bound. A merge key supplies values the
+	// key scan cannot see, so a merged section is checked as decoded (the all-zero read of it still
+	// counts as absent, like before).
+	_, merged := p.keys.Backup["<<"]
+	if merged && d.Backup == (Backup{}) {
+		merged = false
+	}
+	if !merged {
+		if d.Backup.Schedule == "" {
+			d.Backup.Schedule = def.Schedule
+		}
+		if _, set := p.keys.Backup["hour"]; !set {
+			d.Backup.Hour = def.Hour
+		}
+		if _, set := p.keys.Backup["weekday"]; !set {
+			d.Backup.Weekday = def.Weekday
+		}
+		if _, set := p.keys.Backup["keep"]; !set {
+			d.Backup.Keep = def.Keep
+		}
 	}
 	if !slices.Contains(BackupSchedules, d.Backup.Schedule) {
 		return fmt.Errorf("backup.schedule must be one of %v", BackupSchedules)
@@ -362,8 +436,8 @@ func (p *parser) memoryNumbers() error {
 		return err
 	}
 	// index_interval_min: an absent key decodes to 0 (the runtime applies its own floor), so only a
-	// written value inside or outside the documented range is checked
-	if d.Memory.IndexIntervalMin != 0 {
+	// written value inside or outside the documented range is checked — a written 0 included
+	if _, set := p.keys.Memory["index_interval_min"]; set || d.Memory.IndexIntervalMin != 0 {
 		if err := checkBoundInt(p.problems, "memory.index_interval_min", "1–1440", &d.Memory.IndexIntervalMin); err != nil {
 			return err
 		}

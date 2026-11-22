@@ -26,6 +26,8 @@ func TestDirectSecretsAreRefusedOnChangeOnly(t *testing.T) {
 		{"query key", tool("https://api.example/v1?q={q}&key="+direct, nil), "the key parameter"},
 		{"query serviceKey", tool("https://api.example/v1?serviceKey="+direct+"&q={q}", nil), "the serviceKey parameter"},
 		{"query access_token", tool("https://api.example/v1?access_token="+direct, nil), "the access_token parameter"},
+		{"query passwd", tool("https://api.example/v1?passwd="+direct, nil), "the passwd parameter"},
+		{"query percent-encoded", tool("https://api.example/v1?api%5Fkey="+direct, nil), "the api_key parameter"},
 	}
 	for _, c := range refused {
 		err := Validate("ops.lookup", c.s)

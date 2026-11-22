@@ -106,11 +106,12 @@ func directSecretHeader(name, value string) bool {
 	return false
 }
 
-// secretQueryNames are URL query names that carry a key (lowercase, with - and _ removed).
+// secretQueryNames are URL query names that carry a key (lowercase, with - and _ removed). It keeps
+// the same spellings the save-time validator knows (tools.secretQuery), passwd included.
 var secretQueryNames = map[string]bool{
 	"key": true, "apikey": true, "token": true, "accesstoken": true, "authtoken": true, "auth": true,
 	"authkey": true, "servicekey": true, "secret": true, "clientsecret": true, "password": true,
-	"signature": true, "sig": true, "appkey": true, "appsecret": true,
+	"passwd": true, "signature": true, "sig": true, "appkey": true, "appsecret": true,
 }
 
 // redactSecretQuery masks the values of key-carrying query parameters that are written directly
@@ -131,7 +132,13 @@ func redactSecretQuery(raw string) string {
 		if !has || value == "" || (strings.HasPrefix(value, "{") && strings.HasSuffix(value, "}")) {
 			continue
 		}
-		key := strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(name))
+		// the name itself can be percent-encoded (api%5Fkey); classify what it decodes to, not the
+		// raw spelling. A name that does not decode stays as written.
+		decoded := name
+		if unescaped, err := url.QueryUnescape(name); err == nil {
+			decoded = unescaped
+		}
+		key := strings.ToLower(strings.NewReplacer("-", "", "_", "").Replace(decoded))
 		if secretQueryNames[key] {
 			parts[i] = name + "=" + url.QueryEscape(redactedValue)
 			changed = true

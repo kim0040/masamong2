@@ -69,3 +69,27 @@ func TestJSONInputAccepted(t *testing.T) {
 		t.Fatal("truncated JSON must be an error")
 	}
 }
+
+// JSON input is decoded through a Go map before the strict YAML pass, and the map keeps only the
+// last of a repeated object key. A duplicate must be refused here, the same as the YAML decoder
+// refuses a repeated mapping key.
+func TestJSONInputRejectsDuplicateKeys(t *testing.T) {
+	for _, tc := range []struct {
+		raw string
+		key string
+	}{
+		{`{"schema_version":1,"instance":{"id":"x"},"memory":{"capture":false,"capture":true}}`, "capture"},
+		{`{"schema_version":1,"schema_version":1,"instance":{"id":"x"}}`, "schema_version"},
+		{`{"schema_version":1,"instance":{"id":"x","id":"y"}}`, "id"},
+	} {
+		for _, fn := range []func() error{
+			func() error { _, err := Parse([]byte(tc.raw)); return err },
+			func() error { _, _, err := ParseCommitted([]byte(tc.raw)); return err },
+		} {
+			err := fn()
+			if err == nil || !strings.Contains(err.Error(), tc.key) {
+				t.Fatalf("%s: a duplicate key must be rejected naming it: %v", tc.raw, err)
+			}
+		}
+	}
+}
