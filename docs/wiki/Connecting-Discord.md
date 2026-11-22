@@ -95,6 +95,7 @@ masamong channels configure --guild_id 123456789 --id 987654321 --respond mentio
 | `/remind`, `/reminders` | Reminders in plain language (confirmed with a button), list and cancel |
 | `/privacy` | See, give or withdraw consent for memory, fortunes, notices and chiming in |
 | `/mysettings` | Your weather place, time zone, quiet hours, language |
+| `/updates` | What changed in the version the bot runs (only the part that matters to people using it), `previous` for the version before, `subscribe` / `unsubscribe` / `status` for a private message when the bot moves to a new release |
 | `/admin` | Run the bot in this room: pause and resume, reply mode, collecting, chiming in, blocking people in this server (visible to server managers only) |
 | `/status` | Bot status (visible only to you) |
 | `/help` | Commands available right now: registered slash commands whose tools are ready, your language's prefix commands only when Message Content Intent and a command prefix are enabled, and the "Rate this reply" menu item |
@@ -103,7 +104,7 @@ Turning a tool off removes its slash command from Discord's menu at once.
 
 ### Prefix commands (`!`, need Message Content Intent)
 
-The prefix words follow the bot's language. In Korean: `!날씨 서울`, `!특보`, `!시세 AAPL`, `!환율 엔화 50000`, `!검색 마사몽`, `!투표 lunch | gimbap, ramen`, `!요약`, `!알림 tomorrow 3pm meeting`, `!알림목록`, `!운세`, `!운세등록 1995-05-15 14:30 남 서울`, `!이번달운세`, `!올해운세`, `!구독 08:00`, `!공지`, `!편입`, `!개인정보`, `!내설정`, `!관리`, `!도움말`. The words live in the `locales/` language files, not in code, and can be renamed per tool (`tools.<id>.aliases`).
+The prefix words follow the bot's language. In Korean: `!날씨 서울`, `!특보`, `!시세 AAPL`, `!환율 엔화 50000`, `!검색 마사몽`, `!투표 lunch | gimbap, ramen`, `!요약`, `!알림 tomorrow 3pm meeting`, `!알림목록`, `!운세`, `!운세등록 1995-05-15 14:30 남 서울`, `!이번달운세`, `!올해운세`, `!구독 08:00`, `!공지`, `!편입`, `!개인정보`, `!내설정`, `!업데이트`, `!관리`, `!도움말`. The words live in the `locales/` language files, not in code, and can be renamed per tool (`tools.<id>.aliases`).
 
 The bot sends a refusal notice only when the person addressed it (by mention, reply or bot name). Notices use neutral wording and do not reveal budget details; at most one is sent per channel per minute, and at most one to the same person in that channel every five minutes. If a prefix or slash command times out, its final localized error card is still sent when the Discord connection is available.
 
@@ -135,7 +136,18 @@ Server owners and members with "Manage Server" (`access.guild_admins`, allowed b
 | `!관리 응답 호출` | Reply mode: always, when called, commands, off |
 | `!관리 기억 끄기` | Collecting conversation on or off |
 | `!관리 먼저말걸기 기록만` | Chiming in ("먼저 말 걸기"): off, log only, speak. Cannot allow more than the instance setting. `끼어들기`, `능동참여` and `참여` still work in its place |
+| `!관리 소식 켜기` / `!관리 소식 끄기` | Announce a new release in this room (once, when the bot moves to it). Off by default; see [Update news](#update-news) |
 | `!관리 차단 @name` / `!관리 해제 @name` | Ignore that person's messages, commands and buttons in this server only. Bots, yourself and bot operators cannot be blocked |
+
+### Update news
+
+When the bot moves to a new release, it can say what changed, once, and only to people who asked:
+
+- **A room** turns it on with `!관리 소식 켜기` (server managers) or the **Post update news here** switch on the room's page in the console. It is off by default. The room gets one card with what is new for the people there.
+- **A person** subscribes with `/updates subscribe` (or on the console's People page) and gets the same card by private message. It respects `dm.allow`, blocked people and quiet hours, and `/updates unsubscribe` stops it. Resetting your settings does not remove the subscription.
+- A first install announces nothing. A development build, a build after a tag and the practice instance never announce. If the bot jumped over several releases, one card covers them all; a release with nothing for users sends nothing.
+- Each room and person is told a version at most once, even across restarts and crashes. At most 40 messages go out per minute, so a large list takes a few minutes.
+- Anyone can read the notes at any time with `/updates`. The console shows them on **Maintenance** (for operators, including the operator-only notes), and the update-available card lists what the newer release changes when the release carries its notes file.
 
 ## 6. Polls
 
