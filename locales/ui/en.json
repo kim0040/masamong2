@@ -2604,7 +2604,7 @@
   "room.blocks_title": "Conversations it remembers",
   "room.capture": "Store live messages",
   "room.capture_hint": "New messages here go into the memory index. The global capture switch must also be on.",
-  "room.collect_desc": "How much of what the bot did here is logged. Message text is never logged.",
+  "room.collect_desc": "How much of what the bot did here is logged. Message text is never logged. How many days the turn records are kept follows the Retention setting; to keep them shorter in this room only, set logging.retain_days in the config file (0 follows the global setting).",
   "room.collect_title": "Operations log",
   "room.copy": "Copy to rooms",
   "room.copy.alerts": "Disaster alerts and area levels",
