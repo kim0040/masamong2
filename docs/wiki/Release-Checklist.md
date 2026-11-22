@@ -66,9 +66,13 @@ Ask 50+ questions people would really ask in the **Answer lab** and mark each re
 ## 3. Tag and release
 
 1. Pick the version (`vMAJOR.MINOR.PATCH`). A change that migrates settings or data by itself bumps at least MINOR; one that needs a manual migration bumps MAJOR.
-2. Fast-forward `dev` into `main` (`git checkout main && git merge --ff-only dev && git push origin main`). Tags go only on `main`.
-3. `git tag vX.Y.Z && git push origin vX.Y.Z` → the `release` workflow runs the full checks, builds every target, writes `SHA256SUMS`, simulates installs and creates the GitHub Release.
-4. Write the release notes: what changed, setting changes, known problems. Releases are not signed yet, so link the first-launch warning help in [Installation](https://github.com/kim0040/masamong2/wiki/Installation).
+2. **Draft, read, edit, commit the release notes on `dev`, before tagging.** `make release-notes VERSION=vX.Y.Z` (with `ANTHROPIC_API_KEY` in the environment; `SINCE=vA.B.C` overrides the previous tag) sends the commits since the previous tag to the Anthropic API and writes `release-notes/vX.Y.Z.json` and `release-notes/vX.Y.Z.md`. Without a key, or when the call fails, it writes a draft of `TODO:` lines and exits non-zero. Then:
+   - Read the JSON against the commits. `user` is what people feel in Discord (new features, fixed problems); `operator` is install, console, settings and internals. Items are short plain sentences, ko and en are required, and nothing names a person, server or ID.
+   - Edit it by hand where it is wrong or unclear, then run `go test ./internal/relnotes ./tools/relnotes`. Unedited `TODO:` lines fail the test. After editing the JSON, `go run ./tools/relnotes --version vX.Y.Z --render --force` rewrites the Markdown from it.
+   - Mention that releases are not signed yet and link the first-launch warning help in [Installation](https://github.com/kim0040/masamong2/wiki/Installation) in an operator item when it still applies.
+   - Commit both files. The JSON is embedded in the binary, so every build knows the notes of every version up to its own.
+3. Fast-forward `dev` into `main` (`git checkout main && git merge --ff-only dev && git push origin main`). Tags go only on `main`.
+4. `git tag vX.Y.Z && git push origin vX.Y.Z` → the `release` workflow runs the full checks, builds every target, writes `SHA256SUMS`, simulates installs and creates the GitHub Release with `release-notes/vX.Y.Z.md` as its text and `release-notes/vX.Y.Z.json` attached as `release-notes.json`. A tag without that file gets GitHub's generated notes instead, so do not skip step 2.
 
 ## 4. Upgrading the real instance, and going back
 
