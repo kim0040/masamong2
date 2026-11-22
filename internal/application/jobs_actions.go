@@ -41,7 +41,7 @@ func (s *Service) jobsAction(req action.Request) action.Result {
 			if err != nil {
 				return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
 			}
-			err = saveJobExpected(s.Store, j, prev, prevStatus)
+			err = s.saveJobExpected(j, prev, prevStatus)
 			if err != nil && err.Error() == errcode.LeaseMismatch && attempt < 5 {
 				time.Sleep(20 * time.Millisecond)
 				continue
@@ -75,7 +75,7 @@ func (s *Service) jobsAction(req action.Request) action.Result {
 			if err != nil {
 				return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
 			}
-			err = saveJobExpected(s.Store, j, prev, prevStatus)
+			err = s.saveJobExpected(j, prev, prevStatus)
 			if err != nil && err.Error() == errcode.LeaseMismatch && attempt < 5 {
 				time.Sleep(20 * time.Millisecond)
 				if j, err = getJob(s.Store, id); err != nil {
@@ -107,7 +107,7 @@ func (s *Service) Enqueue(typ, idempotency, payload string) (jobs.Job, error) {
 		}
 	}
 	j := jobs.Job{ID: newID("job_"), Type: typ, Status: jobs.Pending, IdempotencyKey: idempotency, Payload: payload}
-	if err := insertJob(s.Store, j); err != nil {
+	if err := s.insertJob(j); err != nil {
 		return j, err
 	}
 	s.jobChanged(j)
@@ -130,7 +130,7 @@ func (s *Service) TakeLease(id, token string, ttl time.Duration) (jobs.Job, erro
 	if err != nil {
 		return j, err
 	}
-	if err := saveJobExpected(s.Store, j, prev, prevStatus); err != nil {
+	if err := s.saveJobExpected(j, prev, prevStatus); err != nil {
 		return j, err
 	}
 	s.jobChanged(j)
@@ -154,7 +154,7 @@ func (s *Service) CompleteWithToken(id, token, result string) (jobs.Job, error) 
 	if err != nil {
 		return j, err
 	}
-	if err := saveJob(s.Store, j, token); err != nil {
+	if err := s.saveJob(j, token); err != nil {
 		return j, err
 	}
 	s.jobChanged(j)
@@ -181,7 +181,7 @@ func (s *Service) setRunProgress(id, token string, attempt int, p jobs.Progress)
 	// alone cannot tell the row we read from the one that is there now. Only the checkpoint is written,
 	// so a lease renewal made meanwhile stays.
 	j.Checkpoint = jobs.EncodeProgress(p)
-	if err := updateJob(s.Store, id, `checkpoint=?`, []any{j.Checkpoint}, token, j.Status, attempt); err != nil {
+	if err := s.updateJob(id, `checkpoint=?`, []any{j.Checkpoint}, token, j.Status, attempt); err != nil {
 		return j, err
 	}
 	s.jobChanged(j)
@@ -200,7 +200,7 @@ func (s *Service) renewJobLease(id, token string, attempt int, ttl time.Duration
 	if j, err = jobs.Renew(j, token, s.Clock.Now(), ttl); err != nil {
 		return err
 	}
-	return updateJob(s.Store, id, `lease_expires_at=?`, []any{nullTime(j.LeaseExpires)}, token, j.Status, attempt)
+	return s.updateJob(id, `lease_expires_at=?`, []any{nullTime(j.LeaseExpires)}, token, j.Status, attempt)
 }
 
 // jobChanged notifies SSE/TUI watchers; the payload carries status and percent, never job payloads.

@@ -122,7 +122,7 @@ func (s *Service) noteLive(m ObservedMessage) {
 			changed := old.Text != l.Text || old.ReplyTo != l.ReplyTo || old.MentionsOthers != l.MentionsOthers || !slices.Equal(old.Mentions, l.Mentions)
 			l.RevisedAt = old.RevisedAt
 			if changed {
-				l.RevisedAt = time.Now()
+				l.RevisedAt = s.Clock.Now().UTC()
 			}
 			if !changed {
 				l.ToBot = l.ToBot || old.ToBot
@@ -187,7 +187,7 @@ func (s *Service) liveEdit(guildID, channelID, messageID, content string) {
 	for _, key := range s.liveKeys(guildID, channelID) {
 		for i, l := range w.chans[key] {
 			if l.ID == messageID {
-				l.RevisedAt = time.Now()
+				l.RevisedAt = s.Clock.Now().UTC()
 				editedAddress(&l, content, bot)
 				if l.Text != "" {
 					l.Text = clip(content, liveTextRunes)

@@ -370,14 +370,14 @@ func (s *Service) applyCandidateLocked(req action.Request, candidate []byte, bas
 		res.Revision = st.Current.Revision
 		return res
 	}
-	if err := persistRevision(s.Store, prep); err != nil {
+	if err := persistRevisionAt(s.Store, prep, s.Clock.Now()); err != nil {
 		return action.Fail(req, "IO", "generic.error", err.Error(), nil)
 	}
 	if err := atomicWriteFile(s.CfgPath, candidate); err != nil {
 		return action.Fail(req, "IO", "generic.error", err.Error(), nil)
 	}
 	prep.Status = config.StatusCommitted
-	if err := persistRevision(s.Store, prep); err != nil {
+	if err := persistRevisionAt(s.Store, prep, s.Clock.Now()); err != nil {
 		return action.Fail(req, "IO", "generic.error", err.Error(), nil)
 	}
 	doc, err := config.Parse(candidate)

@@ -103,7 +103,7 @@ func (s *Service) setup(_ context.Context, req action.Request) action.Result {
 			return action.Fail(req, "IO", "generic.error", err.Error(), nil)
 		}
 		rev := config.Revision{Revision: 1, Status: config.StatusCommitted, ContentHash: config.Hash(raw), Content: raw, BaseRevision: 0}
-		if err := persistRevision(s.Store, rev); err != nil {
+		if err := persistRevisionAt(s.Store, rev, s.Clock.Now()); err != nil {
 			return action.Fail(req, "IO", "generic.error", err.Error(), nil)
 		}
 		if err := atomicWriteFile(s.CfgPath, raw); err != nil {

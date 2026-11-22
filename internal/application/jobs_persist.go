@@ -18,9 +18,9 @@ type jobRow interface {
 	Scan(...any) error
 }
 
-func insertJob(store *storage.Store, j jobs.Job) error {
-	now := time.Now().UTC().Format(time.RFC3339)
-	return store.WithWriter(func(tx *sql.Tx) error {
+func (s *Service) insertJob(j jobs.Job) error {
+	now := s.Clock.Now().UTC().Format(time.RFC3339)
+	return s.Store.WithWriter(func(tx *sql.Tx) error {
 		_, err := tx.Exec(`INSERT INTO jobs(id, type, status, idempotency_key, lease_token, lease_expires_at, attempt, checkpoint, payload, result, error_code, created_at, updated_at)
 			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			j.ID, j.Type, string(j.Status), nullStr(j.IdempotencyKey), nullStr(j.LeaseToken), nullTime(j.LeaseExpires),
@@ -66,20 +66,20 @@ func getJobByIdempotency(store *storage.Store, key string) (jobs.Job, error) {
 
 // saveJob writes only if the row still holds matchLease. Complete/lease use the
 // pre-update token so a stale worker cannot overwrite after a newer lease is stored.
-func saveJob(store *storage.Store, j jobs.Job, matchLease string) error {
-	return saveJobExpected(store, j, matchLease, "")
+func (s *Service) saveJob(j jobs.Job, matchLease string) error {
+	return s.saveJobExpected(j, matchLease, "")
 }
 
 // saveJobExpected also compares the state read before a transition. Lease tokens alone cannot
 // distinguish an old pending row from a cancelled row when both tokens are empty.
-func saveJobExpected(store *storage.Store, j jobs.Job, matchLease string, matchStatus jobs.Status) error {
-	return saveRunJob(store, j, matchLease, matchStatus, 0)
+func (s *Service) saveJobExpected(j jobs.Job, matchLease string, matchStatus jobs.Status) error {
+	return s.saveRunJob(j, matchLease, matchStatus, 0)
 }
 
 // saveRunJob is a run's write: it also compares the run's attempt (> 0). A job cancelled, retried and
 // cancelled again has two cancelled rows with the same empty lease; only the attempt tells them apart.
-func saveRunJob(store *storage.Store, j jobs.Job, matchLease string, matchStatus jobs.Status, attempt int) error {
-	return updateJob(store, j.ID, `status=?, lease_token=?, lease_expires_at=?, attempt=?, checkpoint=?, payload=?, result=?, error_code=?`,
+func (s *Service) saveRunJob(j jobs.Job, matchLease string, matchStatus jobs.Status, attempt int) error {
+	return s.updateJob(j.ID, `status=?, lease_token=?, lease_expires_at=?, attempt=?, checkpoint=?, payload=?, result=?, error_code=?`,
 		[]any{string(j.Status), nullStr(j.LeaseToken), nullTime(j.LeaseExpires), j.Attempt, j.Checkpoint, j.Payload, j.Result, j.ErrorCode},
 		matchLease, matchStatus, attempt)
 }
@@ -87,9 +87,9 @@ func saveRunJob(store *storage.Store, j jobs.Job, matchLease string, matchStatus
 // updateJob sets only the named columns while the row still has the lease, status (when given) and
 // attempt (when > 0) the writer read. A run's progress and its lease renewal come from two goroutines;
 // writing the whole row, one would put back the other's old value.
-func updateJob(store *storage.Store, id, set string, setArgs []any, matchLease string, matchStatus jobs.Status, attempt int) error {
+func (s *Service) updateJob(id, set string, setArgs []any, matchLease string, matchStatus jobs.Status, attempt int) error {
 	query := `UPDATE jobs SET ` + set + `, updated_at=? WHERE id=? AND IFNULL(lease_token,'')=?`
-	args := append(setArgs[:len(setArgs):len(setArgs)], time.Now().UTC().Format(time.RFC3339), id, matchLease)
+	args := append(setArgs[:len(setArgs):len(setArgs)], s.Clock.Now().UTC().Format(time.RFC3339), id, matchLease)
 	if matchStatus != "" {
 		query += ` AND status=?`
 		args = append(args, string(matchStatus))
@@ -98,7 +98,7 @@ func updateJob(store *storage.Store, id, set string, setArgs []any, matchLease s
 		query += ` AND attempt=?`
 		args = append(args, attempt)
 	}
-	return store.WithWriter(func(tx *sql.Tx) error {
+	return s.Store.WithWriter(func(tx *sql.Tx) error {
 		res, err := tx.Exec(query, args...)
 		if err != nil {
 			return err

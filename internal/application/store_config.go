@@ -41,8 +41,12 @@ func loadCASState(store *storage.Store, cfgPath string) (config.State, error) {
 }
 
 func persistRevision(store *storage.Store, r config.Revision) error {
+	return persistRevisionAt(store, r, time.Now())
+}
+
+func persistRevisionAt(store *storage.Store, r config.Revision, at time.Time) error {
 	return store.WithWriter(func(tx *sql.Tx) error {
-		return store.UpsertRevision(tx, r.Revision, string(r.Status), r.ContentHash, string(r.Content), r.BaseRevision, time.Now().UTC().Format(time.RFC3339))
+		return store.UpsertRevision(tx, r.Revision, string(r.Status), r.ContentHash, string(r.Content), r.BaseRevision, at.UTC().Format(time.RFC3339))
 	})
 }
 

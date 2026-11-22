@@ -154,7 +154,7 @@ func OpenPractice(ctx context.Context, dataRoot, locale string, log *slog.Logger
 			return nil, err
 		}
 		rev := config.Revision{Revision: 1, Status: config.StatusCommitted, ContentHash: config.Hash(raw), Content: raw}
-		if err := persistRevision(store, rev); err != nil {
+		if err := persistRevisionAt(store, rev, s.Clock.Now()); err != nil {
 			_ = s.Close()
 			return nil, err
 		}

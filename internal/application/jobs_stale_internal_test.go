@@ -38,7 +38,7 @@ func TestStaleCancelledRowDoesNotUndoARetry(t *testing.T) {
 	}
 	run("jobs.retry")
 	stale.Checkpoint = jobs.EncodeProgress(jobs.Progress{Phase: "sync", Done: 1, Total: 1})
-	if err := saveJobExpected(s.Store, stale, stale.LeaseToken, stale.Status); err == nil || err.Error() != errcode.LeaseMismatch {
+	if err := s.saveJobExpected(stale, stale.LeaseToken, stale.Status); err == nil || err.Error() != errcode.LeaseMismatch {
 		t.Fatalf("stale save: %v, want %s", err, errcode.LeaseMismatch)
 	}
 	if cur, _ := getJob(s.Store, j.ID); cur.Status != jobs.Pending {

@@ -166,7 +166,7 @@ func (s *Store) InsertBatchPlan(room, gen string, rec BatchPlanRecord) error {
 			return err
 		}
 		_, err = tx.Exec(`INSERT INTO memory_batch_plans(room, generation, state, items, created_at, updated_at, plan) VALUES(?,?,?,?,?,?,?)`,
-			room, gen, rec.State, rec.Items, rec.CreatedAt, now(), string(rec.Plan))
+			room, gen, rec.State, rec.Items, rec.CreatedAt, s.now(), string(rec.Plan))
 		return err
 	})
 }
@@ -178,7 +178,7 @@ func (s *Store) SaveBatchPlan(room, gen string, rec BatchPlanRecord) error {
 		if err := planGenerationTx(tx, room, gen); err != nil {
 			return err
 		}
-		return updateBatchPlanTx(tx, room, gen, rec)
+		return s.updateBatchPlanTx(tx, room, gen, rec)
 	})
 }
 
@@ -215,7 +215,7 @@ type BatchWritten struct {
 // and counts it once; a plan of another generation, or none, gets nothing (ErrBatchPlanStale,
 // ErrBatchPlanMissing). An error plan returns rolls everything back.
 func (s *Store) CommitBatchApply(room, gen string, w BatchWrites, spends []BatchSpend, plan func(BatchWritten) (BatchPlanRecord, error)) error {
-	day := time.Now().UTC().Format("2006-01-02")
+	day := s.day()
 	q := `INSERT INTO memory_spend(day, kind, usd, calls) VALUES(?,?,?,?) ON CONFLICT(day, kind) DO UPDATE SET usd=memory_spend.usd+excluded.usd, calls=memory_spend.calls+excluded.calls`
 	if s.tidb() {
 		q = `INSERT INTO memory_spend(day, kind, usd, calls) VALUES(?,?,?,?) ON DUPLICATE KEY UPDATE usd=usd+VALUES(usd), calls=calls+VALUES(calls)`
@@ -235,10 +235,10 @@ func (s *Store) CommitBatchApply(room, gen string, w BatchWrites, spends []Batch
 			}
 		}
 		for _, sw := range w.Summaries {
-			if err := putSummaryTextTx(tx, sw.CacheKey, sw.ID, sw.Body, sw.Summary); err != nil {
+			if err := s.putSummaryTextTx(tx, sw.CacheKey, sw.ID, sw.Body, sw.Summary); err != nil {
 				return err
 			}
-			ok, err := saveSummaryTx(tx, sw.ID, sw.Summary, nil, []string{sw.Body})
+			ok, err := s.saveSummaryTx(tx, sw.ID, sw.Summary, nil, []string{sw.Body})
 			if err != nil {
 				return err
 			}
@@ -255,7 +255,7 @@ func (s *Store) CommitBatchApply(room, gen string, w BatchWrites, spends []Batch
 		if err != nil {
 			return err
 		}
-		if err := updateBatchPlanTx(tx, room, gen, rec); err != nil {
+		if err := s.updateBatchPlanTx(tx, room, gen, rec); err != nil {
 			return err
 		}
 		for _, sp := range spends {
@@ -285,9 +285,9 @@ func planGenerationTx(tx *sql.Tx, room, gen string) error {
 	return nil
 }
 
-func updateBatchPlanTx(tx *sql.Tx, room, gen string, rec BatchPlanRecord) error {
+func (s *Store) updateBatchPlanTx(tx *sql.Tx, room, gen string, rec BatchPlanRecord) error {
 	_, err := tx.Exec(`UPDATE memory_batch_plans SET state=?, items=?, created_at=?, updated_at=?, plan=? WHERE room=? AND generation=?`,
-		rec.State, rec.Items, rec.CreatedAt, now(), string(rec.Plan), room, gen)
+		rec.State, rec.Items, rec.CreatedAt, s.now(), string(rec.Plan), room, gen)
 	return err
 }
 

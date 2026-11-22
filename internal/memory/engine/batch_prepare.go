@@ -151,7 +151,7 @@ func (e *Engine) PrepareBatch(ctx context.Context, room string, opts BatchOption
 	}
 	plan := BatchPlan{Version: batchPlanVersion, Room: room, Generation: newGeneration(), State: BatchPlanWaiting, Space: space,
 		MessageSpace: msgSpace, EmbedModel: e.Models.Embed, SummaryModel: e.Models.Summary, BudgetUSD: opts.BudgetUSD,
-		Limit: opts.Limit, EstimateUSD: *est.BatchUSD, CreatedAt: time.Now().UTC()}
+		Limit: opts.Limit, EstimateUSD: *est.BatchUSD, CreatedAt: e.nowT().UTC()}
 	if opts.Limit > 0 {
 		plan.Workset = workset(pending, after, msgNeed, msgSelected)
 	}
@@ -211,7 +211,7 @@ func (e *Engine) PrepareBatch(ctx context.Context, room string, opts BatchOption
 			// restart and looks it up instead of sending it again
 			plan.Groups = append(plan.Groups, BatchGroup{Purpose: w.purpose, Kind: kind, Model: w.model, Provider: prov,
 				Submit: submitPending, Items: items, Units: units, Ref: openai.BatchRef{API: prov.API, BaseURL: prov.BaseURL,
-					Kind: kind, Model: w.model, Count: len(chunk), SubmitKey: key, SubmittedAt: time.Now().UTC()}})
+					Kind: kind, Model: w.model, Count: len(chunk), SubmitKey: key, SubmittedAt: e.nowT().UTC()}})
 			g := &plan.Groups[len(plan.Groups)-1]
 			save := e.saveBatchPlan
 			if !stored {

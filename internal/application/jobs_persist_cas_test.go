@@ -34,7 +34,7 @@ func TestStaleEmptyTokenLeaseCannotReviveCancelledJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := saveJob(svc.Store, cancelled, stale.LeaseToken); err != nil {
+	if err := svc.saveJob(cancelled, stale.LeaseToken); err != nil {
 		t.Fatal(err)
 	}
 	late, err := jobs.Lease(stale, "late-worker", time.Now(), time.Hour)
@@ -45,7 +45,7 @@ func TestStaleEmptyTokenLeaseCannotReviveCancelledJob(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = saveJobExpected(svc.Store, late, stale.LeaseToken, stale.Status)
+	err = svc.saveJobExpected(late, stale.LeaseToken, stale.Status)
 	if err == nil || err.Error() != errcode.LeaseMismatch {
 		t.Fatalf("stale pending snapshot should lose the compare-and-swap: %v", err)
 	}

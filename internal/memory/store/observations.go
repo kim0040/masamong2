@@ -31,7 +31,7 @@ func (s *Store) UpsertRoom(tx *sql.Tx, r Room) error {
 		ON DUPLICATE KEY UPDATE collection=VALUES(collection), label=IF(VALUES(label)<>'', VALUES(label), label),
 		naive_timezone=IF(VALUES(naive_timezone)<>'', VALUES(naive_timezone), naive_timezone), updated_at=VALUES(updated_at)`
 	}
-	if _, err := tx.Exec(q, r.Room, r.Collection, r.Platform, r.Label, r.NaiveTimezone, now()); err != nil {
+	if _, err := tx.Exec(q, r.Room, r.Collection, r.Platform, r.Label, r.NaiveTimezone, s.now()); err != nil {
 		return err
 	}
 	_, err := s.bumpRoomRevision(context.Background(), tx, r.Room, false)
@@ -44,7 +44,7 @@ var ErrNoRoom = errors.New("memory: no such room")
 // SetRoomLabel renames a room; evidence and the console show the new label.
 func (s *Store) SetRoomLabel(room, label string) error {
 	return s.DB.WithWriter(func(tx *sql.Tx) error {
-		res, err := tx.Exec(`UPDATE memory_rooms SET label=?, updated_at=? WHERE room=?`, label, now(), room)
+		res, err := tx.Exec(`UPDATE memory_rooms SET label=?, updated_at=? WHERE room=?`, label, s.now(), room)
 		if err != nil {
 			return err
 		}
@@ -190,7 +190,7 @@ func (s *Store) EditMessageContext(ctx context.Context, platform, nativeID, cont
 			return err
 		}
 		changed = true
-		if err := invalidateLeaves(tx, rev.ObservationID); err != nil {
+		if err := s.invalidateLeaves(tx, rev.ObservationID); err != nil {
 			return err
 		}
 		// the room's signature changes, so the next index build reads its messages again
@@ -241,7 +241,7 @@ func (s *Store) DeleteMessagesContext(ctx context.Context, platform string, nati
 		for i, r := range out {
 			ids[i] = r.ObservationID
 		}
-		if err := invalidateLeaves(tx, ids...); err != nil {
+		if err := s.invalidateLeaves(tx, ids...); err != nil {
 			return err
 		}
 		return s.reviseRooms(ctx, tx, out)
@@ -254,15 +254,15 @@ func (s *Store) DeleteMessagesContext(ctx context.Context, platform string, nati
 // A few messages (an edit, a deletion) are found by a substring scan of each leaf's ID list, which is
 // cheap even for a large history; a bulk change (a person withdrawing) is found with one JSON pass per
 // chunk of messages instead of one pass per message.
-func invalidateLeaves(tx *sql.Tx, observationIDs ...string) error {
+func (s *Store) invalidateLeaves(tx *sql.Tx, observationIDs ...string) error {
 	if len(observationIDs) == 0 {
 		return nil
 	}
 	raw, _ := json.Marshal(observationIDs)
-	if _, err := tx.Exec(`INSERT INTO privacy_tombstones(kind,source_id,at) SELECT 'source',value,? FROM json_each(?) WHERE true ON CONFLICT(kind,source_id) DO UPDATE SET at=excluded.at`, now(), string(raw)); err != nil {
+	if _, err := tx.Exec(`INSERT INTO privacy_tombstones(kind,source_id,at) SELECT 'source',value,? FROM json_each(?) WHERE true ON CONFLICT(kind,source_id) DO UPDATE SET at=excluded.at`, s.now(), string(raw)); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`INSERT INTO privacy_tombstones(kind,source_id,at) SELECT DISTINCT 'source',l.leaf_id,? FROM memory_leaves l,json_each(l.observation_ids) j WHERE j.value IN (SELECT value FROM json_each(?)) ON CONFLICT(kind,source_id) DO UPDATE SET at=excluded.at`, now(), string(raw)); err != nil {
+	if _, err := tx.Exec(`INSERT INTO privacy_tombstones(kind,source_id,at) SELECT DISTINCT 'source',l.leaf_id,? FROM memory_leaves l,json_each(l.observation_ids) j WHERE j.value IN (SELECT value FROM json_each(?)) ON CONFLICT(kind,source_id) DO UPDATE SET at=excluded.at`, s.now(), string(raw)); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM memory_embed_cache WHERE cache_key IN (SELECT holder_id FROM evidence_refs WHERE holder_kind='cache' AND source_id IN (SELECT value FROM json_each(?)))`, string(raw)); err != nil {
@@ -391,7 +391,7 @@ func (s *Store) DeleteAccountMessages(platform, account, at string) ([]Revision,
 				}
 				ids = append(ids, r.ObservationID)
 			}
-			if err := invalidateLeaves(tx, ids...); err != nil {
+			if err := s.invalidateLeaves(tx, ids...); err != nil {
 				return err
 			}
 			return s.reviseRooms(context.Background(), tx, revisions)
@@ -492,7 +492,7 @@ func (s *Store) insertObservations(ctx context.Context, obs []corpus.Observation
 			}
 		}
 		withdrawn := map[string]bool{}
-		ts := now()
+		ts := s.now()
 		rooms := map[string]corpus.Observation{}
 		appends := map[string]leafAppend{}
 		for _, o := range obs {
