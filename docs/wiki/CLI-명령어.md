@@ -135,6 +135,7 @@ echo '{"region":"Seoul"}' | masamong tools test --id weather.query --input-file 
 | `models list` · `models select` · `models embed-width` | 모델, 임베딩 폭(같은 모델에서 1024·2048·0=전체 폭) |
 | `usage` | 월 예산·사용량 |
 | `stats query` · `stats series` · `dashboard` | 통계 |
+| `stats export [--from 날짜] [--to 날짜] --file 경로 [--reset-id]` | 직접 나눌 수 있는 주 단위 통계 파일을 씁니다([통계](https://github.com/kim0040/masamong2/wiki/통계) 참고). 어디로도 보내지 않습니다 |
 
 ## 운영
 

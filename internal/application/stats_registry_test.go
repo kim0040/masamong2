@@ -8,10 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"masamong/internal/action"
-	"masamong/internal/catalog"
 	"masamong/internal/config"
-	"masamong/internal/errcode"
 )
 
 // Values that must never reach an export as themselves: an operator's tool and provider names, a
@@ -394,18 +391,6 @@ func TestStatsHistogramAndBuckets(t *testing.T) {
 	for n, want := range map[int64]string{0: "", 1: "1", 5: "2-5", 6: "6-20", 100: "21-100", 101: "100+"} {
 		if got := statsRangeLabel(n); got != want {
 			t.Errorf("range %d = %q, want %q", n, got, want)
-		}
-	}
-}
-
-// The catalog entries exist ahead of their handlers: until a part builds one, its Action fails with a
-// code and reason a caller (and the parts' own tests) can see. stats.rollup is built (stats_rollup.go).
-func TestStatsActionsNotYetImplemented(t *testing.T) {
-	s, _ := deliveryService(t)
-	for _, id := range []string{"stats.export"} {
-		res := s.Execute(context.Background(), action.Request{Action: id})
-		if res.OK || res.Error == nil || res.Error.Code != errcode.ActionUnavailable || res.Error.Args["reason"] != catalog.ImplementationDeferred {
-			t.Fatalf("%s: %+v", id, res.Error)
 		}
 	}
 }

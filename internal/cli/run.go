@@ -30,7 +30,8 @@ type Options struct {
 	Interactive   bool // -i: live TUI for doctor / jobs watch when stdout is a TTY
 	Locale        string
 	WebBuild      bool
-	Usage         bool // no command, `help` or --help: a terminal gets the usage text
+	Usage         bool   // no command, `help` or --help: a terminal gets the usage text
+	File          string // stats export --file: where the weekly statistics file is written
 }
 
 func ParseArgs(args []string) (Options, string, json.RawMessage, error) {
@@ -113,6 +114,11 @@ func ParseArgs(args []string) (Options, string, json.RawMessage, error) {
 	}
 	opt.Usage = len(positional) == 0 || positional[0] == "help"
 	act := mapAction(positional)
+	if act == "stats.export" {
+		if err := takeStatsFile(kv, &opt); err != nil {
+			return Options{}, "", nil, err
+		}
+	}
 	if inputFileUsed && act != "tools.test" {
 		return Options{}, "", nil, fmt.Errorf("--input-file is read only by `masamong tools test`")
 	}
@@ -463,6 +469,9 @@ func adminCommand(act string, opt Options, stdout, stderr io.Writer, webBuild bo
 }
 
 func WriteResult(w io.Writer, opt Options, res action.Result) int {
+	if opt.File != "" && res.OK && res.Action == "stats.export" {
+		res = writeStatsExportFile(opt.File, res)
+	}
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	if opt.Output == "json" {

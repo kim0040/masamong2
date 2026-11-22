@@ -750,6 +750,8 @@ func (s *Service) execute(ctx context.Context, req action.Request) action.Result
 		return s.agent(ctx, req)
 	case "stats.query", "reports.create":
 		return s.stats(req)
+	case "stats.export":
+		return s.statsExport(ctx, req)
 	case "privacy.consent":
 		return s.privacyConsentContext(ctx, req)
 	case "preferences.set":

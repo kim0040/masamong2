@@ -9,24 +9,24 @@
       "README.zh-Hans.md": "49362eeac60098b6"
     },
     "wiki/CLI-명령어": {
-      "docs/wiki/CLI-Commands.md": "cb6e440750dc6a01",
-      "docs/wiki/CLI-명령어.md": "9916046cc64ee583"
+      "docs/wiki/CLI-Commands.md": "c0d205a4e14d475e",
+      "docs/wiki/CLI-명령어.md": "a8d4e193857ee78b"
     },
     "wiki/Discord-연결": {
       "docs/wiki/Connecting-Discord.md": "551e10e8e085234c",
       "docs/wiki/Discord-연결.md": "681a01a0a49c3f08"
     },
     "wiki/Home": {
-      "docs/wiki/English.md": "357a9307b7f1f507",
-      "docs/wiki/Home.md": "c67570ed654b7964"
+      "docs/wiki/English.md": "13dc78f38fd8eb88",
+      "docs/wiki/Home.md": "7144d17d4f4fdc04"
     },
     "wiki/개발-가이드": {
       "docs/wiki/Development-Guide.md": "43c4ee08d044ae50",
       "docs/wiki/개발-가이드.md": "12ac2f2cb027f4b0"
     },
     "wiki/관리-콘솔": {
-      "docs/wiki/Admin-Console.md": "67053375e88b1f23",
-      "docs/wiki/관리-콘솔.md": "06393d8879d9c2db"
+      "docs/wiki/Admin-Console.md": "610cfa769ecd94b3",
+      "docs/wiki/관리-콘솔.md": "b36de28447564de9"
     },
     "wiki/기억-블록": {
       "docs/wiki/Memory-Blocks.md": "9e53c1c0ac67387b",
@@ -79,6 +79,10 @@
     "wiki/저장소와-백업": {
       "docs/wiki/Storage-and-Backup.md": "b7f1a01b16cab443",
       "docs/wiki/저장소와-백업.md": "f4dc498198cd4261"
+    },
+    "wiki/통계": {
+      "docs/wiki/Statistics.md": "4658e0420cfb98ce",
+      "docs/wiki/통계.md": "bf837ca6f44fff47"
     }
   }
 }

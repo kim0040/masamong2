@@ -39,6 +39,7 @@
 - [저장소와 백업](https://github.com/kim0040/masamong2/wiki/저장소와-백업) — SQLite 데이터베이스 아키텍처, 백업/복원 절차, 스토리지 설계 배경
 - [CLI 명령어](https://github.com/kim0040/masamong2/wiki/CLI-명령어) — 전체 CLI 명령어 레퍼런스 및 스크립트 자동화용 JSON 출력 규격
 - [언어 설정](https://github.com/kim0040/masamong2/wiki/언어-설정) — 다국어 답변 및 기억 언어팩 구성, 신규 언어 추가 방법
+- [통계](https://github.com/kim0040/masamong2/wiki/통계) — 이 설치가 모으는 통계, 끄는 법, 내보내기 파일에 들어가는 것과 보내는 방법
 - [보안과 개인정보](https://github.com/kim0040/masamong2/wiki/보안과-개인정보) — 키 보관 위치(Keychain·자격 증명 관리자·소유자 전용 파일), 루프백 바인딩 원칙, 대화 원문 처리 가이드라인
 - [문제 해결](https://github.com/kim0040/masamong2/wiki/문제-해결) — 봇 응답 누락 시 진단 절차 및 자주 묻는 질문(FAQ)
 

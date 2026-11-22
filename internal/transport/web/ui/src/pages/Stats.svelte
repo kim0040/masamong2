@@ -15,6 +15,7 @@
   import Dialog from '../components/Dialog.svelte'
   import KeyValue from '../components/KeyValue.svelte'
   import StoredTotals from '../components/StoredTotals.svelte'
+  import StatsExport from '../components/StatsExport.svelte'
   import { call } from '../lib/api.svelte'
   import { toast } from '../lib/toast.svelte'
   import * as I from '../lib/icons'
@@ -122,6 +123,8 @@
     </Card>
   {/if}
 </div>
+
+<div class="panel"><StatsExport /></div>
 
 <Dialog bind:open={repOpen} title={t('stats.report.make')} description={t('stats.report.desc')} size="lg">
   <div class="stack">
