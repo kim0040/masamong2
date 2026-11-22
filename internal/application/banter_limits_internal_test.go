@@ -218,3 +218,43 @@ func TestBanterConcurrentNotesAllStored(t *testing.T) {
 		t.Fatalf("after a restart the full ladder still counts: %q", got)
 	}
 }
+
+// A channel's banter decision does not wait while another channel's banter reads or writes the store
+// (fix plan R03).
+func TestBanterDecisionsDoNotWaitForTheStore(t *testing.T) {
+	t.Run("write", func(t *testing.T) {
+		s, _ := banterLimitsService(t)
+		s.banterStep("g", "a")
+		s.banterStep("g", "b")
+		s.banterDisliked("turn-unknown") // reads the stored turns once: later dislikes need only memory
+		release := takeWriter(t, s)
+		noted := make(chan struct{})
+		go func() { defer close(noted); s.noteBanter("g", "a", "line", "turn-1") }()
+		waitsInStore(t, "(*Service).noteBanter(")
+		var step string
+		stepped := returnsWhileWaiting(t, "banterStep", func() { step = s.banterStep("g", "b") })
+		disliked := returnsWhileWaiting(t, "banterDisliked", func() { s.banterDisliked("turn-unknown") })
+		release()
+		<-noted
+		<-stepped
+		<-disliked
+		if step != "line" {
+			t.Fatalf("banterStep = %q", step)
+		}
+		if lines, _, _, ok := banterRow(t, s, "g", "a"); !ok || lines != 1 {
+			t.Fatalf("the note was not stored once the store was free: %d lines (row %v)", lines, ok)
+		}
+	})
+	t.Run("read", func(t *testing.T) {
+		s, _ := banterLimitsService(t)
+		s.banterStep("g", "b")
+		release := holdReaders(t, s)
+		stepped := make(chan struct{})
+		go func() { defer close(stepped); s.banterStep("g", "new") }()
+		waitsInStore(t, "(*Service).banterStep(")
+		other := returnsWhileWaiting(t, "banterStep of a loaded channel", func() { s.banterStep("g", "b") })
+		release()
+		<-stepped
+		<-other
+	})
+}

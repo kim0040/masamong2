@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"masamong/internal/config"
+	"masamong/internal/storage"
 )
 
 // Banter (docs/plan-memory-conversation.md §5.7.3, experimental, off by default): when someone talks
@@ -45,6 +46,9 @@ type banterState struct {
 	loaded      map[string]bool
 	turns       map[string]banterTurn // recent banter turn → channel, for a later 👎 mute
 	turnsLoaded bool
+	// writing marks the channels whose row is being stored now, dirty those changed since that write
+	// took its copy (writeBanterChannel)
+	writing, dirty map[string]bool
 }
 
 func init() {
@@ -93,25 +97,20 @@ func (s *Service) banterStep(guildID, channelID string) string {
 		}
 	}
 	b := &s.banter
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.chans == nil {
-		b.chans = map[string]*banterChannel{}
-	}
-	c := b.chans[key]
-	if c == nil {
-		c = &banterChannel{}
-		b.chans[key] = c
-	}
-	s.restoreBanterChannelLocked(guildID, channelID, key, c)
+	c, rewrite := s.lockBanterChannel(guildID, channelID, key)
 	c.lines, c.emoji = within(c.lines, now, time.Hour), within(c.emoji, now, time.Hour)
+	step := ""
 	switch {
 	case fast < banterFastPerMin && now.After(c.mutedUntil) && len(c.lines) < banterLinesPerHour:
-		return "line"
+		step = "line"
 	case len(c.emoji) < banterEmojiPerHour:
-		return "emoji"
+		step = "emoji"
 	}
-	return ""
+	b.mu.Unlock()
+	if rewrite {
+		s.writeBanterChannel(guildID, channelID, key)
+	}
+	return step
 }
 
 // noteBanter counts a rung that was used.
@@ -119,9 +118,9 @@ func (s *Service) noteBanter(guildID, channelID, step, turnID string) {
 	key := guildID + ":" + channelID
 	b := &s.banter
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	c := b.chans[key]
 	if c == nil {
+		b.mu.Unlock()
 		return
 	}
 	now := s.Clock.Now().UTC()
@@ -137,26 +136,60 @@ func (s *Service) noteBanter(guildID, channelID, step, turnID string) {
 	} else if step == "emoji" {
 		c.emoji = append(within(c.emoji, now, time.Hour), now)
 	} else {
+		b.mu.Unlock()
 		return
 	}
-	s.persistBanterChannelLocked(guildID, channelID, c, now)
+	b.mu.Unlock()
+	s.writeBanterChannel(guildID, channelID, key)
 	if step == "line" && turnID != "" {
-		s.persistBanterTurnLocked(turnID, guildID, channelID, now)
+		s.persistBanterTurn(turnID, guildID, channelID, now)
 	}
 }
 
 // banterDisliked mutes lines in the channel of a banter reply someone gave a 👎.
 func (s *Service) banterDisliked(turnID string) {
+	s.loadBanterTurns()
 	b := &s.banter
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	s.loadBanterTurnsLocked()
 	s.pruneBanterTurnsLocked(s.Clock.Now().UTC())
 	entry, ok := b.turns[turnID]
+	b.mu.Unlock()
 	if !ok {
 		return
 	}
 	key := entry.guild + ":" + entry.channel
+	c, _ := s.lockBanterChannel(entry.guild, entry.channel, key) // the mute below is written either way
+	c.mutedUntil = s.Clock.Now().UTC().Add(banterMute)
+	b.mu.Unlock()
+	s.writeBanterChannel(entry.guild, entry.channel, key)
+}
+
+// lockBanterChannel takes banter.mu and returns the channel's entry; the caller unlocks. The first time
+// a channel is checked its stored row is read before the lock is taken, so a slow store holds up no other
+// channel's banter (fix plan R03). rewrite says the row held expired state, to be written again once the
+// lock is released.
+func (s *Service) lockBanterChannel(guildID, channelID, key string) (c *banterChannel, rewrite bool) {
+	b := &s.banter
+	b.mu.Lock()
+	if b.loaded[key] || s.Store == nil {
+		return b.channelLocked(key), false
+	}
+	b.mu.Unlock()
+	row, ok := s.readBanterChannel(guildID, channelID)
+	b.mu.Lock()
+	c = b.channelLocked(key)
+	if ok && !b.loaded[key] { // another call may have read it meanwhile
+		if b.loaded == nil {
+			b.loaded = map[string]bool{}
+		}
+		b.loaded[key] = true
+		rewrite = s.restoreBanterChannel(c, row)
+	}
+	return c, rewrite
+}
+
+// channelLocked returns key's entry, made when missing. The caller holds mu.
+func (b *banterState) channelLocked(key string) *banterChannel {
 	if b.chans == nil {
 		b.chans = map[string]*banterChannel{}
 	}
@@ -165,82 +198,123 @@ func (s *Service) banterDisliked(turnID string) {
 		c = &banterChannel{}
 		b.chans[key] = c
 	}
-	s.restoreBanterChannelLocked(entry.guild, entry.channel, key, c)
-	now := s.Clock.Now().UTC()
-	c.mutedUntil = now.Add(banterMute)
-	s.persistBanterChannelLocked(entry.guild, entry.channel, c, now)
+	return c
 }
 
-// restoreBanterChannelLocked loads one channel the first time it is checked. The caller holds banter.mu.
-func (s *Service) restoreBanterChannelLocked(guildID, channelID, key string, c *banterChannel) {
-	b := &s.banter
-	if b.loaded == nil {
-		b.loaded = map[string]bool{}
-	}
-	if b.loaded[key] || s.Store == nil {
-		return
-	}
+// storedBanter is a channel's banter_channel_state row; found is false when there is none.
+type storedBanter struct {
+	lines, emoji, muted string
+	found               bool
+}
+
+// readBanterChannel reads a channel's stored row; ok is false when the store could not be read (the
+// channel is read again next time).
+func (s *Service) readBanterChannel(guildID, channelID string) (row storedBanter, ok bool) {
 	db, err := s.adminDB()
 	if err != nil {
-		return
+		return row, false
 	}
-	var linesRaw, emojiRaw, muted string
 	err = db.Reader().QueryRow(`SELECT lines,emoji,muted_until FROM banter_channel_state WHERE guild_id=? AND channel_id=?`, guildID, channelID).
-		Scan(&linesRaw, &emojiRaw, &muted)
+		Scan(&row.lines, &row.emoji, &row.muted)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return
+		return row, false
 	}
-	b.loaded[key] = true
-	if err == nil {
-		_ = json.Unmarshal([]byte(linesRaw), &c.lines)
-		_ = json.Unmarshal([]byte(emojiRaw), &c.emoji)
-		now := s.Clock.Now()
-		oldLines, oldEmoji := len(c.lines), len(c.emoji)
-		c.lines, c.emoji = within(c.lines, now, time.Hour), within(c.emoji, now, time.Hour)
-		futureMuted := false
-		if at, parseErr := time.Parse(time.RFC3339Nano, muted); parseErr == nil {
-			// a mute lies in the future by design (now+banterMute); only one beyond that horizon
-			// was written before the clock went back
-			if at.After(now.Add(banterMute)) {
-				futureMuted = true
-			} else {
-				c.mutedUntil = at
-			}
-		}
-		if futureMuted || len(c.lines) != oldLines || len(c.emoji) != oldEmoji || !now.Before(c.mutedUntil) && !c.mutedUntil.IsZero() {
-			s.persistBanterChannelLocked(guildID, channelID, c, now)
-		}
-	}
+	row.found = err == nil
+	return row, true
 }
 
-func (s *Service) persistBanterChannelLocked(guildID, channelID string, c *banterChannel, now time.Time) {
+// restoreBanterChannel puts a channel's stored row into its entry and reports whether the row held
+// expired state to clean. The caller holds banter.mu.
+func (s *Service) restoreBanterChannel(c *banterChannel, row storedBanter) (rewrite bool) {
+	if !row.found {
+		return false
+	}
+	_ = json.Unmarshal([]byte(row.lines), &c.lines)
+	_ = json.Unmarshal([]byte(row.emoji), &c.emoji)
+	now := s.Clock.Now()
+	oldLines, oldEmoji := len(c.lines), len(c.emoji)
+	c.lines, c.emoji = within(c.lines, now, time.Hour), within(c.emoji, now, time.Hour)
+	futureMuted := false
+	if at, parseErr := time.Parse(time.RFC3339Nano, row.muted); parseErr == nil {
+		// a mute lies in the future by design (now+banterMute); only one beyond that horizon
+		// was written before the clock went back
+		if at.After(now.Add(banterMute)) {
+			futureMuted = true
+		} else {
+			c.mutedUntil = at
+		}
+	}
+	return futureMuted || len(c.lines) != oldLines || len(c.emoji) != oldEmoji || !now.Before(c.mutedUntil) && !c.mutedUntil.IsZero()
+}
+
+// writeBanterChannel stores a channel's current state, without banter.mu held while the store works.
+// One write per channel runs at a time and it writes the latest state: a change made while it runs is
+// written again right after, so the stored row never ends older than memory.
+func (s *Service) writeBanterChannel(guildID, channelID, key string) {
 	db, err := s.adminDB()
 	if err != nil {
 		return
 	}
-	c.lines, c.emoji = within(c.lines, now, time.Hour), within(c.emoji, now, time.Hour)
-	if len(c.lines) == 0 && len(c.emoji) == 0 && !now.Before(c.mutedUntil) {
+	b := &s.banter
+	b.mu.Lock()
+	if b.writing[key] {
+		b.dirty[key] = true // the running write stores it once more
+		b.mu.Unlock()
+		return
+	}
+	if b.writing == nil {
+		b.writing, b.dirty = map[string]bool{}, map[string]bool{}
+	}
+	b.writing[key] = true
+	for {
+		delete(b.dirty, key)
+		c := b.channelLocked(key)
+		now := s.Clock.Now()
+		c.lines, c.emoji = within(c.lines, now, time.Hour), within(c.emoji, now, time.Hour)
+		keep := len(c.lines) > 0 || len(c.emoji) > 0 || now.Before(c.mutedUntil)
+		lines, _ := json.Marshal(c.lines)
+		emoji, _ := json.Marshal(c.emoji)
+		muted := ""
+		if now.Before(c.mutedUntil) {
+			muted = c.mutedUntil.UTC().Format(time.RFC3339Nano)
+		}
+		b.mu.Unlock()
+		s.storeBanterChannel(db, guildID, channelID, keep, string(lines), string(emoji), muted)
+		b.mu.Lock()
+		if !b.dirty[key] {
+			break
+		}
+	}
+	delete(b.writing, key)
+	b.mu.Unlock()
+}
+
+// storeBanterChannel writes (or, with nothing to keep, deletes) a channel's row.
+func (s *Service) storeBanterChannel(db *storage.Store, guildID, channelID string, keep bool, lines, emoji, muted string) {
+	if !keep {
 		if _, err := db.DB.Exec(`DELETE FROM banter_channel_state WHERE guild_id=? AND channel_id=?`, guildID, channelID); err != nil {
 			s.Log.Debug("banter state prune failed", "err", err.Error())
 		}
 		return
 	}
-	lines, _ := json.Marshal(c.lines)
-	emoji, _ := json.Marshal(c.emoji)
-	muted := ""
-	if now.Before(c.mutedUntil) {
-		muted = c.mutedUntil.UTC().Format(time.RFC3339Nano)
-	}
 	if _, err := db.DB.Exec(`INSERT INTO banter_channel_state(guild_id,channel_id,lines,emoji,muted_until)
 		VALUES(?,?,?,?,?) ON CONFLICT(guild_id,channel_id) DO UPDATE SET lines=excluded.lines,emoji=excluded.emoji,muted_until=excluded.muted_until`,
-		guildID, channelID, string(lines), string(emoji), muted); err != nil {
+		guildID, channelID, lines, emoji, muted); err != nil {
 		s.Log.Debug("banter state write failed", "err", err.Error())
 	}
 }
 
-func (s *Service) loadBanterTurnsLocked() {
+// banterTurnSlack is how far in the future a stored banter turn may lie and still be taken for one noted
+// while the turns are read: a later one was written before the clock went back and is deleted.
+const banterTurnSlack = time.Minute
+
+// loadBanterTurns reads the stored banter turns of the last day once, before banter.mu is taken.
+func (s *Service) loadBanterTurns() {
 	b := &s.banter
-	if b.turnsLoaded || s.Store == nil {
+	b.mu.Lock()
+	loaded := b.turnsLoaded || s.Store == nil
+	b.mu.Unlock()
+	if loaded {
 		return
 	}
 	db, err := s.adminDB()
@@ -253,9 +327,7 @@ func (s *Service) loadBanterTurnsLocked() {
 	if err != nil {
 		return
 	}
-	if b.turns == nil {
-		b.turns = map[string]banterTurn{}
-	}
+	read := map[string]banterTurn{}
 	for rows.Next() {
 		var id, guildID, channelID, stamp string
 		if rows.Scan(&id, &guildID, &channelID, &stamp) != nil {
@@ -263,11 +335,22 @@ func (s *Service) loadBanterTurnsLocked() {
 		}
 		at, parseErr := time.Parse(time.RFC3339Nano, stamp)
 		if parseErr == nil {
-			b.turns[id] = banterTurn{guild: guildID, channel: channelID, at: at}
+			read[id] = banterTurn{guild: guildID, channel: channelID, at: at}
 		}
 	}
 	_ = rows.Close()
-	_, _ = db.DB.Exec(`DELETE FROM banter_turns WHERE created_at<? OR created_at>?`, banterStamp(now.Add(-24*time.Hour)), banterStamp(now))
+	_, _ = db.DB.Exec(`DELETE FROM banter_turns WHERE created_at<? OR created_at>?`, banterStamp(now.Add(-24*time.Hour)), banterStamp(now.Add(banterTurnSlack)))
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.turnsLoaded {
+		return
+	}
+	if b.turns == nil {
+		b.turns = map[string]banterTurn{}
+	}
+	for id, t := range read {
+		b.turns[id] = t
+	}
 	b.turnsLoaded = true
 	s.pruneBanterTurnsLocked(now)
 }
@@ -297,7 +380,9 @@ func (s *Service) pruneBanterTurnsLocked(now time.Time) {
 	}
 }
 
-func (s *Service) persistBanterTurnLocked(turnID, guildID, channelID string, now time.Time) {
+// persistBanterTurn stores a banter turn for a 👎 after a restart (a day at most, 200 at most). The
+// caller does not hold banter.mu.
+func (s *Service) persistBanterTurn(turnID, guildID, channelID string, now time.Time) {
 	db, err := s.adminDB()
 	if err != nil {
 		return
