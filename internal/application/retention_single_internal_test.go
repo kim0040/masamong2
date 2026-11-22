@@ -50,7 +50,7 @@ func TestUsageGCRunsOneAtATime(t *testing.T) {
 	close(release)
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		if _, busy := retentionPasses.Load(s); !busy {
+		if !s.runs.retention.Load() {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -62,14 +62,14 @@ func TestUsageGCRunsOneAtATime(t *testing.T) {
 	if r := runNow(); !r.OK {
 		t.Fatalf("run now after the scheduled pass: %+v", r.Error)
 	}
-	if _, busy := retentionPasses.Load(s); busy {
+	if s.runs.retention.Load() {
 		t.Fatal("the console run left its mark behind")
 	}
 
 	// and the other way: while the console's run holds the mark, the scheduler does not start one
-	retentionPasses.Store(s, struct{}{})
+	s.runs.retention.Store(true)
 	if s.startRetentionPass(context.Background()) {
 		t.Fatal("the scheduler started a pass beside a running one")
 	}
-	retentionPasses.Delete(s)
+	s.runs.retention.Store(false)
 }
