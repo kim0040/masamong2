@@ -3,14 +3,18 @@
 package web
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
+	"masamong/internal/action"
 	"masamong/internal/fsutil"
 	"masamong/internal/secrets"
 )
@@ -113,5 +117,60 @@ func TestOversizedKeyFallsBackToAFileWithAWarningOnWindows(t *testing.T) {
 	}
 	if err := fsutil.VerifyPrivateFile(strings.TrimPrefix(st.ref, "file:")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Two key saves for one provider run one after the other (secretMu). The second must read the
+// reference the first one left, not the one before it: otherwise the key file the first save wrote is
+// never cleaned up when the second replaces it. Here the first save is stood in for by a change of the
+// provider's reference while the second save waits for the lock.
+func TestSecretSaveReadsThePreviousReferenceUnderTheLock(t *testing.T) {
+	s, ts := testServer(t)
+	c := client()
+	csrf := signIn(t, s, ts, c)
+	dir := filepath.Join(s.svc.DataRoot, "secrets")
+	if err := fsutil.PrivateDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	stray := filepath.Join(dir, "stray.key")
+	if err := os.WriteFile(stray, []byte("synthetic-first-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.secretMu.Lock()
+	done := make(chan int, 1)
+	go func() {
+		body := strings.NewReader(`{"target":"provider","id":"finnhub","value":"synthetic-second-value"}`)
+		req, _ := http.NewRequest("POST", ts.URL+"/api/secret", body)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-CSRF-Token", csrf)
+		res, err := c.Do(req)
+		if err != nil {
+			done <- 0
+			return
+		}
+		res.Body.Close()
+		done <- res.StatusCode
+	}()
+	// wait until the save is blocked on the lock
+	buf := make([]byte, 1<<20)
+	for blocked := false; !blocked; {
+		runtime.Gosched()
+		for _, g := range strings.Split(string(buf[:runtime.Stack(buf, true)]), "\n\n") {
+			if strings.Contains(g, "(*Server).apiSecret") && strings.Contains(g, "sync.(*Mutex).Lock") {
+				blocked = true
+			}
+		}
+	}
+	raw, _ := json.Marshal(map[string]any{"ops": []any{map[string]any{"path": []any{"providers", "finnhub", "credential_ref"}, "value": "file:" + stray}}})
+	if res := s.svc.Execute(context.Background(), action.Request{Action: "config.patch", Input: raw}); !res.OK {
+		s.secretMu.Unlock()
+		t.Fatalf("first save stand-in: %+v", res.Error)
+	}
+	s.secretMu.Unlock()
+	if code := <-done; code != 200 {
+		t.Fatalf("second save %d", code)
+	}
+	if _, err := os.Stat(stray); !os.IsNotExist(err) {
+		t.Fatalf("the key file the first save left is still there: %v", err)
 	}
 }
