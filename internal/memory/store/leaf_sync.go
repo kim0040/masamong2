@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -310,4 +312,253 @@ func (s *Store) finishLeafSync(tx *sql.Tx, room string, r leaves.Recipe, _ *time
 		cut[start].ObservationIDs[0], string(b), plan.prefixMessages+cut[start].Start, plan.prefixLeaves+start,
 		len(msgs)-cut[start].Start, room)
 	return err
+}
+
+// LeafID is the stable leaf key: hash(recipe version, room, first observation id). Appending to a
+// room's open tail keeps the ID; the body hash says whether its vector must be recomputed.
+func LeafID(recipe, room, firstObservation string) string {
+	sum := sha256.Sum256([]byte(recipe + "\x1f" + room + "\x1f" + firstObservation))
+	return "lf_" + hex.EncodeToString(sum[:])[:32]
+}
+
+// SyncStats reports one room's leaf synchronization.
+type SyncStats struct {
+	Room          string `json:"room"`
+	Leaves        int    `json:"leaves"`
+	New           int    `json:"new"`
+	Changed       int    `json:"changed"`
+	Removed       int    `json:"removed"`
+	Closed        int    `json:"closed"`
+	Messages      int    `json:"messages"`
+	RecipeChanged bool   `json:"recipe_changed,omitempty"`
+}
+
+// SyncLeaves recuts a room's leaves with the recipe and reconciles them with stored rows: new leaves
+// are inserted, leaves whose body changed lose their vectors (recomputed later), vanished leaves are
+// deleted. The last leaf is "closed" only when full or idle past the gap — open tails are stored but
+// not embedded, so a live channel does not re-embed on every message. A Kakao export's tail is closed
+// at once (leafRoomState.archived).
+//
+// WHY incremental: re-reading and sorting a large room on every small capture
+// wastes SD-card I/O and a room-sized allocation even when embeddings are reused.
+// A durable checkpoint proves an unchanged prefix only for strict appends (the
+// exact corpus tuple order), then the same cutter restarts at the penultimate
+// leaf. That boundary preserves fixed-window overlap, time gaps and a previously
+// idle-closed or archived tail; IDs still use the first observation, not offsets.
+// Late arrivals, edits/deletions, recipe/rendering or declared timezone changes, first
+// syncs and interrupted batches use a full cut. Correctness takes priority over
+// optimizing those rarer cases. No message bodies or identifiers are logged.
+func (s *Store) SyncLeaves(room string, r leaves.Recipe, nowT time.Time, naiveTZ *time.Location) (SyncStats, error) {
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	var snapshot leafRoomState
+	if err := s.DB.Reader().QueryRow(leafRoomSnapshotQuery, room).Scan(&snapshot.revision, &snapshot.recipe, &snapshot.platform, &snapshot.evidenceRevision, &snapshot.naiveTimezone); err != nil {
+		return SyncStats{}, err
+	}
+	msgs, plan, err := s.leafSyncMessages(room, r, naiveTZ, snapshot)
+	if err != nil {
+		return SyncStats{}, err
+	}
+	return s.syncLeavesFrom(room, r, nowT, naiveTZ, msgs, plan, snapshot)
+}
+
+type leafRoomState struct {
+	revision         int64
+	recipe           string
+	platform         string
+	evidenceRevision int64
+	naiveTimezone    string
+}
+
+const leafRoomSnapshotQuery = `SELECT revision,active_recipe,platform,evidence_revision,naive_timezone FROM memory_rooms WHERE room=?`
+
+// archived reports a room imported from a finished export (KakaoTalk): nothing arrives later to close
+// its tail by idling, so the tail closes now. A later, longer export changes the tail's body, and a
+// changed leaf is embedded again.
+func (l leafRoomState) archived() bool { return l.platform == "kakao" }
+
+func (s *Store) syncLeaves(room string, r leaves.Recipe, nowT time.Time, naiveTZ *time.Location, msgs []corpus.Message, expected ...leafRoomState) (SyncStats, error) {
+	return s.syncLeavesFrom(room, r, nowT, naiveTZ, msgs, leafSyncPlan{}, expected...)
+}
+
+func (s *Store) syncLeavesFrom(room string, r leaves.Recipe, nowT time.Time, naiveTZ *time.Location, msgs []corpus.Message, plan leafSyncPlan, expected ...leafRoomState) (SyncStats, error) {
+	var err error
+	st := SyncStats{Room: room, Messages: plan.prefixMessages + len(msgs), Closed: plan.prefixLeaves}
+	if len(expected) == 0 {
+		var snapshot leafRoomState
+		if err := s.DB.Reader().QueryRow(leafRoomSnapshotQuery, room).Scan(&snapshot.revision, &snapshot.recipe, &snapshot.platform, &snapshot.evidenceRevision, &snapshot.naiveTimezone); err != nil {
+			return st, err
+		}
+		expected = []leafRoomState{snapshot}
+	}
+	cut := leaves.SlicePerRoom(msgs, r, 1<<31-1, "leaf")
+	existing := map[string]string{} // leaf_id → body_hash
+	// Only the checkpoint's suffix participates in incremental reconciliation.
+	q, args := leafSyncExistingQuery(room, r.Version(), plan)
+	rows, err := s.DB.Reader().Query(q, args...)
+	if err != nil {
+		return st, err
+	}
+	for rows.Next() {
+		var id, h string
+		if err := rows.Scan(&id, &h); err != nil {
+			rows.Close()
+			return st, err
+		}
+		existing[id] = h
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return st, err
+	}
+	if err := s.DB.WithWriter(func(tx *sql.Tx) error { return s.beginLeafSync(tx, room, expected[0], plan) }); err != nil {
+		return st, err
+	}
+	keep := map[string]bool{}
+	// A room's first sync after a large import writes a leaf per 8 messages: committed in batches, it
+	// stays under TiDB's transaction size limit and never holds the writer for long. A sync interrupted
+	// between batches is completed by the next one (every write here is idempotent).
+	for lo := 0; lo < len(cut); lo += syncBatch {
+		hi := min(len(cut), lo+syncBatch)
+		err = s.DB.WithWriter(func(tx *sql.Tx) error {
+			for i := lo; i < hi; i++ {
+				l := cut[i]
+				for _, m := range msgs[l.Start:l.End] {
+					var text, label, at, deleted string
+					if err := tx.QueryRow(`SELECT content,actor_label,parsed_time,deleted_at FROM memory_observations WHERE observation_id=?`, m.ObservationID).Scan(&text, &label, &at, &deleted); err != nil {
+						return err
+					}
+					if deleted != "" || strings.TrimSpace(text) != m.Content || label != m.ActorLabel || at != m.ParsedTime {
+						return errors.New("memory source changed during leaf sync; retry")
+					}
+				}
+				id := LeafID(r.Version(), room, l.ObservationIDs[0])
+				keep[id] = true
+				h := hashText(l.Body)
+				last := msgs[l.End-1]
+				closed := i < len(cut)-1 || l.N >= r.Size || expected[0].archived()
+				if !closed && r.Split == leaves.SplitTimeGap {
+					closed = idleFor(last.ParsedTime, nowT, naiveTZ) >= time.Duration(r.GapMinutes*float64(time.Minute))
+				}
+				if closed {
+					st.Closed++
+				}
+				ids, _ := json.Marshal(l.ObservationIDs)
+				sp, _ := json.Marshal(l.Speakers)
+				old, had := existing[id]
+				switch {
+				case !had:
+					st.New++
+					if _, err := tx.Exec(`INSERT INTO memory_leaves(leaf_id, room, recipe, first_observation_id, observation_ids, n, body, body_hash, speakers,
+						end_time, closed, summary, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+						id, room, r.Version(), l.ObservationIDs[0], string(ids), l.N, l.Body, h, string(sp), last.ParsedTime, b2i(closed), "", now()); err != nil {
+						return err
+					}
+				case old != h:
+					st.Changed++
+					if _, err := tx.Exec(`UPDATE memory_leaves SET observation_ids=?, n=?, body=?, body_hash=?, speakers=?, end_time=?, closed=?,
+						summary='', leaf_vec=NULL, summary_vec=NULL, updated_at=? WHERE leaf_id=?`,
+						string(ids), l.N, l.Body, h, string(sp), last.ParsedTime, b2i(closed), now(), id); err != nil {
+						return err
+					}
+				default:
+					// Equal rendered text need not mean equal provenance (identical
+					// messages can replace each other). Refresh membership and time
+					// without discarding vectors whose embedding text is unchanged.
+					if _, err := tx.Exec(`UPDATE memory_leaves SET observation_ids=?,n=?,speakers=?,end_time=?,closed=? WHERE leaf_id=?
+						AND (observation_ids<>? OR n<>? OR speakers<>? OR end_time<>? OR closed<>?)`,
+						string(ids), l.N, string(sp), last.ParsedTime, b2i(closed), id,
+						string(ids), l.N, string(sp), last.ParsedTime, b2i(closed)); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return st, err
+		}
+	}
+	var gone []string
+	for id := range existing {
+		if !keep[id] {
+			gone = append(gone, id)
+		}
+	}
+	for lo := 0; lo < len(gone); lo += syncBatch {
+		hi := min(len(gone), lo+syncBatch)
+		err = s.DB.WithWriter(func(tx *sql.Tx) error {
+			for _, id := range gone[lo:hi] {
+				if _, err := tx.Exec(`DELETE FROM memory_leaves WHERE leaf_id=?`, id); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return st, err
+		}
+		st.Removed += hi - lo
+	}
+	// Other recipes remain archived for content-addressed vector reuse. The
+	// replacement is invisible until all batches succeed and this pointer swaps.
+	err = s.DB.WithWriter(func(tx *sql.Tx) error {
+		var revision int64
+		var active string
+		if err := tx.QueryRow(`SELECT revision,active_recipe FROM memory_rooms WHERE room=?`, room).Scan(&revision, &active); err != nil {
+			return err
+		}
+		if revision != expected[0].revision || active != expected[0].recipe {
+			return errors.New("memory source changed during leaf sync; retry")
+		}
+		if _, err := tx.Exec(`UPDATE memory_rooms SET pending_sync=0 WHERE room=?`, room); err != nil {
+			return err
+		}
+		st.RecipeChanged = active != r.Version()
+		if !st.RecipeChanged {
+			return s.finishLeafSync(tx, room, r, naiveTZ, expected[0], plan, msgs, cut)
+		}
+		res, err := tx.Exec(`UPDATE memory_rooms SET active_recipe=? WHERE room=? AND revision=? AND active_recipe=?`, r.Version(), room, revision, active)
+		if err != nil {
+			return err
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n != 1 {
+			return errors.New("memory source changed during leaf sync; retry")
+		}
+		// WHY publish the checkpoint last: the recipe guard must see valid=0
+		// throughout our own activation, just as it does throughout leaf writes.
+		return s.finishLeafSync(tx, room, r, naiveTZ, expected[0], plan, msgs, cut)
+	})
+	st.Leaves = plan.prefixLeaves + len(cut)
+	return st, err
+}
+
+// syncBatch is how many leaf writes SyncLeaves commits per transaction.
+const syncBatch = 1000
+
+// idleFor is how long ago a record was written. Naive times are placed in the room's declared zone;
+// without one they get 14h of slack (the widest zone offset), so a tail closes late rather than early.
+func idleFor(parsed string, nowT time.Time, naiveTZ *time.Location) time.Duration {
+	t, aware, ok := corpus.ParseTime(parsed)
+	if !ok {
+		return 0
+	}
+	if !aware {
+		if naiveTZ != nil {
+			t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), naiveTZ)
+		} else {
+			return nowT.Sub(t) - 14*time.Hour
+		}
+	}
+	return nowT.Sub(t)
+}
+
+func b2i(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
