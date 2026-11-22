@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"masamong/internal/action"
+	featreminders "masamong/internal/features/reminders"
 )
 
 // A record write the database refuses warns — losing history must be visible — but at most once a
@@ -137,5 +138,39 @@ func TestReminderStatusWriteRecorded(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "mark failed") {
 		t.Fatalf("unexpected warning\n%s", logs.String())
+	}
+}
+
+// reminderLive (the SQL condition) and cancellable (the Go predicate) are two names for the same
+// thing: a reminder that is still to come. This pins them equal for every status and both series
+// shapes, so one cannot drift from the other.
+func TestReminderLiveMatchesCancellable(t *testing.T) {
+	s, clk := deliveryService(t)
+	db, err := s.adminDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := clk.t.UTC().Format(time.RFC3339)
+	statuses := []string{"proposed", "scheduled", "paused", "sending", "sent", "failed", "missed", "cancelled", "unknown"}
+	for _, repeat := range []bool{false, true} {
+		for _, st := range statuses {
+			id, rule := "r-"+st, ""
+			var rep *featreminders.Rule
+			if repeat {
+				id, rule = id+"-rep", `{}` // any non-empty rule: only repeat_rule<>'' / Repeat!=nil matters
+				rep = &featreminders.Rule{}
+			}
+			if _, err := db.DB.Exec(`INSERT INTO reminders(id,owner_id,content,timezone,status,repeat_rule,created_at,updated_at)
+				VALUES(?,'u1','x','UTC',?,?,?,?)`, id, st, rule, created, created); err != nil {
+				t.Fatal(err)
+			}
+			var live int
+			if err := db.DB.QueryRow(`SELECT COUNT(*) FROM reminders WHERE id=? AND `+reminderLive, id).Scan(&live); err != nil {
+				t.Fatal(err)
+			}
+			if (live == 1) != cancellable(reminder{Status: st, Repeat: rep}) {
+				t.Fatalf("status %s repeat %v: SQL live=%d, Go cancellable=%v", st, repeat, live, cancellable(reminder{Status: st, Repeat: rep}))
+			}
+		}
 	}
 }

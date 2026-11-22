@@ -57,6 +57,12 @@ const (
 // occurrence is being sent (the series itself goes on).
 const reminderLive = `(status IN ('proposed','scheduled','paused') OR (status='sending' AND repeat_rule<>''))`
 
+const (
+	reminderDeliverBatch = 50               // due reminders sent in one pass
+	reminderSendTimeout  = 30 * time.Second // one channel post or DM of a reminder
+	reminderMaxAttempts  = 3                // a refused send is retried this many times, then failed
+)
+
 var errReminderChanged = errors.New("reminders: state changed")
 
 func init() {
@@ -618,7 +624,7 @@ func (s *Service) cancelReminder(r reminder) bool {
 	}
 	// a series is also cancelled while one of its occurrences is being sent (the send finishes, the series ends)
 	res, err := db.DB.Exec(`UPDATE reminders SET status='cancelled', version=version+1, updated_at=? WHERE id=?
-		AND (status IN ('proposed','scheduled','paused') OR (status='sending' AND repeat_rule<>''))`,
+		AND `+reminderLive,
 		s.Clock.Now().UTC().Format(time.RFC3339), r.ID)
 	if err != nil {
 		return false
@@ -631,7 +637,8 @@ func (s *Service) cancelReminder(r reminder) bool {
 	return n > 0
 }
 
-// cancellable reports whether a reminder can still be cancelled: before it is sent, or as a series.
+// cancellable is the Go form of the reminderLive SQL condition: a reminder that can still be
+// cancelled is live — before it is sent, or a series while one occurrence is being sent.
 func cancellable(r reminder) bool {
 	switch r.Status {
 	case reminderProposed, reminderScheduled, reminderPaused:
@@ -840,7 +847,7 @@ func (s *Service) deliverReminders(ctx context.Context) {
 		return
 	}
 	now := s.Clock.Now()
-	due, err := s.listReminders(`status='scheduled' AND due_at<=?`, []any{now.UTC().Format(time.RFC3339)}, 50)
+	due, err := s.listReminders(`status='scheduled' AND due_at<=?`, []any{now.UTC().Format(time.RFC3339)}, reminderDeliverBatch)
 	if err != nil {
 		return
 	}
@@ -931,7 +938,7 @@ func (s *Service) deliverRows(ctx context.Context, due []reminder, now time.Time
 			if lines := s.reminderContextLines(r); len(lines) > 0 && r.Occurrences == 0 {
 				card.Fields = append(card.Fields, action.CardField{Name: s.msg(req, "reminders.context_header"), Value: lines})
 			}
-			sendCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			sendCtx, cancel := context.WithTimeout(ctx, reminderSendTimeout)
 			switch {
 			case r.Destination == "channel" && poster != nil:
 				msgID, err = poster.PostChannel(sendCtx, r.ChannelID, "", "", &card)
@@ -942,38 +949,38 @@ func (s *Service) deliverRows(ctx context.Context, due []reminder, now time.Time
 			}
 			cancel()
 		}
-		stamp := s.Clock.Now().UTC().Format(time.RFC3339)
+		outcomeStamp := s.Clock.Now().UTC().Format(time.RFC3339)
 		if err != nil && r.Destination == "channel" && ctx.Err() == nil {
 			s.LogProblem(r.GuildID, r.ChannelID, logReminderFailed, "", errclass.Of(err))
 		}
 		if series {
-			s.finishSeriesSend(r, msgID, err, stamp)
+			s.finishSeriesSend(r, msgID, err, outcomeStamp)
 			if err == nil || r.DueAt != "" { // the lines went out with the first message (or its turn has passed)
 				s.dropReminderContext(r.ID)
 			}
 		} else {
 			switch {
 			case err == nil:
-				if _, err := db.DB.Exec(`UPDATE reminders SET status='sent', delivered_id=?, error='', updated_at=? WHERE id=?`, msgID, stamp, r.ID); err != nil {
+				if _, err := db.DB.Exec(`UPDATE reminders SET status='sent', delivered_id=?, error='', updated_at=? WHERE id=?`, msgID, outcomeStamp, r.ID); err != nil {
 					s.warnRecordFailed("reminders: sent mark failed", err)
 				}
 			case errors.Is(err, ErrDMClosed):
-				if _, err := db.DB.Exec(`UPDATE reminders SET status='failed', error='dm_closed', updated_at=? WHERE id=?`, stamp, r.ID); err != nil {
+				if _, err := db.DB.Exec(`UPDATE reminders SET status='failed', error='dm_closed', updated_at=? WHERE id=?`, outcomeStamp, r.ID); err != nil {
 					s.warnRecordFailed("reminders: failed mark failed", err)
 				}
-			case errors.Is(err, ErrNotDelivered) && r.Attempts < 3:
+			case errors.Is(err, ErrNotDelivered) && r.Attempts < reminderMaxAttempts:
 				// Discord answered with a refusal: nothing was posted, try again a little later
 				next := s.Clock.Now().Add(time.Duration(r.Attempts*r.Attempts) * time.Minute).UTC().Format(time.RFC3339)
-				if _, err := db.DB.Exec(`UPDATE reminders SET status='scheduled', due_at=?, error=?, updated_at=? WHERE id=?`, next, clip(err.Error(), 300), stamp, r.ID); err != nil {
+				if _, err := db.DB.Exec(`UPDATE reminders SET status='scheduled', due_at=?, error=?, updated_at=? WHERE id=?`, next, clip(err.Error(), 300), outcomeStamp, r.ID); err != nil {
 					s.warnRecordFailed("reminders: retry mark failed", err)
 				}
 			case errors.Is(err, ErrNotDelivered):
-				if _, err := db.DB.Exec(`UPDATE reminders SET status='failed', error=?, updated_at=? WHERE id=?`, clip(err.Error(), 300), stamp, r.ID); err != nil {
+				if _, err := db.DB.Exec(`UPDATE reminders SET status='failed', error=?, updated_at=? WHERE id=?`, clip(err.Error(), 300), outcomeStamp, r.ID); err != nil {
 					s.warnRecordFailed("reminders: failed mark failed", err)
 				}
 			default:
 				// the connection broke: it may have been posted, and sending again could post it twice
-				if _, err := db.DB.Exec(`UPDATE reminders SET status='unknown', error=?, updated_at=? WHERE id=?`, clip(err.Error(), 300), stamp, r.ID); err != nil {
+				if _, err := db.DB.Exec(`UPDATE reminders SET status='unknown', error=?, updated_at=? WHERE id=?`, clip(err.Error(), 300), outcomeStamp, r.ID); err != nil {
 					s.warnRecordFailed("reminders: unknown mark failed", err)
 				}
 			}

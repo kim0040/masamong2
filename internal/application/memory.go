@@ -1244,7 +1244,8 @@ func (s *Service) personaText(ref string) string {
 	return ""
 }
 
-// Chat turn refusals. The Discord connector stays silent on these (no error spam in the channel).
+// Chat turn refusals. In Discord a refusal the person can act on still gets a short notice (a reply
+// limit or the monthly model budget); the rest stay silent so a refused turn never spams the channel.
 var (
 	ErrChatDisabled = errors.New("chat: replies are turned off (tools.chat.respond)")
 	ErrChatLimited  = errors.New("chat: reply limit reached (tools.chat.respond.limits)")
