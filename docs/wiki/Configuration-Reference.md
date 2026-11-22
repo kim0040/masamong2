@@ -36,6 +36,7 @@ masamong config apply --file new.yaml --base_revision $rev
 | `id` | chosen at setup | Instance name |
 | `data_dir` | the data folder | Filled in automatically |
 | `bot_names` | `[마사몽, masamong]` | Names people call the bot by; the first is used in prompts |
+| `log_level` | `info` | How much the daemon writes to its log: `debug`, `info`, `warn` or `error`. `MASAMONG_LOG_LEVEL` in the environment overrides it for one run. Records at `error` and above also go to `errors.log` next to the log |
 | `expected_bot_id` | `""` | Refuse to register commands when connected with a token for a different bot (protects against token mix-ups). The console fills it from Discord after saving the token (`masamong discord check --apply`) |
 
 ## admin
@@ -125,7 +126,7 @@ A model per role. Roles: `response`, `planner`, `summary`, `embed`, `rerank`, `i
 | `model` | Model name |
 | `dimensions` | Embedding dimensions (`embed` only). Default `1024`; `0` = the model's full width |
 | `price_in_per_mtok`, `price_out_per_mtok` | USD per million tokens, used when the provider reports no cost |
-| `timeout_seconds` | Time limit for one call. 0 = default (`planner` 30, `response` 90), otherwise 5–600. Past it, or on an empty reply, the other chat model takes over. Console: **Connections → Models → prices** |
+| `timeout_seconds` | Time limit for one call. 0 = default (`planner` 30, `response` 90, `vision` 30, any other role 60), otherwise 5–600. Past it, or on an empty reply, the other chat model takes over. Console: **Connections → Models → prices** |
 | `effort` | The chat roles (`response`, `planner`, `summary`, `vision`). How long a reasoning model thinks before it answers: `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. Empty = `low`. Precedence is below the table. Console: **Connections → Models → prices** |
 | `fallbacks` | The chat roles. Up to 3 models (`provider`, `model`, optional `price_in_per_mtok`, `price_out_per_mtok`, `timeout_seconds`, `effort`) asked in order when the role's model fails. A fallback's `effort` replaces the role's on that model; empty keeps the role's. Console: **Connections → Models → Fallbacks** |
 
@@ -197,7 +198,7 @@ Model calls reserve the call count at their start and add cost at completion. Wi
 | `loop_final` | `tools` | When the tool loop ends without asking its model once more. `tools`: in a short message (six words or fewer), when the round's calls are all of tools whose one result is the answer (`places.search`) and all found what they looked for. A failure, an empty or partial result, or a quote answered by a web search still asks. `search`: also when `search.web` found at least 3 results with text, unless the model searched with `depth: deep` or the message has a link. `off`: always asks. A request whose next call depends on a result ("find a cafe near here, then look up its reviews") can end at its first tool; set `off` if those are common |
 | `vision` | `auto` | Image understanding. `auto`: reads only the pictures sent when someone calls the bot (including those on the message they reply to or forward, at most 3 per reply). A picture posted just before a separate call (within 2 minutes), or sent alone within 45 seconds after a call that had none, counts as part of that call. An answer model that takes pictures sees them; otherwise another chat model describes them in 2–4 sentences inside the message. `off`: pictures are not read. No other pictures in the room are looked at, and pictures are not stored. Also on the Tools page |
 | `progress` | `deep` | The short "still looking" line. `deep`: posted as a reply, without a notification, when a deep search or a second round of searches starts. `slow`: those, and also when an ordinary search turn is still unanswered after 12 seconds. `off`: never. The line is deleted before the answer and is never stored in memory or counted for participation. Moderation bots may log the deletion. Also on the Tools page |
-| `transcript_chars` | `5000` | How many characters of the room's recent talk a reply reads back (`1000`–`20000`). The newest lines that fit come in, never fewer than the 8 latest lines. Read on every turn, no restart. Also on the Tools page |
+| `transcript_chars` | `5000` | How many characters of the room's recent talk a reply reads back (`1000`–`20000`). The newest lines that fit come in, never fewer than the 8 latest lines. Read on every turn, no restart. Used in rooms whose `attribution` is `on` or `structural` and for turns that start from a Discord message; with `attribution: off`, and in the console's test chat, the reply reads the plain recent history instead. Also on the Tools page |
 
 ## dm
 
@@ -254,7 +255,7 @@ Each room's `channels.<id>` entry also holds how a conversation with the bot goe
 | `conversation.thread_idle_close_min` | `0` (= 30) | Minutes of quiet before the bot ends its part in its thread |
 | `conversation.thread_recap` | `plan` · `always` · `off` | A short recap in the parent room when a thread ends: only when a plan or decision came out of it, always, or never |
 | `conversation.reply_shape` | `bubbles` · `trim` · `plain` | `bubbles`: two or three short paragraphs go out as separate messages a moment apart, and a reply far longer than a chat line shows its first part with a "more" button. `trim`: only the "more" button. `plain`: as written |
-| `conversation.banter` | `off` · `shadow` · `on` | **Experimental.** When someone talks about the bot in fun, one light line or an emoji back. Never for a real complaint; at most 2 lines and 4 emoji an hour; a 👎 stops lines for 2 hours. `shadow` only records what it would have done |
+| `conversation.banter` | `off` · `shadow` · `on` | **Experimental.** When someone talks about the bot in fun, one light line or an emoji back. Never for a real complaint; at most 2 lines and 4 emoji an hour; a 👎 stops lines for 2 hours. `shadow` only records what it would have done. Works only in rooms with `respond: mention` and `name_call: addressed`, for a message that says the bot's name without a mention or a reply |
 | `logging.level` | `ops` · `errors` · `off` | How much of a turn the console keeps: `ops` the whole turn, `errors` the words of failed turns only, `off` none (ids, timing, tools and costs stay). Remarks only about the bot follow the same level, with the name-call decision (`about_bot`, `unsure`, …) beside them |
 
 Every decision of these features (name calls, follow-ups, thread offers, banter) goes to a body-free log (`conversation_log`, kept for `retention.turn_days`) that the Conversation card summarizes, to tune the defaults from real use.
