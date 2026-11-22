@@ -249,6 +249,13 @@ type Event struct {
 }
 
 func Open(dataRoot string, clk clock.Clock, webBuild bool) (*Service, error) {
+	return OpenLogged(dataRoot, clk, webBuild, nil)
+}
+
+// OpenLogged is Open with the daemon's logger, wrapped so the console's live log sees its records
+// (CaptureLogs). It is installed before any worker starts: workers read s.Log, so it is never swapped
+// afterwards. A nil log keeps Open's slog.Default() without the live log.
+func OpenLogged(dataRoot string, clk clock.Clock, webBuild bool, log *slog.Logger) (*Service, error) {
 	if clk == nil {
 		clk = clock.Real{}
 	}
@@ -263,6 +270,9 @@ func Open(dataRoot string, clk clock.Clock, webBuild bool) (*Service, error) {
 		WebBuild: webBuild,
 		Log:      slog.Default(),
 		watchers: map[chan Event]struct{}{},
+	}
+	if log != nil {
+		s.Log = s.CaptureLogs(log)
 	}
 	s.cfg.Store(&configSnapshot{doc: config.Document{}, reg: buildRegistry(config.Default("", dataRoot), s.Log, s.Clock.Now)})
 	opened := false
@@ -414,7 +424,7 @@ func (s *Service) ownedGo(name string, fn func(context.Context)) {
 		return
 	}
 	// the logger for a crash report is read here, before the goroutine starts; the worker's own logging
-	// still reads s.Log, so set it before starting workers (tests: setupSvcLog)
+	// still reads s.Log, so set it before starting workers (the daemon: OpenLogged; tests: setupSvcLog)
 	log := s.Log
 	go func() { defer done(); defer crash.Recover(log, name); fn(ctx) }()
 }

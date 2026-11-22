@@ -111,8 +111,11 @@ func main() {
 		log.Error("lock", "err", err)
 		os.Exit(launcher.ExitLocked)
 	}
-	restart, bind := run(dataRoot, forceWeb, restartBind, supervisor, log)
+	restart, bind, err := run(dataRoot, forceWeb, restartBind, supervisor, log)
 	lock.Release()
+	if err != nil {
+		os.Exit(1) // run logged why; its deferred shutdown has already stopped the work and closed the database
+	}
 	if restart && supervised {
 		os.Exit(launcher.ExitRestart) // the supervisor starts a fresh copy on the same address
 	}
@@ -189,25 +192,29 @@ const (
 	shutdownReplyWait      = 18 * time.Second       // in-flight replies record their outcome (gateway 12s + 3s)
 )
 
-// run serves until a signal or an operator stop (false) or an operator restart request (true).
-func run(dataRoot string, forceWeb bool, restartBind string, supervisor int, log *slog.Logger) (bool, string) {
+// run serves until a signal or an operator stop (false) or an operator restart request (true). A
+// failure is returned, not exited on, so the deferred shutdown still runs: jobs record why they
+// stopped and the database closes. The caller decides the exit code.
+func run(dataRoot string, forceWeb bool, restartBind string, supervisor int, log *slog.Logger) (restart bool, bind string, err error) {
 	// a reset staged by instance.reset, or a restore staged by backup.restore, runs before the database
 	// opens; the programs an in-app update replaced are cleaned up
 	if err := application.CleanUpdateLeftovers(); err != nil {
-		return runMaintenance(dataRoot, restartBind, err, log)
+		restart, bind = runMaintenance(dataRoot, restartBind, err, log)
+		return restart, bind, nil
 	}
 	if err := application.RecoverMaintenance(dataRoot, log); err != nil {
-		return runMaintenance(dataRoot, restartBind, err, log)
+		restart, bind = runMaintenance(dataRoot, restartBind, err, log)
+		return restart, bind, nil
 	}
-	svc, err := application.Open(dataRoot, nil, web.Embedded())
+	// the logger goes in with Open: the workers Open starts read svc.Log, so it is not swapped afterwards
+	svc, err := application.OpenLogged(dataRoot, nil, web.Embedded(), log)
 	if err != nil {
 		log.Error("open", "err", err)
-		os.Exit(1)
+		return false, "", err
 	}
 	defer svc.Close()
 	svc.Daemon = true
-	log = svc.CaptureLogs(log)
-	svc.Log = log
+	log = svc.Log
 	if !svc.Ready() {
 		log.Warn("instance not initialised; finish setup in the console")
 	}
@@ -216,25 +223,15 @@ func run(dataRoot string, forceWeb bool, restartBind string, supervisor int, log
 	defer stop()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	restart := false
 	srv := web.New(svc)
 	srv.Force = forceWeb
 	srv.UseRestartBind(restartBind)
-	go func() {
-		select {
-		case l := <-svc.LifecycleRequests():
-			restart = l == application.Lifecycle("restart")
-			if restart {
-				srv.PreserveSessionsForRestart()
-			}
-			log.Info("lifecycle request", "request", string(l))
-			// let the console answer the request before the listener closes
-			time.Sleep(shutdownLifecycleDelay)
-			cancel()
-		case <-ctx.Done():
+	life := watchLifecycle(ctx, cancel, svc.LifecycleRequests(), srv.PreserveSessionsForRestart, log)
+	defer func() {
+		if err == nil { // a failed run is not a clean stop: the next start counts it as one that ended abnormally
+			svc.NoteStop(restart)
 		}
 	}()
-	defer func() { svc.NoteStop(restart) }()
 
 	svc.ResumeJobs(ctx)
 	defer svc.WaitJobs(shutdownJobWait) // before svc.Close: running jobs stop and record why
@@ -266,11 +263,52 @@ func run(dataRoot string, forceWeb bool, restartBind string, supervisor int, log
 		}
 		defer launcher.RemoveInfo(dataRoot)
 	}
-	if err := srv.Listen(ctx); err != nil && !errors.Is(err, context.Canceled) {
-		log.Error("listen", "err", err)
-		os.Exit(1)
+	if err = srv.Listen(ctx); errors.Is(err, context.Canceled) {
+		err = nil
 	}
-	return restart, srv.Bind()
+	if err != nil {
+		log.Error("listen", "err", err)
+	}
+	// a console that failed to listen stops the run as a signal does, so the deferred waits below are not
+	// left waiting on work that was never told to stop
+	cancel()
+	return life.result(), srv.Bind(), err
+}
+
+// lifecycleWatch turns an operator's stop or restart request into the end of the run.
+type lifecycleWatch struct {
+	done    chan struct{}
+	restart bool // written by the watch before done closes
+}
+
+// watchLifecycle cancels the run when the console asks to stop or restart. A restart keeps the console
+// sessions; the console gets shutdownLifecycleDelay to answer before the listener closes.
+func watchLifecycle(ctx context.Context, cancel context.CancelFunc, requests <-chan application.Lifecycle, keepSessions func(), log *slog.Logger) *lifecycleWatch {
+	w := &lifecycleWatch{done: make(chan struct{})}
+	go func() {
+		defer close(w.done)
+		select {
+		case l := <-requests:
+			w.restart = l == application.Lifecycle("restart")
+			if w.restart {
+				keepSessions()
+			}
+			log.Info("lifecycle request", "request", string(l))
+			// let the console answer the request before the listener closes
+			time.Sleep(shutdownLifecycleDelay)
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	return w
+}
+
+// result reports whether the run ends in a restart. It waits for the watch to end, which it does once
+// the run context is done: a signal and a request can arrive together, and the answer must be the one
+// the watch acted on.
+func (w *lifecycleWatch) result() bool {
+	<-w.done
+	return w.restart
 }
 
 // A failed maintenance operation never opens the SQL store. This small loopback
