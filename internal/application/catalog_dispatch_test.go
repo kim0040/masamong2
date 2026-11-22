@@ -2,11 +2,7 @@ package application
 
 import (
 	"context"
-	"go/ast"
-	"go/parser"
-	"go/token"
 	"sort"
-	"strconv"
 	"testing"
 	"time"
 
@@ -15,8 +11,8 @@ import (
 	"masamong/internal/errcode"
 )
 
-// The catalog (internal/catalog), the Execute switch (service.go) and the transports are three hand-kept
-// lists of the same Actions. These tests keep the catalog and the switch together: a catalog ID that
+// The catalog (internal/catalog), the handler table (dispatch.go) and the transports are hand-kept
+// lists of the same Actions. These tests keep the catalog and the table together: a catalog ID that
 // Execute does not know answers ACTION_UNKNOWN on every surface, and nothing else would notice.
 
 // A catalog Action that can run on the practice instance (offline providers, its own data root) must
@@ -37,7 +33,7 @@ func TestEveryCatalogActionReachesAHandler(t *testing.T) {
 		res := p.Execute(ctx, action.Request{Action: d.ID, Input: []byte(`{}`)})
 		cancel()
 		if res.Error != nil && res.Error.Code == errcode.ActionUnknown {
-			t.Errorf("catalog Action %s answers %s: Service.execute has no case for it", d.ID, errcode.ActionUnknown)
+			t.Errorf("catalog Action %s answers %s: the Action table has no handler for it", d.ID, errcode.ActionUnknown)
 		}
 		ran++
 	}
@@ -47,10 +43,9 @@ func TestEveryCatalogActionReachesAHandler(t *testing.T) {
 }
 
 // The Actions the practice instance refuses (practiceBlocked) and the ones switched off in the catalog
-// stop before the switch, so running them proves nothing (and some would restart or reset a real
-// instance). For those, the main `switch req.Action` of Service.execute must still list the ID.
-func TestPracticeBlockedAndDeferredActionsAreInTheExecuteSwitch(t *testing.T) {
-	cases := executeCases(t)
+// stop before the handler table, so running them proves nothing (and some would restart or reset a real
+// instance). For those, the table (dispatch.go) must still list the ID.
+func TestPracticeBlockedAndDeferredActionsAreInTheHandlerTable(t *testing.T) {
 	check := map[string]string{}
 	for _, d := range catalog.All() {
 		if d.Availability != catalog.Executable {
@@ -70,66 +65,33 @@ func TestPracticeBlockedAndDeferredActionsAreInTheExecuteSwitch(t *testing.T) {
 	}
 	sort.Strings(ids)
 	for _, id := range ids {
-		if !cases[id] {
-			t.Errorf("%s (%s) has no case in Service.execute", id, check[id])
+		if _, ok := handlerFor(id); !ok {
+			t.Errorf("%s (%s) has no handler in the Action table", id, check[id])
 		}
 	}
 }
 
-// executeCases returns the string constants of the case clauses of the main switch in Service.execute
-// (the switch on req.Action that has a default clause).
-func executeCases(t *testing.T) map[string]bool {
-	t.Helper()
-	file, err := parser.ParseFile(token.NewFileSet(), "service.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
+// Every catalog Action has a handler, and every handler is for a catalog Action: an entry the catalog
+// does not list can never be reached (Service.execute looks the ID up in the catalog first), so it is a
+// leftover. Operator-defined HTTP tools run before the table and are not in it.
+func TestActionTableMatchesTheCatalog(t *testing.T) {
+	table := buildActionTable()
+	if len(table) < 100 {
+		t.Fatalf("the Action table has %d entries; dispatch.go changed shape", len(table))
 	}
-	cases := map[string]bool{}
-	found := false
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Name.Name != "execute" || fn.Recv == nil || fn.Body == nil {
-			continue
-		}
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			sw, ok := n.(*ast.SwitchStmt)
-			if !ok || !switchesOnRequestAction(sw) || !hasDefault(sw) {
-				return true
-			}
-			found = true
-			for _, stmt := range sw.Body.List {
-				cc := stmt.(*ast.CaseClause)
-				for _, e := range cc.List {
-					if lit, ok := e.(*ast.BasicLit); ok && lit.Kind == token.STRING {
-						if id, err := strconv.Unquote(lit.Value); err == nil {
-							cases[id] = true
-						}
-					}
-				}
-			}
-			return false
-		})
-	}
-	if !found || len(cases) < 100 {
-		t.Fatalf("found the main switch of Service.execute: %v, with %d cases; service.go changed shape", found, len(cases))
-	}
-	return cases
-}
-
-func switchesOnRequestAction(sw *ast.SwitchStmt) bool {
-	sel, ok := sw.Tag.(*ast.SelectorExpr)
-	if !ok || sel.Sel.Name != "Action" {
-		return false
-	}
-	x, ok := sel.X.(*ast.Ident)
-	return ok && x.Name == "req"
-}
-
-func hasDefault(sw *ast.SwitchStmt) bool {
-	for _, stmt := range sw.Body.List {
-		if cc, ok := stmt.(*ast.CaseClause); ok && cc.List == nil {
-			return true
+	inCatalog := map[string]bool{}
+	for _, d := range catalog.All() {
+		inCatalog[d.ID] = true
+		if _, ok := table[d.ID]; !ok {
+			t.Errorf("catalog Action %s has no handler in the Action table", d.ID)
 		}
 	}
-	return false
+	for id, h := range table {
+		if h == nil {
+			t.Errorf("Action table entry %s has a nil handler", id)
+		}
+		if !inCatalog[id] {
+			t.Errorf("Action table entry %s is not a catalog Action", id)
+		}
+	}
 }
