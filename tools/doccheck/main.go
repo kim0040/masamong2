@@ -1,4 +1,4 @@
-// doccheck keeps the documentation honest, in three ways:
+// doccheck keeps the documentation honest, in four ways:
 //
 //   - links: every relative link, and every link to this repository's files or wiki pages, points at a
 //     file that exists (wiki links had broken before; nothing caught them);
@@ -11,6 +11,11 @@
 //
 //   - commands: a slash command is named the way Discord shows it in the page's language (a Korean
 //     page says /날씨, not /weather).
+//
+//   - versions: the five READMEs and the two wiki home pages (Home, English) state the same version, and
+//     it is the version of the newest release-notes/vX.Y.Z.json. The version is bumped at release, so a
+//     README that was not brought along fails here, not in a user's browser. (The tree itself carries
+//     an unreleased "-dev" version, so the pages are compared with each other and the notes, not a tag.)
 //
 //     go run ./tools/doccheck          check (go test ./tools/doccheck runs the same)
 //     go run ./tools/doccheck -write   after updating every language of a changed page, record them
@@ -31,6 +36,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"masamong/internal/docnames"
@@ -73,6 +79,7 @@ func main() {
 	}
 	problems := append(checkLinks(root), checkTranslations(root)...)
 	problems = append(problems, checkCommands(root)...)
+	problems = append(problems, checkVersions(root)...)
 	for _, p := range problems {
 		fmt.Println(p)
 	}
@@ -80,7 +87,7 @@ func main() {
 		fmt.Printf("\n%d problem(s)\n", len(problems))
 		os.Exit(1)
 	}
-	fmt.Println("doccheck: links, translations and command names ok")
+	fmt.Println("doccheck: links, translations, command names and versions ok")
 }
 
 func repoRoot() (string, error) {
@@ -707,4 +714,107 @@ func orEmpty(v, d string) string {
 		return d
 	}
 	return v
+}
+
+// versionPages carry the version the product says it is: the READMEs (README.md first, the others are
+// its translations) and the wiki home pages in Korean and English.
+func versionPages(root string) ([]string, error) {
+	readmes, err := filepath.Glob(filepath.Join(root, "README*.md"))
+	if err != nil {
+		return nil, err
+	}
+	pages := []string{"README.md"}
+	for _, r := range readmes {
+		if name := filepath.Base(r); name != "README.md" {
+			pages = append(pages, name)
+		}
+	}
+	sort.Strings(pages[1:])
+	return append(pages, wikiDir+"/Home.md", wikiDir+"/English.md"), nil
+}
+
+var (
+	// "Version: `1.5.1`", "현재 버전: `1.5.1` · …": a short label, then the version in code quotes
+	versionLine = regexp.MustCompile("^[^`\n]{0,40}`(\\d+\\.\\d+\\.\\d+)`")
+	notesFile   = regexp.MustCompile(`^v(\d+)\.(\d+)\.(\d+)\.json$`)
+)
+
+// pageVersion is the version a page states in its first lines.
+func pageVersion(raw string) (string, bool) {
+	for i, line := range strings.Split(raw, "\n") {
+		if i >= 40 {
+			break
+		}
+		if m := versionLine.FindStringSubmatch(line); m != nil {
+			return m[1], true
+		}
+	}
+	return "", false
+}
+
+// newestNotes is the highest version that has a release-notes/vX.Y.Z.json, or "" when there are none.
+func newestNotes(root string) (string, error) {
+	entries, err := os.ReadDir(filepath.Join(root, "release-notes"))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	best, bestKey := "", [3]int{-1, -1, -1}
+	for _, e := range entries {
+		m := notesFile.FindStringSubmatch(e.Name())
+		if m == nil {
+			continue
+		}
+		var key [3]int
+		for i := range key {
+			key[i], _ = strconv.Atoi(m[i+1])
+		}
+		if key[0] > bestKey[0] || key[0] == bestKey[0] && (key[1] > bestKey[1] || key[1] == bestKey[1] && key[2] > bestKey[2]) {
+			best, bestKey = fmt.Sprintf("%d.%d.%d", key[0], key[1], key[2]), key
+		}
+	}
+	return best, nil
+}
+
+// checkVersions reports pages whose stated version differs from README.md's, and a README.md that is not
+// at the version of the newest release notes.
+func checkVersions(root string) []string {
+	pages, err := versionPages(root)
+	if err != nil {
+		return []string{"versions: " + err.Error()}
+	}
+	var problems []string
+	versions := map[string]string{}
+	for _, f := range pages {
+		raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(f)))
+		if err != nil {
+			problems = append(problems, fmt.Sprintf("versions: %s: %v", f, err))
+			continue
+		}
+		v, ok := pageVersion(string(raw))
+		if !ok {
+			problems = append(problems, fmt.Sprintf("versions: %s states no version in its first lines (a label and the version in code quotes)", f))
+			continue
+		}
+		versions[f] = v
+	}
+	want, ok := versions["README.md"]
+	if !ok {
+		return problems
+	}
+	for _, f := range pages {
+		if v, ok := versions[f]; ok && v != want {
+			problems = append(problems, fmt.Sprintf("versions: %s says %s, README.md says %s; bring every page to the same version", f, v, want))
+		}
+	}
+	newest, err := newestNotes(root)
+	switch {
+	case err != nil:
+		problems = append(problems, "versions: "+err.Error())
+	case newest != "" && newest != want:
+		problems = append(problems, fmt.Sprintf("versions: README.md says %s, the newest release notes are v%s; bump the version on every README and wiki home page", want, newest))
+	}
+	return problems
 }
