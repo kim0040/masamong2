@@ -252,7 +252,7 @@ func TestModelReasoningRows(t *testing.T) {
 	s := effortService(t, url, func(d *config.Document) {})
 	yes := true
 	s.storePrices("host", []openai.Model{{ID: "m-planner", Reasoning: &yes, Efforts: []string{"low", "medium", "high"}, Thinking: []string{"adaptive", "disabled"}, PromptPrice: "0.000001", CompletionPrice: "0.000002"}})
-	capsStates.Delete(s) // a new process: only the stored list is left
+	forgetCaps(s) // a new process: only the stored list is left
 	rows := s.modelReasoning()
 	got, _ := rows["host/m-planner"].(map[string]any)
 	if got["reasoning"] != true || strings.Join(got["efforts"].([]string), ",") != "none,minimal,low,medium,high" || got["thinking_off"] != "disabled" {
@@ -263,7 +263,7 @@ func TestModelReasoningRows(t *testing.T) {
 	}
 	// outside Anthropic the list decides about none too: a model that must think offers no none
 	s.storePrices("host", []openai.Model{{ID: "m-planner", Reasoning: &yes, Efforts: []string{"low", "medium", "high", "xhigh", "max"}}})
-	capsStates.Delete(s)
+	forgetCaps(s)
 	got, _ = s.modelReasoning()["host/m-planner"].(map[string]any)
 	if strings.Join(got["efforts"].([]string), ",") != "low,medium,high,xhigh,max" || got["thinking_off"] != nil {
 		t.Fatalf("a model that must think: %v", got)
@@ -282,7 +282,7 @@ func TestStoredCapsKeepKnownEmptyLists(t *testing.T) {
 		{ID: "m-planner", Reasoning: &yes, Efforts: []string{}, Thinking: []string{"enabled", "disabled"}, PromptPrice: "0.000001", CompletionPrice: "0.000005"},
 		{ID: "m-response", Reasoning: &yes, PromptPrice: "0.000001", CompletionPrice: "0.000005"},
 	})
-	capsStates.Delete(s) // a new process: only the stored list is left
+	forgetCaps(s) // a new process: only the stored list is left
 	cache := s.modelCaps("host", s.Doc().Providers["host"])
 	c, known := cache.Get("m-planner")
 	if !known || c.Efforts == nil || len(c.Efforts) != 0 || strings.Join(c.Thinking, ",") != "enabled,disabled" {
