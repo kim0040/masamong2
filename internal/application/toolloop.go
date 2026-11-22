@@ -62,7 +62,8 @@ func (c chatLLM) ChatTools(ctx context.Context, role string, msgs []chat.LoopMsg
 	}
 	if d > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, d)
+		// with fallbacks each model gets its own limit inside the adapter; the whole chain gets their sum (as in ask)
+		ctx, cancel = context.WithTimeout(ctx, chainTimeout(r.a, d))
 		defer cancel()
 	}
 	om := make([]openai.Message, len(msgs))
