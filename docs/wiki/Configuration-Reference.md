@@ -55,7 +55,7 @@ masamong config apply --file new.yaml --base_revision $rev
 | `token_ref` | `env:MASAMONG_DISCORD_TOKEN` | Bot token reference |
 | `command_prefix` | `!` | Prefix for `!` commands |
 | `register_commands` | `true` | Register slash commands automatically |
-| `message_content` | `false` | Read ordinary messages (also turn on Message Content Intent in the portal) |
+| `message_content` | `false` | Read ordinary messages (also turn on Message Content Intent in the portal). Off: in a server the bot answers slash commands only; mentions and `!` commands are not read |
 | `guild_ids` | `[]` | Servers to register slash commands in; empty means global |
 
 ## i18n

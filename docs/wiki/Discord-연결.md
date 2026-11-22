@@ -6,7 +6,7 @@
 
 1. [Discord Developer Portal](https://discord.com/developers/applications)에 접속하여 **New Application**을 클릭하고 새 애플리케이션을 생성합니다.
 2. 좌측 메뉴의 **Bot** 탭으로 이동한 뒤 **Reset Token**을 클릭하여 봇 토큰(Bot Token)을 발급받습니다. (토큰은 발급 시 단 한 번만 조회 가능하므로 즉시 복사해 둡니다.)
-3. 동일한 **Bot** 탭 화면 하단의 **Privileged Gateway Intents** 섹션에서 **Message Content Intent** 토글을 켭니다. (봇이 멘션 감지, 접두사 명령어(`!`), 실시간 대화 기억 수집을 위해 메시지 본문을 읽으려면 반드시 필요합니다.)
+3. 동일한 **Bot** 탭 화면 하단의 **Privileged Gateway Intents** 섹션에서 **Message Content Intent** 토글을 켭니다. (봇이 멘션 감지, 접두사 명령어(`!`), 실시간 대화 기억 수집을 위해 메시지 본문을 읽으려면 반드시 필요합니다.) 설정의 `discord.message_content`가 꺼져 있으면(기본값) 서버의 일반 메시지는 멘션까지 모두 무시하고 슬래시 명령에만 답합니다. 개인 메시지(DM)는 그대로 동작합니다.
 ## 2. 관리 콘솔에 봇 자격증명 등록
 
 관리 콘솔의 **연결 → Discord** 메뉴(또는 첫 설정의 Discord 단계)에서 복사한 봇 토큰을 넣고 Discord 활성화 스위치를 켭니다. 애플리케이션 ID는 복사하지 않아도 됩니다: 토큰을 저장하면 콘솔이 Discord에 저장된 토큰으로 직접 물어서(`GET /applications/@me`, `masamong discord check`) 봇 이름과 ID를 채우고(`instance.expected_bot_id`), 개발자 포털에서 **Message Content Intent**가 켜져 있는지도 보여 줍니다. 설정은 메시지 읽기를 쓰는데 포털에서 꺼져 있으면 Discord가 연결을 거부하므로(종료 코드 4014) 빨간 안내와 포털 링크가 나옵니다. 토큰이 거절되면 포털에서 **Reset Token**으로 새로 받으라고 안내합니다. 설정을 저장한 뒤 서비스 데몬을 재시작하면 Discord Gateway에 자동으로 연결됩니다. 등록된 봇 토큰은 macOS에서는 Keychain에, Windows에서는 자격 증명 관리자에, Linux·FreeBSD에서는 데이터 폴더의 소유자 전용 키 파일에 보관됩니다(파일은 권한으로 보호할 뿐 암호화하지 않습니다). 설정 파일에는 `keychain:`, `file:`, `env:` 형태의 참조 식별자만 남습니다([보안과 개인정보](https://github.com/kim0040/masamong2/wiki/보안과-개인정보)).

@@ -6,7 +6,7 @@
 
 1. In the [Discord Developer Portal](https://discord.com/developers/applications), press **New Application**.
 2. On the **Bot** tab, press **Reset Token** to get the bot token. It is shown only once, so copy it right away.
-3. On the same tab, under **Privileged Gateway Intents**, turn on **Message Content Intent**. The bot needs it to notice its name, to run `!` commands and to remember conversation.
+3. On the same tab, under **Privileged Gateway Intents**, turn on **Message Content Intent**. The bot needs it to notice its name, to run `!` commands and to remember conversation. With `discord.message_content` off (the default) the bot ignores every ordinary message in a server, mentions included, and answers slash commands only; direct messages still work.
 
 ## 2. Give the token to the console
 
