@@ -351,6 +351,14 @@ func (s *Service) Close() error {
 			}
 			q.mu.Unlock()
 		}
+		if v, ok := memStates.Load(s); ok { // a memory rebuild stops at its next stage instead of holding Close
+			st := v.(*memoryState)
+			st.mu.Lock()
+			if st.eng != nil {
+				st.eng.StopReload()
+			}
+			st.mu.Unlock()
+		}
 		s.workWG.Wait()
 		s.part.mu.Lock()
 		for _, c := range s.part.chans {
