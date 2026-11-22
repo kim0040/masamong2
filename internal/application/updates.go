@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"masamong/internal/action"
@@ -30,8 +29,6 @@ var UpdateRepo = "kim0040/masamong2"
 var updateAPI = "https://api.github.com/repos/%s/releases/latest"
 
 const updateEvery = 24 * time.Hour
-
-var updateApplying atomic.Bool
 
 type updateState struct {
 	CheckedAt string `json:"checked_at,omitempty"`

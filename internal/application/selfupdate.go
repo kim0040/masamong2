@@ -165,10 +165,10 @@ func (s *Service) updateApply(ctx context.Context, req action.Request) action.Re
 		return fail(errcode.IO, err.Error(), nil)
 	}
 	defer unlock()
-	if !updateApplying.CompareAndSwap(false, true) {
+	if !s.runs.updateApply.CompareAndSwap(false, true) {
 		return fail(errcode.InvalidInput, "an update is already being installed", nil)
 	}
-	defer updateApplying.Store(false)
+	defer s.runs.updateApply.Store(false)
 	var st updateState
 	_, _ = s.kvGet("updates:state", &st)
 	if why := s.updateBlocked(st); why != "" {
