@@ -2050,7 +2050,8 @@ func (g *Gateway) runCommand(s *discordgo.Session, m *discordgo.MessageCreate, c
 	defer cancel()
 	mark := g.svc.SettledMark() // before the command reads anything: its result may go on into a chat turn
 	res := g.svc.Execute(ctx, requestFor(cmd, opts, ictx, "dc:"+m.ID))
-	if application.Unanswered(res) && (!ictx.Private || m.GuildID == "") { // a DM: CommandToChat checks DM chat is open
+	// a personal command's failure in a room stays its DM card, never a reply there; a DM: CommandToChat checks DM chat
+	if application.Unanswered(res) && (!cmd.Private || m.GuildID == "") {
 		// no answer from the tool: carry on as a conversation, off the event loop
 		g.work(func(base context.Context) {
 			// the reply is posted inside the turn: the conversation keeps only what reached Discord
