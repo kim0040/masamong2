@@ -45,8 +45,10 @@ func TestReviewAliasWriteRollback(t *testing.T) {
 
 func TestReviewAliasMigration200k(t *testing.T) {
 	size := 200000
-	if runtime.GOOS == "windows" {
-		size = 20000 // the same path at a tenth of the size: a Windows CI runner needs minutes per 10,000 rows
+	if runtime.GOOS == "windows" || raceDetector {
+		// the same path at a tenth of the size: a Windows CI runner needs minutes per 10,000 rows,
+		// and the race detector slows the fill several times over
+		size = 20000
 	}
 	reviewAliasMigration(t, size, 90*time.Second)
 }
@@ -112,10 +114,10 @@ func reviewAliasMigration(t testing.TB, size int, bound time.Duration) {
 	}
 	elapsed := time.Since(start)
 	t.Logf("fill of %d rows: %v", size, elapsed)
-	// The bound is checked where disk syncs are cheap. Windows CI runners took about 3 s a
-	// 512-row batch (19 minutes at 200,000 rows); the fill runs in the background there too, so
-	// only its correctness is checked.
-	if elapsed > bound && runtime.GOOS != "windows" {
+	// The bound is checked where disk syncs are cheap and nothing instruments the code. Windows CI
+	// runners took about 3 s a 512-row batch (19 minutes at 200,000 rows) and -race takes over two
+	// minutes at 200,000; the fill runs in the background there too, so only its correctness is checked.
+	if elapsed > bound && runtime.GOOS != "windows" && !raceDetector {
 		t.Fatalf("fill exceeded %v: %v", bound, elapsed)
 	}
 	checkCursor(-1)
