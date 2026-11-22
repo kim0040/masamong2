@@ -667,10 +667,11 @@ func storedDeliveries(t *testing.T, svc *application.Service) map[string]map[str
 
 // What each room was told survives a restart and follows the level in force. A level that ends takes
 // its deliveries with it even where its lift failed to post, so when that level is issued again, its
-// lift goes only where the new issue was posted.
+// lift goes only where the new issue was posted. A room that no longer watches any area (earthquakes
+// only) or was removed loses its deliveries at the next check and gets no lift.
 func TestDisasterDeliveriesFollowTheLevelInForce(t *testing.T) {
 	const area = "L1052100"
-	for _, change := range []string{"restart", "lift failed, then issued again"} {
+	for _, change := range []string{"restart", "lift failed, then issued again", "areas cleared", "room removed"} {
 		t.Run(change, func(t *testing.T) {
 			svc := setupSvc(t)
 			feed := &kmaFeed{}
@@ -716,6 +717,22 @@ func TestDisasterDeliveriesFollowTheLevelInForce(t *testing.T) {
 					t.Fatalf("issued again: %q", got)
 				}
 				gw.failing = ""
+				want = want[1:]
+			}
+			if change == "areas cleared" || change == "room removed" {
+				if change == "areas cleared" {
+					if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "a", "watch_level": map[string]int{}}); !r.OK {
+						t.Fatal(r.Error)
+					}
+				} else {
+					applyDoc(t, svc, func(d *config.Document) { delete(d.Guilds["g1"].Channels, "a") })
+				}
+				if got := tick(svc, 10, rain); len(got) != 0 {
+					t.Fatalf("unchanged warnings: %q", got)
+				}
+				if sent := storedDeliveries(t, svc); len(sent[area+"|R"]) != 1 || sent[area+"|R"]["b"] != "3" {
+					t.Fatalf("room a's delivery outlived its areas: %v", sent)
+				}
 				want = want[1:]
 			}
 			if err := svc.Close(); err != nil {

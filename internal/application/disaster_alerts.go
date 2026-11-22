@@ -147,7 +147,7 @@ func (s *Service) disasterTick(ctx context.Context) {
 	}
 	s.disaster.mu.Unlock()
 	if due {
-		if n, err := s.warningTick(ctx, poster, channels, cfg); err != nil {
+		if n, err := s.warningTick(ctx, poster, channels, doc); err != nil {
 			fail(err)
 		} else if n > 0 {
 			st.LastSentAt, st.LastSentKind, st.LastSentCount = checkedAt, "warning", n
@@ -426,8 +426,10 @@ func (snapshot warningSnapshot) record(w kma.Warning) {
 	snapshot[key] = w
 }
 
-// warningTick announces changes to the active level of each area's warning.
-func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channels []disasterChannel, cfg config.DisasterAlerts) (int, error) {
+// warningTick announces changes to the active level of each area's warning. doc is the check's
+// configuration snapshot, the one channels were chosen from.
+func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channels []disasterChannel, doc config.Document) (int, error) {
+	cfg := doc.DisasterAlerts
 	r := s.Registry()
 	if err := r.reserve(r.kmaID); err != nil {
 		return 0, err
@@ -479,10 +481,30 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 	if before == nil {
 		before = warningSnapshot{}
 	}
+	// A room removed from the configuration, or one that watches no area any more (earthquakes only), is
+	// told nothing more about weather: what it was told is dropped and it gets no lift. Lifts read told,
+	// the stored record without those rooms.
+	watching := map[string]bool{}
+	for _, g := range doc.Guilds {
+		for id, c := range g.Channels {
+			if len(c.WatchLevel) > 0 {
+				watching[id] = true
+			}
+		}
+	}
+	told := map[string]map[string]string{}
+	for k, rooms := range stored.Sent {
+		for room, level := range rooms {
+			if watching[room] {
+				if told[k] == nil {
+					told[k] = map[string]string{}
+				}
+				told[k][room] = level
+			}
+		}
+	}
 	// what each room was told is kept only for the level still in force: a level that ended is gone with
-	// its lift, whether or not the lift reached the room, and a later issue of it needs its own delivery.
-	// Lifts read the stored copy.
-	told := stored.Sent
+	// its lift, whether or not the lift reached the room, and a later issue of it needs its own delivery
 	next := warningState{Version: warningStateVersion, Active: current}
 	for k, rooms := range told {
 		w, ok := current[k]
@@ -504,7 +526,7 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 	}
 	// the set is stored only when it changed (or on the first check): most checks find the same warnings.
 	// It is stored before anything is sent, so a crash or a failed channel never repeats a card.
-	if !seen || !reflect.DeepEqual(before, current) || !reflect.DeepEqual(told, next.Sent) {
+	if !seen || !reflect.DeepEqual(before, current) || !reflect.DeepEqual(stored.Sent, next.Sent) {
 		if err := s.kvSet("disaster:wrn_active", next); err != nil {
 			return 0, err
 		}
