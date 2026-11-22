@@ -649,6 +649,24 @@ add("stats", {
     "quality_title": ("답변 품질", "Answer quality"), "quality_desc": ("품질은 단순 통계로 추정하지 않으며, 답변 실험실에서 판정을 수집하고 비교 평가합니다.", "Quality is not inferred from operations stats; judge and compare in the answer lab."),
     "to_lab": ("실험실로 이동", "Open the lab"),
 })
+add("stats.export", {
+    "title": ("통계 내보내기", "Export statistics"),
+    "desc": ("이 설치의 주 단위 합계를 파일로 만듭니다. 대화 내용, 이름, ID, 주소, 키는 들어 있지 않고, 프로그램이 이 파일을 어디로도 보내지 않습니다.",
+             "Builds a file of weekly totals for this install. It holds no message text, names, IDs, addresses or keys, and the program never sends it anywhere."),
+    "period": ("내보낼 기간", "Period"), "weeks": ("최근 {n}주", "Last {n} weeks"),
+    "build": ("파일 만들기", "Build the file"),
+    "note_manual": ("자동으로 전송되지 않습니다. 파일을 직접 보내기 전에 아래 내용을 모두 읽어 보세요.", "Nothing is sent automatically. Read the whole file below before you send it yourself."),
+    "note_public": ("공개 이슈에 붙인 파일은 누구나 볼 수 있습니다. 설치 ID가 같은 파일은 같은 설치에서 나왔다는 것이 드러납니다.", "A file attached to a public issue can be read by anyone. Files with the same install ID show that they come from one install."),
+    "off": ("통계 수집이 꺼져 있습니다(stats.enabled). 새로 모으지 않고, 이미 모은 값만 내보냅니다.", "Collection is off (stats.enabled). Nothing new is collected; only what was collected earlier is exported."),
+    "summary": ("{from} ~ {to} · 행 {rows}개", "{from} to {to} · {rows} rows"),
+    "empty": ("이 기간에는 내보낼 통계가 아직 없습니다.", "There are no statistics to export for this period yet."),
+    "file_label": ("내보낼 파일 전체", "The complete file"),
+    "id": ("설치 ID", "Install ID"), "download": ("파일 내려받기", "Download the file"),
+    "reset": ("설치 ID 새로 만들기", "New install ID"),
+    "reset_title": ("설치 ID를 새로 만들까요?", "Make a new install ID?"),
+    "reset_body": ("이미 보낸 파일과 앞으로 보낼 파일이 같은 설치에서 나왔다는 연결이 끊어집니다. 모은 통계는 그대로 남습니다.", "Files you sent earlier can no longer be linked to files you send from now on. The statistics themselves stay."),
+    "reset_done": ("새 설치 ID를 만들었습니다", "New install ID made"),
+})
 add("usage", {
     "title": ("비용·한도", "Costs & limits"), "desc": ("월 예산과 모든 도구의 하루 사용 한도를 한곳에서 정합니다.", "The monthly budget and every tool's daily limits in one place."),
     "preset": ("한도 프리셋", "Limit preset"), "preset_hint": ("프리셋을 고르면 모든 도구의 사람당·방당 한도와 대기 시간이 한 번에 채워집니다. 저장 전까지 바뀌지 않습니다.", "A preset fills every tool's per-person and per-room limits and wait at once. Nothing changes until you save."),
@@ -2214,6 +2232,19 @@ add("cfg", {
     "updates.desc": ("하루에 한 번 GitHub에 새 버전이 있는지 묻습니다. 프로그램 이름과 버전만 보내며, 자동으로 설치하지는 않습니다.",
                      "Once a day the service asks GitHub whether a newer version is out. It sends only its name and version and installs nothing."),
     "updates.check": ("새 버전 확인", "Check for new versions"),
+})
+add("cfg", {
+    "stats": ("통계", "Statistics"),
+    "stats.desc": ("이 설치가 한 일의 하루 합계를 자기 데이터베이스에만 모읍니다. 어디로도 보내지 않으며, 콘솔이나 `stats export`로 파일을 만들어 직접 공유할 수 있습니다.",
+                   "Keeps daily totals of what this install does in its own database only. Nothing is sent anywhere; the console or `stats export` can build a file you share by hand."),
+    "stats.enabled": ("통계 모으기", "Collect statistics"),
+    "stats.enabled.hint": ("끄면 새 통계를 모으지 않습니다. 이미 모은 값은 남아 있고 내보낼 수 있습니다.", "When off, nothing new is collected. What was collected earlier stays and can still be exported."),
+    "retention.ledger_days": ("호출 기록 보관 기간(일)", "Call records (days)"),
+    "retention.ledger_days.hint": ("모델 호출, 도구 호출, 답장 전달 기록(본문 없음)의 보관 기간입니다. 0 입력 시 기본값 90일, -1 설정 시 영구 보관.", "How long the model call, tool call and reply delivery records (no message text) are kept. 0 = default 90, -1 = forever."),
+    "retention.pending_days": ("확정 전 제안 보관 기간(일)", "Unconfirmed offers (days)"),
+    "retention.pending_days.hint": ("아무도 확정하지 않은 알림 제안과 그 문구의 보관 기간입니다. 0이면 '사용량 통계 보관 기간'을 따릅니다. -1은 영구 보관.", "How long reminder offers and proposals nobody confirmed are kept, with their text. 0 = follow \"Usage counters (days)\", -1 = forever."),
+    "retention.context_days": ("대화 맥락 보관 기간(일)", "Conversation context (days)"),
+    "retention.context_days.hint": ("조용해진 방의 대화 맥락과 끝난 알림(문구 포함)의 보관 기간입니다. 0이면 '대화 본문 보관 기간'을 따릅니다. -1은 영구 보관.", "How long the conversation context of quiet rooms and finished reminders, with their text, are kept. 0 = follow \"Conversation text (days)\", -1 = forever."),
 })
 add("cfg", {
     "alerts": ("운영자 알림", "Operator alerts"),
