@@ -21,11 +21,18 @@ import (
 // Client talks to a running console on this computer with the bootstrap token (the tray, `masamong
 // stop`). It signs in like a browser and sends the CSRF header on every Action.
 type Client struct {
-	Base  string
-	Via   string // "cli" (default) or "tray"
-	token string
-	http  *http.Client
-	csrf  string
+	Base string
+	Via  string // "cli" (default) or "tray"
+	// DataRoot lets a console of an older version, which cannot prove it knows the token, be signed in
+	// while this data folder's daemon lock is held (see verifyEndpoint). Empty: such a console is refused.
+	DataRoot string
+	// Reload reads the current token before each sign-in, so a long-lived client (the tray) follows a
+	// token re-issue. Nil keeps the token given to NewClient.
+	Reload func() (string, error)
+	bind   string
+	token  string
+	http   *http.Client
+	csrf   string
 	// recheck runs after a rejected sign-in, before that action is sent again.
 	recheck func(context.Context) error
 }
@@ -33,7 +40,8 @@ type Client struct {
 // NewClient prepares a client for the console at bind.
 func NewClient(bind, token string) *Client {
 	jar, _ := cookiejar.New(nil)
-	return &Client{Base: "http://" + hostPort(bind), token: token, Via: "cli", http: &http.Client{Jar: jar, Timeout: 30 * time.Second}}
+	return &Client{Base: "http://" + hostPort(bind), bind: bind, token: token, Via: "cli",
+		http: &http.Client{Jar: jar, Timeout: 30 * time.Second, CheckRedirect: noRedirect}}
 }
 
 // ViaHeader names the program behind a launcher request ("cli" or "tray") so the change log does not
@@ -44,7 +52,16 @@ const ViaHeader = "X-Masamong-Via"
 // background poll, not as console use (the tray's status poll).
 const PollHeader = "X-Masamong-Poll"
 
+// login sends the token only after the console proved it belongs to this installation.
 func (c *Client) login(ctx context.Context) error {
+	if c.Reload != nil {
+		if tok, err := c.Reload(); err == nil {
+			c.token = tok
+		}
+	}
+	if err := verifyEndpoint(ctx, c.bind, c.token, c.DataRoot); err != nil {
+		return err
+	}
 	body, _ := json.Marshal(map[string]string{"token": c.token})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.Base+"/api/login", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -75,6 +92,35 @@ func (c *Client) Close(ctx context.Context) {
 		_ = res.Body.Close()
 	}
 	c.csrf = ""
+}
+
+// RotateTokenPath is the console endpoint that re-issues the sign-in token.
+const RotateTokenPath = "/api/token/rotate"
+
+// RotateToken asks the console to re-issue its sign-in token. The console writes the new token to its
+// token file and ends every session, this client's included.
+func (c *Client) RotateToken(ctx context.Context) error {
+	if c.csrf == "" {
+		if err := c.login(ctx); err != nil {
+			return err
+		}
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.Base+RotateTokenPath, nil)
+	req.Header.Set("X-CSRF-Token", c.csrf)
+	req.Header.Set(ViaHeader, c.Via)
+	res, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	var out struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.NewDecoder(io.LimitReader(res.Body, 1<<16)).Decode(&out); err != nil || !out.OK {
+		return fmt.Errorf("the console did not re-issue the token (%d)", res.StatusCode)
+	}
+	c.csrf = "" // the rotation ended this session too
+	return nil
 }
 
 // ErrActionFailed carries the console's error message.
@@ -184,7 +230,7 @@ func Stop(ctx context.Context, dataRoot, token, via string) (bool, error) {
 		RemoveInfo(dataRoot) // stale record
 		return false, nil
 	}
-	if err := requestStop(ctx, info, health, token, via, ""); err != nil {
+	if err := requestStop(ctx, dataRoot, info, health, token, via, ""); err != nil {
 		return false, err
 	}
 	// The console goes away first; wait until the data folder is released as well.
@@ -223,18 +269,18 @@ func RequestStopChild(ctx context.Context, dataRoot string, pid int, token strin
 	if err != nil {
 		return errors.New("child console did not answer")
 	}
-	return requestStop(ctx, info, health, token, "cli", dataRoot)
+	return requestStop(ctx, dataRoot, info, health, token, "cli", dataRoot)
 }
 
-func requestStop(ctx context.Context, info DaemonInfo, health map[string]any, token, via, expectedRoot string) error {
+func requestStop(ctx context.Context, dataRoot string, info DaemonInfo, health map[string]any, token, via, expectedRoot string) error {
 	if InMaintenance(health) {
 		// the maintenance daemon has no sign-in and no Actions: it stops through its own endpoint
-		if err := stopMaintenance(ctx, info.Bind, token, expectedRoot, info.PID); err != nil {
+		if err := stopMaintenance(ctx, dataRoot, info.Bind, token, expectedRoot, info.PID); err != nil {
 			return err
 		}
 	} else {
 		c := NewClient(info.Bind, token)
-		c.Via = via
+		c.Via, c.DataRoot = via, dataRoot
 		if expectedRoot != "" {
 			root := expectedRoot
 			c.recheck = func(ctx context.Context) error { return c.checkDataRoot(ctx, root) }
@@ -285,8 +331,11 @@ func (c *Client) checkDataRoot(ctx context.Context, expected string) error {
 }
 
 // stopMaintenance asks a daemon stopped for maintenance to end (POST /api/maintenance/stop, which takes
-// the admin token like a sign-in).
-func stopMaintenance(ctx context.Context, bind, token, expectedRoot string, pid int) error {
+// the admin token like a sign-in, so the console proves itself first).
+func stopMaintenance(ctx context.Context, dataRoot, bind, token, expectedRoot string, pid int) error {
+	if err := verifyEndpoint(ctx, bind, token, dataRoot); err != nil {
+		return err
+	}
 	in := map[string]any{"token": token}
 	if expectedRoot != "" {
 		in["data_root"], in["pid"] = expectedRoot, pid
@@ -294,7 +343,7 @@ func stopMaintenance(ctx context.Context, bind, token, expectedRoot string, pid 
 	body, _ := json.Marshal(in)
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+hostPort(bind)+"/api/maintenance/stop", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	res, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
+	res, err := (&http.Client{Timeout: 10 * time.Second, CheckRedirect: noRedirect}).Do(req)
 	if err != nil {
 		return err
 	}

@@ -18,7 +18,7 @@ func fakeMaintenanceDaemon(t *testing.T, token string, stopped *atomic.Bool) (bi
 	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/health":
-			_, _ = w.Write([]byte(`{"ok":true,"maintenance":true,"ready":false}`))
+			writeProvenHealth(w, r, token, map[string]any{"maintenance": true, "ready": false})
 		case "/api/maintenance/stop":
 			var in struct{ Token string }
 			_ = json.NewDecoder(r.Body).Decode(&in)

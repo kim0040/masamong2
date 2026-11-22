@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 	"masamong/internal/catalog"
 	"masamong/internal/fsutil"
 	"masamong/internal/i18n"
+	"masamong/internal/launcher"
 	"masamong/internal/memory/corpus"
 	"masamong/locales"
 )
@@ -54,8 +56,23 @@ func (s *Server) requireAPI(w http.ResponseWriter, r *http.Request, write bool) 
 	return id, sess, true
 }
 
+// health answers anyone on this computer. With ?challenge= it also proves this console knows the
+// sign-in token (launcher.EndpointProof), so the launcher, the tray and the CLI send the token only to
+// this installation's service.
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "ready": s.svc.Ready(), "instance": s.svc.Doc().Instance.ID, "version": versionOf()})
+	out := map[string]any{"ok": true, "ready": s.svc.Ready(), "instance": s.svc.Doc().Instance.ID, "version": versionOf()}
+	if c := r.URL.Query().Get(launcher.ChallengeParam); launcher.ValidChallenge(c) {
+		// the address this request really arrived on (not the Host header, which the caller writes),
+		// so a program relaying from another port gets a proof for the wrong address
+		bind := s.Bind()
+		if a, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr); ok {
+			bind = a.String()
+		}
+		if tok := s.currentToken(); tok != "" {
+			out["proof"] = launcher.EndpointProof(tok, bind, c)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func versionOf() string { return appVersion() }
@@ -111,8 +128,8 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 
 // apiLogin accepts the bootstrap token (the fallback when the browser was not opened by the launcher).
 func (s *Server) apiLogin(w http.ResponseWriter, r *http.Request) {
-	logins := s.loginsFor(r)
-	if !logins.allow(s.now()) {
+	succeeded, allowed := s.loginsFor(r).attempt(s.now())
+	if !allowed {
 		apiError(w, http.StatusTooManyRequests, "RATE_LIMITED", "too many attempts; wait a minute")
 		return
 	}
@@ -120,14 +137,15 @@ func (s *Server) apiLogin(w http.ResponseWriter, r *http.Request) {
 		Token string `json:"token"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&body); err != nil {
+		succeeded() // not a guess: nothing was compared
 		apiError(w, http.StatusBadRequest, "INVALID_INPUT", "bad request")
 		return
 	}
 	if !s.tokenMatches(strings.TrimSpace(body.Token)) {
-		logins.fail(s.now())
 		apiError(w, http.StatusUnauthorized, "UNAUTHORIZED", "token does not match")
 		return
 	}
+	succeeded()
 	id, sess := s.sessions.create(s.now(), r.UserAgent())
 	s.setSessionCookie(w, r, id, int(sessionTTL.Seconds()))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "csrf": sess.CSRF})
@@ -140,6 +158,27 @@ func (s *Server) apiLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sessions.drop(id)
 	s.setSessionCookie(w, r, "", -1)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// apiRotateToken re-issues the sign-in token (the console's button, `masamong admin token rotate`).
+// The tab that asked stays signed in; every other session, link and code made with the old token
+// stops working. The new token is not in the reply: `masamong admin token` prints it.
+func (s *Server) apiRotateToken(w http.ResponseWriter, r *http.Request) {
+	id, _, ok := s.requireAPI(w, r, true)
+	if !ok {
+		return
+	}
+	keep := id
+	if requestSource(r) != "web" {
+		keep = "" // the CLI and the tray sign in again with the new token
+	}
+	if err := s.rotateToken(keep); err != nil {
+		s.log.Error("re-issue console token", "err", err)
+		apiError(w, http.StatusInternalServerError, "IO", "cannot re-issue the token")
+		return
+	}
+	s.log.Info("console sign-in token re-issued", "via", requestSource(r))
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -225,6 +226,9 @@ func mapAction(pos []string) string {
 	}
 	if pos[0] == "admin" {
 		// local helpers, not Actions: resolved in run()
+		if len(pos) > 2 && pos[1] == "token" && pos[2] == "rotate" {
+			return "admin.token.rotate"
+		}
 		if len(pos) > 1 {
 			return "admin." + pos[1]
 		}
@@ -347,7 +351,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer, webBuild,
 		}
 	}
 	if strings.HasPrefix(act, "admin.") {
-		return adminCommand(act, opt, stdout, stderr, webBuild)
+		return adminCommand(ctx, act, opt, stdout, stderr, webBuild)
 	}
 	input, err = commandPaths(act, input)
 	if err != nil {
@@ -404,9 +408,21 @@ func interactiveMode(act string) (tui.Mode, bool) {
 	return "", false
 }
 
-// adminCommand prints the console bootstrap token or login link. The token is a local secret:
-// it is only ever written to the operator's stdout, never to logs.
-func adminCommand(act string, opt Options, stdout, stderr io.Writer, webBuild bool) int {
+// adminCommand prints the console bootstrap token or login link, or re-issues the token. The token is a
+// local secret: it is only ever written to the operator's stdout, never to logs.
+func adminCommand(ctx context.Context, act string, opt Options, stdout, stderr io.Writer, webBuild bool) int {
+	if act == "admin.token.rotate" {
+		tok, err := rotateAdminToken(ctx, opt.DataRoot)
+		if tok == "" {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
+		if err != nil {
+			// the new token is in place; only a leftover code or session file was not removed
+			fmt.Fprintf(stderr, "note: %v\n", err)
+		}
+		return writeAdminResult(act, map[string]any{"rotated": true, "token": tok}, opt, stdout, stderr)
+	}
 	var bind string
 	enabled := true
 	if launcher.Running(opt.DataRoot, "daemon.lock") {
@@ -447,9 +463,41 @@ func adminCommand(act string, opt Options, stdout, stderr io.Writer, webBuild bo
 			out["note"] = "admin.web.enabled is false; set it to true in config and restart masamongd"
 		}
 	default:
-		fmt.Fprintln(stderr, "masamong admin: use `admin token` or `admin open`")
+		fmt.Fprintln(stderr, "masamong admin: use `admin token`, `admin token rotate` or `admin open`")
 		return 2
 	}
+	return writeAdminResult(act, out, opt, stdout, stderr)
+}
+
+// rotateAdminToken re-issues the console sign-in token and returns the new one. A running service
+// re-issues it itself, since it holds the sessions that must end with the old token; otherwise the
+// token file is replaced while this command holds the data folder's lock.
+func rotateAdminToken(ctx context.Context, dataRoot string) (string, error) {
+	if launcher.Running(dataRoot, "daemon.lock") {
+		info, ok := launcher.ReadInfo(dataRoot)
+		if !ok {
+			return "", errors.New("masamong is running but its console address is not recorded yet; try again in a moment")
+		}
+		old, err := web.ReadToken(dataRoot)
+		if err != nil {
+			return "", err
+		}
+		c := launcher.NewClient(info.Bind, old)
+		c.DataRoot = dataRoot
+		if err := c.RotateToken(ctx); err != nil {
+			return "", err
+		}
+		return web.ReadToken(dataRoot)
+	}
+	lock, err := launcher.AcquireLock(dataRoot)
+	if err != nil {
+		return "", err
+	}
+	defer lock.Release()
+	return web.RotateToken(dataRoot)
+}
+
+func writeAdminResult(act string, out map[string]any, opt Options, stdout, stderr io.Writer) int {
 	res := action.Result{OK: true, Action: act, Output: out}
 	if opt.Output == "json" {
 		enc := json.NewEncoder(stdout)
