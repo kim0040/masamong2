@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf16"
 
@@ -33,8 +32,6 @@ import (
 // The tool layer sits in front of Execute: every tool Action — whether the planner, a Discord
 // command, the CLI or the GUI calls it — passes the same switch (instance, feature flag, channel,
 // surface) and the same usage limits. Operator-defined HTTP tools run here too.
-
-var invalidTimezones sync.Map // timezone string → warned once
 
 // toolUsage is the tools' usage counter, opened on first use (Service.toolUses); nil without a store
 // or when its table cannot be opened, which the next call tries again.
@@ -72,9 +69,9 @@ func (s *Service) toolRegistry() []tools.Resolved {
 	return all
 }
 
-func (s *Service) instanceZone() *time.Location { return zoneOf(s.Doc()) }
+func (s *Service) instanceZone() *time.Location { return s.zoneOf(s.Doc()) }
 
-func zoneOf(doc config.Document) *time.Location {
+func (s *Service) zoneOf(doc config.Document) *time.Location {
 	if doc.I18n.Timezone == "" {
 		return time.UTC
 	}
@@ -82,7 +79,7 @@ func zoneOf(doc config.Document) *time.Location {
 	if err == nil {
 		return loc
 	}
-	if _, warned := invalidTimezones.LoadOrStore(doc.I18n.Timezone, true); !warned {
+	if s.loggedOnce.first("timezone=" + doc.I18n.Timezone) {
 		slog.Default().Error("unknown configured timezone; using UTC until it is corrected", "timezone", doc.I18n.Timezone, "err", err)
 	}
 	return time.UTC

@@ -223,6 +223,7 @@ type Service struct {
 	hooks       serviceHooks                  // what a test injected; zero in production (service_hooks.go)
 	zodiacs     zodiacState                   // zodiac cooldowns and generations (fortune.go)
 	noticeCat   noticeCatalogCache            // the notice board catalog (notices.go)
+	loggedOnce  logOnce                       // log lines written once (bad configured zones)
 	// leftovers are files of a finished restore or an interrupted backup that could not be removed
 	// (CleanDataLeftovers); doctor lists them and the scheduler retries.
 	leftovers atomic.Pointer[[]string]
@@ -555,7 +556,7 @@ func (s *Service) applyLogLevel(doc config.Document) {
 // persistQuota counts provider calls per instance-zone day in the database, so neither a restart nor a
 // config change (which rebuilds the registry) resets a provider's daily allowance.
 func (s *Service) persistQuota(q *providers.Quota, doc config.Document) {
-	zone := zoneOf(doc)
+	zone := s.zoneOf(doc)
 	q.Day = func(t time.Time) string { return t.In(zone).Format("2006-01-02") }
 	u := s.toolUsage()
 	if u == nil {
