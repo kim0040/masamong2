@@ -691,7 +691,7 @@ func (s *Service) recordTurn(t TurnRecord) {
 		})
 	}()
 	if err != nil {
-		s.Log.Debug("turn log write failed", "err", err.Error())
+		s.warnRecordFailed("turn log write failed", err)
 		return
 	}
 	s.emit("turn", t.ID, map[string]any{"outcome": t.Outcome, "lab": t.Lab})

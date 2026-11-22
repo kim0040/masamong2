@@ -437,3 +437,31 @@ func UseNewsLimitsForTest(pace time.Duration, perTick int) (restore func()) {
 	updateNewsPace, updateNewsPerTick = pace, perTick
 	return func() { updateNewsPace, updateNewsPerTick = oldPace, oldTick }
 }
+
+// SimulatePreparedCrash writes a prepared-but-uncommitted revision, the way a crash between
+// config.BeginApply and the commit leaves the store; only cas_recover_test.go uses it.
+func (s *Service) SimulatePreparedCrash(candidate []byte, base int) (config.Revision, error) {
+	st, err := loadCASState(s.Store, s.CfgPath)
+	if err != nil {
+		return config.Revision{}, err
+	}
+	prep, err := config.BeginApply(st, base, candidate)
+	if err != nil {
+		return config.Revision{}, err
+	}
+	if err := persistRevision(s.Store, prep); err != nil {
+		return config.Revision{}, err
+	}
+	return prep, nil
+}
+
+// RecoverAfterCrash replays the startup recovery path a crashed apply leaves behind.
+func (s *Service) RecoverAfterCrash() error {
+	if err := s.reloadConfig(); err != nil {
+		return err
+	}
+	if s.Revision() == 0 {
+		return fmt.Errorf("no committed revision after recover")
+	}
+	return nil
+}

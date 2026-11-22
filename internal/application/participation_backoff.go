@@ -249,14 +249,14 @@ func (s *Service) persistPartSpokeTurnLocked(turnID, guildID, channelID string, 
 	if err != nil {
 		return
 	}
-	stamp := now.UTC().Format("2006-01-02T15:04:05.000000000Z")
+	stamp := now.UTC().Format(time.RFC3339Nano)
 	if _, err := db.DB.Exec(`INSERT INTO participation_spoke_turns(turn_id,guild_id,channel_id,created_at) VALUES(?,?,?,?)
 		ON CONFLICT(turn_id) DO UPDATE SET guild_id=excluded.guild_id,channel_id=excluded.channel_id,created_at=excluded.created_at`,
 		turnID, guildID, channelID, stamp); err != nil {
 		s.Log.Debug("participation spoke turn write failed", "err", err.Error())
 		return
 	}
-	cutoff := s.Clock.Now().UTC().Add(-24 * time.Hour).Format("2006-01-02T15:04:05.000000000Z")
+	cutoff := s.Clock.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339Nano)
 	if _, err := db.DB.Exec(`DELETE FROM participation_spoke_turns WHERE created_at<?`, cutoff); err != nil {
 		s.Log.Debug("participation spoke turn prune failed", "err", err.Error())
 		return
@@ -272,7 +272,7 @@ func (s *Service) persistedPartSpoke(turnID string) (guildID, channelID string, 
 	if err != nil {
 		return "", "", false
 	}
-	cutoff := s.Clock.Now().UTC().Add(-24 * time.Hour).Format("2006-01-02T15:04:05.000000000Z")
+	cutoff := s.Clock.Now().UTC().Add(-24 * time.Hour).Format(time.RFC3339Nano)
 	err = db.Reader().QueryRow(`SELECT guild_id,channel_id FROM participation_spoke_turns WHERE turn_id=? AND created_at>=?`, turnID, cutoff).
 		Scan(&guildID, &channelID)
 	return guildID, channelID, err == nil

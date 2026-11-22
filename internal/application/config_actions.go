@@ -396,31 +396,6 @@ func (s *Service) applyCandidateLocked(req action.Request, candidate []byte, bas
 	return res
 }
 
-func (s *Service) SimulatePreparedCrash(candidate []byte, base int) (config.Revision, error) {
-	st, err := loadCASState(s.Store, s.CfgPath)
-	if err != nil {
-		return config.Revision{}, err
-	}
-	prep, err := config.BeginApply(st, base, candidate)
-	if err != nil {
-		return config.Revision{}, err
-	}
-	if err := persistRevision(s.Store, prep); err != nil {
-		return config.Revision{}, err
-	}
-	return prep, nil
-}
-
-func (s *Service) RecoverAfterCrash() error {
-	if err := s.reloadConfig(); err != nil {
-		return err
-	}
-	if s.Revision() == 0 {
-		return fmt.Errorf("no committed revision after recover")
-	}
-	return nil
-}
-
 // configChange is one setting that differs between two config documents, by path.
 type configChange struct {
 	Path   string `json:"path"`

@@ -50,8 +50,8 @@ type convDecision struct {
 	CostUSD                         float64
 }
 
-// logConversation writes a decision and returns its id (so its outcome can be noted later). Failures are
-// logged at debug level and never affect the reply.
+// logConversation writes a decision and returns its id (so its outcome can be noted later). Failures
+// warn (throttled to one a minute) and never affect the reply.
 func (s *Service) logConversation(d convDecision) string {
 	db, err := s.adminDB()
 	if err != nil || d.Channel == "" {
@@ -67,7 +67,7 @@ func (s *Service) logConversation(d convDecision) string {
 	if _, err := db.DB.Exec(`INSERT INTO conversation_log(id,guild_id,channel_id,message_id,author_ref,created_at,kind,decision,mode,score,features,cost_usd)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, id, d.Guild, d.Channel, d.Message, personRef(d.Author), s.Clock.Now().UTC().Format(time.RFC3339Nano),
 		d.Kind, d.Decision, d.Mode, d.Score, feats, d.CostUSD); err != nil {
-		s.Log.Debug("conversation log write failed", "err", err.Error())
+		s.warnRecordFailed("conversation log write failed", err)
 		return ""
 	}
 	return id
@@ -85,6 +85,6 @@ func (s *Service) noteConversationOutcome(id, outcome string) {
 	}
 	if _, err := db.DB.Exec(`UPDATE conversation_log SET outcome=?, outcome_at=? WHERE id=? AND outcome=''`, outcome,
 		s.Clock.Now().UTC().Format(time.RFC3339Nano), id); err != nil {
-		s.Log.Debug("conversation outcome write failed", "err", err.Error())
+		s.warnRecordFailed("conversation outcome write failed", err)
 	}
 }

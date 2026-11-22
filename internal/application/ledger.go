@@ -254,13 +254,10 @@ func memoryJobContext(ctx context.Context, prefix string) context.Context {
 type toolCall struct {
 	Tool, Guard, Status string
 	ParamKeys           []string
-	// ParamSources is reserved: it is filled (parameter name → "message"|"conversation"|"default"|"setting"|"model")
-	// once tools report where each value came from. No tool does yet, so rows hold {}.
-	ParamSources map[string]string
-	Latency      time.Duration
-	CostUSD      float64
-	ResultChars  int
-	Class        errclass.Class
+	Latency             time.Duration
+	CostUSD             float64
+	ResultChars         int
+	Class               errclass.Class
 	// Provider is the configured service that answered (a web search: which of the services in
 	// web_search.order found the pages); "" when the tool has none.
 	Provider string
@@ -274,17 +271,14 @@ func (s *Service) noteToolCall(ctx context.Context, c toolCall) {
 	keys := append([]string{}, c.ParamKeys...)
 	sort.Strings(keys)
 	kj, _ := json.Marshal(keys)
-	src := c.ParamSources
-	if src == nil {
-		src = map[string]string{}
-	}
-	sj, _ := json.Marshal(src)
 	guard := c.Guard
 	if guard == "" {
 		guard = "allowed"
 	}
+	// param_sources stays {}: it is reserved for tools to report where each value came from
+	// ("message"|"conversation"|"default"|"setting"|"model"); no tool does yet.
 	s.ledger.add(s, `INSERT INTO tool_calls(turn_id, tool, param_keys, param_sources, guard, status, latency_ms, cost_usd, result_chars, class, provider, created_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, observability.TurnID(ctx), c.Tool, string(kj), string(sj), guard, c.Status, c.Latency.Milliseconds(),
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, observability.TurnID(ctx), c.Tool, string(kj), "{}", guard, c.Status, c.Latency.Milliseconds(),
 		c.CostUSD, c.ResultChars, string(c.Class), c.Provider, s.Clock.Now().UTC().Format(time.RFC3339))
 }
 
@@ -309,6 +303,32 @@ type ledgerWriter struct {
 	rows     chan ledgerRow
 	dropped  atomic.Int64
 	warnedAt atomic.Int64 // unix seconds of the last "dropping rows" warning
+	// recWarn throttles "record write failed" warnings across the turn log, traces, the
+	// conversation log and these flushes: one warning a minute, however many sites fail.
+	recWarn warnThrottle
+}
+
+// warnThrottle lets one warning a minute through: a broken record writer would otherwise log a line
+// for every turn. The first failure is never throttled; failures in between are counted so the next
+// warning reports how many were missed.
+type warnThrottle struct {
+	last       atomic.Int64 // unix seconds of the last warning
+	suppressed atomic.Int64 // failures refused since it
+}
+
+// take reports whether this failure warns now, and how many were suppressed since the last warning.
+func (w *warnThrottle) take(now time.Time) (int64, bool) {
+	sec := now.Unix()
+	for {
+		last := w.last.Load()
+		if last != 0 && sec-last < 60 {
+			w.suppressed.Add(1)
+			return 0, false
+		}
+		if w.last.CompareAndSwap(last, sec) {
+			return w.suppressed.Swap(0), true
+		}
+	}
 }
 
 func (w *ledgerWriter) add(s *Service, query string, args ...any) {
@@ -394,13 +414,28 @@ func (w *ledgerWriter) flush(s *Service, rows []ledgerRow) {
 	err = db.WithWriter(func(tx *sql.Tx) error {
 		for _, r := range rows {
 			if _, err := tx.Exec(r.query, r.args...); err != nil {
-				s.Log.Debug("call ledger row failed", "err", err.Error())
+				s.warnRecordFailed("call ledger row failed", err)
 			}
 		}
 		return nil
 	})
 	if err != nil {
-		s.Log.Debug("call ledger write failed", "err", err.Error())
+		s.warnRecordFailed("call ledger write failed", err)
+	}
+}
+
+// warnRecordFailed reports a record the database refused — a turn, a trace, a conversation row or a
+// ledger flush. Losing history must warn, but a broken writer repeats every turn, so the throttle on
+// the ledger writer lets one warning a minute through; the rest are counted into the next warning.
+func (s *Service) warnRecordFailed(what string, err error) {
+	suppressed, ok := s.ledger.recWarn.take(s.Clock.Now())
+	if !ok {
+		return
+	}
+	if suppressed > 0 {
+		s.Log.Warn(what, "err", err.Error(), "suppressed", suppressed)
+	} else {
+		s.Log.Warn(what, "err", err.Error())
 	}
 }
 
