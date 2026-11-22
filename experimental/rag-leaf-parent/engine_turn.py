@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Mapping
 
 import engine_index
+from timeparse import normalize_iso
 from engine_index import (
     IndexBundle,
     PlaygroundError,
@@ -397,10 +398,7 @@ def _history_stats(history: list[dict[str, str]], *, keep: int) -> dict[str, Any
 def _request_time_reference(cfg: Mapping[str, Any] | None) -> RetrievalTimeReference:
     raw = (cfg or {}).get("time_reference") if isinstance(cfg, dict) else None
     if isinstance(raw, dict) and raw.get("now"):
-        text = str(raw["now"]).strip()
-        if text.endswith("Z"):
-            text = text[:-1] + "+00:00"
-        now = datetime.fromisoformat(text)
+        now = datetime.fromisoformat(normalize_iso(str(raw["now"])))
         mode = str(raw.get("mode") or "replay")
         if mode not in {"live", "replay"}:
             mode = "replay"

@@ -13,9 +13,10 @@ import json
 import math
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime
 from types import MappingProxyType
 from typing import Any
+
+from timeparse import parse_epoch
 
 
 def _parse_timestamp(value: Any) -> float | None:
@@ -26,16 +27,8 @@ def _parse_timestamp(value: Any) -> float | None:
     if isinstance(value, (int, float)):
         parsed = float(value)
         return parsed if math.isfinite(parsed) else None
-    raw = str(value).strip()
-    if not raw:
-        return None
-    try:
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        parsed = datetime.fromisoformat(raw).timestamp()
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return parsed if math.isfinite(parsed) else None
+    parsed = parse_epoch(str(value))
+    return parsed if parsed is not None and math.isfinite(parsed) else None
 
 
 def _timestamp_pair(row: Mapping[str, Any]) -> tuple[float | None, float | None]:

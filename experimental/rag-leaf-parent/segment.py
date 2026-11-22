@@ -5,6 +5,8 @@ from __future__ import annotations
 import heapq
 from typing import Any, Iterable, Iterator, Mapping
 
+from timeparse import parse_epoch
+
 
 class _MaxTimeItem:
     """max-heap용: 선택된 집합에서 시각이 가장 늦은 항목이 루트."""
@@ -235,17 +237,7 @@ def slice_segments(
 
 
 def _parse_msg_ts(row: Mapping[str, Any]) -> float | None:
-    raw = str(row.get("parsed_time") or "").strip()
-    if not raw:
-        return None
-    try:
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        from datetime import datetime
-
-        return datetime.fromisoformat(raw).timestamp()
-    except ValueError:
-        return None
+    return parse_epoch(str(row.get("parsed_time") or ""))
 
 
 def slice_segments_time_aware(

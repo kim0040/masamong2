@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Mapping
 import numpy as np
 
+from timeparse import parse_iso
 from engine_index import (
     IndexBundle,
     PlaygroundError,
@@ -113,15 +114,8 @@ def weighted_rrf(
 def _source_date(value: Any) -> str:
     """원문 시각의 날짜를 그 원문 기준으로 ("2026-07-25"). 시간대가 없는 카카오 시각을 이 컴퓨터의 시간대로
     읽어 UTC로 바꾸면 새벽 대화가 하루 앞당겨지므로 변환하지 않는다. Go corpus.ParseTime + Format과 같다."""
-    if not value or not isinstance(value, str):
-        return ""
-    text = value.strip()
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        return datetime.fromisoformat(text).strftime("%Y-%m-%d")
-    except ValueError:
-        return ""
+    parsed = parse_iso(value)
+    return parsed.strftime("%Y-%m-%d") if parsed is not None else ""
 
 
 def _leaf_source_date(index: Any, leaf: dict[str, Any]) -> str:

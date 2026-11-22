@@ -17,6 +17,7 @@ import numpy as np
 
 import sandbox_env
 from engine_context import EngineContext, SandboxPaths
+from timeparse import parse_epoch
 
 sandbox_env.ensure()
 ROOT = sandbox_env.ROOT
@@ -1032,17 +1033,7 @@ def prepare_index(*, force: bool = False) -> dict[str, Any]:
 
 
 def _parse_ts(value: Any) -> float | None:
-    if not value or not isinstance(value, str):
-        return None
-    text = value.strip()
-    if not text:
-        return None
-    try:
-        if text.endswith("Z"):
-            text = text[:-1] + "+00:00"
-        return datetime.fromisoformat(text).timestamp()
-    except ValueError:
-        return None
+    return parse_epoch(value)
 
 
 @dataclass
