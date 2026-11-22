@@ -335,10 +335,13 @@ func post(ctx context.Context, c *providers.Client, url string, headers map[stri
 const minScrubbed = 6
 
 // headerSecrets is the credential values a request carries in its headers: the whole header value and,
-// for "Scheme value", the value alone.
+// for "Scheme value", the value alone. Headers that name a format, not a credential, are skipped.
 func headerSecrets(headers map[string]string) []string {
 	var out []string
-	for _, v := range headers {
+	for k, v := range headers {
+		if strings.EqualFold(k, "Accept") || strings.EqualFold(k, "Content-Type") || strings.EqualFold(k, "User-Agent") {
+			continue
+		}
 		out = append(out, v)
 		if _, rest, ok := strings.Cut(v, " "); ok {
 			out = append(out, rest)
