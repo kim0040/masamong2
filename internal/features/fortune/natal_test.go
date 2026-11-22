@@ -11,7 +11,7 @@ func seoulZone(t *testing.T) *time.Location {
 	t.Helper()
 	z, err := time.LoadLocation("Asia/Seoul")
 	if err != nil {
-		t.Skip("no tzdata")
+		t.Fatalf("time zone data: %v", err)
 	}
 	return z
 }
@@ -25,7 +25,7 @@ func TestSolarHourZone(t *testing.T) {
 	seoul := seoulZone(t)
 	ny, err := time.LoadLocation("America/New_York")
 	if err != nil {
-		t.Skip("no tzdata")
+		t.Fatalf("time zone data: %v", err)
 	}
 	for _, c := range []struct {
 		loc  *time.Location
@@ -92,10 +92,10 @@ func TestNatalHourCorrection(t *testing.T) {
 func TestNatalHistoricalSeoulOffsets(t *testing.T) {
 	seoul := seoulZone(t)
 	if _, off := time.Date(1955, 7, 20, 12, 0, 0, 0, seoul).Zone(); off != 9*3600+1800 {
-		t.Skipf("tzdata without Seoul's 1955 summer time (%d)", off)
+		t.Fatalf("tzdata without Seoul's 1955 summer time (%d)", off)
 	}
 	if _, off := time.Date(1987, 7, 20, 12, 0, 0, 0, seoul).Zone(); off != 10*3600 {
-		t.Skipf("tzdata without Seoul's 1987 summer time (%d)", off)
+		t.Fatalf("tzdata without Seoul's 1987 summer time (%d)", off)
 	}
 	bj := time.FixedZone("CST", 8*3600)
 	solar := time.FixedZone("solar", 8*3600+1800)
@@ -197,7 +197,7 @@ func TestLichunInstants(t *testing.T) {
 func TestNatalSummerTimeAfterMidnight(t *testing.T) {
 	seoul := seoulZone(t)
 	if _, off := time.Date(1987, 7, 20, 12, 0, 0, 0, seoul).Zone(); off != 10*3600 {
-		t.Skipf("tzdata without Seoul's 1987 summer time (%d)", off)
+		t.Fatalf("tzdata without Seoul's 1987 summer time (%d)", off)
 	}
 	p := func(stem, branch int) Pillar { return Pillar{Stem: stem, Branch: branch} }
 	n := NatalAt(time.Date(1987, 8, 1, 0, 20, 0, 0, seoul), seoul, true, 30*time.Minute)

@@ -2,8 +2,8 @@
 #   push / pull request -> the quick gate: go vet + go test (+ noweb), and the console check only when the
 #                          console or its strings changed, the license audit only when dependencies changed.
 #                          Windows and macOS verification run on every push/PR; a newer push cancels the older run.
-#   weekly, Run workflow, release -> the full gate: also the race detector, the 45 s load test, every
-#                          release platform's build and the license audit.
+#   weekly, Run workflow, release -> the full gate: also the race detector, the 45 s load test, the large-input
+#                          perf tests (MASAMONG_PERF=1), every release platform's build and the license audit.
 # The release workflow calls this (full) before it builds archives.
 name: ci
 on:
@@ -178,6 +178,23 @@ jobs:
         run: go test -race $(go list ./... | grep -v '^masamong/internal/application$') -count=1 -timeout 40m
       - if: matrix.shard != 'rest'
         run: go test -race ./internal/application -run '${{ matrix.shard }}' -count=1 -timeout 40m
+
+  perf:
+    # The large-input tests that bound the heap or time a migration over hundreds of thousands of rows.
+    # They depend on the machine's GC and load and take minutes, so the normal suite skips them (they
+    # run only with MASAMONG_PERF=1). One job runs just those tests, in the full gate.
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go test ./internal/memory/engine ./internal/memory/corpus ./internal/memory/store -run '^(TestImportGeneratedFileHeapBounded|TestKakaoStreamingHeapStaysBounded|TestReviewAliasMigration200k)$' -count=1 -v
+        env:
+          MASAMONG_PERF: "1"
 
   load:
     # 45 s of mixed traffic against the real service (fake model): fails on leaked goroutines or

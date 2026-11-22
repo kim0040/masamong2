@@ -72,8 +72,13 @@ func TestSlashNamesInCatalogs(t *testing.T) {
 	}
 	sort.Slice(known, func(i, j int) bool { return len(known[i]) > len(known[j]) })
 
-	check := func(source, locale, text string) {
-		// `/own`(`/other`) shows another language's name as an aside; that form is allowed
+	// `/own`(`/other`) shows another language's name as an aside; that form is allowed. The patterns
+	// depend only on the locale, so each locale builds them once, not once per message.
+	asideCache := map[string][]*regexp.Regexp{}
+	asidesFor := func(locale string) []*regexp.Regexp {
+		if asides, ok := asideCache[locale]; ok {
+			return asides
+		}
 		var asides []*regexp.Regexp
 		for _, c := range cmds {
 			own := name(locale, c)
@@ -90,6 +95,11 @@ func TestSlashNamesInCatalogs(t *testing.T) {
 				asides = append(asides, docnames.Aside(own, o))
 			}
 		}
+		asideCache[locale] = asides
+		return asides
+	}
+	check := func(source, locale, text string) {
+		asides := asidesFor(locale)
 		docnames.Scan(text, asides, func(w string, _ int) {
 			if got := docnames.Match(w, known); got != "" && !valid[locale][got] {
 				t.Errorf("%s: /%s is not the %s command name", source, w, locale)

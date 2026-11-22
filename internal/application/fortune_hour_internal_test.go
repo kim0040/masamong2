@@ -139,7 +139,7 @@ func TestHourCorrectedLineOnlyWhenTheClockMoved(t *testing.T) {
 	s := privacyService(t)
 	withZone(t, s, "Asia/Seoul")
 	if _, off := time.Date(1955, 7, 20, 12, 0, 0, 0, s.birthZone()).Zone(); off != 9*3600+1800 {
-		t.Skipf("tzdata without Seoul's 1955 summer time (%d)", off)
+		t.Fatalf("tzdata without Seoul's 1955 summer time (%d)", off)
 	}
 	at := time.Date(2026, 11, 3, 8, 0, 0, 0, time.UTC)
 	line := func(date, tm string, corr *int) string {
@@ -193,7 +193,7 @@ func TestHourCorrectedLineOnlyWhenTheClockMoved(t *testing.T) {
 func TestBirthDateIsComparedInTheBirthZone(t *testing.T) {
 	seoul, err := time.LoadLocation("Asia/Seoul")
 	if err != nil {
-		t.Skip("no tzdata")
+		t.Fatalf("time zone data: %v", err)
 	}
 	ny, _ := time.LoadLocation("America/New_York")
 	for _, c := range []struct {

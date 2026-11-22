@@ -1,6 +1,7 @@
 package store
 
 import (
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -43,12 +44,14 @@ func TestReviewAliasWriteRollback(t *testing.T) {
 	check()
 }
 
+// TestReviewAliasMigration200k runs the migration over 200,000 stored messages, which takes over a minute,
+// so only MASAMONG_PERF=1 does that (one CI job sets it). Without it the same path runs at a tenth of the
+// size, as on Windows and under the race detector (a Windows CI runner needs minutes per 10,000 rows, and
+// the race detector slows the fill several times over).
 func TestReviewAliasMigration200k(t *testing.T) {
-	size := 200000
-	if runtime.GOOS == "windows" || raceDetector {
-		// the same path at a tenth of the size: a Windows CI runner needs minutes per 10,000 rows,
-		// and the race detector slows the fill several times over
-		size = 20000
+	size := 20000
+	if os.Getenv("MASAMONG_PERF") != "" && runtime.GOOS != "windows" && !raceDetector {
+		size = 200000
 	}
 	reviewAliasMigration(t, size, 90*time.Second)
 }

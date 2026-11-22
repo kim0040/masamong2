@@ -160,7 +160,7 @@ func TestSameDateSameDay(t *testing.T) {
 	// 2026-10-08 is 한로 (15:29 KST): the morning and the evening of that date are one almanac day
 	seoul, err := time.LoadLocation("Asia/Seoul")
 	if err != nil {
-		t.Skip("no tzdata")
+		t.Fatalf("time zone data: %v", err)
 	}
 	n := Natal{Year: Pillar{6, 6}, Month: Pillar{4, 2}, Day: Pillar{0, 0}, Hour: Pillar{2, 2}, HasHour: true}
 	for _, zone := range []*time.Location{seoul, kst} {
@@ -246,7 +246,7 @@ func TestBirthMomentKeepsTheWallClockInADSTGap(t *testing.T) {
 	// (+9), so its hour is still 축 (01:00–03:00) and its date the 10th
 	seoul, err := time.LoadLocation("Asia/Seoul")
 	if err != nil {
-		t.Skip("no tzdata")
+		t.Fatalf("time zone data: %v", err)
 	}
 	b := BirthMoment(1987, 5, 10, 2, 30, seoul)
 	if b.Hour() != 2 || b.Minute() != 30 || b.Day() != 10 {
