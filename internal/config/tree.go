@@ -140,7 +140,7 @@ var enums = map[string][]string{
 	"chat.vision":         VisionModes,
 	"chat.progress":       ProgressModes,
 	"web_search.fetch":    FetchKinds,
-	"memory.leaf_split":   {"time_gap", "fixed"},
+	"memory.leaf_split":   LeafSplitModes,
 	"backup.schedule":     BackupSchedules,
 	"participation.mode":  ParticipationModes,
 	"dm.allow":            DMAllowModes,

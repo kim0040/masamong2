@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"go.yaml.in/yaml/v3"
 )
 
 // The console schema and Parse must enforce the same numeric limits: bounds (tree.go) is the one
@@ -107,6 +109,33 @@ func TestSchemaBoundsEdgesAccepted(t *testing.T) {
 			}
 			if _, err := Parse(raw); err != nil {
 				t.Fatalf("%s=%v: a value at the declared limit was rejected: %v", path, v, err)
+			}
+		}
+	}
+}
+
+// The console offers each closed value set from enums (tree.go); Parse must accept every member and
+// refuse anything else, naming the key. Both read the same lists, and this keeps them tied for the day
+// one of them gets a literal of its own.
+func TestSchemaEnumsMatchParse(t *testing.T) {
+	for path, values := range enums {
+		keys := strings.Split(path, ".")
+		for _, v := range append(slices.Clone(values), "not-a-choice") {
+			tr := baseTree(t)
+			set(tr, v, keys...)
+			raw, err := yaml.Marshal(tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = Parse(raw)
+			if v == "not-a-choice" {
+				if err == nil || !strings.Contains(err.Error(), path) {
+					t.Errorf("%s=%q: want an error naming the key, got %v", path, v, err)
+				}
+				continue
+			}
+			if err != nil {
+				t.Errorf("%s=%q is offered by the console but Parse refuses it: %v", path, v, err)
 			}
 		}
 	}
