@@ -107,6 +107,19 @@ type imageQueue struct {
 	wake    chan struct{}
 	started bool
 	stopped bool // the worker has ended with the service: nothing more is accepted
+	// drawing is the one picture being made, by the queue or the command (images.go)
+	drawing imageSlot
+}
+
+// imageSlot lets one picture be made at a time in a service.
+type imageSlot struct {
+	once sync.Once
+	ch   chan struct{}
+}
+
+func (d *imageSlot) slot() chan struct{} {
+	d.once.Do(func() { d.ch = make(chan struct{}, 1) })
+	return d.ch
 }
 
 // imageQueueState is the queue as the console shows it.
@@ -398,15 +411,16 @@ func (s *Service) runImageJob(ctx context.Context, j *imageJob) {
 		}
 	}
 	// the same one-at-a-time slot as the command; shutdown ends the wait
+	slot := s.imgq.drawing.slot()
 	select {
-	case imageMu <- struct{}{}:
+	case slot <- struct{}{}:
 	case <-ctx.Done():
 		return
 	}
 	began := time.Now()
 	jctx := observability.WithTurn(ctx, j.turn)
 	saved, fail := func() (imageSaved, *imageFail) {
-		defer func() { <-imageMu }()
+		defer func() { <-slot }()
 		return s.drawImage(jctx, doc, m, j.prompt, j.ratio, j.timeout)
 	}()
 	if ctx.Err() != nil { // shutdown: no partial post (the attempt is already counted)
