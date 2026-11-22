@@ -170,6 +170,7 @@ func Start(ctx context.Context, svc *application.Service, cfg config.Discord, lo
 	g.startReconciliationDrain(ctx)
 	g.merge.fire = g.answerHeld
 	g.merge.forget = g.forgetFollow
+	g.merge.log = log
 	// direct messages carry personal commands (fortune, notices, privacy) and scheduled deliveries' replies
 	// reactions: the ones people put on the bot's replies are its feedback (feedback.go); not privileged
 	sess.Identify.Intents = discordgo.IntentsGuilds | discordgo.IntentsGuildMessages | discordgo.IntentsDirectMessages | discordgo.IntentsGuildMessageReactions |
