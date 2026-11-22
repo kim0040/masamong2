@@ -161,26 +161,73 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 	if msg == "" {
 		return Result{}, ErrEmptyMessage
 	}
-	res := Result{Timing: map[string]int{}, RagState: string(retrieval.StateNotAttempted)}
-	sp := newSpanLog(req.TurnStart)
+	t := &turn{rt: rt, msg: msg, v: req.Voice, res: Result{Timing: map[string]int{}, RagState: string(retrieval.StateNotAttempted)}}
+	t.sp = newSpanLog(req.TurnStart)
 	ctx = WithGuard(ctx, req.Guard)
 	req.OnProgress = progressOnce(req.OnProgress) // one call per stage across the loop and the planner's steps
+	t.req = req
+	t.nowT, t.local, t.timeRef = turnTime(req)
+	defer t.pf.close(req.Guard)
+	p := t.planTurn(ctx)
+	planned, mem, searchMemory := t.runPlan(ctx, &p)
+	t.readMemory(&p, mem, searchMemory)
+	err := t.answer(ctx, &p, planned)
+	return t.res, err
+}
+
+// turn is one Answer call on its way through its stages: the plan (planTurn), the plan's tools and the
+// memory search (runPlan, readMemory) and the answer. Each stage adds to res. The fields other than res
+// and pf are set before the first stage and only read after.
+type turn struct {
+	rt      *Runtime
+	req     Request
+	msg     string
+	v       Voice
+	res     Result
+	sp      *spanLog
+	nowT    time.Time // the turn's time (Request.Now)
+	local   time.Time // nowT in the turn's zone
+	timeRef string    // the time line the planner and the tool loop are given
+	pf      prefetch  // the memory work started ahead of the plan's end; closed when Answer returns
+}
+
+// turnPlan is what the plan stage decided beside res.Plan and res.Assess: the memory search's intent
+// (made wider by readMemory when the search found nothing in the plan's time window), the tools the loop
+// ran and whether they are the turn's tools, and whether the turn has memory to search.
+type turnPlan struct {
+	intent    search.Intent
+	loopTools []ToolResult
+	loopRan   bool
+	canSearch bool
+}
+
+// turnTime is the turn's time (Request.Now, the wall clock when unset), that time in the turn's zone
+// (Request.TZ, UTC when unset) and the time line the planner and the tool loop are given.
+func turnTime(req Request) (nowT, local time.Time, timeRef string) {
 	tz := req.TZ
 	if tz == nil {
 		tz = time.UTC
 	}
-	nowT := req.Now
+	nowT = req.Now
 	if nowT.IsZero() {
 		nowT = time.Now()
 	}
 	v := req.Voice
-	local := nowT.In(tz)
+	local = nowT.In(tz)
 	weekday := local.Weekday().String()
 	if w := v.pack().Chat.Weekdays; len(w) == 7 {
 		weekday = w[local.Weekday()]
 	}
-	timeRef := lang.Fill(v.pack().Chat.LiveTime, "time", local.Format(time.RFC3339), "weekday", weekday, "tz", tz.String(),
+	timeRef = lang.Fill(v.pack().Chat.LiveTime, "time", local.Format(time.RFC3339), "weekday", weekday, "tz", tz.String(),
 		"days", dayOffsets(local, v.pack().Chat.Weekdays))
+	return nowT, local, timeRef
+}
+
+// planTurn asks the planner, with the tool loop beside it in modes loop and shadow, and asks it once more
+// when the loop could not choose the tools. It starts the prefetch: the message's embedding, and the
+// memory search of a plan made while the loop still runs. res gets the plan, its cost and the loop's trace.
+func (t *turn) planTurn(ctx context.Context) turnPlan {
+	req, v := t.req, t.v
 	// The planner sees memory.search only when memory is on for this channel.
 	memTool, hasMem := req.Tools.find("memory.search")
 	if !hasMem {
@@ -190,89 +237,142 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 	for _, e := range req.Earlier {
 		others = others.without(e.Tool)
 	}
-	warm := rt.startWarm(ctx, req, msg)
-	defer warm.wait()
+	t.pf.warm = t.rt.startWarm(ctx, req, t.msg)
 	// The tool loop (modes loop and shadow) runs beside the planner. In loop mode it chooses the tools,
 	// and the planner's menu shrinks to memory.search: listing only the tools that are on is how the
 	// planner prompt already varies, so its text stays the evaluated one.
 	loopStart := time.Now()
-	loop, plannerTools := rt.startLoop(ctx, req, msg, timeRef, others)
-	planOnce := func(tools Toolset) string {
-		menu := tools
-		if req.MemoryOn {
-			menu = Toolset{Enabled: append([]ToolInfo{memTool}, tools.Enabled...), Known: tools.Known}
-		}
-		t0 := time.Now()
-		planRaw, cost, err := rt.LLM.Chat(ctx, req.PlannerModel, BuildPlannerMessages(v, msg, req.History, "", timeRef, menu), PlannerMaxTokens, 0)
-		res.CostUSD += cost
-		res.Timing["plan"] += ms(t0)
-		sp.add("planner", t0, time.Now())
-		if err != nil {
-			return ""
-		}
-		return planRaw
-	}
-	readPlan := func(raw string, tools Toolset) (Plan, Assessment, search.Intent) {
-		plan := ParsePlan(raw)
-		assessed := Assess(v, plan, tools, req.MemoryOn, true)
-		planned, _ := plan.Intent()
-		if assessed.Time != nil {
-			planned.Time = assessed.Time
-		}
-		return plan, assessed, planned
-	}
-	planRaw := planOnce(plannerTools)
+	loop, plannerTools := t.rt.startLoop(ctx, req, t.msg, t.timeRef, others)
+	planRaw := t.askPlanner(ctx, memTool, plannerTools)
 	plannerEnd := time.Now()
-	plan, assessed, intent := readPlan(planRaw, plannerTools)
-	canSearch := rt.Memory != nil && len(req.Rooms) > 0
+	plan, assessed, intent := t.readPlan(planRaw, plannerTools)
+	canSearch := t.rt.Memory != nil && len(req.Rooms) > 0
 	if assessed.MemoryState != "search" || !canSearch {
-		warm.stop() // a plan made again later searches without it
+		t.pf.warm.stop() // a plan made again later searches without it
 	}
 	// the plan is all the memory search needs: while the loop still runs it starts now, beside the loop
-	var early *earlyMemory
-	defer func() { early.discard(req.Guard) }()
 	if assessed.MemoryState == "search" && canSearch && loop.running() && loopPriceKnown(req) {
-		early = rt.startEarlyMemory(ctx, req, msg, intent, res.CostUSD, loop, nowT, sp)
+		t.pf.early = t.rt.startEarlyMemory(ctx, req, t.msg, intent, t.res.CostUSD, loop, t.nowT, t.sp)
 	}
 	loopTools, loopRan := loop.wait()
-	res.WaitedOn = sp.joinLoop(loop, loopStart, plannerEnd)
+	t.res.WaitedOn = t.sp.joinLoop(loop, loopStart, plannerEnd)
 	if loop != nil {
-		res.ToolLoop = loop.trace
-		res.CostUSD += loop.trace.CostUSD
-		res.Timing["tool_loop"] = loop.trace.Ms
+		t.res.ToolLoop = loop.trace
+		t.res.CostUSD += loop.trace.CostUSD
+		t.res.Timing["tool_loop"] = loop.trace.Ms
 		if loop.err != nil && req.ToolMode == ToolModeLoop {
 			// the model takes no tools (or failed): the planner chooses the tools of this turn
 			plannerTools = others
-			planRaw = planOnce(plannerTools)
-			plan, assessed, intent = readPlan(planRaw, plannerTools)
-			if early != nil && (assessed.MemoryState != "search" || !reflect.DeepEqual(intent, early.intent)) {
+			planRaw = t.askPlanner(ctx, memTool, plannerTools)
+			plan, assessed, intent = t.readPlan(planRaw, plannerTools)
+			if t.pf.early != nil && (assessed.MemoryState != "search" || !reflect.DeepEqual(intent, t.pf.early.intent)) {
 				// the second plan wants another search or none: what the first one found is not used
-				res.CostUSD += early.discard(req.Guard)
-				early = nil
+				t.res.CostUSD += t.pf.drop(req.Guard)
 			}
 		}
 	}
-	res.Plan, res.Assess = plan, assessed
-	if !res.Plan.Parsed {
-		slog.Default().WarnContext(ctx, "chat: planner response rejected", "parse_state", res.Plan.ParseState)
+	t.res.Plan, t.res.Assess = plan, assessed
+	if !t.res.Plan.Parsed {
+		slog.Default().WarnContext(ctx, "chat: planner response rejected", "parse_state", t.res.Plan.ParseState)
 	}
-	res.Intent = intent
+	t.res.Intent = intent
+	return turnPlan{intent: intent, loopTools: loopTools, loopRan: loopRan, canSearch: canSearch}
+}
+
+// askPlanner asks the planner model once with the tools it may choose (memory.search first when memory
+// is on for the channel) and returns its raw plan, "" when the call failed. The turn gets its cost and time.
+func (t *turn) askPlanner(ctx context.Context, memTool ToolInfo, tools Toolset) string {
+	menu := tools
+	if t.req.MemoryOn {
+		menu = Toolset{Enabled: append([]ToolInfo{memTool}, tools.Enabled...), Known: tools.Known}
+	}
+	t0 := time.Now()
+	planRaw, cost, err := t.rt.LLM.Chat(ctx, t.req.PlannerModel, BuildPlannerMessages(t.v, t.msg, t.req.History, "", t.timeRef, menu), PlannerMaxTokens, 0)
+	t.res.CostUSD += cost
+	t.res.Timing["plan"] += ms(t0)
+	t.sp.add("planner", t0, time.Now())
+	if err != nil {
+		return ""
+	}
+	return planRaw
+}
+
+// readPlan parses and assesses a raw plan against the tools it was offered, and returns the memory
+// search's intent with the time window the assessment read.
+func (t *turn) readPlan(raw string, tools Toolset) (Plan, Assessment, search.Intent) {
+	plan := ParsePlan(raw)
+	assessed := Assess(t.v, plan, tools, t.req.MemoryOn, true)
+	planned, _ := plan.Intent()
+	if assessed.Time != nil {
+		planned.Time = assessed.Time
+	}
+	return plan, assessed, planned
+}
+
+// runPlan runs the plan's tools and the memory search at once and adds the tools' results to res after
+// the earlier ones and the loop's. planned is the plan's steps' results in plan order (nil for a step that
+// gave none); searchMemory reports whether the memory search was the turn's to run, and mem is what it
+// found (the early search's when one started).
+func (t *turn) runPlan(ctx context.Context, p *turnPlan) (planned []*ToolResult, mem memoryRun, searchMemory bool) {
+	req := t.req
 	t1 := time.Now()
-	res.Tools = append(res.Tools, req.Earlier...)
-	if loopRan {
-		res.Tools = append(res.Tools, loopTools...)
+	t.res.Tools = append(t.res.Tools, req.Earlier...)
+	if p.loopRan {
+		t.res.Tools = append(t.res.Tools, p.loopTools...)
 	}
 	// the planner's tools and the memory search run at once (runSteps): each is checked against the
 	// turn's limits in plan order (the memory search last, unless it started ahead of the loop's end);
 	// results keep the plan's order. The memory search does wait for the tools that pay an unknown fee,
 	// and counts what the others hold, so that it is told what they leave.
-	planned := make([]*ToolResult, len(res.Assess.Steps))
-	var steps []step
-	var searches []map[string]any
+	planned = make([]*ToolResult, len(t.res.Assess.Steps))
 	told := &roundProgress{report: req.OnProgress, round: 1} // the stage is told as searches are let in
-	var toolsEnd time.Time
-	var endMu sync.Mutex
-	for i, st := range res.Assess.Steps {
+	var toolsEnd lastEnd
+	steps, searches := t.toolSteps(ctx, planned, told, &toolsEnd)
+	searchMemory = t.res.Assess.MemoryState == "search" && p.canSearch
+	if searchMemory && t.pf.early == nil {
+		spent, intent, rt, sp, msg, nowT := t.res.CostUSD, p.intent, t.rt, t.sp, t.msg, t.nowT
+		steps = append(steps, step{decide: func() bool { return req.Guard.AllowMoneyContext(ctx, "memory.search") },
+			run: func() {
+				// the fees of the steps decided before this one count too, whether they have ended yet or not:
+				// an unknown fee is waited for, a bound still held counts in full
+				req.Guard.WaitSpent(ctx)
+				remaining := memoryBudget(ctx, req.Guard, func() float64 { return req.BudgetUSD - spent - feesSoFar(req.Guard) })
+				defer sp.begin("memory")()
+				mem = rt.searchMemory(ctx, req, msg, intent, remaining, nowT)
+			}})
+	}
+	told.asked = searches
+	runSteps(ctx, req.Guard, steps)
+	if t.pf.early != nil {
+		mem = t.pf.take()
+	}
+	t.pf.warm.stop()
+	for _, r := range planned {
+		if r != nil {
+			t.res.Tools = append(t.res.Tools, *r)
+		}
+	}
+	t.res.Timing["tools"] = int(max(toolsEnd.at.Sub(t1), 0).Milliseconds())
+	return planned, mem, searchMemory
+}
+
+// lastEnd is when the last of the planner's tools that ran ended; each sets it as it ends.
+type lastEnd struct {
+	mu sync.Mutex
+	at time.Time
+}
+
+func (e *lastEnd) mark() {
+	e.mu.Lock()
+	e.at = time.Now()
+	e.mu.Unlock()
+}
+
+// toolSteps makes a step of each runnable step of the plan, whose result goes to planned at the step's
+// place, and fills in the steps that need input. It returns the steps and how many of them are web searches.
+func (t *turn) toolSteps(ctx context.Context, planned []*ToolResult, told *roundProgress, end *lastEnd) (steps []step, searches int) {
+	req, rt, sp := t.req, t.rt, t.sp
+	for i, st := range t.res.Assess.Steps {
 		switch st.State {
 		case "runnable":
 			if rt.Tools == nil {
@@ -280,7 +380,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 			}
 			info, _ := req.Tools.find(st.Tool)
 			if st.Tool == webSearchTool {
-				searches = append(searches, st.Parameters)
+				searches++
 			}
 			cancel := func() { planned[i] = &ToolResult{Tool: st.Tool, Status: "cancelled"} }
 			hold := &paidHold{}
@@ -305,41 +405,19 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 				defer sp.begin("tool:" + st.Tool)()
 				r := runTool(ctx, req.Guard, rt.Tools, st.Tool, st.Parameters)
 				planned[i] = &r
-				endMu.Lock()
-				toolsEnd = time.Now()
-				endMu.Unlock()
+				end.mark()
 			}})
 		case "needs_input":
 			planned[i] = &ToolResult{Tool: st.Tool, OK: false, Status: "needs_input", Error: "missing: " + strings.Join(st.Missing, ",")}
 		}
 	}
-	searchMemory := res.Assess.MemoryState == "search" && canSearch
-	var mem memoryRun
-	if searchMemory && early == nil {
-		spent := res.CostUSD
-		steps = append(steps, step{decide: func() bool { return req.Guard.AllowMoneyContext(ctx, "memory.search") },
-			run: func() {
-				// the fees of the steps decided before this one count too, whether they have ended yet or not:
-				// an unknown fee is waited for, a bound still held counts in full
-				req.Guard.WaitSpent(ctx)
-				remaining := memoryBudget(ctx, req.Guard, func() float64 { return req.BudgetUSD - spent - feesSoFar(req.Guard) })
-				defer sp.begin("memory")()
-				mem = rt.searchMemory(ctx, req, msg, intent, remaining, nowT)
-			}})
-	}
-	told.asked = len(searches)
-	runSteps(ctx, req.Guard, steps)
-	if early != nil {
-		mem = early.wait()
-		early = nil
-	}
-	warm.stop()
-	for _, r := range planned {
-		if r != nil {
-			res.Tools = append(res.Tools, *r)
-		}
-	}
-	res.Timing["tools"] = int(max(toolsEnd.Sub(t1), 0).Milliseconds())
+	return steps, searches
+}
+
+// readMemory puts what the memory search found on res (hits, state, trace and the reranker's cost), or
+// why there is nothing. A search made again without the plan's time window leaves its wider intent in p.
+func (t *turn) readMemory(p *turnPlan, mem memoryRun, searchMemory bool) {
+	res, req := &t.res, t.req
 	switch res.Assess.MemoryState {
 	case "search":
 		if !searchMemory || !mem.ran {
@@ -349,7 +427,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 		sr, err, relaxed, firstRerank := mem.sr, mem.err, mem.relaxed, mem.firstRerank
 		if relaxed {
 			res.CostUSD += firstRerank
-			intent = mem.intent // the answer is not told "recent" about memory found outside the window
+			p.intent = mem.intent // the answer is not told "recent" about memory found outside the window
 		}
 		res.Timing["memory"] = mem.ms
 		if err != nil {
@@ -375,34 +453,25 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 	case "blocked_disabled":
 		res.RagState = "memory_search_disabled"
 	}
+}
+
+// answer asks the answer model, once more with less context when the prompt was too long for it, and
+// sets res.Answer, the answer's time and cost and the turn's spans. An error is the answer call's.
+func (t *turn) answer(ctx context.Context, p *turnPlan, planned []*ToolResult) error {
+	res, req, v, msg, rt, sp := &t.res, t.req, t.v, t.msg, t.rt, t.sp
 	t3 := time.Now()
 	maxHistory := req.MaxHistory
 	if maxHistory <= 0 {
 		maxHistory = HistoryShown
 	}
 	searched, searchedState := res.Hits, res.RagState
-	room := req.RoomMemory
-	if req.People != nil {
-		if resolved := req.People(plan.PersonTargets); resolved != nil {
-			room = resolved
-		}
-	}
-	roomBlock, kept, roomTrace := renderRoomMemory(v, room, res.Hits)
-	if roomTrace.DroppedHits > 0 {
-		res.Hits = kept
-		if len(kept) == 0 {
-			res.RagState = RagCoveredByRoomMemory
-		}
-	}
-	if !roomTrace.Empty() {
-		res.Room = &roomTrace
-	}
+	roomBlock := t.roomMemory()
 	system := ComposeSystem(v, req.Persona, req.Rules, req.AgentPrompt)
-	deep := deepSearched(res.ToolLoop, loopRan, res.Assess.Steps, planned)
+	deep := deepSearched(res.ToolLoop, p.loopRan, res.Assess.Steps, planned)
 	msgs := BuildAnswerMessages(v, AnswerInput{
 		System: system, History: req.History, MaxHistory: maxHistory,
-		Hits: res.Hits, RagState: res.RagState, Tools: res.Tools, Speaker: req.Speaker, Message: msg, Intent: intent,
-		RecentRoom: req.RecentRoom, RoomMemory: roomBlock, Now: local, DeepSearch: deep,
+		Hits: res.Hits, RagState: res.RagState, Tools: res.Tools, Speaker: req.Speaker, Message: msg, Intent: p.intent,
+		RecentRoom: req.RecentRoom, RoomMemory: roomBlock, Now: t.local, DeepSearch: deep,
 	})
 	withImages(msgs, req.Images)
 	answerBudget := answerTokenLimit(msg, v.pack().Tag)
@@ -427,7 +496,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 		res.Hits, res.RagState, res.Room = searched[:(len(searched)+1)/2], searchedState, nil
 		msgs = BuildAnswerMessages(v, AnswerInput{
 			System: system, History: hist, MaxHistory: len(hist),
-			Hits: res.Hits, RagState: res.RagState, Tools: res.Tools, Speaker: req.Speaker, Message: msg, Intent: intent, Now: local,
+			Hits: res.Hits, RagState: res.RagState, Tools: res.Tools, Speaker: req.Speaker, Message: msg, Intent: p.intent, Now: t.local,
 			DeepSearch: deep, ToolBudget: toolBlockMax,
 		})
 		withImages(msgs, req.Images)
@@ -440,14 +509,47 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 		res.Timing["answer"] = ms(t3)
 		sp.add("answer", t3, time.Now())
 		res.Spans = sp.spans()
-		warm.wait()
+		t.pf.warm.wait()
 		res.CostUSD += req.Guard.PaidTotal() // what the tools paid for (a search's fee) is part of the turn's cost
 		_, _, res.Skipped = req.Guard.Totals()
 	}
 	if err != nil {
 		finish()
-		return res, err
+		return err
 	}
+	answer := t.wholeAnswer(ctx, completion, msgs, answerBudget)
+	finish()
+	res.Answer = strings.TrimSpace(answer)
+	return nil
+}
+
+// roomMemory renders the room memory the answer is given (the people the plan named, when the caller
+// resolves them) and leaves out of res the memory hits it covers.
+func (t *turn) roomMemory() string {
+	res, req := &t.res, t.req
+	room := req.RoomMemory
+	if req.People != nil {
+		if resolved := req.People(res.Plan.PersonTargets); resolved != nil {
+			room = resolved
+		}
+	}
+	roomBlock, kept, roomTrace := renderRoomMemory(t.v, room, res.Hits)
+	if roomTrace.DroppedHits > 0 {
+		res.Hits = kept
+		if len(kept) == 0 {
+			res.RagState = RagCoveredByRoomMemory
+		}
+	}
+	if !roomTrace.Empty() {
+		res.Room = &roomTrace
+	}
+	return roomBlock
+}
+
+// wholeAnswer is the answer's text: cut after its first round when it repeats itself, and asked to go on
+// once when the provider's output limit cut it off (marked incomplete when that does not finish it).
+func (t *turn) wholeAnswer(ctx context.Context, completion Completion, msgs []Msg, answerBudget int) string {
+	res, req, v, rt := &t.res, t.req, t.v, t.rt
 	answer := strings.TrimSpace(completion.Text)
 	if cut, looped := cutLoop(answer); looped {
 		// a loop is cut after its first round and not continued: more of it is more of the same
@@ -470,9 +572,7 @@ func (rt *Runtime) Answer(ctx context.Context, req Request) (Result, error) {
 			answer = cutAtSentenceBoundary(answer) + " " + v.pack().Chat.IncompleteAnswer
 		}
 	}
-	finish()
-	res.Answer = strings.TrimSpace(answer)
-	return res, nil
+	return answer
 }
 
 // memoryRun is what the turn's memory search found, gathered while the planner's tools ran beside it.

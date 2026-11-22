@@ -153,3 +153,31 @@ func (w *warmRun) wait() {
 		<-w.done
 	}
 }
+
+// prefetch is the memory work a turn starts before its plan is final: the embedding of the message
+// (warmRun) and the memory search of a plan made while the tool loop still runs (earlyMemory). Answer
+// closes it on every way out, so none of it outlives the turn. A nil part is no work.
+type prefetch struct {
+	warm  *warmRun
+	early *earlyMemory
+}
+
+// take waits for the early search and returns what it found; the search is then the turn's.
+func (p *prefetch) take() memoryRun {
+	mem := p.early.wait()
+	p.early = nil
+	return mem
+}
+
+// drop gives the early search up (a second plan wants another search or none) and returns what it spent.
+func (p *prefetch) drop(g *Guard) float64 {
+	spent := p.early.discard(g)
+	p.early = nil
+	return spent
+}
+
+// close gives up an early search nobody took and waits for the embedding to end.
+func (p *prefetch) close(g *Guard) {
+	p.early.discard(g)
+	p.warm.wait()
+}
