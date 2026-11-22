@@ -88,6 +88,39 @@ func TestToolLoopPanicKeepsTheEarlierResults(t *testing.T) {
 	}
 }
 
+// A tool the loop only asked for without its required input (needs_input) never ran: when a panic in a
+// later round hands the turn to the planner, the planner's menu keeps it, and its valid call runs once.
+func TestToolLoopPanicKeepsAToolThatNeverRan(t *testing.T) {
+	plan := `{"memory_requirement":"none","tool_plan":[{"tool_name":"polls.create","parameters":{"question":"lunch?"}}]}`
+	llm := &panicSecondRoundLLM{loopLLM: loopLLM{plannerOut: plan, replies: []LoopReply{
+		{Calls: []LoopCall{call("a", "polls__create", `{}`)}},
+	}}}
+	rec := &recorder{}
+	out, err := (&Runtime{LLM: llm, Tools: rec.run}).Answer(context.Background(), loopRequest("make a lunch poll", ToolModeLoop))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := rec.tools(); !slices.Equal(got, []string{"polls.create"}) {
+		t.Fatalf("ran %v", got)
+	}
+	if len(llm.plannerSys) != 2 || !strings.Contains(llm.plannerSys[1], "polls.create") {
+		t.Fatalf("the planner's menu lost the tool that never ran: %v", llm.plannerSys)
+	}
+	// the loop's own needs_input result stays in the turn beside the planner's run
+	var ok, needs int
+	for _, r := range out.Tools {
+		if r.Tool == "polls.create" && r.OK {
+			ok++
+		}
+		if r.Tool == "polls.create" && r.Status == "needs_input" {
+			needs++
+		}
+	}
+	if ok != 1 || needs != 1 {
+		t.Fatalf("results %+v", out.Tools)
+	}
+}
+
 // reminderMenu offers reminders.update with its closed choice of op, as the application declares it.
 func reminderMenu() Toolset {
 	ts := Toolset{Known: map[string]bool{"reminders.update": true, "polls.create": true, "search.web": true}}
