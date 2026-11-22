@@ -12,9 +12,7 @@ package chat
 
 import (
 	"encoding/json"
-	"maps"
 	"regexp"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -733,32 +731,21 @@ func isPlaceholder(re *regexp.Regexp, v any) bool {
 	return t == "" || re.MatchString(t)
 }
 
-// declaredOnly keeps a planned step's parameters to the ones its tool declares, as the tool loop does
-// (prepare): a key the tool does not take (a poll's id) and a value outside a closed choice are removed
-// and named in stripped. A tool that declares no parameters keeps what the planner gave.
-func declaredOnly(tool string, info ToolInfo, params map[string]any, stripped *[]string) {
-	declared := allowedParams(info)
-	if len(declared) == 0 {
-		return
-	}
-	byName := map[string]ToolParam{}
-	for _, p := range declared {
-		byName[p.Name] = p
-	}
-	for _, k := range slices.Sorted(maps.Keys(params)) {
-		p, ok := byName[k]
-		if !ok {
-			delete(params, k)
-			*stripped = append(*stripped, tool+"."+k)
+// closedChoices checks a planned step's closed choices as the tool loop does (prepare): a value outside
+// a declared choice (reminders.update op confirm) is removed and named in stripped. Keys the tool does not
+// declare are kept: the language packs' planner prompts name some the tools take without declaring them
+// (polls.create options), and the tool reads only what it knows.
+func closedChoices(tool string, info ToolInfo, params map[string]any, stripped *[]string) {
+	for _, p := range allowedParams(info) {
+		v, ok := params[p.Name]
+		if !ok || len(p.Enum) == 0 {
 			continue
 		}
-		if len(p.Enum) > 0 {
-			if choice, ok := enumChoice(params[k], p.Enum); ok {
-				params[k] = choice
-			} else {
-				delete(params, k)
-				*stripped = append(*stripped, tool+"."+k)
-			}
+		if choice, ok := enumChoice(v, p.Enum); ok {
+			params[p.Name] = choice
+		} else {
+			delete(params, p.Name)
+			*stripped = append(*stripped, tool+"."+p.Name)
 		}
 	}
 }
@@ -814,7 +801,7 @@ func Assess(v Voice, p Plan, ts Toolset, memoryOn, hasTimeRef bool) Assessment {
 		case !enabled:
 			st.State = "disabled"
 		default:
-			declaredOnly(s.Tool, info, params, &a.Stripped)
+			closedChoices(s.Tool, info, params, &a.Stripped)
 			for _, k := range info.Required {
 				if isPlaceholder(ph, params[k]) {
 					st.Missing = append(st.Missing, k)

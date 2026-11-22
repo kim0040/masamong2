@@ -77,9 +77,10 @@ func TestToolLoopRefusesAValueOutsideTheChoice(t *testing.T) {
 	}
 }
 
-// Planner mode passes a step only the parameters its tool declares, and only values inside a closed
-// choice, as the tool loop does: a poll's id or op confirm never reaches the tool.
-func TestPlannerStepsKeepOnlyDeclaredParameters(t *testing.T) {
+// Planner mode passes a closed choice only a value inside it, as the tool loop does: op confirm never
+// reaches the tool. Keys the tool does not declare are left to the tool (the application ignores a poll's
+// id from a chat turn).
+func TestPlannerStepsKeepClosedChoices(t *testing.T) {
 	p := ParsePlan(`{"memory_requirement":"none","tool_plan":[` +
 		`{"tool_name":"polls.create","parameters":{"question":"lunch?","id":"poll_other"}},` +
 		`{"tool_name":"reminders.update","parameters":{"op":"confirm","id":"rm_1"}},` +
@@ -88,7 +89,7 @@ func TestPlannerStepsKeepOnlyDeclaredParameters(t *testing.T) {
 	if len(a.Steps) != 3 {
 		t.Fatalf("steps %+v", a.Steps)
 	}
-	if got := a.Steps[0].Parameters; len(got) != 1 || got["question"] != "lunch?" {
+	if got := a.Steps[0].Parameters; len(got) != 2 || got["question"] != "lunch?" {
 		t.Fatalf("poll step %+v", got)
 	}
 	if _, has := a.Steps[1].Parameters["op"]; has || a.Steps[1].Parameters["id"] != "rm_1" {
@@ -97,7 +98,7 @@ func TestPlannerStepsKeepOnlyDeclaredParameters(t *testing.T) {
 	if a.Steps[2].Parameters["op"] != "cancel" {
 		t.Fatalf("cancel step %+v", a.Steps[2].Parameters)
 	}
-	if !slices.Equal(a.Stripped, []string{"polls.create.id", "reminders.update.op"}) {
+	if !slices.Equal(a.Stripped, []string{"reminders.update.op"}) {
 		t.Fatalf("stripped %v", a.Stripped)
 	}
 }

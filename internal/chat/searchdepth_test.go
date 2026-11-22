@@ -705,8 +705,6 @@ func TestMemorySearchWaitsForADeepHoldThatStarvesIt(t *testing.T) {
 			for i := range req.Tools.Enabled {
 				if req.Tools.Enabled[i].ID == webSearchTool {
 					req.Tools.Enabled[i].Parallel, req.Tools.Enabled[i].MaxFeeUSD, req.Tools.Enabled[i].FeeBound = true, 0.06, depthBound
-					// the plan's depth is a parameter the tool declares, as the real search.web does
-					req.Tools.Enabled[i].Params = append(slices.Clone(req.Tools.Enabled[i].Params), ToolParam{Name: "depth", Enum: []string{"quick", "standard", "deep"}})
 				}
 			}
 			if _, err := (&Runtime{LLM: llm, Memory: m, Tools: paidSearch(fee)}).Answer(context.Background(), req); err != nil {
