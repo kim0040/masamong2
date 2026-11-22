@@ -7,7 +7,8 @@ func TestDeferredActionsHaveNoExecutePath(t *testing.T) {
 	// participation and reminders (work order 12) were built on 2026-09-28; participation starts off and
 	// goes through shadow mode, so nothing is left deferred on RAG
 	ragDeferred := []string{}
-	implementationDeferred := []string{}
+	// statistics v1: the contract is in place, the export and the rollup are built by later parts
+	implementationDeferred := []string{"stats.export", "stats.rollup"}
 	operatorDisabled := []string{"storage.migrate"}
 	want := make(map[string]bool, len(ragDeferred)+len(implementationDeferred)+len(operatorDisabled))
 	for _, id := range operatorDisabled {

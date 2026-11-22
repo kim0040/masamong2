@@ -39,6 +39,11 @@ func All() []Descriptor {
 	disabled := func(id, cli, route string) Descriptor {
 		return Descriptor{ID: id, CLI: cli, GUIRoute: route, Availability: Deferred, DeferredReason: OperatorDisabled, Effects: "none", AgentExposure: "none", Permission: id}
 	}
+	// building: the contract exists, the handler does not yet; the Action fails with ACTION_UNAVAILABLE
+	// (reason implementation_deferred) until its part lands and turns it into exec.
+	building := func(id, cli, route, effects string) Descriptor {
+		return Descriptor{ID: id, CLI: cli, GUIRoute: route, Availability: Deferred, DeferredReason: ImplementationDeferred, Effects: effects, AgentExposure: "none", Permission: id}
+	}
 	return []Descriptor{
 		exec("setup.resume", "setup", "/setup", "internal_write"),
 		exec("config.show", "config show", "/settings", "read"),
@@ -177,6 +182,13 @@ func All() []Descriptor {
 		exec("turns.marks", "turns marks", "/turns", "read"),
 		exec("audit.list", "audit", "/settings", "read"),
 		exec("stats.series", "stats series", "/stats", "read"),
+		// Usage statistics (internal/application/stats_registry.go). stats.export: input
+		// {from, to} (statsExportInput), output the file of weekly totals (statsExportDoc); it reads what
+		// was collected even with stats.enabled off. stats.rollup (operator only, CLI or console): input
+		// {group, since, force} (statsRollupInput), output {zone, finished, through, skipped}
+		// (statsRollupOutput); it finishes past days and never rewrites a finished one unless forced.
+		building("stats.export", "stats export", "/stats", "read"),
+		building("stats.rollup", "stats rollup", "/jobs", "internal_write"),
 		exec("lab.reviews", "lab reviews", "/lab", "read"),
 		exec("lab.review", "lab review", "/lab", "internal_write"),
 		exec("config.document", "config document", "/settings", "read"),
