@@ -58,7 +58,7 @@
 
 임베딩 모델을 바꾸면 검색은 새 모델로 임베딩된 leaf만 읽는다(leaf마다 벡터 하나, `embed_space`). 그래서 다시 색인이 끝날 때까지 기억 검색이 비고, 상태 점검은 지금 모델로 임베딩된 leaf만 세어 `pending_index`·`embed_model_changed`로 보이며 홈에 알림이 뜬다. 이미 색인된 기억이 있으면 `models.recommend`와 `models.select`(역할 `embed`)는 확인(`include_embed=true`) 없이 임베딩을 바꾸지 않는다(`models.select`는 `INVALID_INPUT`, 안정적인 메시지 키 `models.embed_reindex_required`, 다시 색인할 양 `reindex`를 돌려준다; 지금 쓰는 모델을 다시 고르는 것은 바꿈이 아니다). 콘솔 연결 화면은 이 키로 거절을 알아보고(영어 문구로 판별하지 않는다) 방·leaf·토큰 추정을 보여 주는 확인창을 띄운 뒤, 확인하면 `include_embed=true`로 다시 보낸다. 콘솔 추천 창은 임베딩을 기본으로 빼 두고, 체크하면 다시 색인할 leaf·토큰·예상 비용을 보여 주며, `reindex=true`면 적용하자마자 블록마다 준비 작업을 시작한다. `masamong models recommend --apply`는 임베딩을 그대로 두고 `embed_kept`로 알린다. 모델을 원래대로 돌리면 이전 벡터가 캐시에 남아 있어 다시 돈이 들지 않는다.
 
-`config.yaml` (기억 운영에 권장하는 설정. 새 설정의 실제 기본값과 다른 곳이 있다: `memory.capture`와 `discord.message_content`는 기본이 `false`라서 운영자가 켜야 하고, 이 예의 `memory.retrieve: auto`는 파일에 적었을 때의 값이다. 파일에 `memory.retrieve`가 없으면 `off`로 읽는다):
+`config.yaml` (기억 운영에 쓰는 설정의 예. 새 설정의 기본값과 같은 것이 많다. 기억은 기본으로 켜져 있어서 `memory.capture`·`memory.retrieve`를 적지 않아도 켜지고(`memory.retrieve`가 없으면 `auto`), 끄는 것은 콘솔이나 설정 파일에서 직접 적는다. `discord.message_content`는 기본이 `false`이고 Discord 개발자 포털의 privileged intent와 함께 운영자가 켠다):
 
 ```yaml
 models:                      # 역할별 모델 (provider: openrouter)

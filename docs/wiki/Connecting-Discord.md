@@ -60,7 +60,7 @@ Set each room under **Servers & rooms** (or `masamong channels configure`):
 | Setting | Values | What it does |
 |---|---|---|
 | Reply mode `respond` | `mention` · `always` · `command` · `off` | When the bot replies |
-| Collect `capture` | on / off | Store the room's conversation as memory (needs `memory.capture` on) |
+| Collect `capture` | on / off | Store the room's conversation as memory (on by default; needs `memory.capture` on, which is also the default) |
 | Use memory `memory_use` | `on` · `off` | Search memory when replying |
 | Persona `persona_ref` | `warm_ko`, `friendly_ko`, `friendly_en`, … | Tone and **default reply language**. A room with none uses its language's default (`warm_ko` and `warm_ja` are polite; see [Languages](https://github.com/kim0040/masamong2/wiki/Languages)) |
 | Extra rules `rules` | text | Additional instructions for this room only |

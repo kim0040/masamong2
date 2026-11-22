@@ -59,7 +59,7 @@ instance:
 | 설정 항목 | 설정값 옵션 | 동작 설명 |
 |---|---|---|
 | 응답 정책 `respond` | `mention` · `always` · `command` · `off` | 봇이 어떤 조건에서 대화에 응답할지 결정 |
-| 대화 수집 `capture` | 활성화 / 비활성화 | 채널의 대화를 기억 데이터베이스에 실시간 수집할지 여부 (전역 `memory.capture` 활성화 필요) |
+| 대화 수집 `capture` | 활성화 / 비활성화 | 채널의 대화를 기억 데이터베이스에 실시간 수집할지 여부 (기본은 활성화. 전역 `memory.capture`도 켜져 있어야 하며 그쪽도 기본이 켜짐) |
 | 기억 검색 `memory_use` | `on` · `off` | 대화 답변 생성 시 과거 기억 블록을 검색하여 반영할지 여부 |
 | 페르소나 `persona_ref` | `warm_ko`, `friendly_ko`, `friendly_en` 등 | 채널별 맞춤 말투 및 **기본 답변 언어** 지정. 비워 두면 그 언어의 기본값을 씁니다(`warm_ko`·`warm_ja`는 존댓말. [언어 설정](https://github.com/kim0040/masamong2/wiki/언어-설정) 참고) |
 | 추가 규칙 `rules` | 텍스트 지시문 | 해당 채널에만 특화된 추가 시스템 프롬프트 지시문 |
