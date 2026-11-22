@@ -387,9 +387,7 @@ func TestAnUpgradedDatabaseKeepsRepliesOnAnOldEdit(t *testing.T) {
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
-	oldEditsDelay = 0
-	t.Cleanup(func() { oldEditsDelay = 30 * time.Second })
-	s, err := Open(dir, nil, false)
+	s, err := openHooked(dir, serviceHooks{oldEditsAtOnce: true})
 	if err != nil {
 		t.Fatal(err)
 	}

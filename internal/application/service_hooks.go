@@ -12,6 +12,8 @@ type serviceHooks struct {
 	pendingPollMin, pendingPollMax time.Duration
 	// pendingStep runs at the start of every pending-event worker pass.
 	pendingStep func()
+	// oldEditsAtOnce settles old edits at the first idle pass instead of oldEditsDelay after the start.
+	oldEditsAtOnce bool
 }
 
 // durationOr is d, or def when d is zero (an interval a test did not shrink).

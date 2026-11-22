@@ -17,9 +17,9 @@ const (
 	pendingEventPollMax = 10 * time.Second
 )
 
-// oldEditsDelay keeps the pass over old edits (settleOldEdits) out of the busy minute after a start. A variable so a
-// test can shorten it.
-var oldEditsDelay = 30 * time.Second
+// oldEditsDelay keeps the pass over old edits (settleOldEdits) out of the busy minute after a start; a
+// test skips it (serviceHooks.oldEditsAtOnce).
+const oldEditsDelay = 30 * time.Second
 
 // nextPendingEventPoll is the wait after a pass: lo with work pending, else twice the last wait, up to hi.
 func nextPendingEventPoll(current time.Duration, pending bool, lo, hi time.Duration) time.Duration {
@@ -59,7 +59,7 @@ func (s *Service) startEventWorker() {
 				pending = true
 				s.kickRedaction()
 			case errors.Is(err, sql.ErrNoRows):
-				if oldEditsDone || time.Since(started) < oldEditsDelay {
+				if oldEditsDone || (!s.hooks.oldEditsAtOnce && time.Since(started) < oldEditsDelay) {
 					break
 				}
 				// the queue is empty: edits finished by an earlier release, a batch at a time
