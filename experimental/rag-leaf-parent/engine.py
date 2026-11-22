@@ -44,8 +44,6 @@ from retrieval_post import (  # noqa: E402
     TimeReference as RetrievalTimeReference,
     narrow_time_ids,
     resolve_time_scope,
-    DENSE_LIMIT as _DEFAULT_DENSE_LIMIT,
-    LEXICAL_LIMIT as _DEFAULT_LEXICAL_LIMIT,
     RERANK_MIN_SCORE,
     finalize_ranked_ids,
     merged_span,
@@ -226,11 +224,6 @@ class ThreadSafeLexicalIndex(LexicalIndex):
 
 class PlaygroundError(RuntimeError):
     pass
-
-
-# 테스트가 모듈 상수를 잠시 덮어쓰므로 retrieval_post 기본값을 여기서 재바인딩한다.
-LEXICAL_LIMIT = _DEFAULT_LEXICAL_LIMIT
-DENSE_LIMIT = _DEFAULT_DENSE_LIMIT
 
 
 def load_config() -> dict[str, Any]:
@@ -1831,6 +1824,8 @@ def _hit_provenance(index: IndexBundle, doc: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# 테스트가 이 모듈 상수를 잠시 덮어쓴다(test_engine_retrieval). retrieval_post의
+# 기본값(200/150)과 다른 풀 한도다.
 LEXICAL_LIMIT = 80
 DENSE_LIMIT = 50
 
@@ -2113,7 +2108,9 @@ def _rerank_leaves(
             continue
         if allowed_ids is not None and doc_id not in allowed_ids:
             continue
-        rank = rrf_rank.get(doc_id, LEXICAL_LIMIT + cand_i)
+        # rrf_rank에 없는 후보는 가져온 목록 바로 뒤의 순위로 둔다.
+        unranked_rank = LEXICAL_LIMIT + cand_i
+        rank = rrf_rank.get(doc_id, unranked_rank)
         # hybrid 1위 → 1.0, 풀 마지막 → 0에 가깝게. 주입된 후보(hybrid에 없음)는 0.
         base = max(0.0, 1.0 - rank / n_consider)
         person, meta = _person_signal(index, leaf, tokens=tokens, labels=labels)
