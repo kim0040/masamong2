@@ -39,6 +39,8 @@ type serviceHooks struct {
 	fetchBase atomic.Pointer[string]
 	// probeTimeout shortens a connection check (Registry.Probe), in nanoseconds; 0 = probeTimeout.
 	probeTimeout atomic.Int64
+	// news replaces the release notes' pace and sends per tick (updatenews_announce.go).
+	news atomic.Pointer[newsLimits]
 	// oldEditsAtOnce settles old edits at the first idle pass instead of oldEditsDelay after the start.
 	oldEditsAtOnce bool
 }

@@ -445,11 +445,11 @@ func (s *Service) ClaimNewsForTest(version, target string) {
 	}
 }
 
-// UseNewsLimitsForTest sets the pause between sends and the sends per pass.
-func UseNewsLimitsForTest(pace time.Duration, perTick int) (restore func()) {
-	oldPace, oldTick := updateNewsPace, updateNewsPerTick
-	updateNewsPace, updateNewsPerTick = pace, perTick
-	return func() { updateNewsPace, updateNewsPerTick = oldPace, oldTick }
+// UseNewsLimitsForTest sets s's pause between sends and the sends per pass; it returns the restore.
+func UseNewsLimitsForTest(s *Service, pace time.Duration, perTick int) (restore func()) {
+	old := s.hooks.news.Load()
+	s.hooks.news.Store(&newsLimits{pace: pace, perTick: perTick})
+	return func() { s.hooks.news.Store(old) }
 }
 
 // SimulatePreparedCrash writes a prepared-but-uncommitted revision, the way a crash between
