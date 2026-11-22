@@ -10,14 +10,6 @@ export type ToolInput = { name: string; type: 'text' | 'number' | 'select' | 'bo
 /** Values as the form holds them: strings, and true/false/undefined for switches. */
 export type InputValues = Record<string, string | boolean | undefined>
 
-export type ProviderState = 'ready' | 'missing' | 'none'
-
-/** Whether a tool's providers are usable, from tools.list (any one provider with a key is enough). */
-export function providerState(tl: any): ProviderState {
-  if (!tl?.provider_kinds?.length) return 'none'
-  return tl.provider_ready ? 'ready' : 'missing'
-}
-
 // Why a tool cannot answer (tools.list ready_reason) → how the console shows it. The server decides
 // readiness once (keys, the model role the tool needs, the memory index); pages only present it.
 const reasonState: Record<string, { tone: 'neutral' | 'info' | 'warn'; key: string }> = {

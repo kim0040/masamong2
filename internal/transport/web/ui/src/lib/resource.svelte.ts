@@ -3,8 +3,7 @@
 import { call, canLoadProtectedActions, session, type ActionError } from './api.svelte'
 import { onLive } from './live.svelte'
 
-type Entry = { data: any; at: number }
-const cache = new Map<string, Entry>()
+const cache = new Map<string, any>()
 
 // Resources on screen whose last refresh failed while they still show older data. Banners.svelte reads
 // this to say so once, for every page, instead of each page drawing its own strip.
@@ -38,9 +37,8 @@ export function resource<T = any>(action: string, input: () => Record<string, un
     }
     const inp = input()
     key = action + JSON.stringify(inp)
-    const hit = cache.get(key)
-    if (hit) {
-      s.data = hit.data
+    if (cache.has(key)) {
+      s.data = cache.get(key)
       s.loading = false
     } else if (s.data === undefined) s.loading = true
     const my = ++seq
@@ -51,7 +49,7 @@ export function resource<T = any>(action: string, input: () => Record<string, un
       s.data = r.output
       s.error = undefined
       s.stale = false
-      cache.set(key, { data: r.output, at: Date.now() })
+      cache.set(key, r.output)
     } else {
       s.error = r.error
       s.stale = s.data !== undefined
@@ -95,8 +93,4 @@ export function resource<T = any>(action: string, input: () => Record<string, un
     }
   })
   return self
-}
-
-export function invalidate(prefix: string) {
-  for (const k of cache.keys()) if (k.startsWith(prefix)) cache.delete(k)
 }

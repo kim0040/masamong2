@@ -83,15 +83,6 @@ export function useConfig() {
   return cfg
 }
 
-export function getIn(obj: any, path: string[]): any {
-  let cur = obj
-  for (const p of path) {
-    if (cur === null || cur === undefined) return undefined
-    cur = cur[p]
-  }
-  return cur
-}
-
 export type Op = { path: string[]; value?: unknown; op?: 'set' | 'unset' }
 
 /** Applies edits; toasts the outcome unless quiet. base is the revision the edits were made on (a form
