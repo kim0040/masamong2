@@ -1123,6 +1123,7 @@ func (g *Gateway) handleComponent(s *discordgo.Session, i *discordgo.Interaction
 		}, discordgo.WithContext(ctx))
 		return
 	}
+	parts, ictx = dmButtonGuild(parts, ictx) // a personal card's button pressed in a DM (private_cards.go)
 	req, ok := featureButton(parts, ictx, "dc:"+i.ID)
 	if !ok {
 		return
@@ -1452,9 +1453,10 @@ func (g *Gateway) onMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	cmd, opts, isCmd := g.prefixTable().Parse(g.cfg.CommandPrefix, m.Content)
 	if m.GuildID != "" && !g.svc.GuildAllowed(m.GuildID) {
 		// a server waiting for an operator's approval: nothing is stored, observed or answered. Only an
-		// operator's "!" commands and consent (which can always be withdrawn) run; a slash command gets
-		// the notice, while "!" stays quiet so a busy server is not flooded with it.
-		if isCmd && (g.svc.IsOperator(m.Author.ID) || cmd.Action == "privacy.consent") {
+		// operator's "!" commands, consent (which can always be withdrawn) and one's own memory (seen and
+		// forgotten, as the application allows: gateDiscord) run; a slash command gets the notice, while "!"
+		// stays quiet so a busy server is not flooded with it.
+		if isCmd && (g.svc.IsOperator(m.Author.ID) || pendingServerAllows(cmd.Action)) {
 			g.runCommand(s, m, cmd, opts)
 		}
 		return
@@ -2092,6 +2094,10 @@ func (g *Gateway) sendCommandCard(base context.Context, s *discordgo.Session, m 
 		}
 	}
 	if ctx.Err() != nil {
+		return
+	}
+	if cmd.Private && m.GuildID != "" {
+		g.sendPrivateCard(ctx, s, m, cmd, ictx, msg)
 		return
 	}
 	sent, err := s.ChannelMessageSendComplex(m.ChannelID, msg, discordgo.WithContext(ctx))

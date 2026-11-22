@@ -28,6 +28,9 @@ type Command struct {
 	Options   []*discordgo.ApplicationCommandOption
 	Build     func(opts map[string]string, ctx InvokeContext) (string, map[string]any) // returns action id + input
 	Ephemeral bool
+	// Private cards show stored data about the caller: typed as "!" in a server, the card goes to the caller's
+	// DMs and the room gets one line (private_cards.go).
+	Private bool
 	// DiscordOnly commands are personal or admin surfaces (consent, subscriptions), not agent tools the
 	// test sandbox runs, so they are not in contracts/sandbox/tool-parity.json.
 	DiscordOnly bool
@@ -285,7 +288,7 @@ func Commands() []Command {
 		},
 		{
 			Name: "fortune-register", Desc: "Register your birthday for personal fortunes", Action: "fortune.subscribe",
-			Ephemeral: true, DiscordOnly: true,
+			Ephemeral: true, Private: true, DiscordOnly: true,
 			Options: []*discordgo.ApplicationCommandOption{
 				option(str, "birth_date", "Date of birth, YYYY-MM-DD", true),
 				option(str, "birth_time", "Time of birth HH:MM (optional)", false),
@@ -347,7 +350,7 @@ func Commands() []Command {
 		},
 		{
 			Name: "notices-register", Desc: "Register your school for notices picked for you", Action: "notices.subscribe",
-			Ephemeral: true, DiscordOnly: true,
+			Ephemeral: true, Private: true, DiscordOnly: true,
 			Options: []*discordgo.ApplicationCommandOption{
 				option(str, "school", "School name (e.g. 전북대학교)", true),
 				choiceOption("degree", "Degree program", false, "undergraduate", "master", "doctorate", "integrated"),
@@ -403,7 +406,7 @@ func Commands() []Command {
 		},
 		{
 			Name: "mysettings", Desc: "My settings: weather place, time zone, quiet hours, language", Action: "preferences.set",
-			Ephemeral: true, DiscordOnly: true,
+			Ephemeral: true, Private: true, DiscordOnly: true,
 			Options: []*discordgo.ApplicationCommandOption{
 				option(str, "region", "Default place for weather (e.g. Seoul)", false),
 				option(str, "timezone", "Time zone (e.g. Asia/Seoul)", false),
@@ -458,7 +461,7 @@ func Commands() []Command {
 		},
 		{
 			Name: "privacy", Desc: "See, give or withdraw consent for memory, fortune, notices and chiming in", Action: "privacy.consent",
-			Ephemeral: true, DiscordOnly: true,
+			Ephemeral: true, Private: true, DiscordOnly: true,
 			Options: []*discordgo.ApplicationCommandOption{
 				choiceOption("action", "What to do", false, "status", "grant", "withdraw"),
 				choiceOption("scope", "Which purpose", false, "memory", "fortune", "school_notice", "transfer_notice", "participation", "profile"),
@@ -497,7 +500,7 @@ func Commands() []Command {
 		},
 		{
 			Name: "reminders", Desc: "My reminders still to come, with cancel buttons", Action: "reminders.update",
-			Ephemeral: true, DiscordOnly: true,
+			Ephemeral: true, Private: true, DiscordOnly: true,
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
 				return "reminders.update", map[string]any{"op": "list"}
 			},
@@ -505,7 +508,7 @@ func Commands() []Command {
 		{
 			// what the bot keeps that names the member, in this server only (memory.mine.show)
 			Name: "mymemory", Desc: "What the bot remembers about you in this server", Action: "memory.mine.show",
-			Ephemeral: true, DiscordOnly: true,
+			Ephemeral: true, Private: true, DiscordOnly: true,
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
 				return "memory.mine.show", map[string]any{}
 			},
@@ -513,7 +516,7 @@ func Commands() []Command {
 		{
 			// a preview of the member's own memory with a confirm button (memory.mine.forget, buttons in memory_buttons.go)
 			Name: "forgetme", Desc: "See, then delete, what the bot remembers about you in this server", Action: "memory.mine.forget",
-			Ephemeral: true, DiscordOnly: true,
+			Ephemeral: true, Private: true, DiscordOnly: true,
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
 				return "memory.mine.forget", map[string]any{}
 			},
@@ -802,6 +805,12 @@ func LocalDesc(c Command, locale string) string {
 		return v
 	}
 	return c.Desc
+}
+
+// pendingServerAllows names the Actions a member's "!" command may run in a server waiting for approval: the
+// same ones the application lets through there (application gateDiscord).
+func pendingServerAllows(action string) bool {
+	return action == "privacy.consent" || action == "memory.mine.show" || action == "memory.mine.forget"
 }
 
 // ByName / ByAlias resolve a Discord surface to a Command.
