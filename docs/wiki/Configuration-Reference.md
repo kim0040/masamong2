@@ -351,6 +351,11 @@ Over months, the operational records each conversation leaves (turn details, dia
 | `usage_days` | `14` | Per-user and per-room tool counters (limits need only today's). Daily totals per tool are kept for `turn_days` |
 | `image_days` | `14` | Files made by the image tool (`<data-root>/images/`) |
 | `query_cache_days` | `7` | Question embedding cache (stored at the configured dimensions: about 8 KB per question at 4096, 2 KB at 1024; the same question rarely comes again). Snippet and summary vectors kept from a previous model are not deleted, because they make switching back free |
+| `ledger_days` | `90` | Model call, tool call and reply delivery ledgers (body-free: roles, models, token counts, timing, cost, failure classes) |
+| `pending_days` | `0` (= `usage_days`) | Reminder offers and reminder proposals nobody confirmed, with their text |
+| `context_days` | `0` (= `turn_detail_days`) | Conversation context of rooms that went quiet or that the bot left, and finished reminders with their text |
+
+`pending_days` and `context_days` hold member content apart from the records: setting the record keys (`turn_days`, `turn_detail_days`, `trace_days`, `audit_days`, `ledger_days`) to `-1` keeps the records forever, while these two keep their own horizon once they are set. While they are unset they follow `usage_days` and `turn_detail_days`, as before they had keys of their own.
 
 ```yaml
 retention:
@@ -434,6 +439,12 @@ When something goes wrong, operators (`access.operators`) get a Discord DM. Swit
 | `check` | `true` | Ask GitHub once a day whether there is a new release. Only the program name and version are sent; nothing is installed automatically. Development builds (`-dev`) do not check. A source build (version from `git describe`) checks too, but updates only by installing again |
 
 A new version shows under **Maintenance** and in the notifications (info).
+
+## stats
+
+| Key | Default | Meaning |
+|---|---|---|
+| `enabled` | `true` | Keep daily usage statistics of this install in its own database (counts by feature, model, tool and outcome; no message text, names or IDs). Nothing is sent anywhere; an operator can export a file and decide whether to share it. `false` stops collecting; statistics already kept can still be exported |
 
 ## web_search
 

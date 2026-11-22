@@ -181,7 +181,8 @@ func implied() map[string]any {
 		"alerts.discord": al.DiscordOn(), "alerts.min_severity": al.Least(), "updates.check": up.CheckOn(),
 		"retention.turn_days": r["turns"], "retention.turn_detail_days": r["turn_detail"], "retention.trace_days": r["traces"],
 		"retention.audit_days": r["audit"], "retention.usage_days": r["usage"], "retention.query_cache_days": r["query_cache"],
-		"retention.image_days": r["images"],
+		"retention.image_days": r["images"], "retention.ledger_days": r["ledger"], "retention.pending_days": r["pending"],
+		"retention.context_days": r["context"], "stats.enabled": Stats{}.On(),
 	}
 }
 

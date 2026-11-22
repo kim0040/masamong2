@@ -39,6 +39,8 @@ type Document struct {
 	Backup        Backup              `yaml:"backup" json:"backup"`
 	// Retention bounds the operational records that grow with every reply (not memory itself).
 	Retention Retention `yaml:"retention,omitempty" json:"retention,omitempty"`
+	// Stats is the install's own usage statistics: daily totals kept in its database, never sent anywhere.
+	Stats Stats `yaml:"stats,omitempty" json:"stats,omitempty"`
 	// Tools configures the bot's tools: built-in Actions (enable, chat, commands, aliases, limits,
 	// defaults, planner text) and operator-defined HTTP tools. Absent entries keep built-in defaults.
 	Tools map[string]tools.Settings `yaml:"tools,omitempty" json:"tools,omitempty"`
@@ -940,6 +942,14 @@ type Retention struct {
 	UsageDays      int `yaml:"usage_days,omitempty" json:"usage_days,omitempty"`             // per-user and per-channel tool counters (14)
 	QueryCacheDays int `yaml:"query_cache_days,omitempty" json:"query_cache_days,omitempty"` // question embeddings cache (7)
 	ImageDays      int `yaml:"image_days,omitempty" json:"image_days,omitempty"`             // generated pictures (14)
+	// LedgerDays keeps the body-free model call, tool call and reply delivery ledgers (90).
+	LedgerDays int `yaml:"ledger_days,omitempty" json:"ledger_days,omitempty"`
+	// PendingDays and ContextDays hold member content apart from the records, so a record key set to -1
+	// (forever) does not keep it too. PendingDays: reminder offers and reminder proposals nobody confirmed,
+	// with their text (unset = usage_days). ContextDays: the conversation context of rooms that went quiet
+	// and finished reminders with their text (unset = turn_detail_days).
+	PendingDays int `yaml:"pending_days,omitempty" json:"pending_days,omitempty"`
+	ContextDays int `yaml:"context_days,omitempty" json:"context_days,omitempty"`
 }
 
 func keepDays(v, def int) int {
@@ -950,13 +960,29 @@ func keepDays(v, def int) int {
 }
 
 // Days returns the effective retention for each record kind (-1 = keep forever).
+// pending and context follow usage and turn_detail while unset, which is what those records followed
+// before they had keys of their own.
 func (r Retention) Days() map[string]int {
+	usage, detail := keepDays(r.UsageDays, 14), keepDays(r.TurnDetailDays, 30)
 	return map[string]int{
-		"turns": keepDays(r.TurnDays, 400), "turn_detail": keepDays(r.TurnDetailDays, 30), "traces": keepDays(r.TraceDays, 30),
-		"audit": keepDays(r.AuditDays, 400), "usage": keepDays(r.UsageDays, 14), "query_cache": keepDays(r.QueryCacheDays, 7),
-		"images": keepDays(r.ImageDays, 14),
+		"turns": keepDays(r.TurnDays, 400), "turn_detail": detail, "traces": keepDays(r.TraceDays, 30),
+		"audit": keepDays(r.AuditDays, 400), "usage": usage, "query_cache": keepDays(r.QueryCacheDays, 7),
+		"images": keepDays(r.ImageDays, 14), "ledger": keepDays(r.LedgerDays, 90),
+		"pending": keepDays(r.PendingDays, usage), "context": keepDays(r.ContextDays, detail),
 	}
 }
+
+// Stats is the install's own usage statistics (internal/application/stats_registry.go): daily totals
+// by feature, model, tool and outcome, kept locally. Nothing is sent anywhere; an operator exports a
+// file by hand (stats.export) and decides whether to share it.
+type Stats struct {
+	// Enabled collects statistics (unset = on). Off stops collection and the daily rollup; an export
+	// still reads what was collected before.
+	Enabled *bool `yaml:"enabled,omitempty" json:"enabled,omitempty"`
+}
+
+// On reports whether statistics are collected.
+func (s Stats) On() bool { return s.Enabled == nil || *s.Enabled }
 
 type Backup struct {
 	Schedule string `yaml:"schedule" json:"schedule"` // off | daily | weekly
