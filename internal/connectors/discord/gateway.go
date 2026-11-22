@@ -1958,11 +1958,8 @@ func messageAuthorName(m *discordgo.Message) string {
 
 // capture stores the message as channel memory when the instance, the channel and its parent allow it.
 func (g *Gateway) capture(m *discordgo.MessageCreate, place application.ChannelPlace) {
-	if m.GuildID == "" {
-		return
-	}
 	body := bodyOf(m.Message)
-	if body == "" || !g.svc.CapturesIn(m.GuildID, m.ChannelID, place) || !g.svc.MemoryAllowed(m.Author.ID) {
+	if body == "" || !g.svc.CapturesIn(m.GuildID, m.ChannelID, place) || !g.svc.MemoryAllowed(m.Author.ID) { // CapturesIn: never a DM
 		return
 	}
 	eng, err := g.svc.MemoryEngine()
@@ -2050,8 +2047,7 @@ func (g *Gateway) runCommand(s *discordgo.Session, m *discordgo.MessageCreate, c
 	defer cancel()
 	mark := g.svc.SettledMark() // before the command reads anything: its result may go on into a chat turn
 	res := g.svc.Execute(ctx, requestFor(cmd, opts, ictx, "dc:"+m.ID))
-	// a personal command's failure in a room stays its DM card, never a reply there; a DM: CommandToChat checks DM chat
-	if application.Unanswered(res) && (!cmd.Private || m.GuildID == "") {
+	if application.Unanswered(res) && (!cmd.Private || m.GuildID == "") { // a personal command's room failure stays its DM card; a DM: CommandToChat checks DM chat
 		// no answer from the tool: carry on as a conversation, off the event loop
 		g.work(func(base context.Context) {
 			// the reply is posted inside the turn: the conversation keeps only what reached Discord
