@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"masamong/internal/config"
 	"masamong/internal/memory/engine"
 )
 
@@ -219,6 +220,13 @@ func (s *Service) retentionPass(ctx context.Context) (retentionResult, error) {
 			return res, fmt.Errorf("turn_detail: %w", err)
 		}
 	}
+	// a room may keep its turn text for fewer days than that (logging.retain_days)
+	if n, err := s.stripRoomTurnDetail(ctx, now, days["turn_detail"]); err != nil {
+		out["room_turn_detail"] = n
+		return res, fmt.Errorf("room_turn_detail: %w", err)
+	} else if n > 0 {
+		out["room_turn_detail"] = n
+	}
 	if s.Store.IsSQLite() {
 		// Trace dependencies are shared with their turn. Retire a trace if that turn never finished
 		// committing or its details have expired, before removing the turn's evidence links.
@@ -302,6 +310,34 @@ func (s *Service) retentionPass(ctx context.Context) (retentionResult, error) {
 		_, _ = s.Store.DB.ExecContext(ctx, `PRAGMA optimize`)
 	}
 	return res, nil
+}
+
+// stripRoomTurnDetail applies a room's logging.retain_days: the message, answer and evidence of that
+// room's turns older than the room's days are blanked the way the global turn_detail pass blanks them
+// (body='{}'). It only ever shortens: a room whose value is unset, the old default 30, or not shorter
+// than global (config.RoomDetailDays) is left to the global pass, and global -1 (keep forever) still keeps
+// every room that sets nothing. No row is deleted, nothing outside turn_log.body is touched (memory,
+// reminders, call ledgers and the statistics are not logging), and other rooms are not affected.
+// A person's own deletion needs nothing from here: it blanks their text in the same rows and this
+// pass can only blank more. Returns the number of turn rows blanked.
+func (s *Service) stripRoomTurnDetail(ctx context.Context, now time.Time, global int) (int64, error) {
+	var total int64
+	for guildID, g := range s.Doc().Guilds {
+		for channelID, ch := range g.Channels {
+			d := config.RoomDetailDays(ch.Logging.RetainDays, global)
+			if d < 0 || d == global {
+				continue
+			}
+			cutoff := now.AddDate(0, 0, -d).Format(time.RFC3339)
+			n, err := s.updateRowsBatched(ctx, "turn_log", `body='{}'`,
+				`guild_id=? AND channel_id=? AND at < ? AND body <> '{}'`, guildID, channelID, cutoff)
+			total += n
+			if err != nil {
+				return total, err
+			}
+		}
+	}
+	return total, nil
 }
 
 func (s *Service) pruneOrphanThreadParticipants(ctx context.Context) (int64, error) {
