@@ -151,26 +151,16 @@ func Commands() []Command {
 		{
 			Name: "weather", Desc: "Current weather from KMA", Action: "weather.query",
 			Options: []*discordgo.ApplicationCommandOption{option(str, "region", "City name (e.g. Seoul)", false)},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				in := map[string]any{}
-				if r := strings.TrimSpace(o["region"]); r != "" {
-					in["region"] = r
-				}
-				return "weather.query", in
-			},
+			Build:   buildWeather,
 		},
 		{
 			Name: "alerts", Desc: "Earthquake notices and active weather warnings", Action: "disasters.query",
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return "disasters.query", map[string]any{}
-			},
+			Build: buildAlerts,
 		},
 		{
 			Name: "quote", Desc: "Stock quote", Action: "finance.quote",
 			Options: []*discordgo.ApplicationCommandOption{option(str, "symbol", "Ticker symbol (e.g. AAPL)", true)},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return "finance.quote", map[string]any{"symbol": o["symbol"], "krw": true}
-			},
+			Build:   buildQuote,
 		},
 		{
 			Name: "fx", Desc: "Exchange rates", Action: "finance.fx",
@@ -179,53 +169,22 @@ func Commands() []Command {
 				option(str, "base", "Currency to show values in, e.g. USD or JPY (default: your region's currency)", false),
 				option(discordgo.ApplicationCommandOptionNumber, "amount", "Amount to convert", false),
 			},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				// what was typed goes to the action as it is: a given option, even a blank one, is checked there.
-				// The blank home is the home currency of the request's language, which the action knows.
-				// The base is sent even when nothing was typed: set, a configured tool default cannot be
-				// merged in as if the person had asked for it, and blank is the home default anyway.
-				in := map[string]any{"home": "", "base": ""}
-				if c.Tag != "" {
-					in["locale_tag"] = c.Tag
-				}
-				if v, given := o["currency"]; given {
-					in["currency"] = v
-				}
-				if v, given := o["base"]; given {
-					in["base"] = v
-				}
-				if v, given := o["amount"]; given {
-					// a number option is already a number; a word of a message is the person's text, read
-					// in their locale's syntax by the action
-					if n, err := strconv.ParseFloat(v, 64); err == nil && !c.Typed {
-						in["amount"] = n
-					} else {
-						in["amount"] = v
-					}
-				}
-				return "finance.fx", in
-			},
+			Build: buildFX,
 		},
 		{
 			Name: "search", Desc: "Web search", Action: "search.web",
 			Options: []*discordgo.ApplicationCommandOption{option(str, "query", "What to search for", true)},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return "search.web", map[string]any{"query": o["query"], "size": 3}
-			},
+			Build:   buildSearch,
 		},
 		{
 			Name: "ranking", Desc: "Who talked the most in this channel", Action: "activity.ranking",
 			Options: []*discordgo.ApplicationCommandOption{option(str, "period", "today, week, month or all", false)},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return "activity.ranking", map[string]any{"period": rankingPeriod(o["period"]), "scope": "discord:" + c.ChannelID}
-			},
+			Build:   buildRanking,
 		},
 		{
 			Name: "places", Desc: "Find places on Kakao Map", Action: "places.search",
 			Options: []*discordgo.ApplicationCommandOption{option(str, "query", "Area and kind of place", true)},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return "places.search", map[string]any{"query": o["query"], "size": 5}
-			},
+			Build:   buildPlaces,
 		},
 		{
 			Name: "poll", Desc: "Create a Discord poll in this channel", Action: "polls.create",
@@ -242,36 +201,12 @@ func Commands() []Command {
 				}(),
 				option(discordgo.ApplicationCommandOptionBoolean, "multiselect", "Allow picking more than one answer", false),
 			},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				raw := o["answers"]
-				if raw == "" {
-					raw = o["options"]
-				}
-				var opts []any
-				for i, part := range strings.Split(raw, ",") {
-					if part = strings.TrimSpace(part); part != "" {
-						opts = append(opts, map[string]any{"id": fmt.Sprintf("o%d", i+1), "label": part})
-					}
-				}
-				hours := 24
-				fmt.Sscanf(o["duration"], "%d", &hours)
-				multi := strings.EqualFold(strings.TrimSpace(o["multiselect"]), "true")
-				in := map[string]any{
-					"question":          o["question"],
-					"options":           opts,
-					"duration_hours":    hours,
-					"allow_multiselect": multi,
-					"scope":             "discord:" + c.ChannelID,
-				}
-				return "polls.create", in
-			},
+			Build: buildPoll,
 		},
 		{
 			Name: "image", Desc: "Draw a picture from a description", Action: "images.generate",
 			Options: []*discordgo.ApplicationCommandOption{option(str, "prompt", "What to draw", true)},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return "images.generate", map[string]any{"prompt": o["prompt"], "scope": "discord:" + c.ChannelID}
-			},
+			Build:   buildImage,
 		},
 		{
 			Name: "fortune", Desc: "Today's fortune, detailed, this month or year; your subscription", Action: "fortune.query",
@@ -280,11 +215,7 @@ func Commands() []Command {
 				choiceOption("what", "What to see or do", false, "today", "detail", "month", "year", "animals", "status", "subscribe", "unsubscribe", "delete"),
 				option(str, "time", "Briefing time HH:MM (with subscribe)", false),
 			},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				verb, rest := splitVerb(o["what"], o["time"], wordsFor("fortune", "verb",
-					"today", "detail", "month", "year", "animals", "status", "subscribe", "unsubscribe", "delete", "register"))
-				return fortuneRequest(verb, rest)
-			},
+			Build: buildFortune,
 		},
 		{
 			Name: "fortune-register", Desc: "Register your birthday for personal fortunes", Action: "fortune.subscribe",
@@ -295,45 +226,25 @@ func Commands() []Command {
 				choiceOption("gender", "Gender (optional)", false, "male", "female"),
 				option(str, "birth_place", "Birthplace, a city (optional)", false),
 			},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				in := map[string]any{"op": "register"}
-				for _, k := range []string{"birth_date", "birth_time", "gender", "birth_place"} {
-					if v := strings.TrimSpace(o[k]); v != "" {
-						in[k] = v
-					}
-				}
-				return "fortune.subscribe", in
-			},
+			Build: buildFortuneRegister,
 		},
 		{
 			Name: "fortune-month", Desc: "This month's fortune", Action: "fortune.query", DiscordOnly: true, PrefixOnly: true,
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return "fortune.query", map[string]any{"what": "month"}
-			},
+			Build: buildFortuneMonth,
 		},
 		{
 			Name: "fortune-year", Desc: "This year's fortune", Action: "fortune.query", DiscordOnly: true, PrefixOnly: true,
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return "fortune.query", map[string]any{"what": "year"}
-			},
+			Build: buildFortuneYear,
 		},
 		{
 			Name: "subscribe", Desc: "Morning fortune briefing at a time", Action: "fortune.subscribe", DiscordOnly: true, PrefixOnly: true,
 			Options: []*discordgo.ApplicationCommandOption{option(str, "time", "HH:MM", false)},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return fortuneRequest("subscribe", o["time"])
-			},
+			Build:   buildSubscribe,
 		},
 		{
 			Name: "zodiac", Desc: "Today's fortune of a zodiac sign, or all twelve ranked", Action: "fortune.query", DiscordOnly: true,
 			Options: []*discordgo.ApplicationCommandOption{option(str, "sign", "Sign name, or ranking (empty = your own sign)", false)},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				sign := strings.TrimSpace(o["sign"])
-				if wordsFor("zodiac", "verb", "ranking")[strings.ToLower(sign)] == "ranking" {
-					return "fortune.query", map[string]any{"what": "ranking"}
-				}
-				return "fortune.query", map[string]any{"what": "zodiac", "sign": sign}
-			},
+			Build:   buildZodiac,
 		},
 		{
 			Name: "notices", Desc: "School notices picked for you; your notice settings", Action: "notices.status",
@@ -342,11 +253,7 @@ func Commands() []Command {
 				choiceOption("what", "What to see or do", false, "latest", "profile", "status", "time", "pause", "resume", "delete", "mute", "unmute"),
 				option(str, "value", "Time HH:MM, or a topic for mute/unmute", false),
 			},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				verb, rest := splitVerb(o["what"], o["value"], wordsFor("notices", "verb",
-					"latest", "profile", "status", "time", "pause", "resume", "delete", "mute", "unmute", "register"))
-				return noticeRequest("school", verb, rest)
-			},
+			Build: buildNotices,
 		},
 		{
 			Name: "notices-register", Desc: "Register your school for notices picked for you", Action: "notices.subscribe",
@@ -365,18 +272,7 @@ func Commands() []Command {
 				option(str, "interests", "Topics you want first, comma-separated", false),
 				option(str, "time", "Delivery time HH:MM", false),
 			},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				in := map[string]any{"kind": "school", "op": "register"}
-				for _, k := range []string{"school", "degree", "department", "campus", "interests", "time"} {
-					if v := strings.TrimSpace(o[k]); v != "" {
-						in[k] = v
-					}
-				}
-				if g, err := strconv.Atoi(strings.TrimSpace(o["grade"])); err == nil {
-					in["grade"] = g
-				}
-				return "notices.subscribe", in
-			},
+			Build: buildNoticesRegister,
 		},
 		{
 			Name: "transfer", Desc: "Recent transfer admission notices; your subscription to universities", Action: "transfer.recent",
@@ -385,24 +281,11 @@ func Commands() []Command {
 				choiceOption("what", "What to see or do", false, "recent", "subscribe", "status", "time", "pause", "resume", "delete"),
 				option(str, "value", "Universities (comma-separated) or a time HH:MM", false),
 			},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				verb, rest := splitVerb(o["what"], o["value"], wordsFor("transfer", "verb",
-					"recent", "subscribe", "status", "time", "pause", "resume", "delete"))
-				if verb == "" || verb == "recent" {
-					in := map[string]any{}
-					if rest != "" {
-						in["universities"] = rest
-					}
-					return "transfer.recent", in
-				}
-				return noticeRequest("transfer", verb, rest)
-			},
+			Build: buildTransfer,
 		},
 		{
 			Name: "summary", Desc: "Summarize this channel's recent conversation", Action: "summaries.channel", DiscordOnly: true,
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return "summaries.channel", map[string]any{}
-			},
+			Build: buildSummary,
 		},
 		{
 			Name: "mysettings", Desc: "My settings: weather place, time zone, quiet hours, language", Action: "preferences.set",
@@ -413,9 +296,7 @@ func Commands() []Command {
 				option(str, "quiet", "Quiet hours for scheduled DMs, HH:MM-HH:MM (\"off\" clears)", false),
 				choiceOption("language", "Language of my cards and DMs", false, "ko", "en", "default"),
 			},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return "preferences.set", settingsInput(o, c.Typed)
-			},
+			Build: buildMysettings,
 		},
 		{
 			Name: "updates", Desc: "What's new in this version; your update news by DM", Action: "updates.notes",
@@ -424,10 +305,7 @@ func Commands() []Command {
 				choiceOption("what", "What to see or do", false, "now", "previous", "subscribe", "unsubscribe", "status"),
 				option(str, "value", "A version, e.g. v1.4.0", false),
 			},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				verb, rest := splitVerb(o["what"], o["value"], wordsFor("updates", "verb", "now", "previous", "subscribe", "unsubscribe", "status"))
-				return updatesRequest(verb, rest)
-			},
+			Build: buildUpdates,
 		},
 		{
 			Name: "admin", Desc: "Run the bot in this channel: pause, replies, memory, chiming in, blocking (server managers)",
@@ -437,27 +315,7 @@ func Commands() []Command {
 				choiceOption("mode", "Setting (reply mode, memory on/off, chiming in)", false, "always", "mention", "command", "off", "on", "collect", "shadow", "conservative"),
 				option(discordgo.ApplicationCommandOptionUser, "user", "Who to block or unblock in this server", false),
 			},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				verb, rest := splitVerb(o["op"], o["mode"], wordsFor("admin", "verb", "status", "pause", "resume", "respond", "memory", "chime", "news", "block", "unblock"))
-				if verb == "" {
-					verb = "status"
-				}
-				in := map[string]any{"op": verb}
-				switch verb {
-				case "respond", "memory", "chime", "news":
-					mode := wordsFor("admin", "mode", "always", "mention", "command", "off", "on", "collect", "shadow", "conservative")[strings.ToLower(rest)]
-					if mode == "" {
-						mode = rest
-					}
-					if verb == "chime" && mode == "on" {
-						mode = "conservative" // "chiming in on" means it may speak
-					}
-					in["mode"] = mode
-				case "block", "unblock":
-					in["user"] = orDefault(o["user"], rest)
-				}
-				return "access.policy", in
-			},
+			Build: buildAdmin,
 		},
 		{
 			Name: "privacy", Desc: "See, give or withdraw consent for memory, fortune, notices and chiming in", Action: "privacy.consent",
@@ -466,17 +324,7 @@ func Commands() []Command {
 				choiceOption("action", "What to do", false, "status", "grant", "withdraw"),
 				choiceOption("scope", "Which purpose", false, "memory", "fortune", "school_notice", "transfer_notice", "participation", "profile"),
 			},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				verb, scope := splitVerb(o["action"], o["scope"], wordsFor("privacy", "verb", "status", "grant", "withdraw"))
-				in := map[string]any{}
-				if scope != "" {
-					in["scope"] = scope
-				}
-				if verb == "grant" || verb == "withdraw" {
-					in["decision"] = verb
-				}
-				return "privacy.consent", in
-			},
+			Build: buildPrivacy,
 		},
 		{
 			Name: "remind", Desc: "Remind me at a time (confirm the time and where it goes)", Action: "reminders.propose",
@@ -486,58 +334,297 @@ func Commands() []Command {
 				option(str, "what", "What to remind you of", false),
 				choiceOption("repeat", "Repeat it (leave empty for once)", false, "daily", "weekly", "monthly"),
 			},
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				// the weekday of a weekly reminder and the day of a monthly one come from the time given
-				in := map[string]any{"text": o["when"]}
-				if what := strings.TrimSpace(o["what"]); what != "" {
-					in = map[string]any{"when": o["when"], "what": what}
-				}
-				if rep := o["repeat"]; rep != "" {
-					in["repeat"] = rep
-				}
-				return "reminders.propose", in
-			},
+			Build: buildRemind,
 		},
 		{
 			Name: "reminders", Desc: "My reminders still to come, with cancel buttons", Action: "reminders.update",
 			Ephemeral: true, Private: true, DiscordOnly: true,
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return "reminders.update", map[string]any{"op": "list"}
-			},
+			Build: buildReminders,
 		},
 		{
 			// what the bot keeps that names the member, in this server only (memory.mine.show)
 			Name: "mymemory", Desc: "What the bot remembers about you in this server", Action: "memory.mine.show",
 			Ephemeral: true, Private: true, DiscordOnly: true,
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return "memory.mine.show", map[string]any{}
-			},
+			Build: buildMymemory,
 		},
 		{
 			// a preview of the member's own memory with a confirm button (memory.mine.forget, buttons in memory_buttons.go)
 			Name: "forgetme", Desc: "See, then delete, what the bot remembers about you in this server", Action: "memory.mine.forget",
 			Ephemeral: true, Private: true, DiscordOnly: true,
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return "memory.mine.forget", map[string]any{}
-			},
+			Build: buildForgetme,
 		},
 		{
 			Name: "status", Desc: "Bot status", Action: "runtime.doctor", Ephemeral: true,
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return "runtime.doctor", map[string]any{}
-			},
+			Build: buildStatus,
 		},
 		{
 			Name: "help", Desc: "List commands", Action: "help.version", Ephemeral: true,
-			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return "help.version", map[string]any{}
-			},
+			Build: buildHelp,
 		},
 	}
 	for i := range cmds {
 		cmds[i].Aliases = aliasesFor(cmds[i].Name)
 	}
 	return cmds
+}
+
+// buildWeather maps the weather command's options to its Action input.
+func buildWeather(o map[string]string, c InvokeContext) (string, map[string]any) {
+	in := map[string]any{}
+	if r := strings.TrimSpace(o["region"]); r != "" {
+		in["region"] = r
+	}
+	return "weather.query", in
+}
+
+// buildAlerts maps the alerts command's options to its Action input.
+func buildAlerts(o map[string]string, c InvokeContext) (string, map[string]any) {
+	return "disasters.query", map[string]any{}
+}
+
+// buildQuote maps the quote command's options to its Action input.
+func buildQuote(o map[string]string, c InvokeContext) (string, map[string]any) {
+	return "finance.quote", map[string]any{"symbol": o["symbol"], "krw": true}
+}
+
+// buildFX maps the fx command's options to its Action input.
+func buildFX(o map[string]string, c InvokeContext) (string, map[string]any) {
+	// what was typed goes to the action as it is: a given option, even a blank one, is checked there.
+	// The blank home is the home currency of the request's language, which the action knows.
+	// The base is sent even when nothing was typed: set, a configured tool default cannot be
+	// merged in as if the person had asked for it, and blank is the home default anyway.
+	in := map[string]any{"home": "", "base": ""}
+	if c.Tag != "" {
+		in["locale_tag"] = c.Tag
+	}
+	if v, given := o["currency"]; given {
+		in["currency"] = v
+	}
+	if v, given := o["base"]; given {
+		in["base"] = v
+	}
+	if v, given := o["amount"]; given {
+		// a number option is already a number; a word of a message is the person's text, read
+		// in their locale's syntax by the action
+		if n, err := strconv.ParseFloat(v, 64); err == nil && !c.Typed {
+			in["amount"] = n
+		} else {
+			in["amount"] = v
+		}
+	}
+	return "finance.fx", in
+}
+
+// buildSearch maps the search command's options to its Action input.
+func buildSearch(o map[string]string, c InvokeContext) (string, map[string]any) {
+	return "search.web", map[string]any{"query": o["query"], "size": 3}
+}
+
+// buildRanking maps the ranking command's options to its Action input.
+func buildRanking(o map[string]string, c InvokeContext) (string, map[string]any) {
+	return "activity.ranking", map[string]any{"period": rankingPeriod(o["period"]), "scope": "discord:" + c.ChannelID}
+}
+
+// buildPlaces maps the places command's options to its Action input.
+func buildPlaces(o map[string]string, c InvokeContext) (string, map[string]any) {
+	return "places.search", map[string]any{"query": o["query"], "size": 5}
+}
+
+// buildPoll maps the poll command's options to its Action input.
+func buildPoll(o map[string]string, c InvokeContext) (string, map[string]any) {
+	raw := o["answers"]
+	if raw == "" {
+		raw = o["options"]
+	}
+	var opts []any
+	for i, part := range strings.Split(raw, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			opts = append(opts, map[string]any{"id": fmt.Sprintf("o%d", i+1), "label": part})
+		}
+	}
+	hours := 24
+	fmt.Sscanf(o["duration"], "%d", &hours)
+	multi := strings.EqualFold(strings.TrimSpace(o["multiselect"]), "true")
+	in := map[string]any{
+		"question":          o["question"],
+		"options":           opts,
+		"duration_hours":    hours,
+		"allow_multiselect": multi,
+		"scope":             "discord:" + c.ChannelID,
+	}
+	return "polls.create", in
+}
+
+// buildImage maps the image command's options to its Action input.
+func buildImage(o map[string]string, c InvokeContext) (string, map[string]any) {
+	return "images.generate", map[string]any{"prompt": o["prompt"], "scope": "discord:" + c.ChannelID}
+}
+
+// buildFortune maps the fortune command's options to its Action input.
+func buildFortune(o map[string]string, c InvokeContext) (string, map[string]any) {
+	verb, rest := splitVerb(o["what"], o["time"], wordsFor("fortune", "verb",
+		"today", "detail", "month", "year", "animals", "status", "subscribe", "unsubscribe", "delete", "register"))
+	return fortuneRequest(verb, rest)
+}
+
+// buildFortuneRegister maps the fortune-register command's options to its Action input.
+func buildFortuneRegister(o map[string]string, c InvokeContext) (string, map[string]any) {
+	in := map[string]any{"op": "register"}
+	for _, k := range []string{"birth_date", "birth_time", "gender", "birth_place"} {
+		if v := strings.TrimSpace(o[k]); v != "" {
+			in[k] = v
+		}
+	}
+	return "fortune.subscribe", in
+}
+
+// buildFortuneMonth maps the fortune-month command's options to its Action input.
+func buildFortuneMonth(o map[string]string, c InvokeContext) (string, map[string]any) {
+	return "fortune.query", map[string]any{"what": "month"}
+}
+
+// buildFortuneYear maps the fortune-year command's options to its Action input.
+func buildFortuneYear(o map[string]string, c InvokeContext) (string, map[string]any) {
+	return "fortune.query", map[string]any{"what": "year"}
+}
+
+// buildSubscribe maps the subscribe command's options to its Action input.
+func buildSubscribe(o map[string]string, c InvokeContext) (string, map[string]any) {
+	return fortuneRequest("subscribe", o["time"])
+}
+
+// buildZodiac maps the zodiac command's options to its Action input.
+func buildZodiac(o map[string]string, c InvokeContext) (string, map[string]any) {
+	sign := strings.TrimSpace(o["sign"])
+	if wordsFor("zodiac", "verb", "ranking")[strings.ToLower(sign)] == "ranking" {
+		return "fortune.query", map[string]any{"what": "ranking"}
+	}
+	return "fortune.query", map[string]any{"what": "zodiac", "sign": sign}
+}
+
+// buildNotices maps the notices command's options to its Action input.
+func buildNotices(o map[string]string, c InvokeContext) (string, map[string]any) {
+	verb, rest := splitVerb(o["what"], o["value"], wordsFor("notices", "verb",
+		"latest", "profile", "status", "time", "pause", "resume", "delete", "mute", "unmute", "register"))
+	return noticeRequest("school", verb, rest)
+}
+
+// buildNoticesRegister maps the notices-register command's options to its Action input.
+func buildNoticesRegister(o map[string]string, c InvokeContext) (string, map[string]any) {
+	in := map[string]any{"kind": "school", "op": "register"}
+	for _, k := range []string{"school", "degree", "department", "campus", "interests", "time"} {
+		if v := strings.TrimSpace(o[k]); v != "" {
+			in[k] = v
+		}
+	}
+	if g, err := strconv.Atoi(strings.TrimSpace(o["grade"])); err == nil {
+		in["grade"] = g
+	}
+	return "notices.subscribe", in
+}
+
+// buildTransfer maps the transfer command's options to its Action input.
+func buildTransfer(o map[string]string, c InvokeContext) (string, map[string]any) {
+	verb, rest := splitVerb(o["what"], o["value"], wordsFor("transfer", "verb",
+		"recent", "subscribe", "status", "time", "pause", "resume", "delete"))
+	if verb == "" || verb == "recent" {
+		in := map[string]any{}
+		if rest != "" {
+			in["universities"] = rest
+		}
+		return "transfer.recent", in
+	}
+	return noticeRequest("transfer", verb, rest)
+}
+
+// buildSummary maps the summary command's options to its Action input.
+func buildSummary(o map[string]string, c InvokeContext) (string, map[string]any) {
+	return "summaries.channel", map[string]any{}
+}
+
+// buildMysettings maps the mysettings command's options to its Action input.
+func buildMysettings(o map[string]string, c InvokeContext) (string, map[string]any) {
+	return "preferences.set", settingsInput(o, c.Typed)
+}
+
+// buildUpdates maps the updates command's options to its Action input.
+func buildUpdates(o map[string]string, c InvokeContext) (string, map[string]any) {
+	verb, rest := splitVerb(o["what"], o["value"], wordsFor("updates", "verb", "now", "previous", "subscribe", "unsubscribe", "status"))
+	return updatesRequest(verb, rest)
+}
+
+// buildAdmin maps the admin command's options to its Action input.
+func buildAdmin(o map[string]string, c InvokeContext) (string, map[string]any) {
+	verb, rest := splitVerb(o["op"], o["mode"], wordsFor("admin", "verb", "status", "pause", "resume", "respond", "memory", "chime", "news", "block", "unblock"))
+	if verb == "" {
+		verb = "status"
+	}
+	in := map[string]any{"op": verb}
+	switch verb {
+	case "respond", "memory", "chime", "news":
+		mode := wordsFor("admin", "mode", "always", "mention", "command", "off", "on", "collect", "shadow", "conservative")[strings.ToLower(rest)]
+		if mode == "" {
+			mode = rest
+		}
+		if verb == "chime" && mode == "on" {
+			mode = "conservative" // "chiming in on" means it may speak
+		}
+		in["mode"] = mode
+	case "block", "unblock":
+		in["user"] = orDefault(o["user"], rest)
+	}
+	return "access.policy", in
+}
+
+// buildPrivacy maps the privacy command's options to its Action input.
+func buildPrivacy(o map[string]string, c InvokeContext) (string, map[string]any) {
+	verb, scope := splitVerb(o["action"], o["scope"], wordsFor("privacy", "verb", "status", "grant", "withdraw"))
+	in := map[string]any{}
+	if scope != "" {
+		in["scope"] = scope
+	}
+	if verb == "grant" || verb == "withdraw" {
+		in["decision"] = verb
+	}
+	return "privacy.consent", in
+}
+
+// buildRemind maps the remind command's options to its Action input.
+func buildRemind(o map[string]string, c InvokeContext) (string, map[string]any) {
+	// the weekday of a weekly reminder and the day of a monthly one come from the time given
+	in := map[string]any{"text": o["when"]}
+	if what := strings.TrimSpace(o["what"]); what != "" {
+		in = map[string]any{"when": o["when"], "what": what}
+	}
+	if rep := o["repeat"]; rep != "" {
+		in["repeat"] = rep
+	}
+	return "reminders.propose", in
+}
+
+// buildReminders maps the reminders command's options to its Action input.
+func buildReminders(o map[string]string, c InvokeContext) (string, map[string]any) {
+	return "reminders.update", map[string]any{"op": "list"}
+}
+
+// buildMymemory maps the mymemory command's options to its Action input.
+func buildMymemory(o map[string]string, c InvokeContext) (string, map[string]any) {
+	return "memory.mine.show", map[string]any{}
+}
+
+// buildForgetme maps the forgetme command's options to its Action input.
+func buildForgetme(o map[string]string, c InvokeContext) (string, map[string]any) {
+	return "memory.mine.forget", map[string]any{}
+}
+
+// buildStatus maps the status command's options to its Action input.
+func buildStatus(o map[string]string, c InvokeContext) (string, map[string]any) {
+	return "runtime.doctor", map[string]any{}
+}
+
+// buildHelp maps the help command's options to its Action input.
+func buildHelp(o map[string]string, c InvokeContext) (string, map[string]any) {
+	return "help.version", map[string]any{}
 }
 
 // updatesRequest maps an updates verb (and what follows it) to its Action: the notes of this version,
