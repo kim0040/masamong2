@@ -28,6 +28,9 @@ type Command struct {
 	Options   []*discordgo.ApplicationCommandOption
 	Build     func(opts map[string]string, ctx InvokeContext) (string, map[string]any) // returns action id + input
 	Ephemeral bool
+	// Private cards show stored data about the caller: typed as "!" in a server, the card goes to the caller's
+	// DMs and the room gets one line (private_cards.go).
+	Private bool
 	// DiscordOnly commands are personal or admin surfaces (consent, subscriptions), not agent tools the
 	// test sandbox runs, so they are not in contracts/sandbox/tool-parity.json.
 	DiscordOnly bool
@@ -285,7 +288,7 @@ func Commands() []Command {
 		},
 		{
 			Name: "fortune-register", Desc: "Register your birthday for personal fortunes", Action: "fortune.subscribe",
-			Ephemeral: true, DiscordOnly: true,
+			Ephemeral: true, Private: true, DiscordOnly: true,
 			Options: []*discordgo.ApplicationCommandOption{
 				option(str, "birth_date", "Date of birth, YYYY-MM-DD", true),
 				option(str, "birth_time", "Time of birth HH:MM (optional)", false),
@@ -347,7 +350,7 @@ func Commands() []Command {
 		},
 		{
 			Name: "notices-register", Desc: "Register your school for notices picked for you", Action: "notices.subscribe",
-			Ephemeral: true, DiscordOnly: true,
+			Ephemeral: true, Private: true, DiscordOnly: true,
 			Options: []*discordgo.ApplicationCommandOption{
 				option(str, "school", "School name (e.g. 전북대학교)", true),
 				choiceOption("degree", "Degree program", false, "undergraduate", "master", "doctorate", "integrated"),
@@ -403,7 +406,7 @@ func Commands() []Command {
 		},
 		{
 			Name: "mysettings", Desc: "My settings: weather place, time zone, quiet hours, language", Action: "preferences.set",
-			Ephemeral: true, DiscordOnly: true,
+			Ephemeral: true, Private: true, DiscordOnly: true,
 			Options: []*discordgo.ApplicationCommandOption{
 				option(str, "region", "Default place for weather (e.g. Seoul)", false),
 				option(str, "timezone", "Time zone (e.g. Asia/Seoul)", false),
@@ -411,7 +414,7 @@ func Commands() []Command {
 				choiceOption("language", "Language of my cards and DMs", false, "ko", "en", "default"),
 			},
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
-				return "preferences.set", settingsInput(o)
+				return "preferences.set", settingsInput(o, c.Typed)
 			},
 		},
 		{
@@ -458,7 +461,7 @@ func Commands() []Command {
 		},
 		{
 			Name: "privacy", Desc: "See, give or withdraw consent for memory, fortune, notices and chiming in", Action: "privacy.consent",
-			Ephemeral: true, DiscordOnly: true,
+			Ephemeral: true, Private: true, DiscordOnly: true,
 			Options: []*discordgo.ApplicationCommandOption{
 				choiceOption("action", "What to do", false, "status", "grant", "withdraw"),
 				choiceOption("scope", "Which purpose", false, "memory", "fortune", "school_notice", "transfer_notice", "participation", "profile"),
@@ -497,7 +500,7 @@ func Commands() []Command {
 		},
 		{
 			Name: "reminders", Desc: "My reminders still to come, with cancel buttons", Action: "reminders.update",
-			Ephemeral: true, DiscordOnly: true,
+			Ephemeral: true, Private: true, DiscordOnly: true,
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
 				return "reminders.update", map[string]any{"op": "list"}
 			},
@@ -505,7 +508,7 @@ func Commands() []Command {
 		{
 			// what the bot keeps that names the member, in this server only (memory.mine.show)
 			Name: "mymemory", Desc: "What the bot remembers about you in this server", Action: "memory.mine.show",
-			Ephemeral: true, DiscordOnly: true,
+			Ephemeral: true, Private: true, DiscordOnly: true,
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
 				return "memory.mine.show", map[string]any{}
 			},
@@ -513,7 +516,7 @@ func Commands() []Command {
 		{
 			// a preview of the member's own memory with a confirm button (memory.mine.forget, buttons in memory_buttons.go)
 			Name: "forgetme", Desc: "See, then delete, what the bot remembers about you in this server", Action: "memory.mine.forget",
-			Ephemeral: true, DiscordOnly: true,
+			Ephemeral: true, Private: true, DiscordOnly: true,
 			Build: func(o map[string]string, c InvokeContext) (string, map[string]any) {
 				return "memory.mine.forget", map[string]any{}
 			},
@@ -613,9 +616,11 @@ func fortuneRequest(verb, rest string) (string, map[string]any) {
 }
 
 // settingsInput turns /mysettings options (or "!내설정 지역 서울" words) into preferences.set input.
-func settingsInput(o map[string]string) map[string]any {
+func settingsInput(o map[string]string, typed bool) map[string]any {
 	in := map[string]any{}
-	if o["timezone"] == "" && o["quiet"] == "" && o["language"] == "" {
+	// only typed words ("!내설정 초기화") carry a verb: the slash command's region option is a place, so
+	// region:"초기화" is not a reset of every setting
+	if typed && o["timezone"] == "" && o["quiet"] == "" && o["language"] == "" {
 		// prefix form: everything is in the first option
 		verb, rest := splitVerb(o["region"], "", wordsFor("mysettings", "verb", "region", "timezone", "quiet", "language", "reset"))
 		switch verb {
@@ -802,6 +807,12 @@ func LocalDesc(c Command, locale string) string {
 	return c.Desc
 }
 
+// pendingServerAllows names the Actions a member's "!" command may run in a server waiting for approval: the
+// same ones the application lets through there (application gateDiscord).
+func pendingServerAllows(action string) bool {
+	return action == "privacy.consent" || action == "memory.mine.show" || action == "memory.mine.forget"
+}
+
 // ByName / ByAlias resolve a Discord surface to a Command.
 func ByName(name string) (Command, bool) {
 	for _, c := range Commands() {
@@ -824,8 +835,8 @@ type ToolCommand struct {
 	FirstParam string
 }
 
-// PrefixTable resolves "!word" with config overrides: configured aliases replace a built-in
-// command's default words, and operator tools with aliases become commands whose text fills their
+// PrefixTable resolves "!word" with config overrides: configured aliases replace the default words of the
+// first built-in command on that Action, and operator tools with aliases become commands whose text fills their
 // first parameter. The zero value uses the defaults only.
 type PrefixTable struct {
 	overrides map[string][]string // action → aliases
@@ -847,11 +858,15 @@ func NewPrefixTable(tc []ToolCommand) PrefixTable {
 
 func (t PrefixTable) byAlias(alias string) (Command, bool) {
 	alias = strings.ToLower(strings.TrimSpace(alias))
+	// configured words are the tool's own: they replace the words of the first command on that Action only, so
+	// the other commands on it (!이번달운세 and !별자리 on fortune.query) keep theirs
+	overridden := map[string]bool{}
 	for _, c := range Commands() {
 		words := c.Aliases
-		if o, ok := t.overrides[c.Action]; ok {
+		if o, ok := t.overrides[c.Action]; ok && !overridden[c.Action] {
 			words = o
 		}
+		overridden[c.Action] = true
 		for _, a := range words {
 			if strings.ToLower(a) == alias {
 				return c, true
@@ -973,15 +988,12 @@ func requestFor(cmd Command, opts map[string]string, ctx InvokeContext, requestI
 		Invoker: &action.Invoker{Via: "command", GuildID: ctx.GuildID, ChannelID: ctx.ChannelID, UserID: ctx.UserID, Manager: ctx.Manager, Private: ctx.Private, Name: ctx.UserName}}
 }
 
-// rankingPeriod reads the period people type after !랭킹 (오늘, 이번주, 이번달, 전체 …).
+// rankingPeriod reads the period people type after !랭킹 (오늘, 이번주, 이번달, 전체 …): the words of every
+// language are discord.command.ranking.period.<period>. Spaces and case do not count; anything else is the
+// default week (the option's description says so).
 func rankingPeriod(v string) string {
-	switch strings.ReplaceAll(strings.ToLower(strings.TrimSpace(v)), " ", "") {
-	case "오늘", "today", "day":
-		return "today"
-	case "이번달", "한달", "month", "이달":
-		return "month"
-	case "전체", "all", "누적":
-		return "all"
+	if p, ok := wordsFor("ranking", "period", "today", "week", "month", "all")[strings.ReplaceAll(strings.ToLower(strings.TrimSpace(v)), " ", "")]; ok {
+		return p
 	}
 	return "week"
 }

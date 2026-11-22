@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"masamong/internal/application"
 	"masamong/internal/fsutil"
 	"masamong/internal/memory/store"
 )
@@ -165,7 +166,8 @@ func (g *Gateway) retryMessageChange(event messageReconciliation) error {
 		} else {
 			lastErr = err
 		}
-		if attempt == len(messageRetryBackoff) {
+		// the service is shutting down: a retry cannot succeed, so the caller queues the change for the next start
+		if errors.Is(lastErr, application.ErrServiceClosing) || attempt == len(messageRetryBackoff) {
 			return lastErr
 		}
 		if !g.reconciliationWaiter()(ctx, messageRetryBackoff[attempt]) {

@@ -1,12 +1,15 @@
 package discord
 
 import (
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 
 	"github.com/bwmarrin/discordgo"
+
+	"masamong/internal/crash"
 )
 
 // People split one request over several messages: "마사몽" then "내일 날씨 어때?", or "내일" then
@@ -48,6 +51,7 @@ type merger struct {
 	byID    map[string]pendingMessage
 	fire    func(msgs []*discordgo.MessageCreate) // runs once per turn, off the lock
 	forget  func(messageID string)                // a held message left without firing (deleted, or its turn stopped); off the lock
+	log     *slog.Logger                          // a panic in a timer's flush is reported here (nil: the default logger)
 }
 
 func mergeKey(m *discordgo.MessageCreate) string {
@@ -222,6 +226,8 @@ func (mg *merger) discardLocked(key string, p *pendingTurn) {
 }
 
 func (mg *merger) flush(key string, p *pendingTurn, generation uint64) {
+	// flush runs on a timer's own goroutine: a panic in fire (answerHeld) must not take the daemon down
+	defer crash.Recover(mg.log, "discord merged turn")
 	mg.mu.Lock()
 	if mg.pending[key] != p || p.generation != generation {
 		mg.mu.Unlock()
