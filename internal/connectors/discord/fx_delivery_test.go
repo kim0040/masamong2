@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -17,6 +18,8 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"masamong/internal/action"
+	"masamong/internal/application"
+	"masamong/internal/providers"
 )
 
 // fxDelivery runs one /환율 or !환율 against a fake Discord and a local rate service.
@@ -27,10 +30,26 @@ type fxDelivery struct {
 	paths []string
 }
 
-func newFXDelivery(t *testing.T, tool func(*Gateway)) *fxDelivery {
+// fxGatewayWithFakeDiscord is gatewayWithFakeDiscord over a service the test already opened: the
+// cases of a table share one service and still get their own gateway, session and recorded calls.
+func fxGatewayWithFakeDiscord(t *testing.T, svc *application.Service) (*Gateway, *fakeDiscord) {
+	t.Helper()
+	SetCatalog(svc.I18n)
+	sess, err := discordgo.New("Bot test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeDiscord{}
+	sess.Client = &http.Client{Transport: fake}
+	g := &Gateway{svc: svc, sess: sess, log: slog.New(slog.NewTextHandler(io.Discard, nil)), ctx: context.Background(),
+		ActionTimeout: -time.Second, notices: map[string]time.Time{}}
+	return g, fake
+}
+
+func newFXDelivery(t *testing.T, svc *application.Service, tool func(*Gateway)) *fxDelivery {
 	t.Helper()
 	d := &fxDelivery{}
-	d.g, d.fake = gatewayWithFakeDiscord(t)
+	d.g, d.fake = fxGatewayWithFakeDiscord(t, svc)
 	d.g.ActionTimeout = 2 * time.Second
 	d.g.cfg.RegisterCommands, d.g.cfg.MessageContent, d.g.cfg.CommandPrefix = true, true, "!"
 	if res := d.g.svc.Execute(context.Background(), action.Request{Action: "access.policy", Input: mustJSON(map[string]any{"server_approval": false})}); !res.OK {
@@ -39,6 +58,7 @@ func newFXDelivery(t *testing.T, tool func(*Gateway)) *fxDelivery {
 	if tool != nil {
 		tool(d.g)
 	}
+	d.g.svc.Registry().Quota = providers.NewQuota(nil) // a table's cases share the day's allowance
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		d.calls.Add(1)
 		d.paths = append(d.paths, r.URL.Path)
@@ -131,6 +151,7 @@ func TestFXGuildTagReadsUnderTheStateLock(t *testing.T) {
 // names itself, else the region Discord's tag names (the interaction's for a slash command, the
 // server's for a message), else the likely region of the saved language, else USD.
 func TestFXHomeFollowsTheFirstRegionThatNamesOne(t *testing.T) {
+	svc := svcForTest(t)
 	saved := func(t *testing.T, d *fxDelivery, locale string) {
 		t.Helper()
 		res := d.g.svc.Execute(context.Background(), action.Request{Action: "preferences.set",
@@ -141,7 +162,7 @@ func TestFXHomeFollowsTheFirstRegionThatNamesOne(t *testing.T) {
 		}
 	}
 	t.Run("saved English, a slash command in pt-BR: Brazil's home, the card in English", func(t *testing.T) {
-		d := newFXDelivery(t, nil)
+		d := newFXDelivery(t, svc, nil)
 		saved(t, d, "en")
 		i := &discordgo.InteractionCreate{Interaction: &discordgo.Interaction{ID: "i", AppID: "app", Token: "tok",
 			Type: discordgo.InteractionApplicationCommand, ChannelID: "c", GuildID: "g",
@@ -167,7 +188,7 @@ func TestFXHomeFollowsTheFirstRegionThatNamesOne(t *testing.T) {
 		{"es", "/latest/GBP"},    // the guild's region beats the language's likely one
 	} {
 		t.Run("guild en-GB, saved "+tc.saved, func(t *testing.T) {
-			d := newFXDelivery(t, nil)
+			d := newFXDelivery(t, svc, nil)
 			saved(t, d, tc.saved)
 			if err := d.g.sess.State.GuildAdd(&discordgo.Guild{ID: "g", PreferredLocale: "en-GB"}); err != nil {
 				t.Fatal(err)
@@ -183,24 +204,20 @@ func TestFXHomeFollowsTheFirstRegionThatNamesOne(t *testing.T) {
 // A base the operator configured as the raw tool's default is for raw callers (chat, the CLI): a bare
 // or single-currency command still means the home currency's default, not a filled-in pair.
 func TestFXConfiguredDefaultBaseIsForRawCallersOnly(t *testing.T) {
-	d := newFXDelivery(t, func(g *Gateway) {
+	svc := svcForTest(t)
+	chf := func(g *Gateway) {
 		res := g.svc.Execute(context.Background(), action.Request{Action: "tools.configure",
 			Input: mustJSON(map[string]any{"id": "finance.fx", "defaults": `{"base":"CHF"}`})})
 		if !res.OK {
 			t.Fatalf("tool configuration failed: %+v", res.Error)
 		}
-	})
+	}
+	d := newFXDelivery(t, svc, chf)
 	d.slash(t)
 	if len(d.paths) != 1 || d.paths[0] != "/latest/KRW" {
 		t.Errorf("a configured default won over the home currency: provider=%v, want /latest/KRW", d.paths)
 	}
-	d2 := newFXDelivery(t, func(g *Gateway) {
-		res := g.svc.Execute(context.Background(), action.Request{Action: "tools.configure",
-			Input: mustJSON(map[string]any{"id": "finance.fx", "defaults": `{"base":"CHF"}`})})
-		if !res.OK {
-			t.Fatalf("tool configuration failed: %+v", res.Error)
-		}
-	})
+	d2 := newFXDelivery(t, svc, chf)
 	d2.slash(t, strOption("currency", "yen"))
 	if len(d2.paths) != 1 || d2.paths[0] != "/latest/JPY" {
 		t.Errorf("a configured default made a currency-only command a pair: provider=%v, want /latest/JPY", d2.paths)
@@ -210,7 +227,7 @@ func TestFXConfiguredDefaultBaseIsForRawCallersOnly(t *testing.T) {
 // A rate a card's row needs that the provider's answer lacks is a provider failure: nothing that looks
 // like a complete card may be posted short a row.
 func TestFXMissingRowRateIsAProviderFailure(t *testing.T) {
-	d := newFXDelivery(t, nil)
+	d := newFXDelivery(t, svcForTest(t), nil)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"result":"success","base_code":"USD","rates":{"USD":1,"JPY":148,"EUR":0.9,"GBP":0.75}}`)
@@ -232,9 +249,10 @@ func TestFXMissingRowRateIsAProviderFailure(t *testing.T) {
 // service documents that is not ISO 4217 is a base like any other. Both reach the provider; only
 // something unreadable is refused.
 func TestFXSlashBaseKeepsLegacyAndProviderCodes(t *testing.T) {
+	svc := svcForTest(t)
 	for _, base := range []string{"", " \t ", "FOK", "GGP", "IMP", "JEP", "KID", "MRU", "SLE", "TVD", "VES"} {
 		t.Run("base="+strconv.Quote(base), func(t *testing.T) {
-			d := newFXDelivery(t, nil)
+			d := newFXDelivery(t, svc, nil)
 			d.slash(t, strOption("base", base))
 			if _, ok := d.fake.find(http.MethodPatch, "/messages/@original"); !ok {
 				t.Errorf("base %q produced no public result (provider=%v)", base, d.paths)
@@ -246,6 +264,7 @@ func TestFXSlashBaseKeepsLegacyAndProviderCodes(t *testing.T) {
 // A currency that cannot be read, or that the rate service lacks, is told to the member alone, with how
 // to write one. Nothing is rewritten into another command, and a malformed one costs no provider call.
 func TestFXSlashInputErrorsAreAnsweredPrivately(t *testing.T) {
+	svc := svcForTest(t)
 	for _, tc := range []struct {
 		name, input string
 		wantCalls   int32
@@ -257,7 +276,7 @@ func TestFXSlashInputErrorsAreAnsweredPrivately(t *testing.T) {
 		{"valid code the service lacks", "BTN", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			d := newFXDelivery(t, nil)
+			d := newFXDelivery(t, svc, nil)
 			d.slash(t, strOption("currency", tc.input))
 			if got := d.calls.Load(); got != tc.wantCalls {
 				t.Errorf("provider calls = %d (%v), want %d", got, d.paths, tc.wantCalls)
@@ -297,7 +316,7 @@ func TestFXSlashInputErrorsAreAnsweredPrivately(t *testing.T) {
 
 // A good answer is still public.
 func TestFXSlashSuccessStaysPublic(t *testing.T) {
-	d := newFXDelivery(t, nil)
+	d := newFXDelivery(t, svcForTest(t), nil)
 	d.slash(t)
 	if flags := d.deferredFlags(t); flags != 0 {
 		t.Errorf("flags = %d, want public", flags)
@@ -313,7 +332,7 @@ func TestFXSlashSuccessStaysPublic(t *testing.T) {
 
 // The tool's own channel switch decides, whatever the member typed.
 func TestFXSlashInvalidInputStillGoesThroughTheToolGate(t *testing.T) {
-	d := newFXDelivery(t, func(g *Gateway) {
+	d := newFXDelivery(t, svcForTest(t), func(g *Gateway) {
 		if res := g.svc.Execute(context.Background(), action.Request{Action: "tools.configure", Input: mustJSON(map[string]any{"id": "finance.fx", "enabled": "off", "guild_id": "g", "channel_id": "c"})}); !res.OK {
 			t.Fatalf("configure: %+v", res)
 		}
@@ -333,10 +352,12 @@ func TestFXSlashInvalidInputStillGoesThroughTheToolGate(t *testing.T) {
 
 // An input error ends the command on the prefix surface too: no model reply, whatever help's state.
 func TestFXPrefixInputErrorIsTerminal(t *testing.T) {
+	svc := svcForTest(t)
+	banter := gatewayBanterService(t)
 	for _, helpOff := range []bool{false, true} {
 		t.Run(fmt.Sprintf("help off=%v", helpOff), func(t *testing.T) {
-			d := newFXDelivery(t, func(g *Gateway) {
-				g.svc = gatewayBanterService(t)
+			d := newFXDelivery(t, svc, func(g *Gateway) {
+				g.svc = banter
 				g.cfg.RegisterCommands, g.cfg.MessageContent, g.cfg.CommandPrefix = true, true, "!"
 				if helpOff {
 					if res := g.svc.Execute(context.Background(), action.Request{Action: "tools.configure", Input: mustJSON(map[string]any{"id": "help.version", "enabled": "off"})}); !res.OK {
@@ -380,9 +401,10 @@ func (r refuseDelete) RoundTrip(req *http.Request) (*http.Response, error) {
 // would be public, and Discord may attach the first follow-up to the public deferred response whatever its
 // flags say.
 func TestFXSlashInputErrorStaysPrivateWhenTheDeleteFails(t *testing.T) {
+	svc := svcForTest(t)
 	for _, input := range []string{"U$D", "   ", "ZZZ", "BTN"} {
 		t.Run(input, func(t *testing.T) {
-			d := newFXDelivery(t, nil)
+			d := newFXDelivery(t, svc, nil)
 			d.g.sess.Client.Transport = refuseDelete{d.fake}
 			d.slash(t, strOption("currency", input))
 			if _, ok := d.fake.find(http.MethodDelete, "/messages/@original"); !ok {
@@ -400,7 +422,7 @@ func TestFXSlashInputErrorStaysPrivateWhenTheDeleteFails(t *testing.T) {
 
 // A typo is refused before the per-user allowance is counted: the next valid request still has it.
 func TestFXInvalidInputDoesNotUseTheToolAllowance(t *testing.T) {
-	d := newFXDelivery(t, func(g *Gateway) { // before the rate service is wired: configuring rebuilds the providers
+	d := newFXDelivery(t, svcForTest(t), func(g *Gateway) { // before the rate service is wired: configuring rebuilds the providers
 		if res := g.svc.Execute(context.Background(), action.Request{Action: "tools.configure", Input: mustJSON(map[string]any{"id": "finance.fx", "per_user_per_day": 1})}); !res.OK {
 			t.Fatalf("configure: %v", res.Error)
 		}
@@ -425,7 +447,7 @@ func TestFXInvalidInputDoesNotUseTheToolAllowance(t *testing.T) {
 
 // The caller's access is answered first, whatever was typed.
 func TestFXBlockedUserIsRefusedBeforeInputIsRead(t *testing.T) {
-	d := newFXDelivery(t, nil)
+	d := newFXDelivery(t, svcForTest(t), nil)
 	if res := d.g.svc.Execute(context.Background(), action.Request{Action: "access.policy", Input: mustJSON(map[string]any{"guild_id": "223456789012345678", "block": "123456789012345678"})}); !res.OK {
 		t.Fatalf("block: %v", res.Error)
 	}
@@ -439,6 +461,7 @@ func TestFXBlockedUserIsRefusedBeforeInputIsRead(t *testing.T) {
 // The prefix words and the action read an amount in one syntax, the locale's: a comma that is a decimal
 // in Spanish is a thousands group in English, and anything ambiguous is refused, never read as another sum.
 func TestFXPrefixAmountsAreReadInTheLocalesSyntax(t *testing.T) {
+	svc := svcForTest(t)
 	for _, tc := range []struct {
 		locale, text string
 		want         string // a fragment of the card, or of the refusal
@@ -455,7 +478,7 @@ func TestFXPrefixAmountsAreReadInTheLocalesSyntax(t *testing.T) {
 		{"ko", "!환율 50,000 엔화", "50,000엔 ≈"},
 	} {
 		t.Run(tc.locale+" "+tc.text, func(t *testing.T) {
-			d := newFXDelivery(t, nil)
+			d := newFXDelivery(t, svc, nil)
 			cmd, o, ok := ParsePrefix("!", tc.text)
 			if !ok {
 				t.Fatal("did not parse")
@@ -485,7 +508,7 @@ func TestFXPrefixAmountsAreReadInTheLocalesSyntax(t *testing.T) {
 
 // The amount refusal says what an amount may be, in the locale's own way of writing one.
 func TestFXInvalidAmountMessageStatesTheCap(t *testing.T) {
-	d := newFXDelivery(t, nil)
+	d := newFXDelivery(t, svcForTest(t), nil)
 	for locale, want := range map[string][]string{
 		"en": {"1,000,000,000,000,000", "1,234.5"}, "es": {"1.000.000.000.000.000", "1.234,5"}, "ko": {"1,000,000,000,000,000", "1,234.5"},
 		"ja": {"1,000,000,000,000,000", "1,234.5"}, "zh-Hans": {"1,000,000,000,000,000", "1,234.5"},
@@ -505,6 +528,7 @@ func TestFXInvalidAmountMessageStatesTheCap(t *testing.T) {
 // One language for the whole request: a saved language preference decides the home currency (its likely region), the way the
 // quotes are written and the card's own words, whatever language Discord reported for the interaction.
 func TestFXOneLocalePerRequest(t *testing.T) {
+	svc := svcForTest(t)
 	setLocale := func(d *fxDelivery) {
 		res := d.g.svc.Execute(context.Background(), action.Request{Action: "preferences.set", Locale: "ko", Input: mustJSON(map[string]any{"locale": "es"}),
 			Invoker: &action.Invoker{Via: "command", GuildID: "g", ChannelID: "c", UserID: "u"}})
@@ -533,7 +557,7 @@ func TestFXOneLocalePerRequest(t *testing.T) {
 		}
 	}
 	t.Run("slash", func(t *testing.T) {
-		d := newFXDelivery(t, nil)
+		d := newFXDelivery(t, svc, nil)
 		setLocale(d)
 		d.slash(t, strOption("currency", "JPY")) // the interaction says Korean
 		edit, ok := d.fake.find(http.MethodPatch, "/messages/@original")
@@ -543,7 +567,7 @@ func TestFXOneLocalePerRequest(t *testing.T) {
 		check(t, d, edit.body)
 	})
 	t.Run("prefix", func(t *testing.T) {
-		d := newFXDelivery(t, nil)
+		d := newFXDelivery(t, svc, nil)
 		setLocale(d)
 		d.prefix(t, "!fx JPY")
 		sent, ok := d.fake.find(http.MethodPost, "/messages")
@@ -553,7 +577,7 @@ func TestFXOneLocalePerRequest(t *testing.T) {
 		check(t, d, sent.body)
 	})
 	t.Run("an input error is in the same language", func(t *testing.T) {
-		d := newFXDelivery(t, nil)
+		d := newFXDelivery(t, svc, nil)
 		setLocale(d)
 		d.slash(t, strOption("currency", "U$D"))
 		follow, ok := d.fake.find(http.MethodPost, "/webhooks/app/tok")

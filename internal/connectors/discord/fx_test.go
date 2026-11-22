@@ -13,6 +13,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"masamong/internal/application"
+	"masamong/internal/providers"
 )
 
 // The command always stays finance.fx and hands the action what was typed. The home currency is the
@@ -120,38 +121,16 @@ func BenchmarkFXPrefixLongUnknownInput(b *testing.B) {
 	}
 }
 
-// fxCard runs /환율 against a local rate service whose dollar prices are fixed.
-func fxCard(t *testing.T, locale string, opts map[string]string) []string {
-	t.Helper()
-	return fxCardOf(t, locale, opts, false)
+// fxEnv is one service behind one local rate service whose dollar prices are fixed, shared by every
+// case of a test: opening the service is by far the slow part of a case, and no case changes what
+// another sees. Rates: 1 USD = 148 JPY = 1,350 KRW = 0.9 EUR = 6.75 CNY = 0.75 GBP = 0.8 CHF = 5.4 BRL.
+type fxEnv struct {
+	g *Gateway
 }
 
-// fxPrefixCard runs the words of a prefix command ("!환율 달러 유로") the way the gateway does.
-func fxPrefixCard(t *testing.T, locale, text string) []string {
-	t.Helper()
-	_, opts, ok := ParsePrefix("!", text)
-	if !ok {
-		t.Fatalf("%q did not parse as a command", text)
-	}
-	return fxCardOf(t, locale, opts, true)
-}
-
-func fxCardOf(t *testing.T, locale string, opts map[string]string, typed bool) []string {
-	t.Helper()
-	return strings.Split(fxEmbed(t, locale, opts, typed).Description, "\n")
-}
-
-func fxEmbed(t *testing.T, locale string, opts map[string]string, typed bool) *discordgo.MessageEmbed {
-	t.Helper()
-	embed, _ := fxRun(t, InvokeContext{Locale: locale, UserID: "tester", Typed: typed}, opts)
-	return embed
-}
-
-// fxRun runs the command for ictx and returns the card with the action's raw output.
-func fxRun(t *testing.T, ictx InvokeContext, opts map[string]string) (*discordgo.MessageEmbed, map[string]any) {
+func newFXEnv(t *testing.T) *fxEnv {
 	t.Helper()
 	svc := svcForTest(t)
-	g := &Gateway{svc: svc}
 	unitsPerDollar := map[string]float64{"USD": 1, "KRW": 1350, "JPY": 148, "CNY": 6.75, "EUR": 0.9, "GBP": 0.75, "CHF": 0.8, "BRL": 5.4}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		base := strings.TrimPrefix(r.URL.Path, "/latest/")
@@ -163,16 +142,49 @@ func fxRun(t *testing.T, ictx InvokeContext, opts map[string]string) (*discordgo
 			"result": "success", "base_code": base, "rates": rates, "time_last_update_unix": 1757894401,
 		})
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 	adapter := svc.Registry().FX
 	adapter.OpenBase, adapter.KeyedBase = server.URL, server.URL
+	svc.Registry().Quota = providers.NewQuota(nil) // a table's cases share the day's allowance
+	return &fxEnv{g: &Gateway{svc: svc}}
+}
 
+// fxCard runs /환율 against the test's rate service.
+func fxCard(t *testing.T, e *fxEnv, locale string, opts map[string]string) []string {
+	t.Helper()
+	return fxCardOf(t, e, locale, opts, false)
+}
+
+// fxPrefixCard runs the words of a prefix command ("!환율 달러 유로") the way the gateway does.
+func fxPrefixCard(t *testing.T, e *fxEnv, locale, text string) []string {
+	t.Helper()
+	_, opts, ok := ParsePrefix("!", text)
+	if !ok {
+		t.Fatalf("%q did not parse as a command", text)
+	}
+	return fxCardOf(t, e, locale, opts, true)
+}
+
+func fxCardOf(t *testing.T, e *fxEnv, locale string, opts map[string]string, typed bool) []string {
+	t.Helper()
+	return strings.Split(fxEmbed(t, e, locale, opts, typed).Description, "\n")
+}
+
+func fxEmbed(t *testing.T, e *fxEnv, locale string, opts map[string]string, typed bool) *discordgo.MessageEmbed {
+	t.Helper()
+	embed, _ := fxRun(t, e, InvokeContext{Locale: locale, UserID: "tester", Typed: typed}, opts)
+	return embed
+}
+
+// fxRun runs the command for ictx and returns the card with the action's raw output.
+func fxRun(t *testing.T, e *fxEnv, ictx InvokeContext, opts map[string]string) (*discordgo.MessageEmbed, map[string]any) {
+	t.Helper()
 	cmd, _ := ByName("fx")
-	res := g.svc.Execute(context.Background(), requestFor(cmd, opts, ictx, ""))
+	res := e.g.svc.Execute(context.Background(), requestFor(cmd, opts, ictx, ""))
 	if !res.OK {
 		t.Fatalf("%s %v: %+v", ictx.Locale, opts, res.Error)
 	}
-	embed := g.renderInvoked(res, cmd, ictx).Embed
+	embed := e.g.renderInvoked(res, cmd, ictx).Embed
 	if len(embed.Fields) != 1 || embed.Footer == nil {
 		t.Error("missing update time or source")
 	}
@@ -180,6 +192,7 @@ func fxRun(t *testing.T, ictx InvokeContext, opts map[string]string) (*discordgo
 }
 
 func TestFXCardsStateRatesInReadableUnits(t *testing.T) {
+	e := newFXEnv(t)
 	for _, tc := range []struct {
 		name, locale string
 		opts         map[string]string
@@ -205,7 +218,7 @@ func TestFXCardsStateRatesInReadableUnits(t *testing.T) {
 		{"en dollars and won", "en", map[string]string{"currency": "USD", "base": "KRW"}, []string{"1 USD ≈ 1,350 KRW", "10 KRW ≈ 0.007407 USD"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := fxCard(t, tc.locale, tc.opts)
+			got := fxCard(t, e, tc.locale, tc.opts)
 			if !slices.Equal(got, tc.want) {
 				t.Errorf("got  %q\nwant %q", got, tc.want)
 			}
