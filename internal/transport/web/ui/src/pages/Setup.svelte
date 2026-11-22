@@ -3,7 +3,9 @@
   import { useTitle } from '../lib/title.svelte'
   import { fly } from 'svelte/transition'
   import { t, i18n, languageLabel } from '../lib/i18n.svelte'
-  import { call, postJSON, session, loadSession, setPractice, canLoadProtectedActions } from '../lib/api.svelte'
+  import { call, session, loadSession, setPractice, canLoadProtectedActions } from '../lib/api.svelte'
+  import { saveSecret } from '../lib/secret'
+  import { checkBot as askBot, makeInvite as fetchInvite } from '../lib/discord'
   import { navigate, route } from '../lib/router.svelte'
   import { tp } from '../lib/platform'
   import { prefs, setPrefs, loadPrefs, motionAllowed } from '../lib/prefs.svelte'
@@ -148,9 +150,9 @@
         const a = await call('providers.add', { host: host.id })
         if (!a.ok) return (err = a.error?.message ?? t('common.failed'))
       }
-      const r = await postJSON('/api/secret', { target: 'provider', id: host.id, value: apiKey.trim() })
+      const r = await saveSecret({ target: 'provider', id: host.id }, apiKey)
       // the typed key stays in the field when saving failed, so it can be sent again
-      if (r.status !== 200) return (err = r.body?.error?.message ?? t('common.failed'))
+      if (!r.ok) return (err = r.message || t('common.failed'))
       apiKey = ''
       await checkKey(host.id)
       // the key works: point the roles this host can serve at its newest models
@@ -165,9 +167,9 @@
     }
   }
   async function makeInvite() {
-    const r = await call('channels.invite')
-    if (r.ok) invite = r.output.url
-    else err = r.error?.message ?? ''
+    const r = await fetchInvite()
+    if (r.url) invite = r.url
+    else err = r.message
   }
   // The step needs a token: the one typed here, or one already saved. The switch is turned on only
   // when Discord has not refused the token, and the step counts as done once Discord has answered for it.
@@ -178,8 +180,8 @@
     busy = true
     try {
       if (typed) {
-        const r = await postJSON('/api/secret', { target: 'discord', value: typed })
-        if (r.status !== 200) return (err = r.body?.error?.message ?? t('common.failed'))
+        const r = await saveSecret({ target: 'discord' }, typed)
+        if (!r.ok) return (err = r.message || t('common.failed'))
         discordToken = ''
         tokenSaved = true
       }
@@ -188,8 +190,7 @@
       const r = await patchConfig([{ path: ['discord', 'enabled'], value: true }], { quiet: true })
       if (!r.ok) return (err = r.error?.message ?? '')
       await refresh()
-      const inv = await call('channels.invite')
-      invite = inv.ok ? inv.output.url : ''
+      invite = (await fetchInvite()).url
       toast('info', t('setup.discord.saved'), t('setup.discord.restart_hint'), { label: t('maint.restart_now'), run: () => void call('runtime.restart') })
     } finally {
       busy = false
@@ -198,12 +199,10 @@
   async function checkBot() {
     botErr = ''
     botReason = ''
-    const r = await call('discord.check', { apply: true })
-    bot = r.ok ? r.output : null
-    if (!r.ok) {
-      botReason = String(r.error?.args?.reason ?? '')
-      if (botReason !== 'no_token') botErr = r.error?.message ?? ''
-    }
+    const checked = await askBot()
+    bot = checked.bot
+    botReason = checked.reason
+    if (checked.message !== undefined) botErr = checked.message
   }
   async function saveRoom() {
     if (!/^\d{5,25}$/.test(guildId.trim()) || !/^\d{5,25}$/.test(channelId.trim())) return (idErr = t('setup.room.ids_invalid'))

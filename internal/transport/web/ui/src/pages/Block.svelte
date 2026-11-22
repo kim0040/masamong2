@@ -7,6 +7,7 @@
   import { num, usd, relative, datetime, duration } from '../lib/format'
   import { etaText, blockState, stateTone, period, jobLine, stopReason, isKakao, modeOf, batchOffer, effectiveMode, batchWaitLine, type PrepareMode } from '../lib/blocks'
   import { toast } from '../lib/toast.svelte'
+  import { estimatePrepare, startPrepare, parseBudget } from '../lib/memoryblocks'
   import PageHeader from '../components/PageHeader.svelte'
   import Card from '../components/Card.svelte'
   import Button from '../components/Button.svelte'
@@ -79,11 +80,10 @@
   async function runEstimate() {
     estimating = true
     estErr = ''
-    // mode=batch makes the one dry run carry both prices (total_usd now, batch_usd as a batch)
-    const r = await call('memory.blocks.prepare', { source_room: room, dry_run: true, mode: 'batch' })
+    const r = await estimatePrepare(room)
     estimating = false
-    if (r.ok) estimate = r.output
-    else estErr = r.error?.message ?? ''
+    if (r.ok) estimate = r.estimate
+    else estErr = r.message
   }
   $effect(() => {
     if (b && !estimate && !estimating && b.message_count && !running) void runEstimate()
@@ -108,17 +108,15 @@
   }
   let starting = $state(false)
   async function start() {
-    const v = parseFloat(budget)
-    if (Number.isNaN(v) || v < 0 || v > 1000) return void (estErr = t('wizard.err.budget'))
+    const v = parseBudget(budget)
+    if (v === null) return void (estErr = t('wizard.err.budget'))
     starting = true
-    const r = await call('memory.blocks.prepare', { source_room: room, background: true, budget_usd: String(v), mode: chosen })
+    const r = await startPrepare(room, { budget: v, mode: chosen })
     starting = false
     if (r.ok) {
-      if (r.output.batch_resumed) toast('info', t('blocks.batch_resumed'), b.label)
-      else if (r.output.already_running) toast('ok', t('blocks.already_running'), b.label)
-      else toast('ok', r.output.mode === 'batch' ? t('blocks.batch_started') : t('blocks.prepare_started'), b.label)
+      toast(r.start.tone, t(r.start.key), b.label)
       estimate = null
-    } else estErr = r.error?.message ?? t('common.failed')
+    } else estErr = r.message || t('common.failed')
     void data.refresh()
   }
   async function cancel() {

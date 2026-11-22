@@ -1,10 +1,12 @@
 <script lang="ts">
   import { tick } from 'svelte'
   import { scrollable } from '../lib/scrollable'
+  import { latest } from '../lib/seqload'
   import { t } from '../lib/i18n.svelte'
   import { call, practice } from '../lib/api.svelte'
   import { resource } from '../lib/resource.svelte'
   import { datetime, relative, duration } from '../lib/format'
+  import { saveFile } from '../lib/download'
   import { route } from '../lib/router.svelte'
   import Stat from '../components/Stat.svelte'
   import PageHeader from '../components/PageHeader.svelte'
@@ -30,10 +32,10 @@
   let loadingLogs = $state(true)
   let unseen = $state(0)
   let bufferSize = $state(3000)
-  let requestSeq = 0
+  const requests = latest()
 
   async function poll(reset = false, timed = false) {
-    const seq = ++requestSeq
+    const live = requests.start()
     if (reset) {
       entries = []
       lastId = 0
@@ -42,7 +44,7 @@
     }
     const requestedAfter = lastId
     const r = await call('runtime.logs', { after_id: requestedAfter, level, q, limit: 400 }, { poll: timed })
-    if (seq !== requestSeq) return
+    if (!live()) return
     loadingLogs = false
     if (!r.ok) {
       logError = r.error?.message ?? t('logs.load_failed')
@@ -134,12 +136,7 @@
   }
   function download() {
     const lines = entries.map((e) => `${e.at} ${e.level.toUpperCase()} ${e.msg} ${Object.entries(e.attrs ?? {}).map(([k, v]) => `${k}=${v}`).join(' ')}`)
-    const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = 'masamong-logs.txt'
-    a.click()
-    URL.revokeObjectURL(a.href)
+    saveFile('masamong-logs.txt', lines.join('\n'), 'text/plain')
   }
 </script>
 

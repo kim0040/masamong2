@@ -1,0 +1,1 @@
+import{d as e,yt as t}from"./Button-Djo56Hdm.js";function n(n){t(()=>{let t=n()?.trim(),r=e(`app.name`);return document.title=t?`${t} · ${r}`:r,()=>{document.title=r}})}export{n as t};

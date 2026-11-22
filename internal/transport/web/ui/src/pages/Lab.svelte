@@ -13,6 +13,7 @@
   import { motionAllowed } from '../lib/prefs.svelte'
   import { usd, ms, num, relative } from '../lib/format'
   import { toast } from '../lib/toast.svelte'
+  import { saveFile } from '../lib/download'
   import PageHeader from '../components/PageHeader.svelte'
   import Card from '../components/Card.svelte'
   import Tabs from '../components/Tabs.svelte'
@@ -190,12 +191,7 @@
     else toast('error', t('common.failed'), r.error?.message)
   }
   function exportReviews() {
-    const blob = new Blob([JSON.stringify(reviews.data?.reviews ?? [], null, 2)], { type: 'application/json' })
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = 'masamong-lab-reviews.json'
-    a.click()
-    URL.revokeObjectURL(a.href)
+    saveFile('masamong-lab-reviews.json', JSON.stringify(reviews.data?.reviews ?? [], null, 2), 'application/json')
   }
 </script>
 

@@ -2,6 +2,7 @@
 // refreshes in the background, so navigation never flashes an empty screen.
 import { call, canLoadProtectedActions, session, type ActionError } from './api.svelte'
 import { onLive } from './live.svelte'
+import { latest } from './seqload'
 
 const cache = new Map<string, any>()
 
@@ -28,7 +29,7 @@ export function resource<T = any>(action: string, input: () => Record<string, un
     stale: false,
   })
   let key = ''
-  let seq = 0
+  const loads = latest()
   async function load(poll = false) {
     if (!canLoadProtectedActions(session.value)) {
       s.loading = false
@@ -41,9 +42,9 @@ export function resource<T = any>(action: string, input: () => Record<string, un
       s.data = cache.get(key)
       s.loading = false
     } else if (s.data === undefined) s.loading = true
-    const my = ++seq
+    const live = loads.start()
     const r = await call<T>(action, inp, { poll })
-    if (my !== seq) return
+    if (!live()) return
     s.loading = false
     if (r.ok) {
       s.data = r.output

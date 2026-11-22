@@ -2,6 +2,7 @@
   import { t, has, toolName } from '../lib/i18n.svelte'
   import { scrollable } from '../lib/scrollable'
   import { call, can } from '../lib/api.svelte'
+  import { adopt, dirtyKeys, changedCells } from '../lib/draft'
   import { resource } from '../lib/resource.svelte'
   import { cfg, useConfig, patchConfig, type Op } from '../lib/config.svelte'
   import { overview, startOverview, refreshOverview } from '../lib/overview.svelte'
@@ -60,10 +61,10 @@
   $effect(() => {
     if (!cfg.loaded) return
     const f = { monthly: cfg.doc.limits?.monthly_budget_usd ?? '', request: cfg.doc.limits?.per_request_budget_usd ?? '', turn: cfg.doc.memory?.turn_budget_usd ?? '', index: cfg.doc.memory?.index_budget_usd ?? '', alert: String(cfg.doc.limits?.budget_alert_percent || 80) }
-    const j = JSON.stringify(f)
-    if (j !== bBase) {
-      b = f
-      bBase = j
+    const adopted = adopt(f, bBase)
+    if (adopted) {
+      b = adopted.form
+      bBase = adopted.base
     }
   })
   // tool limit grid: tool → field → value
@@ -74,20 +75,14 @@
     if (!tools.data) return
     const m: Record<string, L> = {}
     for (const tl of tools.data.tools) if (tl.id !== 'help.version') m[tl.id] = { per_day: tl.limits?.per_day ?? 0, per_user_per_day: tl.limits?.per_user_per_day ?? 0, per_channel_per_day: tl.limits?.per_channel_per_day ?? 0, cooldown_sec: tl.limits?.cooldown_sec ?? 0 }
-    const j = JSON.stringify(m)
-    if (j !== lBase) {
-      lim = m
-      lBase = j
+    const adopted = adopt(m, lBase)
+    if (adopted) {
+      lim = adopted.form
+      lBase = adopted.base
     }
   })
-  const budgetDirty = $derived(bBase ? Object.keys(b).filter((k) => (JSON.parse(bBase) as any)[k] !== (b as any)[k]) : [])
-  const limitDirty = $derived.by(() => {
-    if (!lBase) return [] as [string, keyof L][]
-    const old = JSON.parse(lBase) as Record<string, L>
-    const out: [string, keyof L][] = []
-    for (const [id, v] of Object.entries(lim)) for (const k of Object.keys(v) as (keyof L)[]) if (Number(old[id]?.[k] ?? 0) !== Number(v[k])) out.push([id, k])
-    return out
-  })
+  const budgetDirty = $derived(dirtyKeys(bBase, b))
+  const limitDirty = $derived(changedCells(lBase, lim) as [string, keyof L][])
   // Presets fill the per-person, per-room and wait columns of every tool at once (the daily totals,
   // such as the image cap, stay as they are); nothing is saved until the save bar. Paid calls
   // (images) and replies get their own scale: a reply cap that is too low silences the bot.

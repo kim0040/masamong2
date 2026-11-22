@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { overview, refreshOverview } from '../lib/overview.svelte'
+  import { overview } from '../lib/overview.svelte'
   import { session, call, practice, setPractice } from '../lib/api.svelte'
+  import { setPaused, PAUSE_ALL } from '../lib/pause'
   import { staleResources, refreshStale } from '../lib/resource.svelte'
   import { live, noteLifecycle } from '../lib/live.svelte'
   import { t } from '../lib/i18n.svelte'
@@ -18,10 +19,10 @@
   let busy = $state(false)
   async function resume() {
     busy = true
-    await call('runtime.pause', { scope: 'all', paused: 'false' })
-    await refreshOverview()
+    const r = await setPaused(PAUSE_ALL, false)
     busy = false
-    toast('ok', t('pause.resumed'))
+    if (r.ok) toast('ok', t('pause.resumed'))
+    else toast('error', t('pause.failed'), r.message)
   }
   // data on screen that could not be refreshed: the offline and restart banners already say why
   // when the whole service is away, so this one is for a single failing call

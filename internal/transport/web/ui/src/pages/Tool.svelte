@@ -3,6 +3,7 @@
   import { scrollable } from '../lib/scrollable'
   import { t, has, toolName, toolDesc } from '../lib/i18n.svelte'
   import { call, can } from '../lib/api.svelte'
+  import { adopt, dirtyKeys } from '../lib/draft'
   import { resource } from '../lib/resource.svelte'
   import { cfg, useConfig, patchConfig, type Op } from '../lib/config.svelte'
   import { navigate, route } from '../lib/router.svelte'
@@ -75,13 +76,13 @@
       defaults: JSON.stringify(s.defaults ?? {}, null, 2), per_day: s.limits?.per_day ?? 0, per_user_per_day: s.limits?.per_user_per_day ?? 0, per_channel_per_day: s.limits?.per_channel_per_day ?? 0,
       cooldown_sec: s.limits?.cooldown_sec ?? 0, url: s.http?.url ?? '', credential_ref: s.http?.credential_ref ?? '', pick: (s.http?.pick ?? []).join(', '), max_chars: s.http?.max_chars ?? 0, timeout_sec: s.http?.timeout_sec ?? 0,
     }
-    const j = JSON.stringify(f)
-    if (j !== base) {
-      form = f
-      base = j
+    const adopted = adopt(f, base)
+    if (adopted) {
+      form = adopted.form
+      base = adopted.base
     }
   })
-  const changed = $derived(base ? Object.keys(form).filter((k) => (JSON.parse(base) as any)[k] !== (form as any)[k]) : [])
+  const changed = $derived(dirtyKeys(base, form))
   let saving = $state(false)
   let defaultsErr = $state('')
   async function save() {

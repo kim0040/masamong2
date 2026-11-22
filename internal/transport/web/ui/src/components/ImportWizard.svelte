@@ -8,7 +8,8 @@
   import { motionAllowed } from '../lib/prefs.svelte'
   import { num, bytes, usd, duration } from '../lib/format'
   import { period, roomFromFile, blockHref, batchOffer, effectiveMode, type PrepareMode } from '../lib/blocks'
-  import { prepareStart } from '../lib/prepareresult'
+  import { estimatePrepare, startPrepare as startJob, parseBudget } from '../lib/memoryblocks'
+  import { prepareIsNews } from '../lib/prepareresult'
   import { toast } from '../lib/toast.svelte'
   import Dialog from './Dialog.svelte'
   import Button from './Button.svelte'
@@ -165,21 +166,21 @@
   }
   async function runEstimate() {
     estimating = true
-    const r = await call('memory.blocks.prepare', { source_room: room, dry_run: true, mode: 'batch' }) // one dry run, both prices
+    const r = await estimatePrepare(room)
     estimating = false
-    if (r.ok) estimate = r.output
-    else err = r.error?.message ?? ''
+    if (r.ok) estimate = r.estimate
+    else err = r.message
   }
   async function startPrepare() {
     err = ''
-    const b = parseFloat(budget)
-    if (Number.isNaN(b) || b < 0 || b > 1000) return void (err = t('wizard.err.budget'))
+    const b = parseBudget(budget)
+    if (b === null) return void (err = t('wizard.err.budget'))
     starting = true
-    const r = await call('memory.blocks.prepare', { source_room: room, background: true, budget_usd: String(b), mode: chosen })
+    const r = await startJob(room, { budget: b, mode: chosen })
     starting = false
-    if (!r.ok) return void (err = r.error?.message ?? t('common.failed'))
-    const started = prepareStart(r.output)
-    if (started.key === 'blocks.batch_resumed' || started.key === 'blocks.already_running') toast(started.tone, t(started.key), label)
+    if (!r.ok) return void (err = r.message || t('common.failed'))
+    const started = r.start
+    if (prepareIsNews(started)) toast(started.tone, t(started.key), label)
     jobStarted = true
     batchStarted = started.batch
     step = channels.length ? 3 : 4

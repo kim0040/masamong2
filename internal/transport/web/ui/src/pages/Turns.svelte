@@ -5,6 +5,7 @@
   import { call } from '../lib/api.svelte'
   import { route, setQuery } from '../lib/router.svelte'
   import { onLive } from '../lib/live.svelte'
+  import { latest } from '../lib/seqload'
   import { toast } from '../lib/toast.svelte'
   import { usd, ms, relative } from '../lib/format'
   import PageHeader from '../components/PageHeader.svelte'
@@ -61,10 +62,15 @@
   let wide = $state(true)
   let sheetOpen = $state(false)
 
+  // the list and the random draw share one slot: a filter changed (or a draw made) while an older request is
+  // away must not get that request's rows drawn over the new ones
+  const lists = latest()
   async function load(more = false) {
+    const live = lists.start()
     loading = !more
     loadError = undefined
     const r = await call('turns.list', { outcome, tool, channel_id: channel, lab, tools_only: toolsOnly, limit: PAGE_SIZE, before: more ? next : undefined })
+    if (!live()) return
     loading = false
     if (!r.ok) {
       if (more) toast('error', t('load.failed'), r.error?.message)
@@ -90,9 +96,11 @@
     }
   }
   async function drawSample() {
+    const live = lists.start()
     loading = true
     loadError = undefined
     const r = await call('turns.sample', { n: SAMPLE, lab })
+    if (!live()) return
     loading = false
     if (!r.ok) {
       toast('error', t('turns.sample.failed'), r.error?.message)

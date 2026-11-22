@@ -2,7 +2,8 @@
   import { fly } from 'svelte/transition'
   import { scrollable } from '../lib/scrollable'
   import { t } from '../lib/i18n.svelte'
-  import { call, postJSON } from '../lib/api.svelte'
+  import { call } from '../lib/api.svelte'
+  import { saveSecret } from '../lib/secret'
   import { cfg, useConfig, patchConfig } from '../lib/config.svelte'
   import { navigate } from '../lib/router.svelte'
   import { motionAllowed } from '../lib/prefs.svelte'
@@ -85,14 +86,14 @@
     let credential_ref = ''
     if (f.credMode === 'env') credential_ref = f.credRef.trim()
     if (f.credMode === 'value') {
-      const r = await postJSON('/api/secret', { target: 'file', id: f.id, value: f.credValue.trim() })
+      const r = await saveSecret({ target: 'file', id: f.id }, f.credValue)
       // the typed key stays in the field until the tool is saved, so a failure can be retried
-      if (r.status !== 200) {
-        errs = { cred: r.body?.error?.message ?? t('common.failed') }
+      if (!r.ok) {
+        errs = { cred: r.message || t('common.failed') }
         step = 1
         return
       }
-      credential_ref = r.body.credential_ref
+      credential_ref = r.credentialRef
     }
     const http: any = { url: f.url.trim() }
     if (credential_ref) http.credential_ref = credential_ref

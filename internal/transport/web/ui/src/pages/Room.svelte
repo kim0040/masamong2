@@ -3,10 +3,13 @@
   import { t, toolName, i18n } from '../lib/i18n.svelte'
   import { scrollable } from '../lib/scrollable'
   import { call } from '../lib/api.svelte'
+  import { setPaused, roomPaused } from '../lib/pause'
+  import { makeInvite } from '../lib/discord'
+  import { adopt, dirtyKeys } from '../lib/draft'
   import { resource } from '../lib/resource.svelte'
   import { route } from '../lib/router.svelte'
   import { cfg, useConfig, patchConfig, loadConfig } from '../lib/config.svelte'
-  import { overview, refreshOverview } from '../lib/overview.svelte'
+  import { overview } from '../lib/overview.svelte'
   import { toast } from '../lib/toast.svelte'
   import { relative, datetime, num, usd } from '../lib/format'
   import { blockState, stateTone, blockHref, isKakao } from '../lib/blocks'
@@ -55,7 +58,7 @@
     return n && n !== g ? n : ''
   })
   const pol = $derived(cfg.doc?.guilds?.[g]?.channels?.[c] ?? {})
-  const paused = $derived(!!overview.data?.pause?.channels?.[`${g}:${c}`] || !!overview.data?.pause?.guilds?.[g])
+  const paused = $derived(roomPaused(overview.data?.pause, g, c))
 
   // editable copy of the behavior form
   let form = $state({ respond: 'mention', persona_ref: '', rules: '', capture: false, logging_level: 'ops', memory_use: 'on', disaster_alerts: 'on', update_news: 'off', watch_level: [] as { region: string; level: string }[] })
@@ -70,16 +73,16 @@
     if (!ch) return
     const watch_level = Object.entries(ch.watch_level ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([region, level]) => ({ region, level: String(level) }))
     const f = { respond: ch.respond, persona_ref: ch.persona_ref, rules: pol.rules ?? '', capture: !!ch.capture, logging_level: ch.logging_level, memory_use: ch.memory_use, disaster_alerts: ch.disaster_alerts === false ? 'off' : 'on', update_news: ch.update_news === true ? 'on' : 'off', watch_level }
-    const s = JSON.stringify(f)
-    if (s !== base) {
-      form = f
-      base = s
+    const adopted = adopt(f, base)
+    if (adopted) {
+      form = adopted.form
+      base = adopted.base
     }
     if (cfg.loaded && levelsKey(pol.watch_level) === levelsKey(ch.watch_level)) watchRev = cfg.revision
   })
   // the area levels are edited only while alerts reach this room; a hidden draft is dropped, never saved
   const watchShown = $derived(form.disaster_alerts === 'on' && form.respond !== 'off')
-  const dirty = $derived(base ? Object.entries(form).filter(([k, v]) => (k !== 'watch_level' || watchShown) && JSON.stringify((JSON.parse(base) as any)[k]) !== JSON.stringify(v)).length : 0)
+  const dirty = $derived(dirtyKeys(base, form, (k) => k === 'watch_level' && !watchShown).length)
   async function save() {
     const { watch_level, ...rest } = form
     const input: Record<string, unknown> = { guild_id: g, channel_id: c, ...rest, capture: form.capture ? 'true' : 'false' }
@@ -107,9 +110,8 @@
   }
 
   async function setPause(v: boolean) {
-    const r = await call('runtime.pause', { scope: 'channel', guild_id: g, channel_id: c, paused: v ? 'true' : 'false' })
-    await refreshOverview()
-    r.ok ? toast(v ? 'warn' : 'ok', v ? t('rooms.paused_toast') : t('rooms.resumed_toast')) : toast('error', r.error?.message ?? '')
+    const r = await setPaused({ scope: 'channel', guild_id: g, channel_id: c }, v)
+    r.ok ? toast(v ? 'warn' : 'ok', v ? t('rooms.paused_toast') : t('rooms.resumed_toast')) : toast('error', r.message ?? '')
   }
 
   // per-channel tool switch: default (follow instance) | on | off
@@ -244,9 +246,9 @@
   let inviteErr = $state('')
   async function getInvite() {
     // preselect this room's server so the invite (or a re-invite with more permissions) lands here
-    const r = await call('channels.invite', { guild_id: g })
-    if (r.ok) invite = r.output.url
-    else inviteErr = r.error?.message ?? ''
+    const r = await makeInvite(g)
+    if (r.url) invite = r.url
+    else inviteErr = r.message
   }
 </script>
 

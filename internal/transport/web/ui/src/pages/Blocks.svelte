@@ -9,6 +9,7 @@
   import { messageVectorAsk, messageVectorAskMode, messageVectorsOn, enableMessageVectors, type MessageVectorAsk } from '../lib/messagevectors'
   import { etaText, blockState, stateTone, period, jobLine, blockHref, stopReason, isKakao, batchWaitLine } from '../lib/blocks'
   import { toast } from '../lib/toast.svelte'
+  import { startPrepare } from '../lib/memoryblocks'
   import PageHeader from '../components/PageHeader.svelte'
   import Card from '../components/Card.svelte'
   import Tabs from '../components/Tabs.svelte'
@@ -72,9 +73,9 @@
   }
 
   async function prepare(b: any) {
-    const r = await call('memory.blocks.prepare', { source_room: b.source_room, background: true })
-    if (r.ok) toast(r.output.batch_resumed ? 'info' : 'ok', r.output.batch_resumed ? t('blocks.batch_resumed') : r.output.already_running ? t('blocks.already_running') : r.output.mode === 'batch' ? t('blocks.batch_started') : t('blocks.prepare_started'), b.label)
-    else toast('error', t('blocks.prepare_failed'), r.error?.message)
+    const r = await startPrepare(b.source_room)
+    if (r.ok) toast(r.start.tone, t(r.start.key), b.label)
+    else toast('error', t('blocks.prepare_failed'), r.message)
     void data.refresh()
   }
   async function cancelJob(b: any) {
@@ -166,7 +167,10 @@
       save: () => setMem('message_vectors', true),
       blocks: withData,
       preparing: (b) => blockState(b) === 'preparing',
-      prepare: (b) => call('memory.blocks.prepare', { source_room: b.source_room, background: true }),
+      prepare: async (b) => {
+        const r = await startPrepare(b.source_room)
+        return r.ok ? { ok: true } : { ok: false, error: { message: r.message } }
+      },
     })
     if (!out.saved) {
       // the setting was not saved (the save already said why): nothing was started, and the switch is drawn from the saved setting again
