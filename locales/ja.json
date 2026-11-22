@@ -1174,7 +1174,7 @@
   "discord.chat.limited": "今は返信を続けるのが難しい状況です。少し時間をおいてからもう一度お試しください。",
   "features.reason.timezone_invalid": "不明なタイムゾーン: {arg}",
   "features.reason.config_setting_rejected": "このバージョンでは受け付けない設定のためオフにしています — {arg}。設定でアドレスを直してから、もう一度オンにしてください。",
-  "features.reason.tool_direct_key": "{arg} のヘッダーまたはアドレスに鍵がそのまま書かれているため、エクスポートやバックアップに平文で含まれます。鍵を credential_ref に移し、その場所には credential のプレースホルダーを使ってください。",
+  "features.reason.tool_direct_key": "{arg} のヘッダーまたはアドレスに鍵がそのまま書かれているため、設定とバックアップに平文で残ります（config.show では伏せて表示します）。鍵を credential_ref に移し、その場所には credential のプレースホルダーを使ってください。",
   "features.reason.maintenance_leftovers": "復元またはバックアップで残った古いファイル {arg} 件をまだ削除できていません(別のプログラムが使用中の可能性があります)。1 時間ごとに再試行するので、操作は不要です。",
   "features.reason.restore_failed": "前回の復元({arg})を開始できませんでした。何も変更されておらず、ボットは現在のデータのまま動作しています。理由はメンテナンス画面で確認できます。",
   "features.reason.gateway_retrying": "Discordへの接続を再試行しています。",

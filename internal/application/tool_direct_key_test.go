@@ -41,6 +41,47 @@ func TestDirectKeySaveErrorIsLocalized(t *testing.T) {
 	}
 }
 
+// The console's tool form saves through config.patch, and the operator form through the form fields:
+// the same refusal is localized there too (a regular save and a dry run alike), names the tool and the
+// field, never the value, and leaves the revision where it was.
+func TestDirectKeyPatchAndFormAreLocalized(t *testing.T) {
+	svc := setupSvc(t)
+	direct := "synthetic" + "-direct-value"
+	ops := []any{map[string]any{"path": []any{"tools", "ops.lookup"}, "value": map[string]any{
+		"description": "d",
+		"params":      []any{map[string]any{"name": "q"}},
+		"http":        map[string]any{"url": "https://api.example.com/v1?q={q}", "credential_ref": "env:OPS_KEY", "headers": map[string]any{"X-API-Key": direct}},
+	}}}
+	before := svc.Revision()
+	for _, dry := range []bool{false, true} {
+		in, _ := json.Marshal(map[string]any{"ops": ops, "dry_run": dry, "base_revision": before})
+		r := svc.Execute(t.Context(), action.Request{Action: "config.patch", Input: in, Locale: "ko"})
+		if r.OK || r.Error == nil || r.Error.MessageKey != "tool.direct_key" {
+			t.Fatalf("patch dry=%v: %+v", dry, r.Error)
+		}
+		msg := r.Error.Message
+		if !strings.Contains(msg, "ops.lookup") || !strings.Contains(msg, "headers.X-API-Key") || !strings.Contains(msg, "저장하지 않았어요") || strings.Contains(msg, direct) {
+			t.Fatalf("patch dry=%v: %q", dry, msg)
+		}
+	}
+	if svc.Revision() != before {
+		t.Fatal("a refused patch moved the revision")
+	}
+
+	// the operator form holds the whole document: a key an earlier release accepted stops the save
+	// the same way, in the person's language
+	d := svc.Doc()
+	d.Tools = map[string]tools.Settings{"ops.lookup": directKeyTool(direct)}
+	svc.SetDocForTest(d)
+	in, _ := json.Marshal(map[string]any{"form": "operator", "default_locale": "ko"})
+	for _, act := range []string{"config.apply", "config.validate", "config.diff"} {
+		r := svc.Execute(t.Context(), action.Request{Action: act, Input: in, Locale: "ko"})
+		if r.OK || r.Error == nil || r.Error.MessageKey != "tool.direct_key" || strings.Contains(r.Error.Message, direct) {
+			t.Fatalf("%s operator form: %+v", act, r.Error)
+		}
+	}
+}
+
 // A configuration an earlier release accepted still loads; the doctor lists the tools that keep a key in
 // it (ids only) so the operator moves them to credential_ref.
 func TestDoctorNamesToolsWithDirectKeys(t *testing.T) {
@@ -92,14 +133,19 @@ func TestDirectKeySpellingsAreDoctoredAndMasked(t *testing.T) {
 	svc.SetDocForTest(d)
 
 	res := out(t, svc, "runtime.doctor", nil)
-	found := ""
+	found, reasonText := "", ""
 	for _, raw := range res["attention"].([]any) {
 		if a := raw.(map[string]any); a["item"] == "tool_keys" {
 			found, _ = a["reason"].(string)
+			reasonText, _ = a["reason_text"].(string)
 		}
 	}
 	if found != "tool_direct_key:ops.lookup" {
 		t.Fatalf("the doctor must name the tool: %q", found)
+	}
+	// the warning must say what config.show does: it masks the key, it does not export it
+	if !strings.Contains(reasonText, "config.show") {
+		t.Fatalf("the warning does not describe the masking: %q", reasonText)
 	}
 
 	show := out(t, svc, "config.show", nil)

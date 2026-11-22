@@ -206,7 +206,7 @@ func (s *Service) candidateBytes(req action.Request, in map[string]any) ([]byte,
 	if strVal(in, "form", "") == "operator" {
 		raw, err := s.marshalOperatorForm(in)
 		if err != nil {
-			r := action.Fail(req, errcode.ConfigInvalid, "generic.error", err.Error(), nil)
+			r := s.configFail(req, errcode.ConfigInvalid, err, nil)
 			return nil, &r
 		}
 		return raw, nil
