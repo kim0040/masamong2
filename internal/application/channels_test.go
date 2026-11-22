@@ -392,3 +392,35 @@ func TestChannelsWithoutAnEntryReplyInBubbles(t *testing.T) {
 		}
 	}
 }
+
+// Staging takes only regular files inside rag_staging: a link (to a file anywhere on the computer, or a
+// folder link on the way) is refused, so nothing outside the staging folder is copied into a channel.
+func TestChannelAttachmentStagingRefusesLinks(t *testing.T) {
+	svc := setupSvc(t)
+	staging := filepath.Join(svc.DataRoot, "rag_staging")
+	if err := os.MkdirAll(staging, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "elsewhere.md")
+	if err := os.WriteFile(outside, []byte("synthetic text outside the staging folder\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(staging, "link.md")); err != nil {
+		t.Skipf("symbolic links unavailable: %v", err)
+	}
+	if err := os.Symlink(outsideDir, filepath.Join(staging, "dirlink")); err != nil {
+		t.Fatal(err)
+	}
+	for _, src := range []string{"link.md", filepath.Join("dirlink", "elsewhere.md")} {
+		add := exec(svc, "channels.attachments.add", map[string]any{
+			"guild_id": "g1", "channel_id": "c1", "filename": "notes.md", "source_path": src,
+		})
+		if add.OK {
+			t.Fatalf("%s: a link out of the staging folder was staged", src)
+		}
+	}
+	if atts := svc.Doc().Guilds["g1"].Channels["c1"].RAGAttachments; len(atts) != 0 {
+		t.Fatalf("attachments %v", atts)
+	}
+}
