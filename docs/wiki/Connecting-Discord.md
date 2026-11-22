@@ -6,7 +6,7 @@
 
 1. In the [Discord Developer Portal](https://discord.com/developers/applications), press **New Application**.
 2. On the **Bot** tab, press **Reset Token** to get the bot token. It is shown only once, so copy it right away.
-3. On the same tab, under **Privileged Gateway Intents**, turn on **Message Content Intent**. The bot needs it to notice its name, to run `!` commands and to remember conversation.
+3. On the same tab, under **Privileged Gateway Intents**, turn on **Message Content Intent**. The bot needs it to notice its name, to run `!` commands and to remember conversation. With `discord.message_content` off (the default) the bot ignores every ordinary message in a server, mentions included, and answers slash commands only; direct messages still work.
 
 ## 2. Give the token to the console
 
@@ -60,7 +60,7 @@ Set each room under **Servers & rooms** (or `masamong channels configure`):
 | Setting | Values | What it does |
 |---|---|---|
 | Reply mode `respond` | `mention` · `always` · `command` · `off` | When the bot replies |
-| Collect `capture` | on / off | Store the room's conversation as memory (needs `memory.capture` on) |
+| Collect `capture` | on / off | Store the room's conversation as memory (on by default; needs `memory.capture` on, which is also the default) |
 | Use memory `memory_use` | `on` · `off` | Search memory when replying |
 | Persona `persona_ref` | `warm_ko`, `friendly_ko`, `friendly_en`, … | Tone and **default reply language**. A room with none uses its language's default (`warm_ko` and `warm_ja` are polite; see [Languages](https://github.com/kim0040/masamong2/wiki/Languages)) |
 | Extra rules `rules` | text | Additional instructions for this room only |
@@ -95,6 +95,7 @@ masamong channels configure --guild_id 123456789 --id 987654321 --respond mentio
 | `/remind`, `/reminders` | Reminders in plain language (confirmed with a button), list and cancel |
 | `/privacy` | See, give or withdraw consent for memory, fortunes, notices and chiming in |
 | `/mysettings` | Your weather place, time zone, quiet hours, language |
+| `/mymemory`, `/forgetme` | What the bot remembers about you in this server (only you see the answer), and a preview of it with a confirm button to delete it |
 | `/updates` | What changed in the version the bot runs (only the part that matters to people using it), `previous` for the version before, `subscribe` / `unsubscribe` / `status` for a private message when the bot moves to a new release |
 | `/admin` | Run the bot in this room: pause and resume, reply mode, collecting, chiming in, blocking people in this server (visible to server managers only) |
 | `/status` | Bot status (visible only to you) |

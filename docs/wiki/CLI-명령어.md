@@ -12,7 +12,7 @@
 |---|---|
 | `--data-root DIR` | 사용할 데이터 폴더 (인스턴스 선택) |
 | `--output json` | 자동화용 JSON 출력. 파이프·`CI`·`NO_COLOR` 환경에서는 자동으로 JSON |
-| `--이름 값` | 명령 입력. `--dry_run true`, `--guild_id 123`처럼 씀 |
+| `--name value` | 명령 입력. 이름 자리에는 입력 이름을, 값 자리에는 그 값을 씀: `--dry_run true`, `--guild_id 123` |
 | `--input-file FILE` | `masamong tools test` 전용: JSON 객체를 파일에서 읽음. `--input-file -`는 표준 입력에서 읽음 |
 
 모든 명령은 같은 JSON 구조를 돌려줍니다.

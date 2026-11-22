@@ -8,7 +8,7 @@ Masamong remembers past conversations and brings them back naturally — "we sai
 
 | Source | How it gets in |
 |---|---|
-| Live Discord conversation | Collected in rooms where both the global switch (`memory.capture: true`) and the room's `capture: true` are on |
+| Live Discord conversation | Collected in rooms where both the global switch (`memory.capture`) and the room's `capture` are on. Both are on by default; turning memory off is a setting you make in the console. Servers still waiting for approval are not collected |
 | KakaoTalk chats | Upload a KakaoTalk "export chat" CSV in the console and index it |
 | Discord raw archive | Index an archive of original messages with `imports start --source raw` |
 
@@ -88,7 +88,7 @@ masamong memory blocks update --source_room kakao:friends --mode batch
 
 | Mode | Behavior |
 |---|---|
-| `auto` (default) | Keyword (lexical) and vector (semantic) hybrid search; the rerank model is called only when scores are unclear |
+| `auto` (default, also when the settings file has no `memory.retrieve`) | Keyword (lexical) and vector (semantic) hybrid search; the rerank model is called only when scores are unclear |
 | `hybrid` | Hybrid search only, no rerank (fast and cheap) |
 | `rerank` | Always rerank every candidate set (most accurate) |
 | `off` | Memory search off |

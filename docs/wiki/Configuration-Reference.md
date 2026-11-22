@@ -36,6 +36,7 @@ masamong config apply --file new.yaml --base_revision $rev
 | `id` | chosen at setup | Instance name |
 | `data_dir` | the data folder | Filled in automatically |
 | `bot_names` | `[마사몽, masamong]` | Names people call the bot by; the first is used in prompts |
+| `log_level` | `info` | How much the daemon writes to its log: `debug`, `info`, `warn` or `error`. `MASAMONG_LOG_LEVEL` in the environment overrides it for one run. Records at `error` and above also go to `errors.log` next to the log |
 | `expected_bot_id` | `""` | Refuse to register commands when connected with a token for a different bot (protects against token mix-ups). The console fills it from Discord after saving the token (`masamong discord check --apply`) |
 
 ## admin
@@ -54,7 +55,7 @@ masamong config apply --file new.yaml --base_revision $rev
 | `token_ref` | `env:MASAMONG_DISCORD_TOKEN` | Bot token reference |
 | `command_prefix` | `!` | Prefix for `!` commands |
 | `register_commands` | `true` | Register slash commands automatically |
-| `message_content` | `false` | Read ordinary messages (also turn on Message Content Intent in the portal) |
+| `message_content` | `false` | Read ordinary messages (also turn on Message Content Intent in the portal). Off: in a server the bot answers slash commands only; mentions and `!` commands are not read |
 | `guild_ids` | `[]` | Servers to register slash commands in; empty means global |
 
 ## i18n
@@ -62,8 +63,8 @@ masamong config apply --file new.yaml --base_revision $rev
 | Key | Default | Meaning |
 |---|---|---|
 | `default_locale` | `en` | Reply language when servers and rooms set none |
-| `fallback_locale` | `en` | When a translation is missing |
-| `bundled_locales` | `[en, es, ja, ko, zh-Hans]` | Languages to load |
+| `fallback_locale` | `en` | Not used: a missing text always falls back to English, whatever this says |
+| `bundled_locales` | `[en, es, ja, ko, zh-Hans]` | For information only: the languages this version ships. It does not choose which ones are loaded |
 | `timezone` | `Asia/Seoul` | The day boundary for limits, statistics and backup times. It must be an IANA name such as `Asia/Seoul`. The programs carry their own time zone database, so names work on Windows without Go or a system copy. An unknown name is not silently treated as UTC: `masamong doctor` and Home's attention list show it. If a room's stored `naive_timezone` is invalid, indexing uses the instance time zone and reports the room in its warnings; an invalid zone stored for a person or reminder is logged before its fallback is used |
 | `polite_default` | `true` for new instances | Rooms without a persona start in the polite-but-warm voice (`warm_ko`, `warm_ja`) instead of the casual friend (`friendly_ko`, `friendly_ja`). An instance created before this key existed has none and **keeps the casual voice** until you turn it on: **Settings → New rooms start polite** or `polite_default: true` |
 
@@ -111,7 +112,7 @@ CometAPI and NanoGPT can be picked directly under **Connections → Add provider
 | `none`, `minimal` | `thinking: disabled` | `thinking: between_tools` | no `thinking`, effort `low` | `thinking: disabled` |
 | `low` … `max` | `thinking: adaptive` + `output_config.effort` | the same | the same | `thinking: enabled` with a token budget (1024–16384) |
 
-Thinking gets extra output room on top of the call's limit (`low` 1024 up to `max` 16384 tokens). Signed thinking blocks go back unchanged within a tool loop. Once an Anthropic-format model has answered in the loop, the tool list and the system prompt stay as they were too: a tool closed during the turn stays on the list and answers "not available now" if called. When a fallback model or host takes over, the thinking blocks another model or host wrote are left out. `temperature` goes only to the Claude models listed as taking it (Claude 4.6 and earlier, in `hosts.json`), on calls without thinking. Every other model on an Anthropic-format host, another company's included, runs at its default temperature. A model with budgeted thinking (Haiku 4.5) that takes over a tool loop from another model or host answers that round without thinking: it refuses a round whose last answer has no thinking block. A reached spend limit or an empty credit balance counts as quota: the role's fallback answers. Prompt caching is not sent yet. The cost counts cache reads at 0.1× and cache writes at 1.25× the input price if a host reports them. A host without an Anthropic-format model list still passes the connection test ("list unavailable"): type the model ID in **Change**, and the key is proven by a one-token answer once a role uses the host. A refusal (`stop_reason: refusal`) goes to the role's fallback.
+Thinking gets extra output room on top of the call's limit (`low` 1024 up to `max` 16384 tokens). Signed thinking blocks go back unchanged within a tool loop. Once an Anthropic-format model has answered in the loop, the tool list and the system prompt stay as they were too: a tool closed during the turn stays on the list and answers "not available now" if called. When a fallback model or host takes over, the thinking blocks another model or host wrote are left out. `temperature` goes only to the Claude models listed as taking it (Claude 4.6 and earlier, in `hosts.json`), on calls without thinking. Every other model on an Anthropic-format host, another company's included, runs at its default temperature. A model with budgeted thinking (Haiku 4.5) that takes over a tool loop from another model or host answers that round without thinking: it refuses a round whose last answer has no thinking block. A reached spend limit or an empty credit balance counts as quota: the role's fallback answers. Prompt caching is sent only where the host takes it: the Anthropic host, and OpenRouter for `anthropic/*` and `google/gemini-*` models (other model families cache by themselves and are sent no marker; any other host never sees the field). Cache reads count at the model's cached-input price (0.1× the input price for Claude) and, when a host reports written tokens but no cost, cache writes count at 1.25× the input price on the Anthropic host (a five-minute write) and at the plain input price on OpenRouter; a cost the host reports itself is used as it is. A host without an Anthropic-format model list still passes the connection test ("list unavailable"): type the model ID in **Change**, and the key is proven by a one-token answer once a role uses the host. A refusal (`stop_reason: refusal`) goes to the role's fallback.
 
 When a model rejects an option (e.g. Gemini 3.8 Flash rejects `reasoning_effort: minimal`, OpenAI reasoning models reject `temperature`), the request is sent once more without it and that shape is remembered for the model. When the planner or reply model fails (model missing, overloaded, timeout, ran out of output while thinking), the other one gets the same request once; there is no setting for this. Official prices are in `internal/providers/openai/hosts.json` with the date they were checked; prices entered by the operator always come first.
 
@@ -125,7 +126,7 @@ A model per role. Roles: `response`, `planner`, `summary`, `embed`, `rerank`, `i
 | `model` | Model name |
 | `dimensions` | Embedding dimensions (`embed` only). Default `1024`; `0` = the model's full width |
 | `price_in_per_mtok`, `price_out_per_mtok` | USD per million tokens, used when the provider reports no cost |
-| `timeout_seconds` | Time limit for one call. 0 = default (`planner` 30, `response` 90), otherwise 5–600. Past it, or on an empty reply, the other chat model takes over. Console: **Connections → Models → prices** |
+| `timeout_seconds` | Time limit for one call. 0 = default (`planner` 30, `response` 90, `vision` 30, any other role 60), otherwise 5–600. Past it, or on an empty reply, the other chat model takes over. Console: **Connections → Models → prices** |
 | `effort` | The chat roles (`response`, `planner`, `summary`, `vision`). How long a reasoning model thinks before it answers: `none`, `minimal`, `low`, `medium`, `high`, `xhigh` or `max`. Empty = `low`. Precedence is below the table. Console: **Connections → Models → prices** |
 | `fallbacks` | The chat roles. Up to 3 models (`provider`, `model`, optional `price_in_per_mtok`, `price_out_per_mtok`, `timeout_seconds`, `effort`) asked in order when the role's model fails. A fallback's `effort` replaces the role's on that model; empty keeps the role's. Console: **Connections → Models → Fallbacks** |
 
@@ -154,7 +155,7 @@ The default `dimensions` is **1024** (since 2026-10-13). Measured on three real 
 | Key | Default | Meaning |
 |---|---|---|
 | `profile` | `lite` | Profile name |
-| `monthly_budget_usd` | `"10.00"` | This month's model spend cap; replies stop past it. The Usage page or `masamong usage reset` can restart this month's count from now without changing daily history or provider usage and key limits. Months are counted in UTC (in Korea a new month starts at 09:00 on the 1st) |
+| `monthly_budget_usd` | `"10.00"` | This month's model spend cap; replies stop once it is used up. It is a soft cap: calls in flight at the same time can take the month slightly over it. The Usage page or `masamong usage reset` can restart this month's count from now without changing daily history or provider usage and key limits. Months are counted in UTC (in Korea a new month starts at 09:00 on the 1st) |
 | `per_request_budget_usd` | `"0.15"` (was 0.03) | **Budget per reply.** Once a reply has spent this, its remaining tools and memory search are skipped; the reply itself (and the other chat model standing in when one fails) still runs. A step that alone costs more (a picture) is not refused, only what comes after it |
 | `max_external_attempts` | `10` (1–20; was 6) | **Outside calls per reply** (model calls, tools, memory search). Past it, the remaining tools and memory search are skipped as above. The skipped steps show in the turn record. **The new defaults (0.15 and 10) apply only when the config file does not set these keys**: an install that already has them keeps its values, so raise them yourself (Maintenance › Config & history, or `config apply`) if deep searches get skipped |
 | `budget_alert_percent` | `80` | When the console starts warning about the budget |
@@ -166,13 +167,13 @@ Model calls reserve the call count at their start and add cost at completion. Wi
 
 | Key | Default | Meaning |
 |---|---|---|
-| `capture` | `false` | Store room messages as memory (the room's `capture` must be on too) |
+| `capture` | `true` | Store room messages as memory (the room's `capture` must be on too; it is on by default). Turn memory off here, or per room in the console |
 | `embed` | `true` | Background indexing |
-| `retrieve` | `auto` | `off` · `auto` · `hybrid` · `rerank` ([Memory blocks](https://github.com/kim0040/masamong2/wiki/Memory-Blocks)) |
+| `retrieve` | `auto` (also when the key is missing) | `off` · `auto` · `hybrid` · `rerank` ([Memory blocks](https://github.com/kim0040/masamong2/wiki/Memory-Blocks)) |
 | `summaries` | `true` | Snippet summaries (most of the cost) |
 | `message_vectors` | `true` (on when unset) | **Message-level search.** Also embeds each eligible message of a closed snippet on its own (at least 6 letters or numbers; laughter, emoji and punctuation do not count) and adds the closest messages' snippets as one more search source, so a one-line fact inside a long snippet is found. MRL models store up to 512 dimensions per message, about 0.5 KB of int8 vector payload plus memory; models outside the MRL catalog use the installation's actual leaf width (full width when no explicit width is set) and may use more. The message space contains the actual numeric width; changed leaf widths trigger re-embedding, and messages wait until a leaf width is known. Vectors are not duplicated in the embedding cache; only messages with at least 6 letters or numbers are embedded, roughly a third to 60% of a real history. On by default after measurement (R@5 on the no-answer questions 65% to 75%, flow questions unchanged, under one cent of indexing cost for 30,000 to 40,000 messages). Set `false` to turn it off; while off, search is unchanged. Nothing is embedded at the moment you update. A width change is rebuilt on the next index pass, block prepare or `memory reindex`, within `index_budget_usd`; while rebuilding, search has fewer `message_dense` candidates, like message vectors were partly off (the doctor shows `pending_messages:N` and the width). Before turning it back on, the console estimates messages, tokens, cost, time and vector payload size ([Memory blocks](https://github.com/kim0040/masamong2/wiki/Memory-Blocks)) |
 | `naive_timezone` | `Asia/Seoul` | Time zone for times without one (KakaoTalk) |
-| `index_budget_usd` | `"1.00"` | Cost cap of one background indexing run |
+| `index_budget_usd` | `"1.00"` | Approximate cost cap of one background indexing run: once it is spent, no new paid call starts (calls already sent can add a little more) |
 | `turn_budget_usd` | `"0.05"` | Rerank headroom for one conversation turn |
 | `index_interval_min` | `10` | Background indexing interval (minutes) |
 | `index_workers` | `8` | Embedding and summary requests one indexing pass sends at once (1–256). Lower it if the embedding host often answers 429; raise it to finish a large first index sooner |
@@ -197,7 +198,7 @@ Model calls reserve the call count at their start and add cost at completion. Wi
 | `loop_final` | `tools` | When the tool loop ends without asking its model once more. `tools`: in a short message (six words or fewer), when the round's calls are all of tools whose one result is the answer (`places.search`) and all found what they looked for. A failure, an empty or partial result, or a quote answered by a web search still asks. `search`: also when `search.web` found at least 3 results with text, unless the model searched with `depth: deep` or the message has a link. `off`: always asks. A request whose next call depends on a result ("find a cafe near here, then look up its reviews") can end at its first tool; set `off` if those are common |
 | `vision` | `auto` | Image understanding. `auto`: reads only the pictures sent when someone calls the bot (including those on the message they reply to or forward, at most 3 per reply). A picture posted just before a separate call (within 2 minutes), or sent alone within 45 seconds after a call that had none, counts as part of that call. An answer model that takes pictures sees them; otherwise another chat model describes them in 2–4 sentences inside the message. `off`: pictures are not read. No other pictures in the room are looked at, and pictures are not stored. Also on the Tools page |
 | `progress` | `deep` | The short "still looking" line. `deep`: posted as a reply, without a notification, when a deep search or a second round of searches starts. `slow`: those, and also when an ordinary search turn is still unanswered after 12 seconds. `off`: never. The line is deleted before the answer and is never stored in memory or counted for participation. Moderation bots may log the deletion. Also on the Tools page |
-| `transcript_chars` | `5000` | How many characters of the room's recent talk a reply reads back (`1000`–`20000`). The newest lines that fit come in, never fewer than the 8 latest lines. Read on every turn, no restart. Also on the Tools page |
+| `transcript_chars` | `5000` | How many characters of the room's recent talk a reply reads back (`1000`–`20000`). The newest lines that fit come in, never fewer than the 8 latest lines. Read on every turn, no restart. Used in rooms whose `attribution` is `on` or `structural` and for turns that start from a Discord message; with `attribution: off`, and in the console's test chat, the reply reads the plain recent history instead. Also on the Tools page |
 
 ## dm
 
@@ -246,7 +247,7 @@ Each room's `channels.<id>` entry also holds how a conversation with the bot goe
 |---|---|---|
 | `name_call` | `addressed` · `always` · `off` | A message that only says the bot's name (no mention, no reply to it). `addressed`: a small classifier tells "said to the bot" from "about the bot" and answers only the first (unsure means no). `always`: every message with the name is a call. `off`: the name alone never calls |
 | `attribution` | `on` · `structural` · `off` | Which recent lines a reply sees. `on`: the caller's own conversation plus lines a classifier finds the call pointing at. `structural`: the caller's conversation only. `off`: every recent line |
-| `conversation.follow` | `off` · `reply_only` · `window` | **Experimental.** Carrying on without a tag. `reply_only`: replies to the bot's message. `window`: a scored window after each answer. Decisions are recorded even while `off` |
+| `conversation.follow` | `off` · `window` | **Experimental.** Carrying on without a tag. `window`: a scored window after each answer. Decisions are recorded even while `off`. A reply to the bot's own message always counts as a call, whatever this says. An older value `reply_only` did the same as `off` and is read as `off` |
 | `conversation.follow_window_sec` | `0` (= 90, at most 600) | How long the window stays open; a question from the bot adds 60 |
 | `conversation.follow_max_untagged` | `0` (= 12) | Untagged answers in a row before a tag is needed again |
 | `conversation.thread` | `offer` · `auto_task` · `off` | A button under the reply offers a thread for a long one-on-one exchange. Anyone in the channel may press it, and whoever presses it joins the conversation (only the person asked can press **Keep it here**). `auto_task` (experimental) also opens one by itself for a task that used 3 or more tools. `off` turns thread continuing off in that room: new offers and automatic opening stop, a button shown before the switch opens nothing (only the person who pressed is told), and in a thread the bot already opened it no longer answers without a tag but follows the room's ordinary reply rules. Threads people made themselves are unaffected. There is no server-wide default, so it is set per room. When offers keep going unaccepted the room rests: after two ignored or declined offers in a row with no thread opened, 6 hours; each further ignored offer doubles it (12 h, 24 h …) up to 7 days; one opened thread starts the count over. The rest is read back from the conversation log (`conversation_log`), so it survives a restart, and the room's activity log in the console shows "Resting: recent offers were ignored" (`skip_backoff`) once per conversation |
@@ -254,7 +255,8 @@ Each room's `channels.<id>` entry also holds how a conversation with the bot goe
 | `conversation.thread_idle_close_min` | `0` (= 30) | Minutes of quiet before the bot ends its part in its thread |
 | `conversation.thread_recap` | `plan` · `always` · `off` | A short recap in the parent room when a thread ends: only when a plan or decision came out of it, always, or never |
 | `conversation.reply_shape` | `bubbles` · `trim` · `plain` | `bubbles`: two or three short paragraphs go out as separate messages a moment apart, and a reply far longer than a chat line shows its first part with a "more" button. `trim`: only the "more" button. `plain`: as written |
-| `conversation.banter` | `off` · `shadow` · `on` | **Experimental.** When someone talks about the bot in fun, one light line or an emoji back. Never for a real complaint; at most 2 lines and 4 emoji an hour; a 👎 stops lines for 2 hours. `shadow` only records what it would have done |
+| `conversation.banter` | `off` · `shadow` · `on` | **Experimental.** When someone talks about the bot in fun, one light line or an emoji back. Never for a real complaint; at most 2 lines and 4 emoji an hour; a 👎 stops lines for 2 hours. `shadow` only records what it would have done. Works only in rooms with `respond: mention` and `name_call: addressed`, for a message that says the bot's name without a mention or a reply |
+| `conversation.room_style` | `off` · `on` | **Experimental.** Adds the room's approved style note (how the room talks: length, laughs, slang) to the reply's rules, after the persona. A note is used only after an operator approved it, and stops being used when a message it came from is deleted. People who withdrew "Notes about me" are not counted in the analysis. A thread uses its parent room's setting and its parent room's note |
 | `logging.level` | `ops` · `errors` · `off` | How much of a turn the console keeps: `ops` the whole turn, `errors` the words of failed turns only, `off` none (ids, timing, tools and costs stay). Remarks only about the bot follow the same level, with the name-call decision (`about_bot`, `unsure`, …) beside them |
 
 Every decision of these features (name calls, follow-ups, thread offers, banter) goes to a body-free log (`conversation_log`, kept for `retention.turn_days`) that the Conversation card summarizes, to tune the defaults from real use.
@@ -276,7 +278,7 @@ tools:
 
 ## features
 
-Feature group switches: `weather`, `disasters`, `finance`, `search`, `polls`, `images`, `fortune`, `notices`, `summaries`. `false` turns off every tool in the group.
+Feature group switches: `weather`, `disasters`, `finance`, `search`, `polls`, `images`, `fortune`, `notices`, `summaries`, `reminders`. `false` turns off every tool in the group.
 
 `disasters` (KMA) and `notices` (Korean universities) only cover Korea. A new instance whose wizard language is not Korean and whose browser time zone is not `Asia/Seoul` starts with both `false`, and on `UTC` if the browser sent no time zone. Existing instances keep their settings.
 
@@ -472,7 +474,7 @@ Storage settings needed before the database opens. Only SQLite is used now (`bac
 |---|---|
 | `MASAMONG_DATA_ROOT` | Default data folder |
 | `MASAMONG_TRY_ROOT` | The separate test data folder for `make try` / `start-test.command` (default `~/.masamong-try`) |
-| `MASAMONG_OPENROUTER_KEY`, `MASAMONG_GEMINI_KEY`, `MASAMONG_OPENAI_KEY`, `MASAMONG_COMETAPI_KEY`, `MASAMONG_NANOGPT_KEY` | Model keys (default references of providers added in the console) |
+| `MASAMONG_OPENROUTER_KEY`, `MASAMONG_GEMINI_KEY`, `MASAMONG_OPENAI_KEY`, `MASAMONG_ANTHROPIC_KEY`, `MASAMONG_COMETAPI_KEY`, `MASAMONG_NANOGPT_KEY`, `MASAMONG_OPENGATEWAY_KEY` | Model keys (default references of providers added in the console) |
 | `MASAMONG_DISCORD_TOKEN` | Discord bot token (default reference) |
 | `MASAMONG_KMA_KEY`, `MASAMONG_FINNHUB_KEY`, `MASAMONG_EXCHANGERATE_KEY` | Weather and market data keys |
 | `MASAMONG_TAVILY_KEY`, `MASAMONG_LINKUP_KEY`, `MASAMONG_EXA_KEY`, `MASAMONG_SERPER_KEY`, `MASAMONG_BRAVE_KEY`, `MASAMONG_TINYFISH_KEY`, `MASAMONG_KAKAO_KEY`, `MASAMONG_JINA_KEY` | Web search and link reading keys (Jina works without one) |

@@ -23,7 +23,7 @@ masamong open
 On first visit, a wizard walks you through:
 
 1. **Data folder** — where data is stored, the instance name, **the language the bot answers in** (the console's language is suggested; it sets `i18n.default_locale`, see [Languages](https://github.com/kim0040/masamong2/wiki/Languages)), and how the console is protected (opens on this computer only, one-time sign-in links, SSH tunnels for remote use)
-2. **Model key** — pick OpenRouter, Google Gemini, OpenAI, CometAPI or NanoGPT and paste an API key (once it checks out, the latest model for each role is filled in)
+2. **Model key** — pick OpenRouter, Google Gemini, OpenAI, Anthropic, CometAPI, NanoGPT or OpenGateway and paste an API key (once it checks out, the latest model for each role is filled in)
 3. **Discord** — paste only the bot token; the console asks Discord for the bot's ID and whether it may read messages ([Connecting Discord](https://github.com/kim0040/masamong2/wiki/Connecting-Discord)). The step needs a token (typed now or saved earlier) and counts as done only once Discord has answered for it. A token Discord refuses does not switch Discord on
 4. **First room** — the Discord channel the bot joins and when it replies
 5. **Test chat** — try a conversation in the console without posting to Discord

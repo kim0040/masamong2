@@ -37,7 +37,7 @@ The memory search starts when the planner has answered, without waiting for the 
 
 The 1–4 request caps for external services (Finnhub, KMA, exchange rates, Jina Reader and others) use a process-wide shared governor. Its identity is the provider kind (the canonical provider ID, rather than a config entry's alias), base host and a non-reversible credential hash. Duplicate entries with the same host/key and multiple registries or services share slots. After configuration reload or capacity changes, requests still running on the old registry remain counted. Each HTTP attempt closes its body and releases its slot, including on panic; retry backoff runs outside the slot. An in-flight cap is not a rate limit and does not guarantee requests per second or minute.
 
-Limits and the monthly budget are checked **after** a reply's turn comes, so a burst of requests cannot all slip past the budget together. Waiting counts toward the reply's time limit (180 seconds for a Discord reply, sized for turns that draw a picture), and "typing…" is shown while waiting.
+Limits and the monthly budget are checked **after** a reply's turn comes, so a burst of requests is far less likely to slip past the budget together. The budget is a soft cap, not a hard one: calls already in flight when it is reached still finish and can take the month slightly over it ([Known issues](https://github.com/kim0040/masamong2/blob/main/docs/KNOWN_ISSUES.md)). Waiting counts toward the reply's time limit (180 seconds for a Discord reply, sized for turns that draw a picture), and "typing…" is shown while waiting.
 
 ## Measured
 

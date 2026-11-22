@@ -12,7 +12,7 @@ One program, `masamong`, manages the service and every feature. Everything the c
 |---|---|
 | `--data-root DIR` | The data folder to use (picks the instance) |
 | `--output json` | JSON output for scripts; automatic in pipes and with `CI` or `NO_COLOR` set |
-| `--name value` | Command input, e.g. `--dry_run true`, `--guild_id 123` |
+| `--name value` | Command input: the input's name, then its value, e.g. `--dry_run true`, `--guild_id 123` |
 | `--input-file FILE` | For `masamong tools test` only: read its JSON object from a file; `--input-file -` reads it from standard input |
 
 Every command returns the same JSON shape:
