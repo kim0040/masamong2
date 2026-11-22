@@ -95,15 +95,14 @@ func init() {
 		)`)
 }
 
-var (
-	catalogMu    sync.Mutex
-	catalogCache struct {
-		path   string
-		mod    time.Time
-		cat    *notices.Catalog
-		origin string
-	}
-)
+// noticeCatalogCache keeps the service's board catalog until its file changes (Service.noticeCat).
+type noticeCatalogCache struct {
+	mu     sync.Mutex
+	path   string
+	mod    time.Time
+	cat    *notices.Catalog
+	origin string
+}
 
 func (s *Service) noticeCatalogPath() string {
 	return filepath.Join(s.DataRoot, "notices", "catalog.json")
@@ -111,21 +110,22 @@ func (s *Service) noticeCatalogPath() string {
 
 // noticeCatalog is the board catalog: the instance's file when there is one, else the built-in one.
 func (s *Service) noticeCatalog() (*notices.Catalog, string, error) {
-	catalogMu.Lock()
-	defer catalogMu.Unlock()
+	cc := &s.noticeCat
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
 	path := s.noticeCatalogPath()
 	var mod time.Time
 	if fi, err := os.Stat(path); err == nil {
 		mod = fi.ModTime()
 	}
-	if catalogCache.cat != nil && catalogCache.path == path && catalogCache.mod.Equal(mod) {
-		return catalogCache.cat, catalogCache.origin, nil
+	if cc.cat != nil && cc.path == path && cc.mod.Equal(mod) {
+		return cc.cat, cc.origin, nil
 	}
 	c, origin, err := notices.Load(path)
 	if err != nil {
 		return nil, "", err
 	}
-	catalogCache.path, catalogCache.mod, catalogCache.cat, catalogCache.origin = path, mod, c, origin
+	cc.path, cc.mod, cc.cat, cc.origin = path, mod, c, origin
 	return c, origin, nil
 }
 
