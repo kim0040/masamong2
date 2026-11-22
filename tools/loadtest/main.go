@@ -92,8 +92,12 @@ func main() {
 }
 
 func run(o options) error {
-	_ = os.Setenv("MASAMONG_OFFLINE", "1") // only the loopback fake model is reachable
-	_ = os.Setenv("LOADTEST_MODEL_KEY", "fake")
+	// only the loopback fake model is reachable
+	for _, kv := range [][2]string{{"MASAMONG_OFFLINE", "1"}, {"LOADTEST_MODEL_KEY", "fake"}} {
+		if err := os.Setenv(kv[0], kv[1]); err != nil {
+			return fmt.Errorf("setenv %s: %w", kv[0], err)
+		}
+	}
 	if o.dataRoot == "" {
 		dir, err := os.MkdirTemp("", "masamong-load-")
 		if err != nil {
@@ -112,7 +116,11 @@ func run(o options) error {
 		defer cleanup()
 	}
 	if o.pprofAddr != "" {
-		go func() { _ = http.ListenAndServe(o.pprofAddr, nil) }()
+		go func() {
+			if err := http.ListenAndServe(o.pprofAddr, nil); err != nil {
+				fmt.Fprintln(os.Stderr, "loadtest: pprof:", err)
+			}
+		}()
 	}
 	llm := &fakeLLM{latency: o.latency, jitter: o.jitter, errRate: o.errRate, dims: o.dims}
 	srv := llm.start()
@@ -125,7 +133,9 @@ func run(o options) error {
 	defer svc.Close()
 	// the daemon's log setup: JSON lines to a file under logs/, plus the console's in-memory ring
 	logDir := filepath.Join(o.dataRoot, "logs")
-	_ = os.MkdirAll(logDir, 0o700)
+	if err := os.MkdirAll(logDir, 0o700); err != nil {
+		return err
+	}
 	lf, err := logfile.Open(filepath.Join(logDir, "daemon.log"), 10<<20, 5) // as masamongd does
 	if err != nil {
 		return err
@@ -235,15 +245,23 @@ func run(o options) error {
 	end.Goroutines = final
 
 	if o.heapProfile != "" {
-		if f, err := os.Create(o.heapProfile); err == nil {
+		f, err := os.Create(o.heapProfile)
+		if err == nil {
 			runtime.GC()
-			_ = pprof.WriteHeapProfile(f)
-			_ = f.Close()
+			err = pprof.WriteHeapProfile(f)
+			if cerr := f.Close(); err == nil {
+				err = cerr
+			}
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "loadtest: heap profile:", err)
 		}
 	}
 	var integrity string
 	if svc.Store.IsSQLite() {
-		_ = svc.Store.DB.QueryRow(`PRAGMA integrity_check`).Scan(&integrity)
+		if err := svc.Store.DB.QueryRow(`PRAGMA integrity_check`).Scan(&integrity); err != nil {
+			integrity = "check failed: " + err.Error()
+		}
 	} else {
 		integrity = "ok" // TiDB keeps its own consistency; nothing to check from a client
 	}
@@ -264,7 +282,10 @@ func run(o options) error {
 		if err := os.WriteFile(o.report, []byte(md), 0o644); err != nil {
 			return err
 		}
-		js, _ := json.MarshalIndent(rep, "", "  ")
+		js, err := json.MarshalIndent(rep, "", "  ")
+		if err != nil {
+			return err
+		}
 		if err := os.WriteFile(strings.TrimSuffix(o.report, filepath.Ext(o.report))+".json", js, 0o644); err != nil {
 			return err
 		}
@@ -281,7 +302,10 @@ func prepare(svc *application.Service, o options, base string) error {
 	if r := svc.Execute(context.Background(), action.Request{Action: "setup.resume", Input: json.RawMessage(`{"instance":"load"}`), Locale: "en"}); !r.OK {
 		return fmt.Errorf("setup: %+v", r.Error)
 	}
-	raw, _ := config.Marshal(svc.Doc())
+	raw, err := config.Marshal(svc.Doc())
+	if err != nil {
+		return err
+	}
 	d, err := config.Parse(raw) // deep copy
 	if err != nil {
 		return err
@@ -311,8 +335,14 @@ func prepare(svc *application.Service, o options, base string) error {
 		d.Participation = config.Participation{Enabled: true, Mode: "conservative", WaitSec: 2}
 		d.Discord.Enabled = true
 	}
-	out, _ := config.Marshal(d)
-	in, _ := json.Marshal(map[string]any{"yaml": string(out), "base_revision": svc.Revision()})
+	out, err := config.Marshal(d)
+	if err != nil {
+		return err
+	}
+	in, err := json.Marshal(map[string]any{"yaml": string(out), "base_revision": svc.Revision()})
+	if err != nil {
+		return err
+	}
 	if r := svc.Execute(context.Background(), action.Request{Action: "config.apply", Input: in, BaseRevision: svc.Revision(), Locale: "en"}); !r.OK {
 		return fmt.Errorf("config: %+v", r.Error)
 	}
@@ -321,13 +351,19 @@ func prepare(svc *application.Service, o options, base string) error {
 		if o.features && participates(i) {
 			respond = "mention" // people talk among themselves here; the bot answers when called or joins in
 		}
-		in, _ := json.Marshal(map[string]any{"guild_id": "g", "id": fmt.Sprintf("ch%03d", i), "respond": respond,
+		in, err := json.Marshal(map[string]any{"guild_id": "g", "id": fmt.Sprintf("ch%03d", i), "respond": respond,
 			"capture": o.memory, "memory_use": map[bool]string{true: "on", false: "off"}[o.memory]})
+		if err != nil {
+			return err
+		}
 		if r := svc.Execute(context.Background(), action.Request{Action: "channels.configure", Input: in, Locale: "en"}); !r.OK {
 			return fmt.Errorf("channel: %+v", r.Error)
 		}
 		if o.features && participates(i) {
-			in, _ := json.Marshal(map[string]any{"guild_id": "g", "channel_id": fmt.Sprintf("ch%03d", i), "mode": participationMode(i)})
+			in, err := json.Marshal(map[string]any{"guild_id": "g", "channel_id": fmt.Sprintf("ch%03d", i), "mode": participationMode(i)})
+			if err != nil {
+				return err
+			}
 			if r := svc.Execute(context.Background(), action.Request{Action: "participation.mode", Input: in, Locale: "en"}); !r.OK {
 				return fmt.Errorf("participation: %+v", r.Error)
 			}
@@ -422,7 +458,9 @@ func settleGoroutines(baseline int, max time.Duration) int {
 // goroutineDump groups the goroutines still running by stack (the leak suspects), largest first.
 func goroutineDump() string {
 	var b strings.Builder
-	_ = pprof.Lookup("goroutine").WriteTo(&b, 1)
+	if err := pprof.Lookup("goroutine").WriteTo(&b, 1); err != nil {
+		return "goroutine dump failed: " + err.Error()
+	}
 	return clip(b.String(), 12000)
 }
 
