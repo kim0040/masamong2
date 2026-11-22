@@ -818,8 +818,13 @@ func (s *Service) resolveStagingPath(source string) (string, error) {
 	if abs != root && !strings.HasPrefix(abs, root+string(os.PathSeparator)) {
 		return "", fmt.Errorf("source_path must be under %s", stagingRoot)
 	}
-	// Only a regular file that is really inside the staging folder: a link (to a file, or a folder
-	// link on the way) could copy anything this account can read into a channel.
+	// Only a regular file inside a real staging folder: a linked root, a linked folder on the way,
+	// or a link as the leaf could each copy anything this account can read into a channel.
+	if st, err := os.Lstat(root); err != nil {
+		return "", fmt.Errorf("source file not found under rag_staging")
+	} else if st.Mode()&os.ModeSymlink != 0 || !st.IsDir() {
+		return "", fmt.Errorf("rag_staging must be a real directory, not a link")
+	}
 	st, err := os.Lstat(abs)
 	if err != nil {
 		return "", fmt.Errorf("source file not found under rag_staging")
@@ -830,6 +835,18 @@ func (s *Service) resolveStagingPath(source string) (string, error) {
 	if !st.Mode().IsRegular() {
 		return "", fmt.Errorf("source_path must be a regular file, not a link or a special file")
 	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return "", err
+	}
+	dir := root
+	parts := strings.Split(rel, string(filepath.Separator))
+	for _, part := range parts[:len(parts)-1] {
+		dir = filepath.Join(dir, part)
+		if st, err := os.Lstat(dir); err != nil || st.Mode()&os.ModeSymlink != 0 || !st.IsDir() {
+			return "", fmt.Errorf("source_path may not pass through a link or a non-directory")
+		}
+	}
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
 		return "", err
@@ -838,7 +855,9 @@ func (s *Service) resolveStagingPath(source string) (string, error) {
 	if err != nil || !strings.HasPrefix(real, realRoot+string(os.PathSeparator)) {
 		return "", fmt.Errorf("source_path must be under %s", stagingRoot)
 	}
-	return abs, nil
+	// the resolved path is what the checks covered: hash and copy read this file, not the spelled
+	// path (a swapped link on the way cannot redirect the read to a file that was not checked)
+	return real, nil
 }
 
 // generatedStoredName is the name channelsAttachmentAdd gives a staged copy: the content's sha256 hex

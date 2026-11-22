@@ -420,6 +420,41 @@ func TestChannelAttachmentStagingRefusesLinks(t *testing.T) {
 			t.Fatalf("%s: a link out of the staging folder was staged", src)
 		}
 	}
+	// a folder link that resolves inside the staging root is refused the same way
+	inner := filepath.Join(staging, "inner")
+	if err := os.MkdirAll(inner, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(inner, "inside.md"), []byte("synthetic text inside staging\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("inner", filepath.Join(staging, "sublink")); err != nil {
+		t.Fatal(err)
+	}
+	if add := exec(svc, "channels.attachments.add", map[string]any{
+		"guild_id": "g1", "channel_id": "c1", "filename": "inside.md", "source_path": filepath.Join("sublink", "inside.md"),
+	}); add.OK {
+		t.Fatal("a folder link inside the staging root was staged")
+	}
+	// a linked staging root moves the trusted folder itself: refuse it
+	otherDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(otherDir, "root.md"), []byte("synthetic text at a linked root\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(staging); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(otherDir, staging); err != nil {
+		t.Fatal(err)
+	}
+	for _, src := range []string{"root.md", filepath.Join(staging, "root.md")} {
+		add := exec(svc, "channels.attachments.add", map[string]any{
+			"guild_id": "g1", "channel_id": "c1", "filename": "root.md", "source_path": src,
+		})
+		if add.OK {
+			t.Fatalf("%s: a file under a linked staging root was staged", src)
+		}
+	}
 	if atts := svc.Doc().Guilds["g1"].Channels["c1"].RAGAttachments; len(atts) != 0 {
 		t.Fatalf("attachments %v", atts)
 	}
