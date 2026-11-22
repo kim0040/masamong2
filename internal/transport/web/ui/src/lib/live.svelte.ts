@@ -10,6 +10,14 @@ export const live = $state<{ status: 'connecting' | 'live' | 'offline'; lastEven
   lifecycle: '',
 })
 
+// bursts of change events are merged: handlers run once this long after the first one
+const COALESCE_MS = 400
+// how long an announced restart may take before a missing connection counts as an outage again
+const RESTART_WINDOW_MS = 45_000
+// after a stop: when /api/health is first asked, and how often after that
+const HEALTH_FIRST_CHECK_MS = 700
+const HEALTH_POLL_MS = 2000
+
 type Handler = () => void
 const handlers = new Map<string, Set<Handler>>()
 const pending = new Set<Handler>()
@@ -29,7 +37,7 @@ function schedule(h: Handler) {
       return
     }
     list.forEach((fn) => fn())
-  }, 400)
+  }, COALESCE_MS)
 }
 const hiddenQueue = new Set<Handler>()
 document.addEventListener('visibilitychange', () => {
@@ -85,7 +93,7 @@ export function noteLifecycle(l: 'stop' | 'restart') {
     if (live.lifecycle !== '') return
     live.lifecycle = 'restart'
     // a restart that never comes back is an outage again: the offline banner takes over
-    setTimeout(() => live.lifecycle === 'restart' && (live.lifecycle = ''), 45000)
+    setTimeout(() => live.lifecycle === 'restart' && (live.lifecycle = ''), RESTART_WINDOW_MS)
     return
   }
   if (healthTimer) return
@@ -104,8 +112,8 @@ export function noteLifecycle(l: 'stop' | 'restart') {
       live.status = 'offline'
     }
   }
-  healthTimer = setInterval(check, 2000)
-  setTimeout(check, 700)
+  healthTimer = setInterval(check, HEALTH_POLL_MS)
+  setTimeout(check, HEALTH_FIRST_CHECK_MS)
 }
 
 export function disconnectLive() {

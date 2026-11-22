@@ -73,7 +73,7 @@
     const r = await call('runtime.pause', { scope: 'all', paused: was ? 'false' : 'true' })
     pausing = false
     await refreshOverview()
-    if (r.ok) toast(was ? 'ok' : 'warn', was ? t('pause.resumed') : t('pause.paused'), was ? undefined : t('pause.paused_body'), was ? undefined : { label: t('pause.undo'), run: () => void call('runtime.pause', { scope: 'all', paused: 'false' }).then(refreshOverview) })
+    if (r.ok) toast(was ? 'ok' : 'warn', was ? t('pause.resumed') : t('pause.paused'), was ? undefined : t('pause.paused_body'), was ? undefined : { label: t('pause.undo'), run: () => void call('runtime.pause', { scope: 'all', paused: 'false' }).then(() => refreshOverview()) })
     else toast('error', t('pause.failed'), r.error?.message)
   }
 </script>

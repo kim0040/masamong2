@@ -874,3 +874,13 @@ test('DM conversation form: warns when one person may use more than everybody to
   assert.equal(dm.dmOrderWarning(mk(none, custom('50'))), false) // no per-person limit
   assert.equal(dm.dmOrderWarning(mk(custom('x'), custom('50'))), false) // not a number yet
 })
+
+test('starting memory preparation: a job that is already running is told apart from a new one', async () => {
+  const { prepareStart } = await load('prepareresult.ts', [])
+  // the import wizard once treated "already running" like a fresh start and said nothing
+  assert.deepEqual(prepareStart({ already_running: true, mode: 'batch' }), { tone: 'ok', key: 'blocks.already_running', batch: false })
+  assert.deepEqual(prepareStart({ batch_resumed: true, mode: 'batch' }), { tone: 'info', key: 'blocks.batch_resumed', batch: true })
+  assert.deepEqual(prepareStart({ mode: 'batch' }), { tone: 'ok', key: 'blocks.batch_started', batch: true })
+  assert.deepEqual(prepareStart({ mode: 'realtime' }), { tone: 'ok', key: 'blocks.prepare_started', batch: false })
+  assert.deepEqual(prepareStart(undefined), { tone: 'ok', key: 'blocks.prepare_started', batch: false })
+})
