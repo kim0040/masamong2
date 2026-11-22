@@ -357,6 +357,10 @@ Over months, the operational records each conversation leaves (turn details, dia
 
 `pending_days` and `context_days` hold member content apart from the records: setting the record keys (`turn_days`, `turn_detail_days`, `trace_days`, `audit_days`, `ledger_days`) to `-1` keeps the records forever, while these two keep their own horizon once they are set. While they are unset they follow `usage_days` and `turn_detail_days`, as before they had keys of their own.
 
+**What `-1` keeps.** A record key set to `-1` keeps those records forever, and nothing else changes: set `pending_days` and `context_days` at the same time, or with `turn_detail_days: -1` the quiet rooms' context and finished reminders are kept forever too. Two more things follow `turn_detail_days` and stay with `-1`: the message and draft text in the participation log, and old turn details that deleting a message or withdrawing consent could not trace back to it (short messages, records from before sources were kept).
+
+**Statistics first.** While usage statistics are on (`stats.enabled`, the default), each run first adds up the days that ended (a local day counts 10 minutes after its midnight) and only then deletes rows from the tables they are counted from: turn rows, the model call, tool call and delivery ledgers, feedback, the participation and conversation logs, reminders, finished jobs and activity counts. Rows of a day not counted yet wait for the next run; the schedule's last run (`masamong schedules list`) lists them under `held`, with the reason. A counted day is never counted again from rows that are gone. With `stats.enabled: false` the cleanup deletes by age alone, as before.
+
 ```yaml
 retention:
   turn_detail_days: 14
