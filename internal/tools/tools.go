@@ -172,6 +172,7 @@ func Builtins() []Builtin {
 				{Name: "async", Type: "bool", Operator: true}}},
 		{ID: "polls.create", Feature: "polls", Chat: true, Command: true, Implemented: true, Required: []string{"question"}, Scoped: true, Writes: true, Once: true,
 			Inputs: []Input{{Name: "question", Type: "text", Required: true}, {Name: "options_text", Type: "text"},
+				{Name: "options", Type: "list", Max: 10},
 				{Name: "duration_hours", Type: "number", Min: 1, Max: 768, Example: "24"}, {Name: "allow_multiselect", Type: "bool"}}},
 		{ID: "help.version", Chat: true, Command: true, Implemented: true, Sample: map[string]any{}},
 		{ID: "activity.ranking", Chat: true, Command: true, Implemented: true, Scoped: true, Sample: map[string]any{"period": "week"},

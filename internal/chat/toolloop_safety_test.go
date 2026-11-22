@@ -96,6 +96,8 @@ func reminderMenu() Toolset {
 			Params: []ToolParam{{Name: "op", Enum: []string{"list", "cancel", "pause", "resume"}}, {Name: "id"}, {Name: "match"}}},
 		{ID: "polls.create", Description: "poll", Writes: true, Required: []string{"question"},
 			Params: []ToolParam{{Name: "question", Required: true}, {Name: "options_text"}, {Name: "options", Type: "array"}}},
+		{ID: "search.web", Description: "web", Required: []string{"query"},
+			Params: []ToolParam{{Name: "query", Required: true}, {Name: "size", Type: "integer"}}},
 	}
 	return ts
 }
@@ -123,9 +125,34 @@ func TestToolLoopRefusesAValueOutsideTheChoice(t *testing.T) {
 	}
 }
 
+// A planned step carries only the parameters the tool declares: an invented provider choice or a
+// poll's id never reaches the tool, and the options the planner prompts describe (a declared list)
+// stay. What was dropped is named in stripped.
+func TestPlannerStepsKeepOnlyDeclaredParameters(t *testing.T) {
+	p := ParsePlan(`{"memory_requirement":"none","tool_plan":[` +
+		`{"tool_name":"search.web","parameters":{"query":"news","provider":"tavily"}},` +
+		`{"tool_name":"polls.create","parameters":{"question":"lunch?","options":["a","b"],"id":"poll_other"}}]}`)
+	a := Assess(koVoice(), p, reminderMenu(), true, true)
+	if len(a.Steps) != 2 {
+		t.Fatalf("steps %+v", a.Steps)
+	}
+	if got := a.Steps[0].Parameters; len(got) != 1 || got["query"] != "news" {
+		t.Fatalf("search step %+v", got)
+	}
+	got := a.Steps[1].Parameters
+	if len(got) != 2 || got["question"] != "lunch?" {
+		t.Fatalf("poll step %+v", got)
+	}
+	if opts, _ := got["options"].([]any); len(opts) != 2 {
+		t.Fatalf("options %+v", got)
+	}
+	if !slices.Equal(a.Stripped, []string{"search.web.provider", "polls.create.id"}) {
+		t.Fatalf("stripped %v", a.Stripped)
+	}
+}
+
 // Planner mode passes a closed choice only a value inside it, as the tool loop does: op confirm never
-// reaches the tool. Keys the tool does not declare are left to the tool (the application ignores a poll's
-// id from a chat turn).
+// reaches the tool. A key the tool does not declare (a poll's id) is stripped with it.
 func TestPlannerStepsKeepClosedChoices(t *testing.T) {
 	p := ParsePlan(`{"memory_requirement":"none","tool_plan":[` +
 		`{"tool_name":"polls.create","parameters":{"question":"lunch?","id":"poll_other"}},` +
@@ -135,7 +162,7 @@ func TestPlannerStepsKeepClosedChoices(t *testing.T) {
 	if len(a.Steps) != 3 {
 		t.Fatalf("steps %+v", a.Steps)
 	}
-	if got := a.Steps[0].Parameters; len(got) != 2 || got["question"] != "lunch?" {
+	if got := a.Steps[0].Parameters; len(got) != 1 || got["question"] != "lunch?" {
 		t.Fatalf("poll step %+v", got)
 	}
 	if _, has := a.Steps[1].Parameters["op"]; has || a.Steps[1].Parameters["id"] != "rm_1" {
@@ -144,7 +171,7 @@ func TestPlannerStepsKeepClosedChoices(t *testing.T) {
 	if a.Steps[2].Parameters["op"] != "cancel" {
 		t.Fatalf("cancel step %+v", a.Steps[2].Parameters)
 	}
-	if !slices.Equal(a.Stripped, []string{"reminders.update.op"}) {
+	if !slices.Equal(a.Stripped, []string{"polls.create.id", "reminders.update.op"}) {
 		t.Fatalf("stripped %v", a.Stripped)
 	}
 }

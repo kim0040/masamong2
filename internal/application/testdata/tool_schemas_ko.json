@@ -59,6 +59,13 @@
      "minimum": 1,
      "maximum": 768
     },
+    "options": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "maxItems": 10
+    },
     "options_text": {
      "type": "string",
      "description": "선택지, 한 줄에 하나(2–10개, 각 55자까지). 비우면 예/아니요."

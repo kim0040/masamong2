@@ -29,6 +29,32 @@ func TestRedactDSN(t *testing.T) {
 	}
 }
 
+// InsertPoll fails on a duplicate id: a second create for the same id errors and leaves the first
+// poll as it was (creating is not upserting, on either backend).
+func TestInsertPollFailsOnDuplicate(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(filepath.Join(dir, "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	insert := func(state string, rev int) error {
+		return s.WithWriter(func(tx *sql.Tx) error {
+			return s.InsertPoll(tx, "p1", "ch", rev, state, "2026-01-01T00:00:00Z")
+		})
+	}
+	if err := insert(`{"id":"p1"}`, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := insert(`{"id":"p1","r":2}`, 2); err == nil {
+		t.Fatal("a second insert for the same id must fail")
+	}
+	var raw string
+	if err := s.DB.QueryRow(`SELECT state FROM polls WHERE id=?`, "p1").Scan(&raw); err != nil || raw != `{"id":"p1"}` {
+		t.Fatalf("first poll changed: %q %v", raw, err)
+	}
+}
+
 func TestSQLiteUpsertPoll(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(filepath.Join(dir, "t.db"))
