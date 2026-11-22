@@ -100,14 +100,20 @@ func TestGatewayWaitJoinsDeliveredDelete(t *testing.T) {
 			entered, release := make(chan struct{}), make(chan struct{})
 			g.cancelPictures = func(string, []string) { close(entered); <-release }
 			handled := make(chan struct{})
-			go func() {
-				defer close(handled)
-				if bulk {
-					g.onMessageDeleteBulk(nil, &discordgo.MessageDeleteBulk{Messages: []string{"m1"}, GuildID: "g", ChannelID: "c"})
-					return
-				}
-				g.onMessageDelete(nil, &discordgo.MessageDelete{Message: &discordgo.Message{ID: "m1", GuildID: "g", ChannelID: "c"}})
-			}()
+			// delivered as DiscordGo does with what registerHandlers added: a call on its event loop
+			if bulk {
+				deliver := counted(&g.changes, func(s *discordgo.Session, m *discordgo.MessageDeleteBulk) {
+					defer close(handled)
+					g.onMessageDeleteBulk(s, m)
+				})
+				deliver(nil, &discordgo.MessageDeleteBulk{Messages: []string{"m1"}, GuildID: "g", ChannelID: "c"})
+			} else {
+				deliver := counted(&g.changes, func(s *discordgo.Session, m *discordgo.MessageDelete) {
+					defer close(handled)
+					g.onMessageDelete(s, m)
+				})
+				deliver(nil, &discordgo.MessageDelete{Message: &discordgo.Message{ID: "m1", GuildID: "g", ChannelID: "c"}})
+			}
 			select {
 			case <-entered:
 			case <-time.After(10 * time.Second):
