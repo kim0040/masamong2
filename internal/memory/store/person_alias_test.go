@@ -44,7 +44,11 @@ func TestReviewAliasWriteRollback(t *testing.T) {
 }
 
 func TestReviewAliasMigration200k(t *testing.T) {
-	reviewAliasMigration(t, 200000, 90*time.Second)
+	size := 200000
+	if runtime.GOOS == "windows" {
+		size = 20000 // the same path at a tenth of the size: a Windows CI runner needs minutes per 10,000 rows
+	}
+	reviewAliasMigration(t, size, 90*time.Second)
 }
 
 // Run the reviewer's full-sized reproduction with -benchtime=1x.
