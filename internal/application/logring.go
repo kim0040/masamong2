@@ -86,17 +86,29 @@ func (h *ringHandler) Enabled(ctx context.Context, l slog.Level) bool {
 func (h *ringHandler) Handle(ctx context.Context, r slog.Record) error {
 	if r.Level >= slog.LevelInfo {
 		attrs := map[string]string{}
-		add := func(a slog.Attr) {
+		// Groups are walked to their leaves, flattened with dotted keys like the JSON handler's
+		// nested output, and every leaf goes through the same redactAttr as a top-level attr.
+		var add func(prefix string, a slog.Attr)
+		add = func(prefix string, a slog.Attr) {
 			k := a.Key
-			if h.group != "" {
-				k = h.group + "." + k
+			if k == "" {
+				k = prefix
+			} else if prefix != "" {
+				k = prefix + "." + k
 			}
-			attrs[k] = redactAttr(k, a.Value.Resolve().String())
+			v := a.Value.Resolve()
+			if v.Kind() == slog.KindGroup {
+				for _, ga := range v.Group() {
+					add(k, ga)
+				}
+				return
+			}
+			attrs[k] = redactAttr(k, v.String())
 		}
 		for _, a := range h.attrs {
-			add(a)
+			add(h.group, a)
 		}
-		r.Attrs(func(a slog.Attr) bool { add(a); return true })
+		r.Attrs(func(a slog.Attr) bool { add(h.group, a); return true })
 		h.ring.add(logEntry{At: r.Time.UTC().Format(time.RFC3339Nano), Level: strings.ToLower(r.Level.String()), Msg: observability.Redact(r.Message), Attrs: attrs})
 	}
 	if h.next.Enabled(ctx, r.Level) {

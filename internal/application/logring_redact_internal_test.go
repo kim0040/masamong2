@@ -45,3 +45,36 @@ func TestLogRingMasksWhatTheFileLogMasks(t *testing.T) {
 		t.Fatalf("redaction removed ordinary text: %s", shown)
 	}
 }
+
+// A grouped attribute is walked the way the file handler walks it: a secret in a nested leaf cannot
+// hide inside the group's flattened text, which the counting-prefix exemption used to pass through.
+func TestLogRingRedactsInsideGroups(t *testing.T) {
+	var file bytes.Buffer
+	base := slog.New(observability.ContextHandler(observability.RedactHandler(slog.NewJSONHandler(&file, nil))))
+	s := &Service{}
+	l := s.CaptureLogs(base)
+	l.Info("usage", slog.Group("request",
+		slog.String("input_token", "token=synthetic-fixture"),
+		slog.String("content", "private words"),
+		slog.Int("n", 5)))
+
+	r := s.ring()
+	r.mu.Lock()
+	entries := append([]logEntry(nil), r.entries...)
+	r.mu.Unlock()
+	if len(entries) != 1 {
+		t.Fatalf("want one ring entry, got %d", len(entries))
+	}
+	shown := fmt.Sprint(entries)
+	if strings.Contains(shown, "synthetic-fixture") {
+		t.Fatalf("console ring leaks a grouped secret: %s", shown)
+	}
+	if strings.Contains(file.String(), "synthetic-fixture") {
+		t.Fatalf("file log leaks a grouped secret (precondition): %s", file.String())
+	}
+	// group leaves are treated like top-level attrs: a sensitive key name is blanked, an ordinary
+	// value passes through Redact and stays readable
+	if entries[0].Attrs["request.content"] != "[redacted]" || entries[0].Attrs["request.n"] != "5" {
+		t.Fatalf("grouped attrs not redacted leaf-wise: %s", shown)
+	}
+}
