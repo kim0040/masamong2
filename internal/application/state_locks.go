@@ -8,4 +8,5 @@ import "sync"
 type stateLocks struct {
 	deliveryAlerted sync.Mutex // delivery:alerted (NoteDeliveryProblem, delivery.go)
 	providerHealth  sync.Mutex // provider:<id> (noteProvider, ops_extra.go)
+	statsInstall    sync.Mutex // the statistics install id (statsExportInstall, stats_export.go)
 }

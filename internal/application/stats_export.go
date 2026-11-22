@@ -13,7 +13,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"masamong/internal/action"
@@ -58,8 +57,6 @@ type statsInstallState struct {
 	ID        string `json:"id"`
 	FirstSeen string `json:"first_seen,omitempty"` // an ISO week, never a date
 }
-
-var statsInstallMu sync.Mutex
 
 // statsExport is the stats.export Action.
 func (s *Service) statsExport(ctx context.Context, req action.Request) action.Result {
@@ -426,8 +423,8 @@ func statsExportRowOf(c *statsExportCell) (statsExportRow, bool) {
 
 // statsExportInstall is the install block. The id is made at the first export (or replaced on request).
 func (s *Service) statsExportInstall(ctx context.Context, reset bool) (statsExportInstall, error) {
-	statsInstallMu.Lock()
-	defer statsInstallMu.Unlock()
+	s.stateLocks.statsInstall.Lock()
+	defer s.stateLocks.statsInstall.Unlock()
 	var st statsInstallState
 	if _, err := s.kvGet(statsInstallKey, &st); err != nil {
 		return statsExportInstall{}, err
