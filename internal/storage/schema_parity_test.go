@@ -31,7 +31,7 @@ type ddlSchema struct {
 }
 
 var (
-	createTable = regexp.MustCompile(`(?is)^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([a-z_][a-z0-9_]*)\s*\((.*)\)\s*$`)
+	createTable = regexp.MustCompile(`(?is)^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+([a-z_][a-z0-9_]*)\s*\((.*)\)\s*(?:WITHOUT\s+ROWID)?\s*$`)
 	createIndex = regexp.MustCompile(`(?is)^CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+([a-z_][a-z0-9_]*)\s+ON\s+([a-z_][a-z0-9_]*)\s*\((.*)\)\s*$`)
 	inlineKey   = regexp.MustCompile(`(?is)^(?:UNIQUE\s+)?(?:KEY|INDEX)\s+([a-z_][a-z0-9_]*)\s*\((.*)\)$`)
 	primaryKey  = regexp.MustCompile(`(?is)^PRIMARY\s+KEY\s*\((.*)\)$`)
