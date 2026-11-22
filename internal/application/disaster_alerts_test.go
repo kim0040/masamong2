@@ -459,6 +459,62 @@ func TestDisasterTickReadsOneConfigRevision(t *testing.T) {
 	}
 }
 
+// revisionSwapGateway applies a configuration change the first time the watcher asks whether Discord is
+// connected, which is after the check has read its configuration.
+type revisionSwapGateway struct {
+	postingGateway
+	onConnected func()
+}
+
+func (g *revisionSwapGateway) Connected() bool {
+	if swap := g.onConnected; swap != nil {
+		g.onConnected = nil
+		swap()
+	}
+	return true
+}
+
+// Server approval is read from the check's configuration revision too: a revision that drops the first
+// server and the second room's areas while the check runs must not combine the new approval with the
+// old rooms (the old revision sends to both rooms, the new one to neither).
+func TestDisasterApprovalReadsTheChecksRevision(t *testing.T) {
+	const area = "L1052100"
+	svc := setupSvc(t)
+	feed := &kmaFeed{}
+	pointAt(t, svc, "kma", feed.server(t).URL, "KMA_TEST_KEY", "k")
+	for _, room := range [][2]string{{"g1", "a"}, {"g2", "b"}} {
+		if r := exec(svc, "channels.configure", map[string]any{"guild_id": room[0], "id": room[1], "respond": "mention", "watch_level": map[string]int{area: 3}}); !r.OK {
+			t.Fatal(r.Error)
+		}
+	}
+	if r := exec(svc, "access.policy", map[string]any{"server_approval": true}); !r.OK {
+		t.Fatal(r.Error)
+	}
+	gw := &revisionSwapGateway{}
+	svc.Discord = gw
+	now := time.Date(2026, 10, 1, 3, 20, 0, 0, time.UTC)
+	svc.Clock = clock.Fixed{T: now}
+	application.DisasterTickForTest(svc, context.Background())
+	gw.onConnected = func() {
+		applyDoc(t, svc, func(d *config.Document) {
+			delete(d.Guilds, "g1")
+			g := d.Guilds["g2"]
+			ch := g.Channels["b"]
+			ch.WatchLevel = nil
+			g.Channels["b"] = ch
+			d.Guilds["g2"] = g
+		})
+	}
+	feed.mu.Lock()
+	feed.warnings = []string{warning(area, "광주·전라남도", "목포시", "호우", "경보", "발표")}
+	feed.mu.Unlock()
+	svc.Clock = clock.Fixed{T: now.Add(5 * time.Minute)}
+	application.DisasterTickForTest(svc, context.Background())
+	if len(gw.posts) != 2 {
+		t.Fatalf("the check's revision sends to a and b, got %q", gw.posts)
+	}
+}
+
 // The first check after an upgrade from a build that stored a bare, filtered map announces nothing,
 // whatever the rooms are set to: the old set left out advisories that may have been in force for
 // hours. The set is then stored with its version, and a restart repeats nothing. The older build kept

@@ -7,6 +7,7 @@ import (
 	"masamong/internal/errclass"
 	"math"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -81,7 +82,7 @@ func (s *Service) disasterChannels(doc config.Document) []disasterChannel {
 	}
 	var out []disasterChannel
 	for gid, g := range doc.Guilds {
-		if !s.GuildAllowed(gid) {
+		if !disasterGuildAllowed(doc, gid) {
 			continue
 		}
 		loc := g.Locale
@@ -97,6 +98,12 @@ func (s *Service) disasterChannels(doc config.Document) []disasterChannel {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Guild+out[i].Channel < out[j].Guild+out[j].Channel })
 	return out
+}
+
+// disasterGuildAllowed is GuildAllowed read from doc, the check's configuration snapshot, so a server's
+// approval never comes from another revision than its rooms. Keep it in step with GuildAllowed.
+func disasterGuildAllowed(doc config.Document, guildID string) bool {
+	return guildID == "" || !doc.Access.ApprovalRequired() || slices.Contains(doc.Access.Servers, guildID) || guildConfigured(doc, guildID)
 }
 
 // disasterTick is one scheduler minute: earthquakes, and warnings when five minutes have passed.
