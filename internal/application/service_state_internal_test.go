@@ -3,7 +3,6 @@ package application
 import (
 	"testing"
 
-	"masamong/internal/clock"
 	"masamong/internal/config"
 )
 
@@ -14,14 +13,11 @@ func forgetCaps(s *Service) {
 	s.caps.mu.Unlock()
 }
 
-// twoServices opens two services side by side, as the daemon runs the real instance and the console's
-// practice instance in one process.
+// twoServices opens two set-up services side by side, as the daemon runs the real instance and the
+// console's practice instance in one process.
 func twoServices(t *testing.T) (*Service, *Service) {
 	t.Helper()
-	a := &Service{Clock: clock.Real{}, watchers: map[chan Event]struct{}{}}
-	b := &Service{Clock: clock.Real{}, watchers: map[chan Event]struct{}{}}
-	t.Cleanup(func() { _ = a.Close(); _ = b.Close() })
-	return a, b
+	return privacyService(t), privacyService(t)
 }
 
 // State that belongs to one service lives in that service: two services in one process never see
@@ -58,6 +54,12 @@ func TestTwoServicesKeepTheirOwnState(t *testing.T) {
 		c.mu.Unlock()
 		if b.optOuts() == c || b.optOuts().ids["100000000000000001"] {
 			t.Fatal("one service's withdrawn people show up in the other")
+		}
+	})
+
+	t.Run("tool usage", func(t *testing.T) {
+		if a.toolUsage() == nil || a.toolUsage() == b.toolUsage() || a.toolUsage() != a.toolUsage() {
+			t.Fatal("each service opens and keeps its own tool usage counter")
 		}
 	})
 }
