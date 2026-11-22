@@ -523,11 +523,22 @@ func (s *Service) reminderContextLines(r reminder) string {
 		return ""
 	}
 	defer rows.Close()
+	// Read every line and close the cursor before MemoryAllowed (one shared SQLite connection: a cold
+	// opt-out cache queries it again and would wait on this cursor forever).
+	type line struct{ author, name, text, at string }
+	var lines []line
+	for rows.Next() {
+		var l line
+		if rows.Scan(&l.author, &l.name, &l.text, &l.at) == nil {
+			lines = append(lines, l)
+		}
+	}
+	_ = rows.Close()
 	var out []string
 	old := s.Clock.Now().Add(-contextKeep)
-	for rows.Next() {
-		var author, name, text, at string
-		if rows.Scan(&author, &name, &text, &at) != nil || !s.MemoryAllowed(author) {
+	for _, l := range lines {
+		author, name, text, at := l.author, l.name, l.text, l.at
+		if !s.MemoryAllowed(author) {
 			continue
 		}
 		if t, err := time.Parse(time.RFC3339, at); err == nil && t.Before(old) {

@@ -116,13 +116,25 @@ func (s *Service) activityRanking(req action.Request) action.Result {
 		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
 	}
 	defer rows.Close()
-	top := []map[string]any{}
+	// Read every row and close the cursor before MemoryAllowed: on SQLite the writer and reader share one
+	// connection, and a cold opt-out cache queries it again, so checking inside the loop waits forever.
+	type ranked struct {
+		id, name string
+		n        int
+	}
+	var found []ranked
 	for rows.Next() {
-		var id, name, last string
-		var n int
-		if rows.Scan(&id, &name, &n, &last) != nil {
+		var r ranked
+		var last string
+		if rows.Scan(&r.id, &r.name, &r.n, &last) != nil {
 			continue
 		}
+		found = append(found, r)
+	}
+	_ = rows.Close()
+	top := []map[string]any{}
+	for _, r := range found {
+		id, name, n := r.id, r.name, r.n
 		if !s.MemoryAllowed(id) {
 			continue // withdrew after being counted
 		}
