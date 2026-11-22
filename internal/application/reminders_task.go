@@ -257,7 +257,8 @@ func (s *Service) reminderBriefs(req action.Request, list []reminder) []map[stri
 // one whose name or task holds most of the words. With no words, a person with one reminder means
 // that one. Several equally good or none: nothing is changed, and the answer lists them to ask which.
 func (s *Service) reminderByWords(req action.Request, userID, words string) (string, *action.Result) {
-	list, err := s.listReminders(`owner_id=? AND `+reminderLive, []any{userID}, 25)
+	scope, args := reminderScope(req.Invoker)
+	list, err := s.listReminders(`owner_id=? AND `+reminderLive+scope, append([]any{userID}, args...), 25)
 	if err != nil {
 		res := s.myReminders(req, userID)
 		return "", &res

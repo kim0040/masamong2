@@ -286,6 +286,11 @@ func ChatToolForTest(s *Service, in ChatInput) chat.ToolRunner {
 	return s.chatTool(in, chat.Voice{Pack: lang.For("en")})
 }
 
+// TaskToolForTest is the runner a scheduled task's turn uses for tools.
+func TaskToolForTest(s *Service, in ChatInput) chat.ToolRunner {
+	return s.turnTool(in, chat.Voice{Pack: lang.For("en")}, viaTask)
+}
+
 // CapContextForTest applies the limits on a reminder's conversation lines to author/text pairs.
 func CapContextForTest(pairs [][2]string) [][2]string {
 	var in []reminderContextLine
