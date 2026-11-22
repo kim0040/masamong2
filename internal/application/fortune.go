@@ -1031,15 +1031,13 @@ func (j morningJob) targetDate(zone *time.Location) string {
 	return t.In(zone).Format("2006-01-02")
 }
 
-var morningRunning atomic.Bool
-
 // runFortuneMorning writes and sends the briefings that are due (the scheduler calls it every minute;
 // a run still going is not started twice).
 func (s *Service) runFortuneMorning(ctx context.Context) {
-	if !morningRunning.CompareAndSwap(false, true) {
+	if !s.runs.morning.CompareAndSwap(false, true) {
 		return
 	}
-	defer morningRunning.Store(false)
+	defer s.runs.morning.Store(false)
 	sender, ok := s.Discord().(DiscordSender)
 	if s.Discord() == nil || !ok || !s.Discord().Connected() {
 		return
