@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"masamong/internal/action"
@@ -45,14 +44,12 @@ var (
 	updateNewsPerTick = 40
 )
 
-var updateNewsRunning atomic.Bool
-
 // updateNewsTick is one scheduler minute; a run still going is not started twice.
 func (s *Service) updateNewsTick(ctx context.Context) {
-	if !updateNewsRunning.CompareAndSwap(false, true) {
+	if !s.runs.updateNews.CompareAndSwap(false, true) {
 		return
 	}
-	defer updateNewsRunning.Store(false)
+	defer s.runs.updateNews.Store(false)
 	s.announceUpdates(ctx)
 }
 
