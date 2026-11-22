@@ -904,6 +904,71 @@ func TestDisasterReleaseInTheSameResponse(t *testing.T) {
 	}
 }
 
+// A release ends only its own level: when one response lists an earlier advisory, a later warning and
+// the warning's release, the advisory stays in force (the warning is lifted and the advisory announced),
+// and the next check that lists only the advisory announces nothing.
+func TestDisasterReleaseKeepsTheOtherLevel(t *testing.T) {
+	const area = "L1052100"
+	for _, encoding := range []string{"json", "text"} {
+		t.Run(encoding, func(t *testing.T) {
+			svc := setupSvc(t)
+			feed := &kmaFeed{}
+			pointAt(t, svc, "kma", feed.server(t).URL, "KMA_TEST_KEY", "k")
+			if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "a", "respond": "mention", "watch_level": map[string]int{area: 5}}); !r.OK {
+				t.Fatal(r.Error)
+			}
+			applyDoc(t, svc, func(d *config.Document) {
+				g := d.Guilds["g1"]
+				g.Locale = "ko"
+				d.Guilds["g1"] = g
+			})
+			gw := &postingGateway{}
+			svc.Discord = gw
+			row := func(level, cmd, fc, ef string) string {
+				if encoding == "text" {
+					return strings.Join([]string{"L1050000", "광주·전라남도", area, "목포시", fc, ef, "R", level, cmd, "", ""}, ",")
+				}
+				lvl := map[string]string{"2": "주의", "3": "경보"}[level]
+				command := map[string]string{"1": "발표", "3": "해제"}[cmd]
+				return fmt.Sprintf(`{"REG_UP":"L1050000","REG_UP_KO":"광주·전라남도","REG_ID":%q,"REG_KO":"목포시","TM_FC":%q,"TM_EF":%q,"WRN":"호우","LVL":%q,"CMD":%q}`, area, fc, ef, lvl, command)
+			}
+			start := time.Date(2026, 10, 1, 3, 20, 0, 0, time.UTC)
+			tick := func(minutes int, rows ...string) []string {
+				feed.mu.Lock()
+				feed.warnings, feed.text = nil, nil
+				if encoding == "text" {
+					feed.text = append([]string{}, rows...)
+				} else {
+					feed.warnings = rows
+				}
+				feed.mu.Unlock()
+				before := len(gw.posts)
+				svc.Clock = clock.Fixed{T: start.Add(time.Duration(minutes) * time.Minute)}
+				application.DisasterTickForTest(svc, context.Background())
+				return gw.posts[before:]
+			}
+			advisory := row("2", "1", "202610011000", "202610011030")
+			issued := row("3", "1", "202610011100", "202610011120")
+			release := row("3", "3", "202610011126", "202610011130")
+			tick(0)
+			if got := tick(5, advisory, issued); len(got) != 1 || !strings.HasPrefix(got[0], "a|⚠️ 호우경보 발표|목포시") {
+				t.Fatalf("issue: %q", got)
+			}
+			got := tick(10, advisory, issued, release)
+			if len(got) != 2 || !strings.Contains(strings.Join(got, "\n"), "a|✅ 호우경보 해제|목포시") || !strings.Contains(strings.Join(got, "\n"), "a|⚠️ 호우주의보 발표|목포시") {
+				t.Fatalf("the warning's release: %q", got)
+			}
+			var n int
+			if err := svc.Store.DB.QueryRow(`SELECT count(*) FROM admin_state WHERE k='disaster:wrn_active' AND json_extract(v,'$.active."L1052100|R".Level')='2'`).Scan(&n); err != nil || n != 1 {
+				t.Fatalf("the advisory is not stored as in force: %d %v", n, err)
+			}
+			if got := tick(15, advisory); len(got) != 0 {
+				t.Fatalf("the advisory in force was announced again: %q", got)
+			}
+		})
+	}
+}
+
 // A watch_level key must match a KMA area name or code exactly; the bot ships no KMA area list, so the
 // room's watch_areas tell the console which keys match an area KMA has reported so far. A key that
 // matches nothing (서울 is not an area name) is saved and flagged by its absence from "matched".

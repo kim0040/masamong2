@@ -449,27 +449,29 @@ func (s *Service) warningTick(ctx context.Context, poster ChannelPoster, channel
 	s.learnWarningAreas(all)
 	current := warningSnapshot{}
 	cancelled := warningSnapshot{}
+	issued := map[string]kma.Warning{}   // the latest issue of each area, kind and level
 	released := map[string]kma.Warning{} // the latest cancellation of each area, kind and level
 	for _, w := range all {
 		rank := warningRank(w)
 		if rank == 0 {
 			continue
 		}
+		latest := issued
 		if warningCancelled(w.Command) {
 			cancelled.record(w)
-			if r, ok := released[warningKey(w)+"|"+w.Level]; !ok || warningLater(w, r) {
-				released[warningKey(w)+"|"+w.Level] = w
-			}
+			latest = released
+		}
+		if l, ok := latest[warningKey(w)+"|"+w.Level]; !ok || warningLater(w, l) {
+			latest[warningKey(w)+"|"+w.Level] = w
+		}
+	}
+	// A release of a level published after its issue ends that level, even when the response still
+	// lists the issue; another level of the same area and kind that is still issued stays in force.
+	for k, w := range issued {
+		if r, ok := released[k]; ok && warningLater(r, w) {
 			continue
 		}
 		current.record(w)
-	}
-	// A release of the same level published after its issue ends it, even when the response still
-	// lists the issue.
-	for k, w := range current {
-		if r, ok := released[k+"|"+w.Level]; ok && warningLater(r, w) {
-			delete(current, k)
-		}
 	}
 	var raw json.RawMessage
 	seen, err := s.kvGet("disaster:wrn_active", &raw)
