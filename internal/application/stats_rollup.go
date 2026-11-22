@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -87,15 +86,11 @@ func statsSourceGroup(table string) (string, bool) {
 	return "", false
 }
 
-// statsRollups marks a service whose rollup is running. The entry exists only while one runs, so a
-// closed service leaves nothing behind.
-var statsRollups sync.Map // *Service → struct{}
-
 // statsClaim takes the service's rollup slot. With wait it waits for a running rollup (until ctx ends).
 func (s *Service) statsClaim(ctx context.Context, wait bool) (func(), bool) {
 	for {
-		if _, busy := statsRollups.LoadOrStore(s, struct{}{}); !busy {
-			return func() { statsRollups.Delete(s) }, true
+		if s.runs.statsRollup.CompareAndSwap(false, true) {
+			return func() { s.runs.statsRollup.Store(false) }, true
 		}
 		if !wait {
 			return nil, false

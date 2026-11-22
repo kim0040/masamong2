@@ -330,9 +330,9 @@ func TestStatsPruneWaitsForUnrolledDays(t *testing.T) {
 	tool(finishedAt.AddDate(0, 0, 1))
 
 	// a rollup that is already running (or failed) leaves the days unfinished
-	statsRollups.Store(s, struct{}{})
+	s.runs.statsRollup.Store(true)
 	res, err := s.retentionPass(ctx)
-	statsRollups.Delete(s)
+	s.runs.statsRollup.Store(false)
 	if err != nil {
 		t.Fatal(err)
 	}

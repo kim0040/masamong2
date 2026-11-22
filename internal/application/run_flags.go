@@ -6,5 +6,6 @@ import "sync/atomic"
 // runs (or is claimed) and belongs to one service: the real instance and the practice instance in the
 // same process never block each other.
 type runFlags struct {
-	retention atomic.Bool // a usage_gc pass is running, scheduled or run from the console (retention.go)
+	retention   atomic.Bool // a usage_gc pass is running, scheduled or run from the console (retention.go)
+	statsRollup atomic.Bool // the statistics rollup is running (statsClaim, stats_rollup.go)
 }
