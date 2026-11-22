@@ -208,6 +208,7 @@ type Service struct {
 	commandMenu atomic.Pointer[[]CommandHint] // the Discord connector's commands (command_menu.go)
 	credit      creditCache                   // OpenRouter keys' own spending limits (credit.go)
 	caps        capsState                     // the providers' capability caches (model_caps.go)
+	priceLists  priceState                    // the providers' price lists (pricing.go)
 	// leftovers are files of a finished restore or an interrupted backup that could not be removed
 	// (CleanDataLeftovers); doctor lists them and the scheduler retries.
 	leftovers atomic.Pointer[[]string]
@@ -385,7 +386,7 @@ func (s *Service) Close() error {
 			r.entries = nil
 			r.mu.Unlock()
 		}
-		for _, m := range []*sync.Map{&memoryOptOuts, &lifecycles, &priceStates, &summaryRevs, &toolUsages} {
+		for _, m := range []*sync.Map{&memoryOptOuts, &lifecycles, &summaryRevs, &toolUsages} {
 			m.Delete(s)
 		}
 		s.mu.Lock()

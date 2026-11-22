@@ -38,4 +38,16 @@ func TestTwoServicesKeepTheirOwnState(t *testing.T) {
 			t.Fatal("a service must keep its own cache between calls")
 		}
 	})
+
+	t.Run("price lists", func(t *testing.T) {
+		if a.prices() == b.prices() {
+			t.Fatal("two services share one price table")
+		}
+		a.prices().mu.Lock()
+		a.prices().lists["p"] = &priceList{}
+		a.prices().mu.Unlock()
+		if b.prices().lists["p"] != nil {
+			t.Fatal("a price list of one service shows up in the other")
+		}
+	})
 }
