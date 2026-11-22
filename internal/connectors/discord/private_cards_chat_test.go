@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -18,7 +19,9 @@ import (
 func TestPrivatePrefixFailureNeverBecomesARoomReply(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
+		if strings.HasSuffix(r.URL.Path, "/chat/completions") { // a chat turn; a background model-list read is not one
+			calls.Add(1)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": "a synthetic public reply"}, "finish_reason": "stop"}},
 			"usage":   map[string]any{"prompt_tokens": 10, "completion_tokens": 5},
