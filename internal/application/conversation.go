@@ -12,6 +12,7 @@ import (
 	"masamong/internal/chat"
 	"masamong/internal/config"
 	"masamong/internal/conversation"
+	"masamong/internal/features/privacy"
 	"masamong/internal/lang"
 	"masamong/internal/memory/blocks"
 	"masamong/internal/memory/corpus"
@@ -614,10 +615,16 @@ func (e notAddressedErr) Error() string        { return ErrNotAddressed.Error() 
 func (e notAddressedErr) Is(target error) bool { return target == ErrNotAddressed }
 
 // banterGate decides the answer to a playful mention of the bot (banter.go): a line (the turn goes on
-// with the banter rules), an emoji (ReactOnly), or silence. Every decision is logged, also in shadow.
+// with the banter rules), an emoji (ReactOnly), or silence. Every decision is logged, also in shadow,
+// except for a person who withdrew participation or memory consent: they get silence and no row.
 func (s *Service) banterGate(in ChatInput, pol config.ChannelPolicy) (bool, error) {
 	mode := pol.Conversation.Banter
 	if mode == "" || mode == "off" {
+		return false, ErrNotAddressed
+	}
+	// banter is an unasked line: a person who withdrew participation or memory consent gets none, and no
+	// decision row names them
+	if !s.ConsentAllows(in.SpeakerID, privacy.Participation) || !s.MemoryAllowed(in.SpeakerID) {
 		return false, ErrNotAddressed
 	}
 	step := s.banterStep(in.GuildID, in.ChannelID)

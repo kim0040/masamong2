@@ -384,7 +384,7 @@ func (s *Service) serverLogPost(e serverLogEntry) {
 	st := &s.serverLog
 	st.once.Do(func() {
 		st.queue = make(chan serverLogEntry, serverLogQueue)
-		go s.serverLogWorker()
+		s.ownedGo("server log", s.serverLogWorker) // not started once Close began: entries then wait unsent
 	})
 	select {
 	case st.queue <- e:
@@ -398,9 +398,16 @@ func (s *Service) serverLogPost(e serverLogEntry) {
 	}
 }
 
-func (s *Service) serverLogWorker() {
-	for e := range s.serverLog.queue {
-		s.serverLogSend(e)
+// serverLogWorker posts the queued entries one at a time until the service stops; what still waits then is
+// not posted.
+func (s *Service) serverLogWorker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case e := <-s.serverLog.queue:
+			s.serverLogSend(e)
+		}
 	}
 }
 

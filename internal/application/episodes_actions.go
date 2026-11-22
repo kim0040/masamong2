@@ -104,25 +104,37 @@ func (s *Service) episodesList(req action.Request, db *storage.Store, in map[str
 	if err != nil {
 		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
 	}
-	defer rows.Close()
-	list := []map[string]any{}
-	labelers := map[string]func(string) string{}
+	type listed struct {
+		id, room, guild, channel, source, kind, title, status, due, when, participants, first, last, expires string
+		importance, regen, items, hidden                                                                     int
+	}
+	var found []listed
 	for rows.Next() {
-		var id, room, guild, channel, source, kind, title, status, due, when, participants, first, last, expires string
-		var importance, regen, items, hidden int
-		if err := rows.Scan(&id, &room, &guild, &channel, &source, &kind, &title, &status, &due, &when, &importance, &participants, &first, &last, &expires, &regen, &items, &hidden); err != nil {
+		var e listed
+		if err := rows.Scan(&e.id, &e.room, &e.guild, &e.channel, &e.source, &e.kind, &e.title, &e.status, &e.due, &e.when, &e.importance, &e.participants, &e.first, &e.last, &e.expires, &e.regen, &e.items, &e.hidden); err != nil {
+			rows.Close()
 			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
 		}
+		found = append(found, e)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+	}
+	// labels after the cursor is closed: refLabels reads the same reader pool (two at once would hold a
+	// small host's two connections and wait for a third)
+	list := []map[string]any{}
+	labelers := map[string]func(string) string{}
+	for _, e := range found {
 		var refs []string
-		_ = json.Unmarshal([]byte(participants), &refs)
-		labelOf := labelers[room]
+		_ = json.Unmarshal([]byte(e.participants), &refs) // a malformed list counts as no participants
+		labelOf := labelers[e.room]
 		if labelOf == nil {
-			labelOf = s.refLabels(db, room)
-			labelers[room] = labelOf
+			labelOf = s.refLabels(db, e.room)
+			labelers[e.room] = labelOf
 		}
-		list = append(list, map[string]any{"id": id, "room": room, "guild_id": guild, "channel_id": channel, "source": source, "kind": kind, "title": episodes.StoredText(title, labelOf, "?"),
-			"status": status, "due_at": due, "when_text": when, "importance": importance, "participants": len(refs), "items": items, "hidden": hidden,
-			"first_seen": first, "last_seen": last, "expires_at": expires, "regen": regen == 1})
+		list = append(list, map[string]any{"id": e.id, "room": e.room, "guild_id": e.guild, "channel_id": e.channel, "source": e.source, "kind": e.kind, "title": episodes.StoredText(e.title, labelOf, "?"),
+			"status": e.status, "due_at": e.due, "when_text": e.when, "importance": e.importance, "participants": len(refs), "items": e.items, "hidden": e.hidden,
+			"first_seen": e.first, "last_seen": e.last, "expires_at": e.expires, "regen": e.regen == 1})
 	}
 	return action.OK(req, map[string]any{"episodes": list, "budget": map[string]any{"limit_usd": s.Doc().Memory.DerivedBudget(), "spent_usd": s.derivedSpent()}})
 }

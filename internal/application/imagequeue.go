@@ -306,8 +306,7 @@ func (s *Service) imagePolicySkip(j *imageJob) string {
 		return "paused"
 	case s.BlockedIn(j.guildID, j.userID):
 		return "blocked"
-	case !s.MemoryAllowed(j.userID):
-		return "withdrawn"
+	// withdrawn memory consent is not one: it is about what is stored, and /image draws for them too
 	case !s.GuildAllowed(j.guildID):
 		return "server_not_approved"
 	case s.ChannelPolicyFor(j.guildID, j.channelID).Respond == "off":

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -361,11 +362,6 @@ func TestPictureJobsAreDroppedSilentlyForPolicyReasons(t *testing.T) {
 		{"requester blocked", 1, func(t *testing.T, svc *application.Service) {
 			applyDoc(t, svc, func(d *config.Document) { d.Access.BlockedUsers = append(d.Access.BlockedUsers, "u2") })
 		}},
-		{"requester withdrew consent", 1, func(t *testing.T, svc *application.Service) {
-			if r := asUser(svc, "u2", "privacy.consent", map[string]any{"scope": "memory", "decision": "withdraw"}); !r.OK {
-				t.Fatal(r.Error)
-			}
-		}},
 		{"picture tool switched off", 2, func(t *testing.T, svc *application.Service) {
 			if r := exec(svc, "tools.configure", map[string]any{"id": "images.generate", "enabled": "off"}); !r.OK {
 				t.Fatal(r.Error)
@@ -401,6 +397,49 @@ func TestPictureJobsAreDroppedSilentlyForPolicyReasons(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Withdrawn memory consent is about what is stored, not a policy reason to drop a picture: a person who
+// withdrew before asking, or while their job waits, gets it drawn and posted like /image would.
+func TestPictureForAPersonWhoWithdrewMemoryConsentIsPosted(t *testing.T) {
+	withdraw := func(t *testing.T, svc *application.Service, user string) {
+		if r := asUser(svc, user, "privacy.consent", map[string]any{"scope": "memory", "decision": "withdraw"}); !r.OK {
+			t.Fatal(r.Error)
+		}
+	}
+	posted := func(gw *pictureGateway, msg string) bool {
+		gw.mu.Lock()
+		defer gw.mu.Unlock()
+		return slices.ContainsFunc(gw.pictures, func(p postedPicture) bool { return p.replyTo == msg })
+	}
+	t.Run("before asking", func(t *testing.T) {
+		svc, img, gw := imageChatSvc(t)
+		withdraw(t, svc, "u9")
+		img.open()
+		if r := drawFor(svc, "u9", "m9", "a cat"); r.Status != "queued" {
+			t.Fatalf("%+v", r)
+		}
+		waitFor(t, "the picture post", func() bool { return posted(gw, "m9") })
+		idle(t, svc)
+		if application.ImageDropsForTest(svc) != 0 {
+			t.Fatal("the job was dropped")
+		}
+	})
+	t.Run("while queued", func(t *testing.T) {
+		svc, img, gw := imageChatSvc(t)
+		drawFor(svc, "u1", "m1", "a cat")
+		waitFor(t, "the first draw to start", func() bool { return img.calls.Load() == 1 })
+		if r := drawFor(svc, "u2", "m2", "a dog"); r.Status != "queued" {
+			t.Fatalf("u2: %+v", r)
+		}
+		withdraw(t, svc, "u2")
+		img.open()
+		waitFor(t, "both picture posts", func() bool { return posted(gw, "m1") && posted(gw, "m2") })
+		idle(t, svc)
+		if application.ImageDropsForTest(svc) != 0 || img.calls.Load() != 2 {
+			t.Fatalf("drops=%d provider calls=%d", application.ImageDropsForTest(svc), img.calls.Load())
+		}
+	})
 }
 
 // A reconnecting gateway (not connected, no servers listed for a moment) is not a reason to throw away a

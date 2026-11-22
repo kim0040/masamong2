@@ -195,19 +195,19 @@ func (s *Service) capturingRooms(db *storage.Store) []memRoom {
 	if err != nil {
 		return nil
 	}
-	defer rows.Close()
-	var out []memRoom
+	var rooms []string
 	for rows.Next() {
 		var room string
-		if rows.Scan(&room) != nil {
-			continue
+		if rows.Scan(&room) == nil {
+			rooms = append(rooms, room)
 		}
+	}
+	rows.Close() // before roomCaptures, which reads the same pool: a small host has two reader connections
+	var out []memRoom
+	for _, room := range rooms {
 		parts := strings.SplitN(room, ":", 3) // engine.RoomKey
-		if len(parts) != 3 || parts[1] == "0" {
-			continue // a DM
-		}
-		if !s.roomCaptures(db, parts[1], parts[2]) {
-			continue
+		if len(parts) != 3 || parts[1] == "0" || !s.roomCaptures(db, parts[1], parts[2]) {
+			continue // a DM, or a room that does not store now
 		}
 		out = append(out, memRoom{guild: parts[1], channel: parts[2], room: room, source: "discord"})
 	}
@@ -397,7 +397,7 @@ func personRefOf(r memRoom, m episodes.Message) string {
 
 func kakaoPrefix(room string) string { return "kakao:" + strings.TrimPrefix(room, "kakao:") + ":" }
 
-// refLabels names the people of a room by their stored reference (from their current messages).
+// refLabels names the people of a room by their stored reference (current messages; consent read in the query).
 func (s *Service) refLabels(db *storage.Store, room string) func(string) string {
 	labels := map[string]string{}
 	loaded := false
@@ -410,12 +410,12 @@ func (s *Service) refLabels(db *storage.Store, room string) func(string) string 
 		}
 		if !loaded {
 			loaded = true
-			rows, err := db.Reader().Query(`SELECT actor_account, actor_label FROM memory_observations WHERE room=? AND deleted_at='' AND actor_account<>''
-				GROUP BY actor_account ORDER BY MAX(parsed_time) DESC LIMIT 1000`, room)
+			rows, err := db.Reader().Query(`SELECT actor_account, actor_label FROM memory_observations o WHERE room=? AND deleted_at='' AND actor_account<>''
+				AND NOT EXISTS (SELECT 1 FROM consent_state c WHERE c.user_id=o.actor_account AND c.scope='memory' AND c.status='withdrawn') GROUP BY actor_account ORDER BY MAX(parsed_time) DESC LIMIT 1000`, room)
 			if err == nil {
 				for rows.Next() {
 					var account, label string
-					if rows.Scan(&account, &label) == nil && s.MemoryAllowed(account) {
+					if rows.Scan(&account, &label) == nil {
 						labels[store.PersonRef(account)] = label
 					}
 				}

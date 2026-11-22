@@ -478,6 +478,7 @@ func (s *Service) considerCandidate(cand *partCandidate) {
 		return
 	}
 	defer done()
+	gone := s.BlockedIn(cand.guild, cand.msg.author) || !s.ConsentAllows(cand.msg.author, privacy.Participation) || s.Paused(cand.guild, cand.channel) // may change in the wait; asks the store, so before the lock
 	s.part.mu.Lock()
 	c := s.partChannel(cand.key)
 	if c.pending != cand {
@@ -505,7 +506,7 @@ func (s *Service) considerCandidate(cand *partCandidate) {
 		s.logParticipation(cand, "collect", partCollected, reason, 0, "", 0)
 		return
 	}
-	if cand.collect {
+	if cand.collect && !gone {
 		// made in collect mode, which checked no budget: the mode changed during the wait, so the limits
 		// that speaking and judging answer to apply now
 		if why := s.candidateBlocked(c, s.Clock.Now()); why != "" {
@@ -516,8 +517,8 @@ func (s *Service) considerCandidate(cand *partCandidate) {
 			return
 		}
 	}
-	if why := backoffBlocked(c, s.Clock.Now()); why != "" {
-		// muted or just called while the candidate waited
+	if why := backoffBlocked(c, s.Clock.Now()); why != "" || gone {
+		// muted or just called while the candidate waited, or the person or channel no longer allows it
 		s.part.mu.Unlock()
 		return
 	}
