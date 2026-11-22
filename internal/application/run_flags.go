@@ -13,4 +13,5 @@ type runFlags struct {
 	styles      atomic.Bool // the room style refresh is running (roomstyle.go)
 	idleThreads atomic.Bool // closing idle threads is running (threads.go)
 	notices     atomic.Bool // the notice pass is running (notices.go)
+	noticesTick atomic.Bool // the scheduler's notice tick is running (schedule.go)
 }

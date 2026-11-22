@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"masamong/internal/action"
@@ -193,8 +192,6 @@ func b2i(b bool) int {
 // ---------------------------------------------------------------------------
 // Collecting
 // ---------------------------------------------------------------------------
-
-var noticesTicking atomic.Bool
 
 // neededSources are the boards someone subscribed to (active, with consent).
 func (s *Service) neededSources(c *notices.Catalog) map[string]bool {

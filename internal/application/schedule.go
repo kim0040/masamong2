@@ -67,8 +67,8 @@ func (s *Service) RunScheduler(ctx context.Context) {
 				if disasterTicking.CompareAndSwap(false, true) {
 					s.ownedGo("disaster alerts", func(ctx context.Context) { defer disasterTicking.Store(false); s.disasterTick(ctx) })
 				}
-				if noticesTicking.CompareAndSwap(false, true) {
-					s.ownedGo("notices", func(ctx context.Context) { defer noticesTicking.Store(false); s.noticesTick(ctx) })
+				if s.runs.noticesTick.CompareAndSwap(false, true) {
+					s.ownedGo("notices", func(ctx context.Context) { defer s.runs.noticesTick.Store(false); s.noticesTick(ctx) })
 				}
 				if s.retentionDue(s.Clock.Now(), started) {
 					s.startRetentionPass(ctx)
