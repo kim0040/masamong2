@@ -192,3 +192,36 @@ func TestWarmQueryWaitsForAnIndex(t *testing.T) {
 		t.Fatalf("%d embedding calls", n)
 	}
 }
+
+// The query cache keeps the latest 512 vectors in memory. A warmed query pushed out before any search
+// asked for it is gone with its unsaved mark: the search that comes later asks the provider again.
+func TestQueryCacheKeepsTheLatest512(t *testing.T) {
+	e, fp := indexed(t)
+	e.WarmQuery(context.Background(), "오래된 질문 A")
+	e.WarmQuery(context.Background(), "오래된 질문 B")
+	for i := range 510 {
+		if _, err := e.EmbedQuery(context.Background(), "다른 질문 "+itoa(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := fp.embedCalls.Load()
+	if _, err := e.EmbedQuery(context.Background(), "오래된 질문 B"); err != nil || fp.embedCalls.Load() != before {
+		t.Fatalf("512 vectors fit: %v, %d calls", err, fp.embedCalls.Load()-before)
+	}
+	if _, ok := e.Store.CachedVector(e.queryKey("오래된 질문 B")); !ok {
+		t.Fatal("the searched warm query reached the database")
+	}
+	if _, err := e.EmbedQuery(context.Background(), "다른 질문 510"); err != nil {
+		t.Fatal(err)
+	}
+	before = fp.embedCalls.Load()
+	if _, ok := e.Store.CachedVector(e.queryKey("오래된 질문 A")); ok {
+		t.Fatal("a warmed query nobody searched reached the database")
+	}
+	if _, err := e.EmbedQuery(context.Background(), "오래된 질문 A"); err != nil || fp.embedCalls.Load() != before+1 {
+		t.Fatalf("the 513th vector pushes out the oldest: %v, %d calls", err, fp.embedCalls.Load()-before)
+	}
+	if _, ok := e.Store.CachedVector(e.queryKey("오래된 질문 A")); !ok {
+		t.Fatal("the search keeps the vector it paid for")
+	}
+}
