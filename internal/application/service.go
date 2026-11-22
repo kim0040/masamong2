@@ -146,6 +146,7 @@ type Service struct {
 	jobCtx         context.Context
 	jobsWG         sync.WaitGroup
 	watchers       map[chan Event]struct{}
+	eventSeq       atomic.Int64    // the last event ID this service handed out; each service counts its own
 	practice       bool            // the console's practice instance: offline models, no Discord, no OS-level actions
 	kv             kvCache         // recent admin_state values (see kvGet)
 	peopleScans    peopleScanCache // people.servers groups, reused for a minute
@@ -365,7 +366,7 @@ func (s *Service) Close() error {
 			r.entries = nil
 			r.mu.Unlock()
 		}
-		for _, m := range []*sync.Map{&memoryOptOuts, &lifecycles, &priceStates, &summaryRevs, &toolUsages} {
+		for _, m := range []*sync.Map{&memoryOptOuts, &lifecycles, &priceStates, &summaryRevs, &toolUsages, &capsStates} {
 			m.Delete(s)
 		}
 		s.mu.Lock()
@@ -947,8 +948,6 @@ func (s *Service) msg(req action.Request, key string, args ...any) string {
 // Watchers (SSE / TUI)
 // ---------------------------------------------------------------------------
 
-var eventSeq int64
-
 func (s *Service) Subscribe() (<-chan Event, func()) {
 	ch := make(chan Event, 32)
 	s.mu.Lock()
@@ -968,8 +967,7 @@ func (s *Service) Subscribe() (<-chan Event, func()) {
 
 func (s *Service) emit(kind, ref string, data map[string]any) {
 	s.mu.Lock()
-	eventSeq++
-	ev := Event{ID: eventSeq, Kind: kind, Ref: ref, Revision: s.Revision(), Data: data, At: s.Clock.Now()}
+	ev := Event{ID: s.eventSeq.Add(1), Kind: kind, Ref: ref, Revision: s.Revision(), Data: data, At: s.Clock.Now()}
 	for ch := range s.watchers {
 		select {
 		case ch <- ev:
