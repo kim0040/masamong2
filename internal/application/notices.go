@@ -622,8 +622,8 @@ func mdEscape(s string) string { return mdSpecial.Replace(s) }
 
 // deliverNotices sends each subscriber whose time has come what is new for them (once a day).
 func (s *Service) deliverNotices(ctx context.Context) {
-	sender, ok := s.Discord.(DiscordSender)
-	if s.Discord == nil || !ok || !s.Discord.Connected() {
+	sender, ok := s.Discord().(DiscordSender)
+	if s.Discord() == nil || !ok || !s.Discord().Connected() {
 		return
 	}
 	c, _, err := s.noticeCatalog()

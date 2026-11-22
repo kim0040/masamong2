@@ -141,7 +141,7 @@ func run(o options) error {
 	h := &harness{svc: svc, opt: o, rec: newRecorder(), errors: map[string]int{}}
 	gw := &featureGateway{delivered: map[string]int{}}
 	if o.features {
-		svc.Discord = gw // reminders are delivered, participation posts, through a counting stand-in
+		svc.SetDiscord(gw) // reminders are delivered, participation posts, through a counting stand-in
 	}
 	var seeded *seedResult
 	if o.seed > 0 && o.memory {

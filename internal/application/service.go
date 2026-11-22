@@ -118,7 +118,7 @@ type Service struct {
 	CfgPath  string
 	WebBuild bool // false when compiled with noweb
 	Log      *slog.Logger
-	Discord  DiscordInfo // nil until the daemon attaches a gateway
+	discord  atomic.Pointer[DiscordInfo] // nil until the daemon attaches a gateway (SetDiscord)
 	// Daemon is set by masamongd: restart/stop requests have a reader only in the daemon process.
 	Daemon bool
 

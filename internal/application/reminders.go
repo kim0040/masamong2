@@ -836,7 +836,7 @@ func (s *Service) deliverReminders(ctx context.Context) {
 		return
 	}
 	defer remindersRunning.Store(false)
-	if s.Discord == nil || !s.Discord.Connected() {
+	if s.Discord() == nil || !s.Discord().Connected() {
 		return
 	}
 	now := s.Clock.Now()
@@ -850,8 +850,8 @@ func (s *Service) deliverReminders(ctx context.Context) {
 // deliverRows sends the due reminders that were read. Every lease checks the row's version and due_at, so
 // rows read earlier by another pass or process (a stale list) lease nothing that was already taken.
 func (s *Service) deliverRows(ctx context.Context, due []reminder, now time.Time) {
-	dm, _ := s.Discord.(DiscordSender)
-	poster, _ := s.Discord.(ChannelPoster)
+	dm, _ := s.Discord().(DiscordSender)
+	poster, _ := s.Discord().(ChannelPoster)
 	db, err := s.adminDB()
 	if err != nil {
 		return

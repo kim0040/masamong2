@@ -149,7 +149,7 @@ func (s *Service) backoffAfter(m ObservedMessage, react, logged string) {
 		s.afterWithdraw(context.Background(), m.AuthorID, privacy.Participation)
 	}
 	s.logConversation(convDecision{Guild: m.GuildID, Channel: m.ChannelID, Message: m.MessageID, Author: m.AuthorID, Kind: convBackoff, Decision: logged})
-	if r, ok := s.Discord.(ChannelReactor); ok && react != "" && s.Discord != nil && s.Discord.Connected() {
+	if r, ok := s.Discord().(ChannelReactor); ok && react != "" && s.Discord() != nil && s.Discord().Connected() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = r.React(ctx, m.ChannelID, m.MessageID, react)

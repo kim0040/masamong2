@@ -278,8 +278,8 @@ func (s *Service) discordAdmin(req action.Request) action.Result {
 			if bot := s.Doc().Instance.ExpectedBotID; target == inv.UserID || target == bot || s.IsOperator(target) {
 				return action.Fail(req, errcode.PermissionDenied, "access.cannot_block", s.msg(req, "access.cannot_block"), nil)
 			}
-			if s.Discord != nil {
-				if id, _ := s.Discord.BotUser(); id == target {
+			if s.Discord() != nil {
+				if id, _ := s.Discord().BotUser(); id == target {
 					return action.Fail(req, errcode.PermissionDenied, "access.cannot_block", s.msg(req, "access.cannot_block"), nil)
 				}
 			}

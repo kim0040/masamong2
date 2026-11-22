@@ -817,7 +817,7 @@ func TestBackfillDoesNotCaptureAnInterimLine(t *testing.T) {
 	doc.Guilds["g"] = gs
 	applyDoc(t, g, doc)
 	g.connected.Store(true)
-	g.svc.Discord = g
+	g.svc.SetDiscord(g)
 
 	now := time.Now().UTC()
 	anchor := discordSnowflake(now.Add(-time.Hour))

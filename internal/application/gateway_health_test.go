@@ -21,12 +21,12 @@ func (g *healthGateway) GatewayHealth() application.GatewayHealth  { return g.he
 func TestChannelsListCarriesGatewayHealth(t *testing.T) {
 	svc := setupSvc(t)
 	// a gateway that does not report health leaves the field out, so the console shows nothing extra
-	svc.Discord = &startupDoctorGateway{}
+	svc.SetDiscord(&startupDoctorGateway{})
 	if _, has := exec(svc, "channels.list", nil).Output["gateway"]; has {
 		t.Fatal("a gateway without health reporting must not add a gateway field")
 	}
 	want := application.GatewayHealth{State: application.GatewayOK, Connected: true, LatencyMs: 42, AckAgeSec: 7, EventAgeSec: 300, Ready: 1, Resumed: 2, Disconnects: 2}
-	svc.Discord = &healthGateway{health: want}
+	svc.SetDiscord(&healthGateway{health: want})
 	res := exec(svc, "channels.list", nil)
 	if !res.OK {
 		t.Fatalf("channels.list: %+v", res.Error)
@@ -41,7 +41,7 @@ func TestDoctorWarnsWhenTheGatewayLooksStuck(t *testing.T) {
 	svc := setupSvc(t)
 	applyDoc(t, svc, func(d *config.Document) { d.Discord.Enabled = true })
 	discordOf := func(h application.GatewayHealth) (map[string]any, []map[string]any) {
-		svc.Discord = &healthGateway{health: h}
+		svc.SetDiscord(&healthGateway{health: h})
 		res := exec(svc, "runtime.doctor", nil)
 		if !res.OK {
 			t.Fatalf("doctor: %+v", res.Error)
@@ -83,7 +83,7 @@ func TestDoctorAndAttentionShowBlockedReconciliation(t *testing.T) {
 	svc := setupSvc(t)
 	applyDoc(t, svc, func(d *config.Document) { d.Discord.Enabled = true })
 	gw := &reconcilingGateway{healthGateway: healthGateway{health: application.GatewayHealth{State: application.GatewayOK, Connected: true}}}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 
 	doctorItem := func() map[string]any {
 		res := exec(svc, "runtime.doctor", nil)
@@ -127,7 +127,7 @@ func TestDoctorAndAttentionShowBlockedReconciliation(t *testing.T) {
 	}
 
 	// a gateway that cannot report (older or test gateways) adds nothing
-	svc.Discord = &healthGateway{health: gw.health}
+	svc.SetDiscord(&healthGateway{health: gw.health})
 	if doctorItem() != nil || bellItem() != nil {
 		t.Fatal("a gateway without a reconciliation reporter must not add an item")
 	}

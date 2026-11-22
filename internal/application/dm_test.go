@@ -65,7 +65,7 @@ func TestDMPoliciesRefuseBeforeTurnAndLeaveCommandsAvailable(t *testing.T) {
 				d.Access.BlockedUsers = []string{"11111"}
 			}
 		})
-		svc.Discord = dmGuildMembership{allowed: tc.member}
+		svc.SetDiscord(dmGuildMembership{allowed: tc.member})
 		user := "33333"
 		if tc.operator {
 			user = "11111"

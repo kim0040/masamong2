@@ -91,9 +91,9 @@ func (s *Service) doctor(ctx context.Context, req action.Request) action.Result 
 	switch {
 	case !s.Doc().Discord.Enabled:
 		put("discord", "disabled", "discord.enabled=false")
-	case s.Discord == nil:
+	case s.Discord() == nil:
 		put("discord", "pending", "gateway_not_started")
-	case s.Discord.Connected():
+	case s.Discord().Connected():
 		// connected by the SDK's own callbacks, yet Discord has stopped acknowledging heartbeats: a stuck
 		// socket looks like this. A warning only; DiscordGo owns reconnecting.
 		if h, ok := s.gatewayHealth(); ok && h.State == GatewayCheck {
@@ -104,7 +104,7 @@ func (s *Service) doctor(ctx context.Context, req action.Request) action.Result 
 			put("discord", "ready", "")
 		}
 	default:
-		status, reportsStartup := s.Discord.(DiscordStartupReporter)
+		status, reportsStartup := s.Discord().(DiscordStartupReporter)
 		startup := DiscordStartupStatus{}
 		if reportsStartup {
 			startup = status.StartupStatus()
@@ -344,8 +344,8 @@ func (s *Service) doctor(ctx context.Context, req action.Request) action.Result 
 	if len(dataWarnings) > 0 {
 		out["data_folder_warnings"] = dataWarnings
 	}
-	if s.Discord != nil {
-		if status, ok := s.Discord.(DiscordStartupReporter); ok {
+	if s.Discord() != nil {
+		if status, ok := s.Discord().(DiscordStartupReporter); ok {
 			startup := status.StartupStatus()
 			if startup.Attempts > 0 {
 				out["discord_startup"] = startup

@@ -172,7 +172,7 @@ func imageChatSvc(t *testing.T) (*application.Service, *gatedImages, *pictureGat
 		d.Models["image"] = config.Model{Provider: "img", Model: "google/gemini-image"}
 	})
 	gw := &pictureGateway{guilds: []application.GuildInfo{{ID: "g"}}, perms: attachFiles}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	return svc, img, gw
 }
 

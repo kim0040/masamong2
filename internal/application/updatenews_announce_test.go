@@ -94,7 +94,7 @@ func newNewsFixture(t *testing.T, running string) *newsFixture {
 		subscribe(id)
 	}
 	gw := &newsGateway{members: map[string]bool{"u1": true, "u2": true, "u4": true}}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	svc.Clock = clock.Fixed{T: time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC)}
 	return &newsFixture{svc: svc, gw: gw}
 }

@@ -56,7 +56,7 @@ func TestServerLogWorkerIsOwnedByTheService(t *testing.T) {
 	t.Run("a panicking post is recovered", func(t *testing.T) {
 		svc, base := logSvc(t)
 		gw := &panicLogGateway{logGateway: logGateway{fakeGateway: base.fakeGateway}}
-		svc.Discord = gw
+		svc.SetDiscord(gw)
 		svc.LogProblem("g", "9000001", "reply_failed", "", errclass.Timeout)
 		waitFor(t, "the post attempt", func() bool { return gw.tried.Load() == 1 })
 		closeWithin(t, svc.Close) // reaching here means the process survived the panic

@@ -114,8 +114,8 @@ func (s *Service) Backfill(ctx context.Context, trigger, guildID, channelID stri
 	if !doc.Discord.MessageContent {
 		return rep, errors.New("reading message text needs the message content intent (discord.message_content)")
 	}
-	h, ok := s.Discord.(DiscordHistory)
-	if s.Discord == nil || !ok || !s.Discord.Connected() {
+	h, ok := s.Discord().(DiscordHistory)
+	if s.Discord() == nil || !ok || !s.Discord().Connected() {
 		return rep, errors.New("discord is not connected")
 	}
 	eng, err := s.MemoryEngine()

@@ -107,7 +107,7 @@ func TestDisasterAlertsWatchKMAAndAnnounce(t *testing.T) {
 		d.Guilds["g1"] = g
 	})
 	gw := &postingGateway{}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	ctx := context.Background()
 	now := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
 	tick := func(d time.Duration) {
@@ -220,7 +220,7 @@ func TestDisasterRoomWatchLevels(t *testing.T) {
 		d.Guilds["g1"] = g
 	})
 	gw := &postingGateway{}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	now := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
 	tick := func() {
 		now = now.Add(5 * time.Minute)
@@ -324,7 +324,7 @@ func TestDisasterWarningUpgrades(t *testing.T) {
 		d.Guilds["g1"] = g
 	})
 	gw := &postingGateway{}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	now := time.Date(2026, 7, 12, 0, 0, 0, 0, time.UTC)
 	check := func(rows []string, want ...string) {
 		t.Helper()
@@ -382,7 +382,7 @@ func TestDisasterAlertsIdleChecksWriteNothingButStatusStaysFresh(t *testing.T) {
 	if r := exec(svc, "channels.configure", map[string]any{"id": "c1", "guild_id": "g1", "respond": "mention"}); !r.OK {
 		t.Fatal(r.Error)
 	}
-	svc.Discord = &postingGateway{}
+	svc.SetDiscord(&postingGateway{})
 	ctx := context.Background()
 	now := time.Date(2026, 10, 1, 10, 0, 0, 0, time.UTC)
 	tick := func(d time.Duration) {
@@ -456,7 +456,7 @@ func TestDisasterTickReadsOneConfigRevision(t *testing.T) {
 		t.Fatal(r.Error)
 	}
 	gw := &postingGateway{}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	now := time.Date(2026, 10, 1, 3, 10, 0, 0, time.UTC)
 	svc.Clock = clock.Fixed{T: now}
 	application.DisasterTickForTest(svc, context.Background())
@@ -520,7 +520,7 @@ func TestDisasterApprovalReadsTheChecksRevision(t *testing.T) {
 		t.Fatal(r.Error)
 	}
 	gw := &configSwapGateway{}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	now := time.Date(2026, 10, 1, 3, 20, 0, 0, time.UTC)
 	svc.Clock = clock.Fixed{T: now}
 	application.DisasterTickForTest(svc, context.Background())
@@ -591,7 +591,7 @@ func TestDisasterOlderWarningStateIsAStartingPoint(t *testing.T) {
 			}
 			feed.mu.Unlock()
 			gw := &postingGateway{}
-			svc.Discord = gw
+			svc.SetDiscord(gw)
 			svc.Clock = clock.Fixed{T: now}
 			application.DisasterTickForTest(svc, context.Background())
 			if len(gw.posts) != 0 {
@@ -609,7 +609,7 @@ func TestDisasterOlderWarningStateIsAStartingPoint(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = reopened.Close() })
-			reopened.Discord = gw
+			reopened.SetDiscord(gw)
 			application.DisasterTickForTest(reopened, context.Background())
 			if len(gw.posts) != 0 {
 				t.Fatalf("repeated after a restart: %q", gw.posts)
@@ -696,7 +696,7 @@ func TestDisasterLiftsGoWhereTheIssueWent(t *testing.T) {
 				d.Guilds["g1"] = g
 			})
 			gw := &failingGateway{failing: tc.fail}
-			svc.Discord = gw
+			svc.SetDiscord(gw)
 			now := time.Date(2026, 10, 1, 3, 10, 0, 0, time.UTC)
 			for i, rows := range tc.ticks {
 				if i == len(tc.ticks)-1 && tc.change != nil {
@@ -772,7 +772,7 @@ func TestDisasterDeliveriesFollowTheLevelInForce(t *testing.T) {
 				d.Guilds["g1"] = g
 			})
 			gw := &failingGateway{}
-			svc.Discord = gw
+			svc.SetDiscord(gw)
 			start := time.Date(2026, 10, 1, 3, 20, 0, 0, time.UTC)
 			tick := func(svc *application.Service, minutes int, rows ...string) []string {
 				feed.mu.Lock()
@@ -828,7 +828,7 @@ func TestDisasterDeliveriesFollowTheLevelInForce(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = reopened.Close() })
-			reopened.Discord = gw
+			reopened.SetDiscord(gw)
 			if got := tick(reopened, 20, rain); len(got) != 0 {
 				t.Fatalf("repeated after a restart: %q", got)
 			}
@@ -887,7 +887,7 @@ func TestDisasterReleaseInTheSameResponse(t *testing.T) {
 					d.Guilds["g1"] = g
 				})
 				gw := &postingGateway{}
-				svc.Discord = gw
+				svc.SetDiscord(gw)
 				now := time.Date(2026, 10, 1, 3, 10, 0, 0, time.UTC)
 				serve := func(rows []row) {
 					feed.mu.Lock()
@@ -952,7 +952,7 @@ func TestDisasterReleaseKeepsTheOtherLevel(t *testing.T) {
 				d.Guilds["g1"] = g
 			})
 			gw := &postingGateway{}
-			svc.Discord = gw
+			svc.SetDiscord(gw)
 			row := func(level, cmd, fc, ef string) string {
 				if encoding == "text" {
 					return strings.Join([]string{"L1050000", "광주·전라남도", area, "목포시", fc, ef, "R", level, cmd, "", ""}, ",")
@@ -1019,7 +1019,7 @@ func TestDisasterWatchAreasMatchWhatKMAReported(t *testing.T) {
 		t.Fatalf("nothing can be checked before KMA reported any area: %v", areas)
 	}
 	gw := &postingGateway{}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	feed.warnings = []string{warning("L1052100", "광주·전라남도", "목포시", "건조", "주의", "발표")}
 	feed.warnings[0] = strings.Replace(feed.warnings[0], `"REG_UP":"L1000000"`, `"REG_UP":"L1050000"`, 1)
 	svc.Clock = clock.Fixed{T: time.Date(2026, 10, 1, 3, 10, 0, 0, time.UTC)}

@@ -167,7 +167,7 @@ func TestNoticesCollectPersonalizeAndDeliver(t *testing.T) {
 	_ = as(svc, "notices.subscribe", map[string]any{"kind": "school", "op": "unmute", "topic": "장학"}, u)
 	// delivery at 08:00 in the person's zone, once
 	gw := &dmGateway{}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	svc.Clock = clock.Fixed{T: time.Now().In(seoul).Truncate(24 * time.Hour).Add(30 * time.Hour)} // tomorrow, well after 08:00
 	application.DeliverNotices(svc, context.Background())

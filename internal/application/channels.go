@@ -53,7 +53,7 @@ func (s *Service) channels(req action.Request) action.Result {
 }
 
 func (s *Service) channelsList(req action.Request) action.Result {
-	live := s.Discord != nil && s.Discord.Connected()
+	live := s.Discord() != nil && s.Discord().Connected()
 	guilds := []any{}
 	chans := []any{}
 	seenGuild := map[string]bool{}
@@ -67,10 +67,10 @@ func (s *Service) channelsList(req action.Request) action.Result {
 			"blocked_users": nonNil(doc.Guilds[g.ID].BlockedUsers), "log": s.serverLogView(g.ID)}
 	}
 	if live {
-		for _, g := range s.Discord.Guilds() {
+		for _, g := range s.Discord().Guilds() {
 			seenGuild[g.ID] = true
 			guilds = append(guilds, guildView(g, true))
-			for _, c := range s.Discord.Channels(g.ID) {
+			for _, c := range s.Discord().Channels(g.ID) {
 				seenChan[c.ID] = true
 				chans = append(chans, s.channelView(g.ID, c.ID, c.Name, c.Type, true))
 			}
@@ -361,8 +361,8 @@ func (s *Service) channelsConfigure(req action.Request, in map[string]any) actio
 
 func (s *Service) channelsInvite(req action.Request) action.Result {
 	id := s.Doc().Instance.ExpectedBotID
-	if s.Discord != nil && s.Discord.Connected() {
-		id, _ = s.Discord.BotUser()
+	if s.Discord() != nil && s.Discord().Connected() {
+		id, _ = s.Discord().BotUser()
 	}
 	if id == "" {
 		return action.Fail(req, errcode.InvalidInput, "generic.error", "set instance.expected_bot_id or connect the gateway to build an invite link", nil)
@@ -397,8 +397,8 @@ func (s *Service) channelsLeave(req action.Request, in map[string]any) action.Re
 	}
 	name := guildID
 	present := false
-	if s.Discord != nil && s.Discord.Connected() {
-		for _, g := range s.Discord.Guilds() {
+	if s.Discord() != nil && s.Discord().Connected() {
+		for _, g := range s.Discord().Guilds() {
 			if g.ID == guildID {
 				name, present = g.Name, true
 			}
@@ -407,8 +407,8 @@ func (s *Service) channelsLeave(req action.Request, in map[string]any) action.Re
 	if !boolVal(in, "confirm") {
 		return action.OK(req, map[string]any{"guild_id": guildID, "name": name, "present": present, "confirm_required": true})
 	}
-	leaver, ok := s.Discord.(GuildLeaver)
-	if !ok || s.Discord == nil || !s.Discord.Connected() {
+	leaver, ok := s.Discord().(GuildLeaver)
+	if !ok || s.Discord() == nil || !s.Discord().Connected() {
 		return action.Fail(req, errcode.DiscordNotConnected, "generic.error", "the Discord connection is not running", nil)
 	}
 	if !present {

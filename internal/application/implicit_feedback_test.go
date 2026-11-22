@@ -19,7 +19,7 @@ func implicitSvc(t *testing.T) *application.Service {
 	planURL := plan.start(t, func(string) string { return `{"memory_requirement":"none","tool_plan":[]}` })
 	respURL := resp.start(t, func(string) string { return "답이야" })
 	svc := routedSvc(t, planURL, respURL)
-	svc.Discord = &postGateway{}
+	svc.SetDiscord(&postGateway{})
 	applyDoc(t, svc, func(d *config.Document) {
 		if d.Guilds == nil {
 			d.Guilds = map[string]config.GuildSettings{}
@@ -193,7 +193,7 @@ func TestDecliningAThreadOfferIsNotedOnItsTurn(t *testing.T) {
 	planURL := plan.start(t, func(string) string { return `{"memory_requirement":"none","tool_plan":[]}` })
 	respURL := resp.start(t, func(string) string { return strings.Repeat("길게 설명하는 답이야. ", 30) })
 	svc := routedSvc(t, planURL, respURL)
-	svc.Discord = &postGateway{}
+	svc.SetDiscord(&postGateway{})
 	offerTurn := ""
 	for i := 1; i <= 6; i++ {
 		id := string(rune('0' + i))

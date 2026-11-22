@@ -19,7 +19,7 @@ func TestThreadOffersBackOffWhenNobodyTakesThemUp(t *testing.T) {
 	planURL := plan.start(t, func(string) string { return `{"memory_requirement":"none","tool_plan":[]}` })
 	respURL := resp.start(t, func(string) string { return strings.Repeat("길게 설명하는 답이야. ", 30) })
 	svc := routedSvc(t, planURL, respURL)
-	svc.Discord = &postGateway{}
+	svc.SetDiscord(&postGateway{})
 	t0 := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
 	n := 0
 	// a conversation of `turns` long answers from one person at the given time; reports whether an offer came

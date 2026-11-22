@@ -534,7 +534,7 @@ var mentionPattern = regexp.MustCompile(`<@!?(\d+)>`)
 // It must be the first read on tx: the thread deletion boundary below relies on it.
 func (s *Service) personRooms(tx *sql.Tx, guild, channel string, localOnly bool) map[string]bool {
 	rooms := map[string]bool{} // value = local to this channel group
-	gw, ok := s.Discord.(interface{ PersonMemoryChannels(string) map[string]bool })
+	gw, ok := s.Discord().(interface{ PersonMemoryChannels(string) map[string]bool })
 	if !ok || channel == "" {
 		return rooms
 	}

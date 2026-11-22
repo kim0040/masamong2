@@ -1144,7 +1144,7 @@ func (s *Service) CloseThread(ctx context.Context, threadID, reason string) erro
 	t.writeMu.Unlock()
 	pol := s.channelPolicy(c.Guild, c.Parent)
 	voice := s.voiceFor(c.Guild, pol)
-	poster, _ := s.Discord.(ChannelPoster)
+	poster, _ := s.Discord().(ChannelPoster)
 	if poster != nil && reason == "stop" {
 		_, _ = poster.PostChannel(ctx, threadID, "", voice.Pack.Thread.Bye, nil)
 	}
@@ -1184,7 +1184,7 @@ func (s *Service) CloseThread(ctx context.Context, threadID, reason string) erro
 			}
 		}
 	}
-	if a, ok := s.Discord.(ThreadArchiver); ok {
+	if a, ok := s.Discord().(ThreadArchiver); ok {
 		if err := a.ArchiveThread(ctx, threadID); err != nil {
 			s.Log.Debug("thread archive failed", "err", err.Error())
 		}

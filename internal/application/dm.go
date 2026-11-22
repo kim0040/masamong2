@@ -25,7 +25,7 @@ func (s *Service) DMChatAllowed(ctx context.Context, userID string) bool {
 	if s.Doc().DM.AllowMode() == "operators" {
 		return false
 	}
-	gateway, ok := s.Discord.(DiscordMembership)
+	gateway, ok := s.Discord().(DiscordMembership)
 	return ok && gateway.SharedGuildMember(ctx, userID)
 }
 

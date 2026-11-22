@@ -55,7 +55,7 @@ func TestThreadOfferAndRecap(t *testing.T) {
 	respURL := resp.start(t, func(string) string { return strings.Repeat("길게 설명하는 답이야. ", 30) })
 	svc := routedSvc(t, planURL, respURL)
 	gw := &postGateway{}
-	svc.Discord = gw
+	svc.SetDiscord(gw)
 	turn := func(id string) (string, bool) {
 		svc.Observe(application.ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: id, AuthorID: "uc", AuthorName: "Chris",
 			Content: "@마사몽 제주 일정", At: time.Now(), Mentions: []string{"bot"}})
@@ -143,7 +143,7 @@ func TestThreadOffMakesNoOfferButRecordsIt(t *testing.T) {
 		planURL := plan.start(t, func(string) string { return `{"memory_requirement":"none","tool_plan":[]}` })
 		respURL := resp.start(t, func(string) string { return strings.Repeat("길게 설명하는 답이야. ", 30) })
 		svc := routedSvc(t, planURL, respURL)
-		svc.Discord = &postGateway{}
+		svc.SetDiscord(&postGateway{})
 		applyDoc(t, svc, func(d *config.Document) {
 			if d.Guilds == nil {
 				d.Guilds = map[string]config.GuildSettings{}
