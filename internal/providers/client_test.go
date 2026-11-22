@@ -72,7 +72,8 @@ func TestNonRetryable4xx(t *testing.T) {
 }
 
 func TestTimeoutClassified(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { time.Sleep(200 * time.Millisecond) }))
+	// the server holds the request until the client gives up, so the client's own deadline is what ends it
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	defer srv.Close()
 	c := NewClient(30*time.Millisecond, nil)
 	c.Sleep = noSleep
@@ -257,7 +258,15 @@ func TestRetryWaitsUseRetryAfterDateOrBackoff(t *testing.T) {
 // A caller's deadline that passes while the client waits to retry is still a timeout (the class the
 // provider-outage handling reads), not a cancel; a cancelled context stays a cancel.
 func TestDeadlineDuringRetryWaitIsATimeout(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { time.Sleep(100 * time.Millisecond) }))
+	// the server holds each request until the client gives up and says so when the second one lands
+	var n atomic.Int32
+	arrived := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if n.Add(1) == 2 {
+			arrived <- struct{}{}
+		}
+		<-r.Context().Done()
+	}))
 	defer srv.Close()
 	c := NewClient(time.Minute, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
@@ -268,8 +277,12 @@ func TestDeadlineDuringRetryWaitIsATimeout(t *testing.T) {
 		t.Fatalf("deadline kind: %v", err)
 	}
 	ctx2, cancel2 := context.WithCancel(context.Background())
-	time.AfterFunc(30*time.Millisecond, cancel2)
-	_, err = c.Get(ctx2, srv.URL, nil)
+	defer cancel2()
+	done := make(chan error, 1)
+	go func() { _, err := c.Get(ctx2, srv.URL, nil); done <- err }()
+	<-arrived // the request is in flight when the caller cancels
+	cancel2()
+	err = <-done
 	if !errors.As(err, &pe) || pe.Kind != "cancelled" {
 		t.Fatalf("cancel kind: %v", err)
 	}

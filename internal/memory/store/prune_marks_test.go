@@ -8,6 +8,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"masamong/internal/testutil"
 )
 
 // A pass of PruneChatHolders against a reply committing meanwhile. goingFrom in the future means no 'going' tombstone is
@@ -149,13 +151,9 @@ func TestAPassThatStopsIsFinishedByTheNext(t *testing.T) {
 		_, err := st.PruneChatHolders(ctx, 1, longAfter)
 		done <- err
 	}()
-	deadline := time.Now().Add(10 * time.Second)
-	for countOf(t, st, `SELECT COUNT(*) FROM evidence_refs WHERE holder_id=?`, link) == len(sources) {
-		if time.Now().After(deadline) {
-			t.Fatal("the pass took nothing")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	testutil.WaitFor(t, 10*time.Second, "the pass to take some entries", func() bool {
+		return countOf(t, st, `SELECT COUNT(*) FROM evidence_refs WHERE holder_id=?`, link) < len(sources)
+	})
 	stop()
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("stopped with %v", err)
