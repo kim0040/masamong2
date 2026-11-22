@@ -22,9 +22,9 @@ from engine_index import (
     prepare_status_payload,
     remaining_session_budget,
 )
+from engine_query import resolve_intent
 from engine_retrieve import (
     prefetch_query_vector,
-    resolve_intent,
     retrieve,
 )
 

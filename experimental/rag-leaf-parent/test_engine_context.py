@@ -96,3 +96,35 @@ class SandboxEnvTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LayeringTests(unittest.TestCase):
+    """The engine modules import only downward, so the experiments cannot leak into the ported path by accident."""
+
+    LAYERS = ["engine_context", "sandbox_env", "engine_index", "engine_query", "engine_experiments", "engine_retrieve", "engine_turn"]
+
+    def test_modules_import_only_lower_layers(self) -> None:
+        import ast
+
+        here = Path(__file__).resolve().parent
+        for rank, name in enumerate(self.LAYERS):
+            tree = ast.parse((here / f"{name}.py").read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                mods = [node.module] if isinstance(node, ast.ImportFrom) and node.module else []
+                mods += [a.name for a in node.names] if isinstance(node, ast.Import) else []
+                for mod in mods:
+                    if mod in self.LAYERS:
+                        self.assertLess(self.LAYERS.index(mod), rank, f"{name} imports {mod}")
+
+    def test_the_ported_path_reaches_the_experiments_only_through_two_calls(self) -> None:
+        import ast
+
+        here = Path(__file__).resolve().parent
+        tree = ast.parse((here / "engine_retrieve.py").read_text(encoding="utf-8"))
+        imported = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "engine_experiments"
+            for alias in node.names
+        }
+        self.assertEqual(imported, {"_rerank_leaves", "_soft_event_candidates", "_soft_event_recipe"})

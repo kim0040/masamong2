@@ -1,7 +1,11 @@
-"""Sandbox engine facade: re-exports the three halves so `import engine as E` keeps working.
+"""소규모 RAG 엔진 — leaf 매칭 후 parent 원문 확장 실험.
 
-The code lives in `engine_index` (config, paths, ledger, prepare_index, load_index), `engine_retrieve`
-(intent, candidates, fusion, rerank, retrieve) and `engine_turn` (prompt, sessions, chat, chat_stream).
+Sandbox engine facade: re-exports the three halves so `import engine as E` keeps working.
+
+The code lives in `engine_index` (config, paths, ledger, prepare_index, load_index), `engine_query` (intent,
+person targets, dense/lexical primitives), `engine_experiments` (the R1 reranker and soft events: not part of the
+Go port contract), `engine_retrieve` (fusion, ranking, candidates, retrieve) and `engine_turn` (prompt, sessions,
+chat, chat_stream).
 Reading a name here gives the owner module's current value. Assigning to a name here does NOT reach the
 owner: a test that fakes `RerankClient`, `load_secrets` or `retrieve` patches the module that uses it
 (`engine_retrieve`, `engine_turn`), not this one. The data-dir paths and the prepare state are not copied
@@ -58,8 +62,7 @@ from engine_index import (  # noqa: F401
     apply_vector_dims,
     populate_block_catalog,
 )
-from engine_retrieve import (  # noqa: F401
-    weighted_rrf,
+from engine_query import (  # noqa: F401
     _PARTICLE_CHARS,
     _strip_name_particles,
     _token_in_text,
@@ -68,9 +71,6 @@ from engine_retrieve import (  # noqa: F401
     _INTRO_RE,
     _POLITICS_RE,
     _identity_re,
-    _source_date,
-    _leaf_source_date,
-    _context_only_date,
     _query_intent,
     _neutral_intent,
     resolve_intent,
@@ -86,7 +86,25 @@ from engine_retrieve import (  # noqa: F401
     _target_labels,
     _intent_targets,
     _lexical_query_expanded,
+    _dense_hits,
+    _lexical_hits,
+)
+from engine_experiments import (  # noqa: F401
     _SoftEventRuntime,
+    _person_signal,
+    _recency_bonus,
+    _rerank_leaves,
+    _soft_event_recipe,
+    _soft_event_leaf_times,
+    _soft_event_search_text,
+    _soft_event_runtime,
+    _soft_event_candidates,
+)
+from engine_retrieve import (  # noqa: F401
+    weighted_rrf,
+    _source_date,
+    _leaf_source_date,
+    _context_only_date,
     _rerank_available,
     fit_query_vector,
     _embed_instruction,
@@ -95,13 +113,8 @@ from engine_retrieve import (  # noqa: F401
     query_vector,
     _q1_text,
     _hit_provenance,
-    _dense_hits,
-    _lexical_hits,
     _hybrid_fusion,
     _hybrid_rank,
-    _person_signal,
-    _recency_bonus,
-    _rerank_leaves,
     RERANK_DOC_FORMATS,
     _rerank_document,
     _pre_rerank_dedup,
@@ -109,11 +122,6 @@ from engine_retrieve import (  # noqa: F401
     _apply_hybrid_floor,
     _scope_allowed_ids,
     _canon_query,
-    _soft_event_recipe,
-    _soft_event_leaf_times,
-    _soft_event_search_text,
-    _soft_event_runtime,
-    _soft_event_candidates,
     _generate_candidates,
     retrieve,
 )
