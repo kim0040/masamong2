@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"masamong/internal/action"
+	"masamong/internal/testutil"
 )
 
 // cancelRequestAtSnapshot ends the request's context at every backup snapshot, as a console reload or a
@@ -42,7 +43,7 @@ func TestManualBackupSurvivesTheRequestEnding(t *testing.T) {
 	// the scheduled backup run by hand (schedules.run) is detached the same way
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	cancelRequestAtSnapshot(t, cancel2)
-	res = s.Execute(ctx2, action.Request{Action: "schedules.run", Locale: "en", Input: mustJSON(map[string]any{"id": "backup"})})
+	res = s.Execute(ctx2, action.Request{Action: "schedules.run", Locale: "en", Input: testutil.MustJSON(t, map[string]any{"id": "backup"})})
 	if !res.OK {
 		t.Fatalf("schedules.run backup failed after its request ended: %+v", res.Error)
 	}
@@ -50,7 +51,7 @@ func TestManualBackupSurvivesTheRequestEnding(t *testing.T) {
 	// and so is the safety backup of a restore
 	ctx3, cancel3 := context.WithCancel(context.Background())
 	cancelRequestAtSnapshot(t, cancel3)
-	res = s.Execute(ctx3, action.Request{Action: "backup.restore", Locale: "en", Input: mustJSON(map[string]any{"name": name, "confirm": name, "restart": "false"})})
+	res = s.Execute(ctx3, action.Request{Action: "backup.restore", Locale: "en", Input: testutil.MustJSON(t, map[string]any{"name": name, "confirm": name, "restart": "false"})})
 	if !res.OK {
 		t.Fatalf("backup.restore failed after its request ended: %+v", res.Error)
 	}

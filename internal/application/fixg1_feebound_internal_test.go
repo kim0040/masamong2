@@ -3,7 +3,6 @@ package application
 import (
 	"context"
 	"encoding/json"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -15,6 +14,7 @@ import (
 	"masamong/internal/chat"
 	"masamong/internal/config"
 	"masamong/internal/lang"
+	"masamong/internal/testutil"
 	"masamong/internal/tools"
 )
 
@@ -70,8 +70,6 @@ func toolsOf(t *testing.T, s *Service) map[string]chat.ToolInfo {
 	return out
 }
 
-func near(a, b float64) bool { return math.Abs(a-b) < 1e-12 }
-
 // A web search holds what it may pay at every service of the configured order (a service that finds
 // nothing may still charge, and the next one is asked), by the call's depth and reworded queries; a
 // provider the call names is the only one counted. The price fallback of finance.quote holds the
@@ -95,19 +93,19 @@ func TestFeeBoundFollowsTheSearchOrder(t *testing.T) {
 		{map[string]any{"depth": "deep", "provider": "linkup"}, 0.055},
 		{map[string]any{"depth": "deep", "provider": "nowhere"}, 0.07},
 	} {
-		if got := search.FeeBound(c.params); !near(got, c.want) {
+		if got := search.FeeBound(c.params); !testutil.Near(got, c.want, 1e-12) {
 			t.Errorf("search %v: bound %v, want %v", c.params, got, c.want)
 		}
 	}
-	if !near(search.MaxFeeUSD, 0.07) {
+	if !testutil.Near(search.MaxFeeUSD, 0.07, 1e-12) {
 		t.Errorf("search MaxFeeUSD %v is not its dearest call's bound", search.MaxFeeUSD)
 	}
-	if got := quote.FeeBound(map[string]any{"symbol": "AAPL"}); !near(got, 0.008+0.0055) || !near(quote.MaxFeeUSD, got) {
+	if got := quote.FeeBound(map[string]any{"symbol": "AAPL"}); !testutil.Near(got, 0.008+0.0055, 1e-12) || !testutil.Near(quote.MaxFeeUSD, got, 1e-12) {
 		t.Errorf("quote bound %v (max %v), want one standard search", got, quote.MaxFeeUSD)
 	}
 	// services that run reworded queries as requests of their own count each of them
 	brave := toolsOf(t, fixg1Svc(t, []string{"brave2"}, map[string]string{"brave2": config.KindBrave}, nil))["search.web"]
-	if got := brave.FeeBound(map[string]any{"depth": "deep", "queries": []any{"a", "", "b", "c"}}); !near(got, 0.005*3) {
+	if got := brave.FeeBound(map[string]any{"depth": "deep", "queries": []any{"a", "", "b", "c"}}); !testutil.Near(got, 0.005*3, 1e-12) {
 		t.Errorf("brave deep with queries: %v", got)
 	}
 	for name, order := range map[string][]string{"free": {"tinyfish", "kakao"}, "none": nil} {
@@ -275,7 +273,7 @@ func TestFallbackSearchSpendsWithinItsHold(t *testing.T) {
 		t.Fatalf("search: %+v", res)
 	}
 	_, spent, _ := g.Totals()
-	if !near(spent, 0.014) || spent > bound {
+	if !testutil.Near(spent, 0.014, 1e-12) || spent > bound {
 		t.Fatalf("spent %v against a hold of %v", spent, bound)
 	}
 }

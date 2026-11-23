@@ -3,12 +3,12 @@ package application
 import (
 	"context"
 	"errors"
-	"math"
 	"testing"
 	"time"
 
 	"masamong/internal/action"
 	"masamong/internal/clock"
+	"masamong/internal/testutil"
 )
 
 func spendResetTestService(t *testing.T, now time.Time) *Service {
@@ -56,8 +56,6 @@ func ledgerRowForTest(t *testing.T, s *Service) spendRowSnapshot {
 	return row
 }
 
-func closeSpend(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
-
 func TestUsageResetReopensBudgetAndLeavesSpendRowsUntouched(t *testing.T) {
 	now := time.Date(2026, 10, 14, 12, 30, 0, 0, time.UTC)
 	s := spendResetTestService(t, now)
@@ -76,11 +74,11 @@ func TestUsageResetReopensBudgetAndLeavesSpendRowsUntouched(t *testing.T) {
 		t.Fatalf("reset output = %+v", reset.Output)
 	}
 	by, spent, ok := s.monthSpend()
-	if !ok || !closeSpend(spent, 0) || !closeSpend(by["chat"], 0) {
+	if !ok || !testutil.Near(spent, 0, 1e-9) || !testutil.Near(by["chat"], 0, 1e-9) {
 		t.Fatalf("month spend after reset = %v, %v, %v", by, spent, ok)
 	}
 	rowsAfter, totalAfter := ledgerSpendForTest(t, s)
-	if rowsAfter != rowsBefore || !closeSpend(totalAfter, totalBefore) || ledgerRowForTest(t, s) != rowBefore {
+	if rowsAfter != rowsBefore || !testutil.Near(totalAfter, totalBefore, 1e-9) || ledgerRowForTest(t, s) != rowBefore {
 		t.Fatalf("reset changed raw spend rows: before=(%d, %v), after=(%d, %v)", rowsBefore, totalBefore, rowsAfter, totalAfter)
 	}
 	if _, _, err := s.featureText(context.Background(), "response", "reply", "system", "prompt", 8, 0); errors.Is(err, ErrChatBudget) {
@@ -88,14 +86,14 @@ func TestUsageResetReopensBudgetAndLeavesSpendRowsUntouched(t *testing.T) {
 	}
 
 	addSpendForTest(t, s, now.Format("2006-01-02"), "chat", 0.25)
-	if _, spent, ok := s.monthSpend(); !ok || !closeSpend(spent, 0.25) {
+	if _, spent, ok := s.monthSpend(); !ok || !testutil.Near(spent, 0.25, 1e-9) {
 		t.Fatalf("post-reset spend = %v, %v", spent, ok)
 	}
 	undo := usageResetForTest(s, `{"undo":true}`)
 	if !undo.OK {
 		t.Fatalf("usage.reset undo: %+v", undo.Error)
 	}
-	if _, spent, ok := s.monthSpend(); !ok || !closeSpend(spent, 11.25) {
+	if _, spent, ok := s.monthSpend(); !ok || !testutil.Near(spent, 11.25, 1e-9) {
 		t.Fatalf("month spend after undo = %v, %v", spent, ok)
 	}
 	var audited int
@@ -116,7 +114,7 @@ func TestMonthSpendIgnoresPriorMonthResetAndClampsKinds(t *testing.T) {
 		t.Fatal(err)
 	}
 	by, spent, ok := s.monthSpend()
-	if !ok || !closeSpend(spent, 0.75) || !closeSpend(by["chat"], 0.25) {
+	if !ok || !testutil.Near(spent, 0.75, 1e-9) || !testutil.Near(by["chat"], 0.25, 1e-9) {
 		t.Fatalf("prior-month reset affected spend: %v, %v, %v", by, spent, ok)
 	}
 
@@ -130,7 +128,7 @@ func TestMonthSpendIgnoresPriorMonthResetAndClampsKinds(t *testing.T) {
 		t.Fatal(err)
 	}
 	by, spent, ok = s.monthSpend()
-	if !ok || !closeSpend(spent, 0.4) || !closeSpend(by["chat"], 0) || !closeSpend(by["embed"], 0.4) {
+	if !ok || !testutil.Near(spent, 0.4, 1e-9) || !testutil.Near(by["chat"], 0, 1e-9) || !testutil.Near(by["embed"], 0.4, 1e-9) {
 		t.Fatalf("reset clamp = %v, %v, %v", by, spent, ok)
 	}
 }
@@ -143,7 +141,7 @@ func TestMonthSpendIgnoresUnreadableResetSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	by, spent, ok := s.monthSpend()
-	if !ok || !closeSpend(spent, 0.25) || !closeSpend(by["chat"], 0.25) {
+	if !ok || !testutil.Near(spent, 0.25, 1e-9) || !testutil.Near(by["chat"], 0.25, 1e-9) {
 		t.Fatalf("unreadable reset snapshot changed spend: %v, %v, %v", by, spent, ok)
 	}
 }
@@ -161,7 +159,7 @@ func TestDashboardUsesResetForTodayAndShowsActiveReset(t *testing.T) {
 		t.Fatalf("usage.budgets: %+v", usage.Error)
 	}
 	usageReset, ok := usage.Output["reset"].(map[string]any)
-	if !ok || usageReset["at"] != now.Format(time.RFC3339) || !closeSpend(usageReset["before_usd"].(float64), 6) {
+	if !ok || usageReset["at"] != now.Format(time.RFC3339) || !testutil.Near(usageReset["before_usd"].(float64), 6, 1e-9) {
 		t.Fatalf("usage reset metadata: %+v", usage.Output)
 	}
 	dash := s.Execute(context.Background(), action.Request{Action: "dashboard.overview"})
@@ -171,7 +169,7 @@ func TestDashboardUsesResetForTodayAndShowsActiveReset(t *testing.T) {
 	month := dash.Output["month"].(map[string]any)
 	today := dash.Output["today"].(map[string]any)
 	reset := month["reset"].(map[string]any)
-	if !closeSpend(month["spent_usd"].(float64), 0) || !closeSpend(today["cost_usd"].(float64), 0) || reset["at"] != now.Format(time.RFC3339) || !closeSpend(reset["before_usd"].(float64), 6) {
+	if !testutil.Near(month["spent_usd"].(float64), 0, 1e-9) || !testutil.Near(today["cost_usd"].(float64), 0, 1e-9) || reset["at"] != now.Format(time.RFC3339) || !testutil.Near(reset["before_usd"].(float64), 6, 1e-9) {
 		t.Fatalf("dashboard reset view: month=%v today=%v", month, today)
 	}
 	addSpendForTest(t, s, day, "chat", 0.75)
@@ -181,7 +179,7 @@ func TestDashboardUsesResetForTodayAndShowsActiveReset(t *testing.T) {
 	}
 	month = dash.Output["month"].(map[string]any)
 	today = dash.Output["today"].(map[string]any)
-	if !closeSpend(month["spent_usd"].(float64), 0.75) || !closeSpend(today["cost_usd"].(float64), 0.75) {
+	if !testutil.Near(month["spent_usd"].(float64), 0.75, 1e-9) || !testutil.Near(today["cost_usd"].(float64), 0.75, 1e-9) {
 		t.Fatalf("post-reset dashboard spend: month=%v today=%v", month, today)
 	}
 }

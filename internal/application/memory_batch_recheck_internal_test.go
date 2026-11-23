@@ -7,11 +7,13 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"masamong/internal/action"
 	"masamong/internal/config"
 	"masamong/internal/memory/engine"
 	"masamong/internal/providers/openai"
+	"masamong/internal/testutil"
 )
 
 // R6: discarding a plan that drains in the background stops that drain, and a new preparation of the
@@ -26,14 +28,14 @@ func TestBatchDiscardRetiresTheBackgroundDrain(t *testing.T) {
 	if !started.OK {
 		t.Fatal(started.Error)
 	}
-	waitFor(t, "the first poll", func() bool { return host.polls.Load() > 0 })
+	testutil.WaitFor(t, 15*time.Second, "the first poll", func() bool { return host.polls.Load() > 0 })
 	if r := runAction(t, s, "jobs.cancel", map[string]any{"id": started.JobID}); !r.OK {
 		t.Fatal(r.Error)
 	}
 	if got := waitJobDone(t, s, started.JobID); got["status"] != "cancelled" {
 		t.Fatalf("job %+v", got)
 	}
-	waitFor(t, "the background drain", func() bool { _, running := s.drains.Load(room); return running })
+	testutil.WaitFor(t, 15*time.Second, "the background drain", func() bool { _, running := s.drains.Load(room); return running })
 	sent := host.submitted()
 	if r := runAction(t, s, "memory.blocks.update", map[string]any{"source_room": room, "discard_batch": true}); !r.OK {
 		t.Fatalf("discard %+v", r)
@@ -48,7 +50,7 @@ func TestBatchDiscardRetiresTheBackgroundDrain(t *testing.T) {
 	if !again.OK {
 		t.Fatal(again.Error)
 	}
-	waitFor(t, "the new preparation's batches", func() bool { return host.submitted() == 2*sent })
+	testutil.WaitFor(t, 15*time.Second, "the new preparation's batches", func() bool { return host.submitted() == 2*sent })
 	if r := runAction(t, s, "jobs.cancel", map[string]any{"id": again.JobID}); !r.OK {
 		t.Fatal(r.Error)
 	}

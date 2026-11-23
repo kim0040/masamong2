@@ -10,6 +10,7 @@ import (
 
 	"masamong/internal/action"
 	"masamong/internal/errclass"
+	"masamong/internal/testutil"
 )
 
 // serverLogWorkers counts the goroutines running the server log's sender.
@@ -51,14 +52,14 @@ func TestServerLogWorkerIsOwnedByTheService(t *testing.T) {
 			t.Fatal("precondition: the sender runs after a post")
 		}
 		closeWithin(t, svc.Close)
-		waitFor(t, "the sender to end", func() bool { return serverLogWorkers() < running })
+		testutil.WaitFor(t, 5*time.Second, "the sender to end", func() bool { return serverLogWorkers() < running })
 	})
 	t.Run("a panicking post is recovered", func(t *testing.T) {
 		svc, base := logSvc(t)
 		gw := &panicLogGateway{logGateway: logGateway{fakeGateway: base.fakeGateway}}
 		svc.SetDiscord(gw)
 		svc.LogProblem("g", "9000001", "reply_failed", "", errclass.Timeout)
-		waitFor(t, "the post attempt", func() bool { return gw.tried.Load() == 1 })
+		testutil.WaitFor(t, 5*time.Second, "the post attempt", func() bool { return gw.tried.Load() == 1 })
 		closeWithin(t, svc.Close) // reaching here means the process survived the panic
 	})
 }

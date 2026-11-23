@@ -4,6 +4,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"masamong/internal/testutil"
 )
 
 func TestPendingEventPollBacksOffAndResetsWhenWorkExists(t *testing.T) {
@@ -37,13 +39,7 @@ func TestPendingEventWorkerBacksOffWakesOnEnqueueAndStopsOnShutdown(t *testing.T
 	count := func() int { mu.Lock(); defer mu.Unlock(); return len(steps) }
 	waitFor := func(what string, limit time.Duration, ok func() bool) {
 		t.Helper()
-		deadline := time.Now().Add(limit)
-		for !ok() {
-			if time.Now().After(deadline) {
-				t.Fatalf("timed out waiting for %s (%d passes)", what, count())
-			}
-			time.Sleep(5 * time.Millisecond)
-		}
+		testutil.WaitFor(t, limit, what, ok)
 	}
 
 	// idle: waits of 40, 80, 160, 320, 640 ms ...; a fixed 40 ms poll would make ~25 passes in the first second

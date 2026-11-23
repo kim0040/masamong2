@@ -12,6 +12,7 @@ import (
 
 	"masamong/internal/action"
 	"masamong/internal/config"
+	"masamong/internal/testutil"
 	"masamong/internal/tools"
 )
 
@@ -464,7 +465,7 @@ func TestStatsExportPeriodIsWholeFinishedWeeks(t *testing.T) {
 		t.Errorf("W47 is exported the morning after it ended: %+v", doc.Period)
 	}
 	for _, in := range []statsExportInput{{From: "21.11.2026"}, {To: "soon"}, {From: "2026-11-10", To: "2026-11-01"}} {
-		res := s.Execute(context.Background(), action.Request{Action: "stats.export", Input: mustJSON(in)})
+		res := s.Execute(context.Background(), action.Request{Action: "stats.export", Input: testutil.MustJSON(t, in)})
 		if res.OK || res.Error == nil || res.Error.Code != "INVALID_INPUT" {
 			t.Errorf("%+v: %+v", in, res)
 		}

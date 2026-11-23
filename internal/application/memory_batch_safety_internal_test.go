@@ -11,6 +11,7 @@ import (
 	"masamong/internal/config"
 	"masamong/internal/memory/engine"
 	"masamong/internal/providers/openai"
+	"masamong/internal/testutil"
 )
 
 func prepareJobsOf(t *testing.T, s *Service, room string) int {
@@ -20,17 +21,6 @@ func prepareJobsOf(t *testing.T, s *Service, room string) int {
 		t.Fatal(err)
 	}
 	return n
-}
-
-func waitFor(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for !cond() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 }
 
 // Finding C: a graceful stop while the job waits on its batch records the job INTERRUPTED; the next start
@@ -46,7 +36,7 @@ func TestBatchRestartRetriesTheInterruptedJob(t *testing.T) {
 	if !started.OK {
 		t.Fatal(started.Error)
 	}
-	waitFor(t, "the first poll", func() bool { return host.polls.Load() > 0 })
+	testutil.WaitFor(t, 15*time.Second, "the first poll", func() bool { return host.polls.Load() > 0 })
 	stop() // the daemon stops gracefully
 	first := waitJobDone(t, s, started.JobID)
 	if first["status"] != "failed" || first["error_code"] != "INTERRUPTED" {
@@ -106,7 +96,7 @@ func TestBatchCancelDrainsInTheBackground(t *testing.T) {
 	if !started.OK {
 		t.Fatal(started.Error)
 	}
-	waitFor(t, "the first poll", func() bool { return host.polls.Load() > 0 })
+	testutil.WaitFor(t, 15*time.Second, "the first poll", func() bool { return host.polls.Load() > 0 })
 	if r := runAction(t, s, "jobs.cancel", map[string]any{"id": started.JobID}); !r.OK {
 		t.Fatal(r.Error)
 	}
@@ -116,7 +106,7 @@ func TestBatchCancelDrainsInTheBackground(t *testing.T) {
 	// the job row reads cancelled at once; the run then asks the host to cancel, waits a little (the batch
 	// keeps running), and hands the plan to a background drain. The batch ends only once that drain runs,
 	// so the cancel itself cannot collect it
-	waitFor(t, "the background drain", func() bool { _, running := s.drains.Load(room); return running })
+	testutil.WaitFor(t, 15*time.Second, "the background drain", func() bool { _, running := s.drains.Load(room); return running })
 	info, ok := batchPlanOf(eng, room)
 	if !ok || info.State != engine.BatchPlanDraining {
 		t.Fatalf("the plan drains: %v %+v", ok, info)
@@ -126,8 +116,8 @@ func TestBatchCancelDrainsInTheBackground(t *testing.T) {
 		t.Fatalf("the block shows the drain: %+v", b)
 	}
 	host.set(openai.BatchDone) // the batch ends on its own
-	waitFor(t, "the drain", func() bool { _, ok := batchPlanOf(eng, room); return !ok })
-	waitFor(t, "the drain to end", func() bool { _, running := s.drains.Load(room); return !running })
+	testutil.WaitFor(t, 15*time.Second, "the drain", func() bool { _, ok := batchPlanOf(eng, room); return !ok })
+	testutil.WaitFor(t, 15*time.Second, "the drain to end", func() bool { _, running := s.drains.Load(room); return !running })
 	var pending int
 	if err := eng.Store.DB.DB.QueryRow(`SELECT count(*) FROM memory_leaves WHERE room=? AND closed=1 AND leaf_vec IS NULL`, room).Scan(&pending); err != nil {
 		t.Fatal(err)

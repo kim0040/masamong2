@@ -15,6 +15,7 @@ import (
 	"masamong/internal/config"
 	"masamong/internal/providers"
 	"masamong/internal/providers/openai"
+	"masamong/internal/testutil"
 )
 
 // The reference, name-call and follow-up classifiers ask without thinking; every other planner-route
@@ -69,7 +70,7 @@ func TestQuickAnswerAsksWithoutThinking(t *testing.T) {
 	doc.Models["planner"] = config.Model{Provider: "fake", Model: "m"}
 	doc.Models["response"] = config.Model{Provider: "fake", Model: "m"}
 	raw, _ := config.Marshal(doc)
-	if r := s.Execute(context.Background(), action.Request{Action: "config.apply", Input: mustJSON(map[string]any{"yaml": string(raw), "base_revision": s.Revision()})}); !r.OK {
+	if r := s.Execute(context.Background(), action.Request{Action: "config.apply", Input: testutil.MustJSON(t, map[string]any{"yaml": string(raw), "base_revision": s.Revision()})}); !r.OK {
 		t.Fatalf("%+v", r.Error)
 	}
 	voice := s.voiceFor("g", config.ChannelPolicy{})
