@@ -207,6 +207,23 @@ type Service struct {
 	cfgProblems atomic.Pointer[[]config.Problem]
 	commandMenu atomic.Pointer[[]CommandHint] // the Discord connector's commands (command_menu.go)
 	credit      creditCache                   // OpenRouter keys' own spending limits (credit.go)
+	caps        capsState                     // the providers' capability caches (model_caps.go)
+	priceLists  priceState                    // the providers' price lists (pricing.go)
+	optOutIDs   optOutCache                   // who withdrew consent to being remembered (privacy.go)
+	toolUses    atomic.Pointer[tools.Usage]   // the tools' usage counter, opened on first use (tools.go)
+	summaryRevs roomRevisions                 // edits and deletions seen per room (summaries.go)
+	lifeReqs    lifecycleQueue                // restart/stop requests for the daemon (admin.go)
+	logs        logRing                       // the console's live log (logring.go)
+	mem         memoryState                   // the memory engine of the live configuration (memory_engine.go)
+	resync      resyncQueue                   // rooms to resync after edits and deletions (revisions.go)
+	runs        runFlags                      // "one at a time" marks of background passes (run_flags.go)
+	drains      batchDrainSet                 // the rooms' background batch drains (memory_blocks.go)
+	adminReady  adminMigration                // whether the admin tables are in the store (admin.go)
+	stateLocks  stateLocks                    // read-modify-write order of admin_state records (state_locks.go)
+	hooks       serviceHooks                  // what a test injected; zero in production (service_hooks.go)
+	zodiacs     zodiacState                   // zodiac cooldowns and generations (fortune.go)
+	noticeCat   noticeCatalogCache            // the notice board catalog (notices.go)
+	loggedOnce  logOnce                       // log lines written once (bad configured zones)
 	// leftovers are files of a finished restore or an interrupted backup that could not be removed
 	// (CleanDataLeftovers); doctor lists them and the scheduler retries.
 	leftovers atomic.Pointer[[]string]
@@ -252,10 +269,19 @@ func Open(dataRoot string, clk clock.Clock, webBuild bool) (*Service, error) {
 	return OpenLogged(dataRoot, clk, webBuild, nil)
 }
 
+// openHooked is Open with a test's hooks (set by hook) in place before any worker starts.
+func openHooked(dataRoot string, hook func(*serviceHooks)) (*Service, error) {
+	return openService(dataRoot, nil, false, nil, hook)
+}
+
 // OpenLogged is Open with the daemon's logger, wrapped so the console's live log sees its records
 // (CaptureLogs). It is installed before any worker starts: workers read s.Log, so it is never swapped
 // afterwards. A nil log keeps Open's slog.Default() without the live log.
 func OpenLogged(dataRoot string, clk clock.Clock, webBuild bool, log *slog.Logger) (*Service, error) {
+	return openService(dataRoot, clk, webBuild, log, nil)
+}
+
+func openService(dataRoot string, clk clock.Clock, webBuild bool, log *slog.Logger, hook func(*serviceHooks)) (*Service, error) {
 	if clk == nil {
 		clk = clock.Real{}
 	}
@@ -271,10 +297,15 @@ func OpenLogged(dataRoot string, clk clock.Clock, webBuild bool, log *slog.Logge
 		Log:      slog.Default(),
 		watchers: map[chan Event]struct{}{},
 	}
+	if hook != nil {
+		hook(&s.hooks)
+	}
 	if log != nil {
 		s.Log = s.CaptureLogs(log)
 	}
-	s.cfg.Store(&configSnapshot{doc: config.Document{}, reg: buildRegistry(config.Default("", dataRoot), s.Log, s.Clock.Now)})
+	reg := buildRegistry(config.Default("", dataRoot), s.Log, s.Clock.Now)
+	reg.hooks = &s.hooks
+	s.cfg.Store(&configSnapshot{doc: config.Document{}, reg: reg})
 	opened := false
 	defer func() {
 		if !opened {
@@ -343,22 +374,11 @@ func (s *Service) Close() error {
 		}
 		s.lifeMu.Unlock()
 		s.pendingMsgs.close()
-		if v, ok := resyncQueues.LoadAndDelete(s); ok {
-			q := v.(*resyncQueue)
-			q.mu.Lock()
-			if q.timer != nil {
-				q.timer.Stop()
-			}
-			q.mu.Unlock()
+		s.resync.stop()
+		if s.practice {
+			openPractices.remove(s)
 		}
-		if v, ok := memStates.Load(s); ok { // a memory rebuild stops at its next stage instead of holding Close
-			st := v.(*memoryState)
-			st.mu.Lock()
-			if st.eng != nil {
-				st.eng.StopReload()
-			}
-			st.mu.Unlock()
-		}
+		s.mem.stopReload() // a memory rebuild stops at its next stage instead of holding Close
 		s.workWG.Wait()
 		s.part.mu.Lock()
 		for _, c := range s.part.chans {
@@ -368,25 +388,8 @@ func (s *Service) Close() error {
 		}
 		s.part.chans = nil
 		s.part.mu.Unlock()
-		if v, ok := memStates.LoadAndDelete(s); ok {
-			st := v.(*memoryState)
-			st.mu.Lock()
-			if st.eng != nil {
-				st.eng.Close()
-				st.eng = nil
-			}
-			st.mu.Unlock()
-		}
-		if v, ok := rings.LoadAndDelete(s); ok {
-			r := v.(*logRing)
-			r.mu.Lock()
-			r.closed = true
-			r.entries = nil
-			r.mu.Unlock()
-		}
-		for _, m := range []*sync.Map{&memoryOptOuts, &lifecycles, &priceStates, &summaryRevs, &toolUsages, &capsStates} {
-			m.Delete(s)
-		}
+		s.mem.close()
+		s.logs.close()
 		s.mu.Lock()
 		for ch := range s.watchers {
 			close(ch)
@@ -399,7 +402,6 @@ func (s *Service) Close() error {
 			s.flushAllMemoryLLMCalls()
 			s.ledger.drain(s)
 			s.statsFlush(context.Background())
-			adminReady.Delete(s.Store)
 			s.closeErr = s.Store.Close()
 		}
 	})
@@ -509,6 +511,7 @@ func (s *Service) setDoc(doc config.Document, rev int) {
 	}
 	// Provider governors outlive this registry: requests on the old snapshot still hold their slots.
 	reg := buildRegistry(regDoc, s.Log, s.Clock.Now)
+	reg.hooks = &s.hooks
 	if !s.practice {
 		reg.addBuiltinOpenMeteo() // worldwide weather needs no key
 		reg.addBuiltinReader()    // reading a page needs no key either
@@ -543,7 +546,7 @@ func (s *Service) applyLogLevel(doc config.Document) {
 // persistQuota counts provider calls per instance-zone day in the database, so neither a restart nor a
 // config change (which rebuilds the registry) resets a provider's daily allowance.
 func (s *Service) persistQuota(q *providers.Quota, doc config.Document) {
-	zone := zoneOf(doc)
+	zone := s.zoneOf(doc)
 	q.Day = func(t time.Time) string { return t.In(zone).Format("2006-01-02") }
 	u := s.toolUsage()
 	if u == nil {

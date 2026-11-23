@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"masamong/internal/action"
@@ -96,15 +95,14 @@ func init() {
 		)`)
 }
 
-var (
-	catalogMu    sync.Mutex
-	catalogCache struct {
-		path   string
-		mod    time.Time
-		cat    *notices.Catalog
-		origin string
-	}
-)
+// noticeCatalogCache keeps the service's board catalog until its file changes (Service.noticeCat).
+type noticeCatalogCache struct {
+	mu     sync.Mutex
+	path   string
+	mod    time.Time
+	cat    *notices.Catalog
+	origin string
+}
 
 func (s *Service) noticeCatalogPath() string {
 	return filepath.Join(s.DataRoot, "notices", "catalog.json")
@@ -112,21 +110,22 @@ func (s *Service) noticeCatalogPath() string {
 
 // noticeCatalog is the board catalog: the instance's file when there is one, else the built-in one.
 func (s *Service) noticeCatalog() (*notices.Catalog, string, error) {
-	catalogMu.Lock()
-	defer catalogMu.Unlock()
+	cc := &s.noticeCat
+	cc.mu.Lock()
+	defer cc.mu.Unlock()
 	path := s.noticeCatalogPath()
 	var mod time.Time
 	if fi, err := os.Stat(path); err == nil {
 		mod = fi.ModTime()
 	}
-	if catalogCache.cat != nil && catalogCache.path == path && catalogCache.mod.Equal(mod) {
-		return catalogCache.cat, catalogCache.origin, nil
+	if cc.cat != nil && cc.path == path && cc.mod.Equal(mod) {
+		return cc.cat, cc.origin, nil
 	}
 	c, origin, err := notices.Load(path)
 	if err != nil {
 		return nil, "", err
 	}
-	catalogCache.path, catalogCache.mod, catalogCache.cat, catalogCache.origin = path, mod, c, origin
+	cc.path, cc.mod, cc.cat, cc.origin = path, mod, c, origin
 	return c, origin, nil
 }
 
@@ -194,8 +193,6 @@ func b2i(b bool) int {
 // Collecting
 // ---------------------------------------------------------------------------
 
-var noticesRunning, noticesTicking atomic.Bool
-
 // neededSources are the boards someone subscribed to (active, with consent).
 func (s *Service) neededSources(c *notices.Catalog) map[string]bool {
 	need := map[string]bool{}
@@ -252,10 +249,10 @@ type CollectReport struct {
 // collectNotices reads the boards (the ones given, else the ones someone needs) and stores what is new.
 func (s *Service) collectNotices(ctx context.Context, only []string) (CollectReport, error) {
 	rep := CollectReport{At: s.Clock.Now().UTC().Format(time.RFC3339), Failures: map[string]string{}}
-	if !noticesRunning.CompareAndSwap(false, true) {
+	if !s.runs.notices.CompareAndSwap(false, true) {
 		return rep, errors.New("a collection is already running")
 	}
-	defer noticesRunning.Store(false)
+	defer s.runs.notices.Store(false)
 	c, _, err := s.noticeCatalog()
 	if err != nil {
 		return rep, err

@@ -203,7 +203,7 @@ func TestSlowSearchServiceIsPassedOver(t *testing.T) {
 	pointAt(t, svc, "tavily", slow.URL, "T_KEY", "key-k1")
 	pointAt(t, svc, "serper", fast.URL, "S_KEY", "key-k1")
 	for _, c := range []struct{ asked, limit string }{{"quick", "quick"}, {"", "standard"}, {"deep", "deep"}} {
-		restore := application.SetSearchDeadlineForTest(c.limit, 150*time.Millisecond)
+		restore := application.SetSearchDeadlineForTest(svc, c.limit, 150*time.Millisecond)
 		before := slowHits.Load()
 		started := time.Now()
 		res := out(t, svc, "search.web", map[string]any{"query": "캠핑", "depth": c.asked})
@@ -286,7 +286,7 @@ func TestSearchStopsWithTheTurnAndBlamesNoServiceForOurLimits(t *testing.T) {
 		t.Fatalf("the cancelled call went into the service's health: %v", e)
 	}
 
-	restore := application.SetSearchDeadlineForTest("standard", 150*time.Millisecond)
+	restore := application.SetSearchDeadlineForTest(svc, "standard", 150*time.Millisecond)
 	defer restore()
 	res = run(context.Background())
 	if !res.OK || res.Output["provider"] != "serper" || nextHits.Load() != 1 {

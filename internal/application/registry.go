@@ -64,14 +64,23 @@ type Registry struct {
 	Places                *kakao.Adapter
 	placesID              string
 	openMeteoID, readerID string
+	// hooks are the owning service's test hooks (nil when it has none: a registry built on its own)
+	hooks *serviceHooks
 }
 
 // fetchQuotaKey is the daily counter of pages read (one unit a page, not a call) and the health key of
 // the page reader; it is not a provider of config.
 const fetchQuotaKey = "fetch"
 
-// tinyfishFetchBase is TinyFish Fetch's address (a test points it at a server).
-var tinyfishFetchBase = websearch.FetchBaseURL
+// fetchBase is TinyFish Fetch's address, or the server a test of the owning service points it at.
+func (r *Registry) fetchBase() string {
+	if r.hooks != nil {
+		if b := r.hooks.fetchBase.Load(); b != nil {
+			return *b
+		}
+	}
+	return websearch.FetchBaseURL
+}
 
 // pageFetcher is the service that reads the pages behind search results, as web_search.fetch says:
 // TinyFish Fetch when it is chosen (or automatic) and a TinyFish key exists, else Jina Reader; nil for
@@ -90,7 +99,7 @@ func (r *Registry) pageFetcher(ws config.WebSearch) websearch.Fetcher {
 		if f := r.fetchers["tinyfish"]; f != nil {
 			return f
 		}
-		f := websearch.NewTinyFishFetcher(r.tinyfishClient, tinyfishFetchBase, r.tinyfishCred)
+		f := websearch.NewTinyFishFetcher(r.tinyfishClient, r.fetchBase(), r.tinyfishCred)
 		r.fetchers["tinyfish"] = f
 		return f
 	}
@@ -320,8 +329,8 @@ func (r *Registry) reserve(id string) error {
 
 // probeTimeout bounds one connection check, whatever the caller's context allows: the search services'
 // HTTP limit is 50 s and the client retries, so a hung service would otherwise keep the console button
-// waiting for minutes. A variable so a test can shorten it.
-var probeTimeout = 15 * time.Second
+// waiting for minutes. A test shortens it for its own service (serviceHooks.probeTimeout).
+const probeTimeout = 15 * time.Second
 
 // Probe makes the cheapest real request for provider id so 'providers test' proves the credential works.
 func (r *Registry) Probe(ctx context.Context, id string) (map[string]any, error) {
@@ -332,7 +341,11 @@ func (r *Registry) Probe(ctx context.Context, id string) (map[string]any, error)
 	if err := r.reserve(id); err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
+	limit := probeTimeout
+	if r.hooks != nil {
+		limit = durationOr(time.Duration(r.hooks.probeTimeout.Load()), probeTimeout)
+	}
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	start := time.Now()
 	out := map[string]any{"id": id, "kind": st.Kind}

@@ -166,7 +166,19 @@ func (c chatLLM) ChatDetailed(ctx context.Context, role string, msgs []chat.Msg,
 // unless the model sets models.<role>.timeout_seconds. A host that stops answering otherwise holds the
 // turn until the HTTP client gives up (120 s): the scenario runs on CometAPI saw intent calls hang for
 // 125 s while the answer itself took 3 s. The defaults leave room for a model that thinks first.
+// The table is never changed; a test shortens a role's limit for its own service (roleDeadline).
 var chatDeadline = map[string]time.Duration{"planner": 30 * time.Second, "response": 90 * time.Second, "vision": 30 * time.Second}
+
+// roleDeadline is chatDeadline's limit for role, or the one a test set for this service.
+func (s *Service) roleDeadline(role string) (time.Duration, bool) {
+	if m := s.hooks.chatDeadlines.Load(); m != nil {
+		if d, ok := (*m)[role]; ok {
+			return d, true
+		}
+	}
+	d, ok := chatDeadline[role]
+	return d, ok
+}
 
 // quickKey marks a small classifier call made under ctx (a JSON line of tens of tokens).
 type quickKey struct{}
@@ -187,7 +199,7 @@ func quickAnswer(ctx context.Context) bool {
 // ask makes one call to r's model; fallback is true when it is the other chat role's model standing in
 // (the call ledger tells the two apart).
 func (c chatLLM) ask(ctx context.Context, r chatRoute, role string, msgs []chat.Msg, maxTokens int, temperature float64, fallback bool) (chat.Completion, error) {
-	d, ok := chatDeadline[role]
+	d, ok := c.s.roleDeadline(role)
 	if r.timeout > 0 {
 		d, ok = r.timeout, true // the model's own limit, also when it stands in for the other role
 	}

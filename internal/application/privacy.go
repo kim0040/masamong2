@@ -82,19 +82,15 @@ func (s *Service) scopeWords() map[string]string {
 	return out
 }
 
-// memoryOptOuts caches who withdrew consent to being remembered (read on every captured message).
+// optOutCache caches who withdrew consent to being remembered (read on every captured message;
+// Service.optOutIDs).
 type optOutCache struct {
 	mu     sync.RWMutex
 	loaded bool
 	ids    map[string]bool
 }
 
-var memoryOptOuts sync.Map // *Service → *optOutCache
-
-func (s *Service) optOuts() *optOutCache {
-	v, _ := memoryOptOuts.LoadOrStore(s, &optOutCache{})
-	return v.(*optOutCache)
-}
+func (s *Service) optOuts() *optOutCache { return &s.optOutIDs }
 
 // MemoryAllowed reports whether a Discord account's messages may be stored and searched (the account
 // has not withdrawn consent to being remembered).
@@ -338,16 +334,7 @@ func (s *Service) applyPracticePrivacy(fn func(*Service) error) error {
 		return nil
 	}
 	root := PracticeRoot(s.DataRoot)
-	var target *Service
-	memStates.Range(func(k, _ any) bool {
-		p := k.(*Service)
-		if p.practice && filepath.Clean(p.DataRoot) == filepath.Clean(root) {
-			target = p
-			return false
-		}
-		return true
-	})
-	if target != nil {
+	if target := openPractices.find(root); target != nil {
 		if _, done, ok := target.beginWork(context.Background()); ok {
 			defer done()
 			return fn(target)

@@ -62,8 +62,8 @@ type newsFixture struct {
 func newNewsFixture(t *testing.T, running string) *newsFixture {
 	t.Helper()
 	t.Cleanup(application.UseVersionForTest(running))
-	t.Cleanup(application.UseNewsLimitsForTest(0, 40))
 	svc := setupSvc(t)
+	application.UseNewsLimitsForTest(svc, 0, 40)
 	serveAnyServer(t, svc)
 	for _, ch := range []map[string]any{
 		{"id": "c1", "respond": "mention", "update_news": "on"},
@@ -343,7 +343,7 @@ func TestUpdateNewsSpreadsSendsOverPasses(t *testing.T) {
 			t.Fatal(r.Error)
 		}
 	}
-	defer application.UseNewsLimitsForTest(0, 3)()
+	defer application.UseNewsLimitsForTest(f.svc, 0, 3)()
 	f.run(t)
 	rooms, dms := f.gw.sent()
 	if len(rooms)+len(dms) != 3 || f.svc.AnnouncedForTest() != "v1.4.0" {

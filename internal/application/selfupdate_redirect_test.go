@@ -8,7 +8,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -64,12 +63,9 @@ func TestUpdateDownloadFollowsTheRedirectToTheAssetHost(t *testing.T) {
 		}
 	}))
 	defer origin.Close()
-	oldPrefix, oldAllow := updateDownloadPrefix, updateRedirectHost
-	t.Cleanup(func() { updateDownloadPrefix, updateRedirectHost = oldPrefix, oldAllow })
-	updateDownloadPrefix = origin.URL + "/dl/%s/"
 	base := origin.URL + "/dl/" + UpdateRepo + "/v9/"
 	st := updateState{Asset: &updateAsset{Name: name, URL: base + name}, SumsURL: base + "SHA256SUMS"}
-	s := &Service{Log: slog.Default()}
+	s := downloadService(origin.URL + "/dl/%s/")
 	dir := t.TempDir()
 
 	// the default policy only trusts GitHub's hosts: a redirect anywhere else is refused
@@ -79,7 +75,8 @@ func TestUpdateDownloadFollowsTheRedirectToTheAssetHost(t *testing.T) {
 	if left := updateTempFiles(t, dir); len(left) != 0 {
 		t.Fatalf("a refused redirect left files: %v", left)
 	}
-	updateRedirectHost = func(host string) bool { return host == "127.0.0.1" }
+	local := func(host string) bool { return host == "127.0.0.1" }
+	s.hooks.redirectHost.Store(&local)
 	arc, err := downloadRelease(context.Background(), s, st, dir)
 	if err != nil {
 		t.Fatal(err)

@@ -402,10 +402,9 @@ type batchDrain struct {
 	done   chan struct{}
 }
 
-// batchDrains are the background drains (*batchDrain), by service and room: at most one per room.
-var batchDrains sync.Map
-
-func drainKey(s *Service, room string) string { return fmt.Sprintf("%p|%s", s, room) }
+// batchDrainSet holds a service's background drains (*batchDrain) by room: at most one per room
+// (Service.drains).
+type batchDrainSet struct{ sync.Map }
 
 // goDrain collects the room's stored draining plan in the background (engine.DrainBatch): its batches
 // run to their end at the hosts, their results are applied and the plan is deleted. One drain per room
@@ -426,10 +425,9 @@ func (s *Service) goDrain(room string) {
 		return
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	key := drainKey(s, room)
 	d := &batchDrain{gen: plan.Generation, cancel: cancel, done: make(chan struct{})}
 	for {
-		v, loaded := batchDrains.LoadOrStore(key, d)
+		v, loaded := s.drains.LoadOrStore(room, d)
 		if !loaded {
 			break
 		}
@@ -440,12 +438,12 @@ func (s *Service) goDrain(room string) {
 			return
 		}
 		old.cancel() // a drain of a plan that is gone
-		batchDrains.CompareAndDelete(key, old)
+		s.drains.CompareAndDelete(room, old)
 	}
 	log := s.Log
 	go func() {
 		defer workDone()
-		defer func() { batchDrains.CompareAndDelete(key, d); cancel(); close(d.done) }()
+		defer func() { s.drains.CompareAndDelete(room, d); cancel(); close(d.done) }()
 		defer crash.Recover(log, "batch drain "+room)
 		for attempt := 0; attempt < 3; attempt++ {
 			eng, err := s.MemoryEngine()
@@ -474,7 +472,7 @@ func (s *Service) goDrain(room string) {
 // retireDrain stops the room's background drain of generation gen (the plan being discarded) and waits
 // for it to end, at most until ctx ends.
 func (s *Service) retireDrain(ctx context.Context, room, gen string) {
-	v, ok := batchDrains.Load(drainKey(s, room))
+	v, ok := s.drains.Load(room)
 	if !ok {
 		return
 	}
@@ -512,7 +510,7 @@ func (s *Service) awaitDrain(ctx context.Context, room string, status engine.Bat
 	if err != nil {
 		return err
 	}
-	if v, running := batchDrains.Load(drainKey(s, room)); running {
+	if v, running := s.drains.Load(room); running {
 		d := v.(*batchDrain)
 		if !ok || d.gen != plan.Generation {
 			d.cancel()

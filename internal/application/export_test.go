@@ -61,21 +61,27 @@ func ImageDropsForTest(s *Service) int64 { return s.imgDrops.Load() }
 // ImageQueueStateForTest is how many picture jobs wait and whether one is being drawn.
 func ImageQueueStateForTest(s *Service) (waiting int, running bool) { return s.imageQueueState() }
 
-// SetImageConnectWaitForTest shortens how long a picture job waits for a reconnecting gateway.
-func SetImageConnectWaitForTest(wait, poll time.Duration) (restore func()) {
-	w, p := imageConnectWait, imageConnectPoll
-	imageConnectWait, imageConnectPoll = wait, poll
-	return func() { imageConnectWait, imageConnectPoll = w, p }
+// SetImageConnectWaitForTest shortens how long the service's picture jobs wait for a reconnecting
+// gateway. Call it before the jobs start.
+func SetImageConnectWaitForTest(s *Service, wait, poll time.Duration) {
+	s.hooks.imageConnectWait, s.hooks.imageConnectPoll = wait, poll
 }
 
 // RunFortuneMorning runs one pass of the morning briefings (the scheduler runs it every minute).
 func RunFortuneMorning(s *Service, ctx context.Context) { s.runFortuneMorning(ctx) }
 
-// SetChatDeadlineForTest shortens how long one model call of a role may take; it returns the restore.
-func SetChatDeadlineForTest(role string, d time.Duration) func() {
-	old := chatDeadline[role]
-	chatDeadline[role] = d
-	return func() { chatDeadline[role] = old }
+// SetChatDeadlineForTest shortens how long one model call of a role may take in s; it returns the restore.
+func SetChatDeadlineForTest(s *Service, role string, d time.Duration) func() {
+	old := s.hooks.chatDeadlines.Load()
+	m := map[string]time.Duration{}
+	if old != nil {
+		for k, v := range *old {
+			m[k] = v
+		}
+	}
+	m[role] = d
+	s.hooks.chatDeadlines.Store(&m)
+	return func() { s.hooks.chatDeadlines.Store(old) }
 }
 
 // FailChatToolForTest makes a chat tool answer "unavailable" in one channel; it returns the undo.
@@ -216,22 +222,22 @@ func SaveOfferForTest(s *Service, guildID, channelID, text string) (string, erro
 func (s *Service) AlertTickForTest(ctx context.Context) { s.alertTick(ctx) }
 func (s *Service) NoteStartForTest()                    { s.noteUptime("start", "") }
 
-// UseUpdateAPIForTest points the release check at url (with %s for the repository) and sets the version.
-func UseUpdateAPIForTest(url, version string) (restore func()) {
-	oldURL, oldVer := updateAPI, Version
-	updateAPI, Version = url, version
-	return func() { updateAPI, Version = oldURL, oldVer }
+// UseUpdateAPIForTest points s's release check at url (with %s for the repository). The running
+// version is a process value: SetVersionForTest.
+func UseUpdateAPIForTest(s *Service, url string) {
+	s.hooks.updateAPI.Store(&url)
 }
 
 // NewerVersionForTest exposes the version comparison.
 func NewerVersionForTest(latest, current string) bool { return newerVersion(latest, current) }
 
-// UseSelfUpdateForTest points release downloads at a local server and the running programs at dir.
-func UseSelfUpdateForTest(downloadPrefix, dir string) (restore func()) {
-	oldPrefix, oldSelf := updateDownloadPrefix, selfExecutable
-	updateDownloadPrefix = downloadPrefix
+// UseSelfUpdateForTest points s's release downloads at a local server and the running programs (a
+// process value) at dir.
+func UseSelfUpdateForTest(s *Service, downloadPrefix, dir string) (restore func()) {
+	oldSelf := selfExecutable
+	s.hooks.downloads.Store(&downloadPrefix)
 	selfExecutable = func() (string, error) { return filepath.Join(dir, exeName("masamongd")), nil }
-	return func() { updateDownloadPrefix, selfExecutable = oldPrefix, oldSelf }
+	return func() { selfExecutable = oldSelf }
 }
 
 // UpdateAssetNameForTest is this computer's release archive name.
@@ -383,11 +389,19 @@ func (s *Service) RunRetentionForTest(ctx context.Context) (map[string]int64, er
 	return s.runRetention(ctx)
 }
 
-// SetSearchDeadlineForTest shortens how long search.web waits for one service at a depth; it returns the restore.
-func SetSearchDeadlineForTest(depth string, d time.Duration) func() {
-	old := searchDeadline[depth]
-	searchDeadline[depth] = d
-	return func() { searchDeadline[depth] = old }
+// SetSearchDeadlineForTest shortens how long s's search.web waits for one service at a depth; it returns
+// the restore.
+func SetSearchDeadlineForTest(s *Service, depth string, d time.Duration) func() {
+	return s.changeSearchLimits(func(l *searchLimits) { l.deadline[depth] = d })
+}
+
+// changeSearchLimits gives s a changed copy of its search limits; it returns the restore.
+func (s *Service) changeSearchLimits(change func(*searchLimits)) func() {
+	old := s.hooks.search.Load()
+	l := s.searchLimits().clone()
+	change(l)
+	s.hooks.search.Store(l)
+	return func() { s.hooks.search.Store(old) }
 }
 
 // UseVersionForTest sets the running version for a test (the update-news notes follow it).
@@ -436,11 +450,11 @@ func (s *Service) ClaimNewsForTest(version, target string) {
 	}
 }
 
-// UseNewsLimitsForTest sets the pause between sends and the sends per pass.
-func UseNewsLimitsForTest(pace time.Duration, perTick int) (restore func()) {
-	oldPace, oldTick := updateNewsPace, updateNewsPerTick
-	updateNewsPace, updateNewsPerTick = pace, perTick
-	return func() { updateNewsPace, updateNewsPerTick = oldPace, oldTick }
+// UseNewsLimitsForTest sets s's pause between sends and the sends per pass; it returns the restore.
+func UseNewsLimitsForTest(s *Service, pace time.Duration, perTick int) (restore func()) {
+	old := s.hooks.news.Load()
+	s.hooks.news.Store(&newsLimits{pace: pace, perTick: perTick})
+	return func() { s.hooks.news.Store(old) }
 }
 
 // SimulatePreparedCrash writes a prepared-but-uncommitted revision, the way a crash between

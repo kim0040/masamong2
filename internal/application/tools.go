@@ -13,7 +13,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode/utf16"
 
@@ -34,23 +33,22 @@ import (
 // command, the CLI or the GUI calls it — passes the same switch (instance, feature flag, channel,
 // surface) and the same usage limits. Operator-defined HTTP tools run here too.
 
-var toolUsages sync.Map       // *Service → *tools.Usage
-var invalidTimezones sync.Map // timezone string → warned once
-
+// toolUsage is the tools' usage counter, opened on first use (Service.toolUses); nil without a store
+// or when its table cannot be opened, which the next call tries again.
 func (s *Service) toolUsage() *tools.Usage {
 	if s.Store == nil {
 		return nil
 	}
-	if v, ok := toolUsages.Load(s); ok {
-		return v.(*tools.Usage)
+	if u := s.toolUses.Load(); u != nil {
+		return u
 	}
 	u, err := tools.OpenUsage(s.Store)
 	if err != nil {
 		s.Log.Warn("tools: usage table unavailable", "err", err)
 		return nil
 	}
-	v, _ := toolUsages.LoadOrStore(s, u)
-	return v.(*tools.Usage)
+	s.toolUses.CompareAndSwap(nil, u)
+	return s.toolUses.Load()
 }
 
 // toolRegistry is every tool with its effective settings for the current config revision.
@@ -71,9 +69,9 @@ func (s *Service) toolRegistry() []tools.Resolved {
 	return all
 }
 
-func (s *Service) instanceZone() *time.Location { return zoneOf(s.Doc()) }
+func (s *Service) instanceZone() *time.Location { return s.zoneOf(s.Doc()) }
 
-func zoneOf(doc config.Document) *time.Location {
+func (s *Service) zoneOf(doc config.Document) *time.Location {
 	if doc.I18n.Timezone == "" {
 		return time.UTC
 	}
@@ -81,7 +79,7 @@ func zoneOf(doc config.Document) *time.Location {
 	if err == nil {
 		return loc
 	}
-	if _, warned := invalidTimezones.LoadOrStore(doc.I18n.Timezone, true); !warned {
+	if s.loggedOnce.first("timezone=" + doc.I18n.Timezone) {
 		slog.Default().Error("unknown configured timezone; using UTC until it is corrected", "timezone", doc.I18n.Timezone, "err", err)
 	}
 	return time.UTC

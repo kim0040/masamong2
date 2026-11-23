@@ -62,14 +62,14 @@ func init() {
 		`INSERT OR IGNORE INTO thread_tombstones(thread_id) SELECT thread_id FROM channel_threads WHERE close_reason='deleted'`)
 }
 
-var threadsTicking atomic.Bool
-
 // Every relation/participant lookup uses the same durable deletion boundary.
 func threadVisibleSQL(table string) string {
 	return table + `.close_reason<>'deleted' AND NOT EXISTS (SELECT 1 FROM thread_tombstones d WHERE d.thread_id=` + table + `.thread_id)`
 }
 
-var threadTestHooks struct {
+// threadHooks let a test run code between a thread read and the write that follows it
+// (serviceHooks.threads); each may be set and cleared while the service runs.
+type threadHooks struct {
 	afterRead              atomic.Pointer[func(threadID string)]
 	afterRoomsRead         atomic.Pointer[func(parentID string)]
 	beforeArchiveDB        atomic.Pointer[func(threadID string)]
@@ -380,7 +380,7 @@ func (s *Service) NoteThread(guildID, threadID, parentID string, botOwned bool) 
 	if !ok {
 		return
 	}
-	if hook := threadTestHooks.afterRead.Load(); hook != nil {
+	if hook := s.hooks.threads.afterRead.Load(); hook != nil {
 		(*hook)(threadID)
 	}
 	t.mu.Lock()
@@ -574,7 +574,7 @@ func (s *Service) recoverThreadOnce(threadID string, anyAge bool) (bool, bool) {
 		info.participants[owner], info.humans[owner] = true, true
 	}
 	s.loadSingleThreadParticipants(db, threadID, info)
-	if hook := threadTestHooks.afterRead.Load(); hook != nil {
+	if hook := s.hooks.threads.afterRead.Load(); hook != nil {
 		(*hook)(threadID)
 	}
 	t.mu.Lock()
@@ -625,7 +625,7 @@ func (s *Service) threadRooms(guildID, parentID string) []string {
 				_ = rows.Close()
 			}
 		}
-		if hook := threadTestHooks.afterRoomsRead.Load(); hook != nil {
+		if hook := s.hooks.threads.afterRoomsRead.Load(); hook != nil {
 			(*hook)(parentID)
 		}
 		t.mu.Lock()
@@ -739,7 +739,7 @@ func (s *Service) NoteThreadParticipant(channelID, authorID string) {
 	t.mu.Unlock()
 	defer t.endRead(channelID, r)
 	persist := s.MemoryAllowed(authorID)
-	if hook := threadTestHooks.beforeParticipantWrite.Load(); hook != nil {
+	if hook := s.hooks.threads.beforeParticipantWrite.Load(); hook != nil {
 		(*hook)(channelID)
 	}
 	t.writeMu.Lock()
@@ -1119,7 +1119,7 @@ func (s *Service) CloseThread(ctx context.Context, threadID, reason string) erro
 	info.Owner = "" // a closed thread keeps no account id (the row is pruned with the turns)
 	t.invalidateRead(threadID)
 	t.mu.Unlock()
-	if hook := threadTestHooks.beforeCloseWrite.Load(); hook != nil {
+	if hook := s.hooks.threads.beforeCloseWrite.Load(); hook != nil {
 		(*hook)(threadID)
 	}
 	// Persist the captured close even if the minute tick evicts the now-closed cache entry.
@@ -1265,14 +1265,14 @@ func (s *Service) ThreadArchived(threadID string, archived bool) {
 		return
 	}
 	t := s.threadsLoaded()
-	if hook := threadTestHooks.beforeArchiveDB.Load(); hook != nil {
+	if hook := s.hooks.threads.beforeArchiveDB.Load(); hook != nil {
 		(*hook)(threadID)
 	}
 	db, err := s.adminDB()
 	if err != nil {
 		return
 	}
-	if hook := threadTestHooks.beforeArchiveWrite.Load(); hook != nil {
+	if hook := s.hooks.threads.beforeArchiveWrite.Load(); hook != nil {
 		(*hook)(threadID)
 	}
 	t.writeMu.Lock()

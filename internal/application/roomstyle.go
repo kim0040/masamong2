@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -59,8 +58,6 @@ const (
 	spendStyle        = "style"
 	holderRoomStyle   = "room_style"
 )
-
-var styleTicking atomic.Bool
 
 func init() {
 	featureDDL = append(featureDDL,

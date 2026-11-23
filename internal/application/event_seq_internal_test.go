@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"masamong/internal/clock"
-	"masamong/internal/config"
 )
 
 // The daemon runs two Services at once (the real one and the console's practice instance). Each hands
@@ -33,21 +32,5 @@ func TestEventIDsAreCountedPerService(t *testing.T) {
 				t.Fatalf("service %s: event %d has ID %d", name, want, got)
 			}
 		}
-	}
-}
-
-// Close drops the service's provider capability caches: the registry of them is a package variable and
-// would otherwise keep every closed service (and its caches) alive.
-func TestCloseForgetsTheCapabilityCaches(t *testing.T) {
-	s := &Service{Clock: clock.Real{}, watchers: map[chan Event]struct{}{}}
-	s.modelCaps("p", config.Provider{Kind: config.KindOpenAI, BaseURL: "http://127.0.0.1:1/v1"})
-	if _, ok := capsStates.Load(s); !ok {
-		t.Fatal("the cache should exist after use")
-	}
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := capsStates.Load(s); ok {
-		t.Fatal("Close must forget the capability caches")
 	}
 }

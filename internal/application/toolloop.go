@@ -56,7 +56,7 @@ func (c chatLLM) ChatTools(ctx context.Context, role string, msgs []chat.LoopMsg
 	if !ok || r.a == nil {
 		return chat.LoopReply{}, fmt.Errorf("no adapter for the %s role", role)
 	}
-	d := chatDeadline[role]
+	d, _ := c.s.roleDeadline(role)
 	if r.timeout > 0 {
 		d = r.timeout
 	}

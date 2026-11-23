@@ -47,8 +47,8 @@ func TestTTLCacheExpiresAndStaysBounded(t *testing.T) {
 	}
 }
 
-// The two process-wide caches that used to grow with every place and every person: a flood of distinct keys
-// leaves them at their caps.
+// The two caches that used to grow with every place and every person (the geocoder's, shared by the
+// process, and a service's zodiac cooldowns): a flood of distinct keys leaves them at their caps.
 func TestGeocodeAndCooldownCachesAreCapped(t *testing.T) {
 	now := time.Now()
 	for i := 0; i < geocodeCacheMax+500; i++ {
@@ -57,10 +57,11 @@ func TestGeocodeAndCooldownCachesAreCapped(t *testing.T) {
 	if n := geocodeCache.len(); n > geocodeCacheMax {
 		t.Fatalf("geocode cache holds %d places, cap %d", n, geocodeCacheMax)
 	}
+	cooldown := (&Service{}).zodiacCooldown()
 	for i := 0; i < zodiacCooldownMax+500; i++ {
-		zodiacCooldown.put(fmt.Sprintf("capped-test-user-%d", i), struct{}{}, now)
+		cooldown.put(fmt.Sprintf("capped-test-user-%d", i), struct{}{}, now)
 	}
-	if n := zodiacCooldown.len(); n > zodiacCooldownMax {
+	if n := cooldown.len(); n > zodiacCooldownMax {
 		t.Fatalf("cooldown table holds %d people, cap %d", n, zodiacCooldownMax)
 	}
 }

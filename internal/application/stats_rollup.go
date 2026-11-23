@@ -8,8 +8,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"masamong/internal/action"
@@ -87,15 +85,11 @@ func statsSourceGroup(table string) (string, bool) {
 	return "", false
 }
 
-// statsRollups marks a service whose rollup is running. The entry exists only while one runs, so a
-// closed service leaves nothing behind.
-var statsRollups sync.Map // *Service → struct{}
-
 // statsClaim takes the service's rollup slot. With wait it waits for a running rollup (until ctx ends).
 func (s *Service) statsClaim(ctx context.Context, wait bool) (func(), bool) {
 	for {
-		if _, busy := statsRollups.LoadOrStore(s, struct{}{}); !busy {
-			return func() { statsRollups.Delete(s) }, true
+		if s.runs.statsRollup.CompareAndSwap(false, true) {
+			return func() { s.runs.statsRollup.Store(false) }, true
 		}
 		if !wait {
 			return nil, false
@@ -107,9 +101,6 @@ func (s *Service) statsClaim(ctx context.Context, wait bool) (func(), bool) {
 		}
 	}
 }
-
-// statsDayHook runs after each finished day (tests stop a backfill midway). Never set in production.
-var statsDayHook atomic.Pointer[func(s *Service, ctx context.Context, group, day string)]
 
 // ---------------------------------------------------------------------------
 // days
@@ -428,7 +419,7 @@ func (s *Service) statsRollupGroup(ctx context.Context, db *storage.Store, doc c
 		}
 		zones[d] = zoneName
 		through = statsLaterDay(through, d)
-		if h := statsDayHook.Load(); h != nil {
+		if h := s.hooks.statsDay.Load(); h != nil {
 			(*h)(s, ctx, g, d)
 		}
 		select {

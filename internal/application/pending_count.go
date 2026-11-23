@@ -139,14 +139,18 @@ func (s *Service) startPendingCount(eng *engine.Engine, space, key string, run *
 			}
 		}()
 		defer crash.Recover(s.Log, "pending message count")
-		n, err := pendingCountHook(ctx, eng, space)
+		count := countPendingMessages
+		if s.hooks.pendingCount != nil {
+			count = s.hooks.pendingCount
+		}
+		n, err := count(ctx, eng, space)
 		s.finishPendingCount(key, run, n, err)
 		finished = true
 	}()
 }
 
-// pendingCountHook is the count itself; tests replace it.
-var pendingCountHook = func(ctx context.Context, eng *engine.Engine, space string) (int, error) {
+// countPendingMessages is the count itself (a test replaces it: serviceHooks.pendingCount).
+func countPendingMessages(ctx context.Context, eng *engine.Engine, space string) (int, error) {
 	return eng.Store.CountPendingMessagesContext(ctx, nil, space, eng.Settings.Recipe.Version())
 }
 

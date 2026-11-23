@@ -333,13 +333,18 @@ func TestPracticeCloseReleasesWorkersIndexesAndGlobalState(t *testing.T) {
 		if e.Index() != nil || s.Store.DB.Ping() == nil || s.Store.Read.Ping() == nil {
 			t.Fatal("store/index remains open")
 		}
-		for _, m := range []*sync.Map{&memStates, &rings, &memoryOptOuts, &resyncQueues, &lifecycles, &priceStates, &summaryRevs, &toolUsages} {
-			if _, ok := m.Load(s); ok {
-				t.Fatal("service retained in global state")
-			}
+		// what the service held is its own and closed with it; no package registry keeps it
+		if openPractices.find(s.DataRoot) != nil {
+			t.Fatal("service retained in the practice registry")
 		}
-		if _, ok := adminReady.Load(s.Store); ok {
-			t.Fatal("store retained in admin state")
+		s.mem.mu.Lock()
+		engineKept := s.mem.eng != nil
+		s.mem.mu.Unlock()
+		s.logs.mu.Lock()
+		ringOpen := !s.logs.closed
+		s.logs.mu.Unlock()
+		if engineKept || ringOpen {
+			t.Fatalf("Close left the memory engine (%v) or the live log (%v) open", engineKept, ringOpen)
 		}
 		if err := ResetPractice(root); err != nil {
 			t.Fatal(err)

@@ -36,7 +36,6 @@ const (
 )
 
 var (
-	imageMu     = make(chan struct{}, 1) // the one picture being made
 	imageIDRE   = regexp.MustCompile(`^img_[a-f0-9]{16}$`)
 	aspectRatio = map[string]bool{"1:1": true, "2:3": true, "3:2": true, "3:4": true, "4:3": true, "4:5": true, "5:4": true, "9:16": true, "16:9": true, "21:9": true}
 	blockedOnce sync.Once
@@ -171,9 +170,10 @@ func (s *Service) images(ctx context.Context, req action.Request) action.Result 
 	// one picture at a time: a request waits for the one being made, then gives up without counting
 	wait, cancelWait := context.WithTimeout(ctx, secondsOr(in, "queue_wait_sec", imageQueueWait))
 	defer cancelWait()
+	slot := s.imgq.drawing.slot()
 	select {
-	case imageMu <- struct{}{}:
-		defer func() { <-imageMu }()
+	case slot <- struct{}{}:
+		defer func() { <-slot }()
 	case <-wait.Done():
 		return action.Fail(req, errcode.ProviderUnavailable, "image.busy", s.msg(req, "image.busy"), nil)
 	}
@@ -221,7 +221,7 @@ type imageFail struct {
 	err  error
 }
 
-// drawImage makes one picture with the image role's model and keeps it. The caller holds imageMu. Spend
+// drawImage makes one picture with the image role's model and keeps it. The caller holds the image slot (imageSlot). Spend
 // and the provider's health are noted here, a failed attempt included (it is still an attempt), so the
 // command and a background job account the same way.
 func (s *Service) drawImage(ctx context.Context, doc config.Document, m config.Model, prompt, ar string, timeout time.Duration) (imageSaved, *imageFail) {

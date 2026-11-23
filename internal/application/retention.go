@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"masamong/internal/config"
@@ -511,24 +510,10 @@ func (s *Service) runScheduledRetention(ctx context.Context) scheduleState {
 	return st
 }
 
-// retentionPasses marks a service whose usage_gc pass is running, scheduled or run from the console
-// (the entry exists only meanwhile).
-var retentionPasses sync.Map // *Service → struct{}
-
 // startRetentionPass runs the usage_gc pass off the scheduler tick (a first statistics backfill can
 // take minutes, review M5), one at a time; Close stops it between days and batches.
 func (s *Service) startRetentionPass(parent context.Context) bool {
-	if _, busy := retentionPasses.LoadOrStore(s, struct{}{}); busy {
-		return false
-	}
-	if !s.ownedGoContext("usage_gc", parent, func(ctx context.Context) {
-		defer retentionPasses.Delete(s)
-		s.runScheduledRetention(ctx)
-	}) {
-		retentionPasses.Delete(s)
-		return false
-	}
-	return true
+	return s.ownedSingleFlight(parent, &s.runs.retention, "usage_gc", func(ctx context.Context) { s.runScheduledRetention(ctx) })
 }
 
 // retentionDue reports whether the daily pass should run now.

@@ -24,15 +24,23 @@ import (
 var ErrServiceClosing = errors.New("application: service is closing; the change was not applied")
 
 // resyncDelay gathers a burst of edits or deletions (a bulk delete, a user tidying up) into one resync.
-var resyncDelay = 2 * time.Second
+const resyncDelay = 2 * time.Second
 
+// resyncQueue gathers the rooms waiting for a resync (Service.resync); Close stops its timer.
 type resyncQueue struct {
 	mu    sync.Mutex
 	rooms map[string]bool
 	timer *time.Timer
 }
 
-var resyncQueues sync.Map // *Service → *resyncQueue
+// stop cancels a pending resync.
+func (q *resyncQueue) stop() {
+	q.mu.Lock()
+	if q.timer != nil {
+		q.timer.Stop()
+	}
+	q.mu.Unlock()
+}
 
 // scheduleResync resyncs the rooms after resyncDelay (engine.OnRevised).
 func (s *Service) scheduleResync(rooms []string) {
@@ -41,10 +49,12 @@ func (s *Service) scheduleResync(rooms []string) {
 	if s.closing {
 		return
 	}
-	v, _ := resyncQueues.LoadOrStore(s, &resyncQueue{rooms: map[string]bool{}})
-	q := v.(*resyncQueue)
+	q := &s.resync
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	if q.rooms == nil {
+		q.rooms = map[string]bool{}
+	}
 	for _, r := range rooms {
 		q.rooms[r] = true
 	}

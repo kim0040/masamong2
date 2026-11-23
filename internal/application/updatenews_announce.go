@@ -6,7 +6,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"masamong/internal/action"
@@ -40,19 +39,24 @@ const (
 )
 
 // updateNewsPace is the pause between two sends; updateNewsPerTick the sends one scheduler minute makes.
-var (
+// A test sets its own for its service (serviceHooks.news).
+const (
 	updateNewsPace    = 1100 * time.Millisecond
 	updateNewsPerTick = 40
 )
 
-var updateNewsRunning atomic.Bool
+// newsLimits are the pause between two sends and the sends of one tick.
+type newsLimits struct {
+	pace    time.Duration
+	perTick int
+}
 
 // updateNewsTick is one scheduler minute; a run still going is not started twice.
 func (s *Service) updateNewsTick(ctx context.Context) {
-	if !updateNewsRunning.CompareAndSwap(false, true) {
+	if !s.runs.updateNews.CompareAndSwap(false, true) {
 		return
 	}
-	defer updateNewsRunning.Store(false)
+	defer s.runs.updateNews.Store(false)
 	s.announceUpdates(ctx)
 }
 
@@ -103,7 +107,10 @@ func (s *Service) announceUpdates(ctx context.Context) {
 	if _, err := db.DB.Exec(`SELECT 1 FROM update_news_sent LIMIT 0`); err != nil {
 		return // this storage has no ledger: nothing can be sent safely, so nothing is
 	}
-	run := newsRun{s: s, gw: gw, version: cur, notes: notes}
+	run := newsRun{s: s, gw: gw, version: cur, notes: notes, limits: newsLimits{pace: updateNewsPace, perTick: updateNewsPerTick}}
+	if l := s.hooks.news.Load(); l != nil {
+		run.limits = *l
+	}
 	if !run.rooms(ctx) || !run.people(ctx) {
 		return
 	}
@@ -121,6 +128,7 @@ type newsRun struct {
 	notes    []relnotes.Note
 	sent     int
 	deferred bool
+	limits   newsLimits
 }
 
 // claim reserves (version, target); false when it was already claimed (sent, failed or interrupted).
@@ -160,10 +168,10 @@ func (r *newsRun) settle(target string, err error) {
 // pace waits between two sends; false when the service is shutting down.
 func (r *newsRun) pace(ctx context.Context) bool {
 	r.sent++
-	if updateNewsPace <= 0 {
+	if r.limits.pace <= 0 {
 		return ctx.Err() == nil
 	}
-	t := time.NewTimer(updateNewsPace)
+	t := time.NewTimer(r.limits.pace)
 	defer t.Stop()
 	select {
 	case <-ctx.Done():
@@ -174,7 +182,7 @@ func (r *newsRun) pace(ctx context.Context) bool {
 }
 
 // full reports whether this tick has used its sends (the next tick carries on).
-func (r *newsRun) full() bool { return r.sent >= updateNewsPerTick }
+func (r *newsRun) full() bool { return r.sent >= r.limits.perTick }
 
 // rooms posts one card to each room that turned update news on. It returns false when the pass must
 // stop (shutdown, or the tick's sends are used).

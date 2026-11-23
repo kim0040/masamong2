@@ -28,20 +28,18 @@ type capsSlot struct {
 	cache *openai.CapsCache
 }
 
+// capsState holds one service's capability caches, one slot per provider (Service.caps).
 type capsState struct {
 	mu    sync.Mutex
 	slots map[string]*capsSlot
 }
-
-var capsStates sync.Map // *Service → *capsState
 
 // modelCaps is provider's capability cache.
 func (s *Service) modelCaps(provider string, p config.Provider) *openai.CapsCache {
 	key := p.BaseURL + "\x00" + string(openai.ResolveAPI(p.API, p.BaseURL))
 	raw, _ := json.Marshal(p)
 	conf := string(raw)
-	v, _ := capsStates.LoadOrStore(s, &capsState{slots: map[string]*capsSlot{}})
-	st := v.(*capsState)
+	st := &s.caps
 	st.mu.Lock()
 	slot := st.slots[provider]
 	if slot != nil && slot.key == key {
@@ -53,6 +51,9 @@ func (s *Service) modelCaps(provider string, p config.Provider) *openai.CapsCach
 		return slot.cache
 	}
 	slot = &capsSlot{key: key, conf: conf, cache: openai.NewCapsCache()}
+	if st.slots == nil {
+		st.slots = map[string]*capsSlot{}
+	}
 	st.slots[provider] = slot
 	st.mu.Unlock()
 	if s.Store != nil {
@@ -68,11 +69,7 @@ func (s *Service) modelCaps(provider string, p config.Provider) *openai.CapsCach
 
 // resetShapes drops the shapes learned for provider (its key was saved, or it is being tested).
 func (s *Service) resetShapes(provider string) {
-	v, ok := capsStates.Load(s)
-	if !ok {
-		return
-	}
-	st := v.(*capsState)
+	st := &s.caps
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if slot := st.slots[provider]; slot != nil {

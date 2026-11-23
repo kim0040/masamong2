@@ -27,6 +27,7 @@ type logEntry struct {
 	Attrs map[string]string `json:"attrs,omitempty"`
 }
 
+// logRing is the console's live log of one service (Service.logs); Close empties and closes it.
 type logRing struct {
 	mu      sync.Mutex
 	entries []logEntry
@@ -34,11 +35,14 @@ type logRing struct {
 	closed  bool
 }
 
-var rings sync.Map // *Service → *logRing
+func (s *Service) ring() *logRing { return &s.logs }
 
-func (s *Service) ring() *logRing {
-	v, _ := rings.LoadOrStore(s, &logRing{})
-	return v.(*logRing)
+// close drops the entries and refuses later ones.
+func (r *logRing) close() {
+	r.mu.Lock()
+	r.closed = true
+	r.entries = nil
+	r.mu.Unlock()
 }
 
 func (r *logRing) add(e logEntry) {

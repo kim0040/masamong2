@@ -51,8 +51,8 @@ const (
 )
 
 // How long a job waits for the gateway (reconnecting) and the server list before it gives up, and how
-// often it looks. Variables so tests can shorten them.
-var (
+// often it looks. A test shortens them for its own service (serviceHooks).
+const (
 	imageConnectWait = 30 * time.Second
 	imageConnectPoll = 250 * time.Millisecond
 )
@@ -107,6 +107,19 @@ type imageQueue struct {
 	wake    chan struct{}
 	started bool
 	stopped bool // the worker has ended with the service: nothing more is accepted
+	// drawing is the one picture being made, by the queue or the command (images.go)
+	drawing imageSlot
+}
+
+// imageSlot lets one picture be made at a time in a service.
+type imageSlot struct {
+	once sync.Once
+	ch   chan struct{}
+}
+
+func (d *imageSlot) slot() chan struct{} {
+	d.once.Do(func() { d.ch = make(chan struct{}, 1) })
+	return d.ch
 }
 
 // imageQueueState is the queue as the console shows it.
@@ -331,9 +344,9 @@ func (s *Service) imageReady(j *imageJob) bool {
 // waitImageReady waits, at most imageConnectWait, until Discord is ready for the job. It returns early
 // when the service stops or a policy reason ends the job; the caller looks at both.
 func (s *Service) waitImageReady(ctx context.Context, j *imageJob) bool {
-	deadline := time.NewTimer(imageConnectWait)
+	deadline := time.NewTimer(durationOr(s.hooks.imageConnectWait, imageConnectWait))
 	defer deadline.Stop()
-	tick := time.NewTicker(imageConnectPoll)
+	tick := time.NewTicker(durationOr(s.hooks.imageConnectPoll, imageConnectPoll))
 	defer tick.Stop()
 	for !s.imageReady(j) {
 		if s.imagePolicySkip(j) != "" {
@@ -398,15 +411,16 @@ func (s *Service) runImageJob(ctx context.Context, j *imageJob) {
 		}
 	}
 	// the same one-at-a-time slot as the command; shutdown ends the wait
+	slot := s.imgq.drawing.slot()
 	select {
-	case imageMu <- struct{}{}:
+	case slot <- struct{}{}:
 	case <-ctx.Done():
 		return
 	}
 	began := time.Now()
 	jctx := observability.WithTurn(ctx, j.turn)
 	saved, fail := func() (imageSaved, *imageFail) {
-		defer func() { <-imageMu }()
+		defer func() { <-slot }()
 		return s.drawImage(jctx, doc, m, j.prompt, j.ratio, j.timeout)
 	}()
 	if ctx.Err() != nil { // shutdown: no partial post (the attempt is already counted)

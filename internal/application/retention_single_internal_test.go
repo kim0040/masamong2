@@ -29,8 +29,7 @@ func TestUsageGCRunsOneAtATime(t *testing.T) {
 			}
 		}
 	}
-	statsDayHook.Store(&hook)
-	t.Cleanup(func() { statsDayHook.Store(nil) })
+	s.hooks.statsDay.Store(&hook)
 	runNow := func() action.Result {
 		raw, _ := json.Marshal(map[string]any{"id": "usage_gc"})
 		return s.Execute(context.Background(), action.Request{Action: "schedules.run", Input: raw, Locale: "en"})
@@ -50,7 +49,7 @@ func TestUsageGCRunsOneAtATime(t *testing.T) {
 	close(release)
 	deadline := time.Now().Add(20 * time.Second)
 	for {
-		if _, busy := retentionPasses.Load(s); !busy {
+		if !s.runs.retention.Load() {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -58,18 +57,18 @@ func TestUsageGCRunsOneAtATime(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	statsDayHook.Store(nil)
+	s.hooks.statsDay.Store(nil)
 	if r := runNow(); !r.OK {
 		t.Fatalf("run now after the scheduled pass: %+v", r.Error)
 	}
-	if _, busy := retentionPasses.Load(s); busy {
+	if s.runs.retention.Load() {
 		t.Fatal("the console run left its mark behind")
 	}
 
 	// and the other way: while the console's run holds the mark, the scheduler does not start one
-	retentionPasses.Store(s, struct{}{})
+	s.runs.retention.Store(true)
 	if s.startRetentionPass(context.Background()) {
 		t.Fatal("the scheduler started a pass beside a running one")
 	}
-	retentionPasses.Delete(s)
+	s.runs.retention.Store(false)
 }

@@ -13,8 +13,8 @@ func TestThreadClosePersistsAfterTickEviction(t *testing.T) {
 		t.Fatal(err)
 	}
 	hook := func(string) { evictThreadByCap(t, s, "target") }
-	threadTestHooks.beforeCloseWrite.Store(&hook)
-	t.Cleanup(func() { threadTestHooks.beforeCloseWrite.Store(nil) })
+	s.hooks.threads.beforeCloseWrite.Store(&hook)
+	t.Cleanup(func() { s.hooks.threads.beforeCloseWrite.Store(nil) })
 	if err := s.CloseThread(context.Background(), "target", "stop"); err != nil {
 		t.Fatal(err)
 	}

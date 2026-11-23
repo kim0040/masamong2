@@ -12,9 +12,9 @@ func TestPendingEventPollBacksOffAndResetsWhenWorkExists(t *testing.T) {
 		if delay != want {
 			t.Fatalf("idle poll delay = %s, want %s", delay, want)
 		}
-		delay = nextPendingEventPoll(delay, false)
+		delay = nextPendingEventPoll(delay, false, pendingEventPollMin, pendingEventPollMax)
 	}
-	if got := nextPendingEventPoll(delay, true); got != time.Second {
+	if got := nextPendingEventPoll(delay, true, pendingEventPollMin, pendingEventPollMax); got != time.Second {
 		t.Fatalf("poll delay with pending work = %s, want 1s", got)
 	}
 }
@@ -23,17 +23,17 @@ func TestPendingEventPollBacksOffAndResetsWhenWorkExists(t *testing.T) {
 // waiting out the long interval, and shutdown ends it without waiting either. The intervals are shrunk
 // and the passes are counted through the step hook.
 func TestPendingEventWorkerBacksOffWakesOnEnqueueAndStopsOnShutdown(t *testing.T) {
-	oldMin, oldMax, oldHook := pendingEventPollMin, pendingEventPollMax, pendingEventStepHook
-	pendingEventPollMin, pendingEventPollMax = 40*time.Millisecond, 10*time.Second
 	var mu sync.Mutex
 	var steps []time.Time
-	pendingEventStepHook = func() {
-		mu.Lock()
-		steps = append(steps, time.Now())
-		mu.Unlock()
-	}
-	defer func() { pendingEventPollMin, pendingEventPollMax, pendingEventStepHook = oldMin, oldMax, oldHook }()
-	s, _ := deliveryService(t) // setting the service up starts the worker, with the shrunk intervals
+	// setting the service up starts the worker, with the shrunk intervals
+	s := hookedService(t, func(h *serviceHooks) {
+		h.pendingPollMin, h.pendingPollMax = 40*time.Millisecond, 10*time.Second
+		h.pendingStep = func() {
+			mu.Lock()
+			steps = append(steps, time.Now())
+			mu.Unlock()
+		}
+	})
 	count := func() int { mu.Lock(); defer mu.Unlock(); return len(steps) }
 	waitFor := func(what string, limit time.Duration, ok func() bool) {
 		t.Helper()

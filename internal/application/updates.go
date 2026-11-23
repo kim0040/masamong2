@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"masamong/internal/action"
@@ -26,12 +25,10 @@ import (
 // UpdateRepo is the GitHub repository whose releases are checked (set at build time with -X).
 var UpdateRepo = "kim0040/masamong2"
 
-// updateAPI is the releases endpoint; tests point it at a local server.
-var updateAPI = "https://api.github.com/repos/%s/releases/latest"
+// updateAPI is the releases endpoint; a test points its service at a local server (serviceHooks).
+const updateAPI = "https://api.github.com/repos/%s/releases/latest"
 
 const updateEvery = 24 * time.Hour
-
-var updateChecking, updateApplying atomic.Bool
 
 type updateState struct {
 	CheckedAt string `json:"checked_at,omitempty"`
@@ -73,7 +70,11 @@ func (s *Service) checkUpdate(ctx context.Context) updateState {
 	client := providers.NewClient(15*time.Second, s.Log)
 	client.MaxBody = 1 << 20
 	client.UserAgent = "masamong/" + Version
-	resp, err := client.Get(ctx, strings.Replace(updateAPI, "%s", UpdateRepo, 1), map[string]string{"Accept": "application/vnd.github+json"})
+	api := updateAPI
+	if u := s.hooks.updateAPI.Load(); u != nil {
+		api = *u
+	}
+	resp, err := client.Get(ctx, strings.Replace(api, "%s", UpdateRepo, 1), map[string]string{"Accept": "application/vnd.github+json"})
 	var pe *providers.Error
 	switch {
 	case errors.As(err, &pe) && pe.Status == 404:
@@ -221,10 +222,10 @@ func (s *Service) updatesAction(ctx context.Context, req action.Request) action.
 // failure, a size over the limit, notes that do not validate or name another version) gives "" and
 // the console simply shows no notes: they are an extra, never a reason to fail the check.
 func (s *Service) fetchReleaseNotes(ctx context.Context, url, tag string) string {
-	if !strings.HasPrefix(url, strings.Replace(updateDownloadPrefix, "%s", UpdateRepo, 1)) {
+	if !strings.HasPrefix(url, s.downloadPrefix()) {
 		return ""
 	}
-	client := providers.NewDownloadClient(15*time.Second, s.Log, updateRedirectHost)
+	client := providers.NewDownloadClient(15*time.Second, s.Log, s.redirectHost())
 	client.UserAgent = "masamong/" + Version
 	client.MaxRetries = 0
 	client.MaxBody = updateNotesMax

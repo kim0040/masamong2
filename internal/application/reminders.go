@@ -9,7 +9,6 @@ import (
 	"masamong/internal/errclass"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 
 	"masamong/internal/action"
@@ -813,8 +812,6 @@ func (s *Service) reminderOffer(id string) (reminderOfferRow, bool) {
 // Delivery
 // ---------------------------------------------------------------------------
 
-var remindersRunning atomic.Bool
-
 // recoverReminders runs once when the scheduler starts: a send the previous process did not finish may
 // have been posted, so it is marked unknown and not sent again. A series goes on: that one occurrence is
 // the unknown one (its due_at was already moved to the next when it was leased), the rest still come.
@@ -834,10 +831,10 @@ func (s *Service) recoverReminders() {
 
 // deliverReminders sends the reminders that are due.
 func (s *Service) deliverReminders(ctx context.Context) {
-	if !remindersRunning.CompareAndSwap(false, true) {
+	if !s.runs.reminders.CompareAndSwap(false, true) {
 		return
 	}
-	defer remindersRunning.Store(false)
+	defer s.runs.reminders.Store(false)
 	if s.Discord() == nil || !s.Discord().Connected() {
 		return
 	}

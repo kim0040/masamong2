@@ -595,7 +595,7 @@ func TestChatFallsBackToTheOtherChatModel(t *testing.T) {
 		t.Fatalf("an empty intent reply hands over: err=%v tools=%+v", err, res.Tools)
 	}
 	// an intent model that hangs is given up after its deadline, not the HTTP client's two minutes
-	defer application.SetChatDeadlineForTest("planner", 300*time.Millisecond)()
+	defer application.SetChatDeadlineForTest(svc, "planner", 300*time.Millisecond)()
 	models("slow/planner", "fake/response")
 	started := time.Now()
 	res, err = svc.ChatTurn(context.Background(), in)

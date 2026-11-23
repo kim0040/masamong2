@@ -33,12 +33,12 @@ func TestBatchDiscardRetiresTheBackgroundDrain(t *testing.T) {
 	if got := waitJobDone(t, s, started.JobID); got["status"] != "cancelled" {
 		t.Fatalf("job %+v", got)
 	}
-	waitFor(t, "the background drain", func() bool { _, running := batchDrains.Load(drainKey(s, room)); return running })
+	waitFor(t, "the background drain", func() bool { _, running := s.drains.Load(room); return running })
 	sent := host.submitted()
 	if r := runAction(t, s, "memory.blocks.update", map[string]any{"source_room": room, "discard_batch": true}); !r.OK {
 		t.Fatalf("discard %+v", r)
 	}
-	if _, running := batchDrains.Load(drainKey(s, room)); running {
+	if _, running := s.drains.Load(room); running {
 		t.Fatal("the discard retires the plan's drain")
 	}
 	if _, ok := batchPlanOf(eng, room); ok {

@@ -57,24 +57,24 @@ func (s *Service) RunScheduler(ctx context.Context) {
 				s.statsFlushTick(ctx)
 				s.ownedGo("fortune briefings", func(ctx context.Context) { s.runFortuneMorning(ctx) })
 				s.ownedGo("reminders", func(ctx context.Context) { s.deliverReminders(ctx) })
-				if styleTicking.CompareAndSwap(false, true) {
-					s.ownedGo("room styles", func(ctx context.Context) { defer styleTicking.Store(false); s.refreshRoomStyles(ctx) })
+				if s.runs.styles.CompareAndSwap(false, true) {
+					s.ownedGo("room styles", func(ctx context.Context) { defer s.runs.styles.Store(false); s.refreshRoomStyles(ctx) })
 				}
 				s.sweepCollectNext() // collected moments whose follow-up window ended with nothing happening
-				if threadsTicking.CompareAndSwap(false, true) {
-					s.ownedGo("idle threads", func(ctx context.Context) { defer threadsTicking.Store(false); s.closeIdleThreads(ctx) })
+				if s.runs.idleThreads.CompareAndSwap(false, true) {
+					s.ownedGo("idle threads", func(ctx context.Context) { defer s.runs.idleThreads.Store(false); s.closeIdleThreads(ctx) })
 				}
 				if disasterTicking.CompareAndSwap(false, true) {
 					s.ownedGo("disaster alerts", func(ctx context.Context) { defer disasterTicking.Store(false); s.disasterTick(ctx) })
 				}
-				if noticesTicking.CompareAndSwap(false, true) {
-					s.ownedGo("notices", func(ctx context.Context) { defer noticesTicking.Store(false); s.noticesTick(ctx) })
+				if s.runs.noticesTick.CompareAndSwap(false, true) {
+					s.ownedGo("notices", func(ctx context.Context) { defer s.runs.noticesTick.Store(false); s.noticesTick(ctx) })
 				}
 				if s.retentionDue(s.Clock.Now(), started) {
 					s.startRetentionPass(ctx)
 				}
-				if s.updateDue() && updateChecking.CompareAndSwap(false, true) {
-					s.ownedGo("update check", func(ctx context.Context) { defer updateChecking.Store(false); s.checkUpdate(ctx) })
+				if s.updateDue() && s.runs.updateCheck.CompareAndSwap(false, true) {
+					s.ownedGo("update check", func(ctx context.Context) { defer s.runs.updateCheck.Store(false); s.checkUpdate(ctx) })
 				}
 				s.ownedGo("update news", func(ctx context.Context) { s.updateNewsTick(ctx) })
 				if now := s.Clock.Now(); now.Sub(lastClean) >= time.Hour && len(s.leftoverList()) > 0 {
@@ -203,10 +203,10 @@ func (s *Service) schedulesAction(ctx context.Context, req action.Request) actio
 			return action.OK(req, map[string]any{"state": st})
 		case "usage_gc":
 			// one pass at a time: this run and the scheduler's (startRetentionPass) share the mark
-			if _, busy := retentionPasses.LoadOrStore(s, struct{}{}); busy {
+			if !s.runs.retention.CompareAndSwap(false, true) {
 				return action.Fail(req, errcode.ActionUnavailable, "generic.error", "a usage_gc pass is already running", nil)
 			}
-			defer retentionPasses.Delete(s)
+			defer s.runs.retention.Store(false)
 			// the pass finishes statistics first, which can take a while: it follows the service's
 			// lifetime like a backup, not the request's
 			wctx, done, ok := s.detachedWork(ctx)

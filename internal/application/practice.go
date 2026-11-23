@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"masamong/internal/action"
@@ -38,6 +39,41 @@ const (
 
 // PracticeRoot is where the practice instance lives.
 func PracticeRoot(dataRoot string) string { return filepath.Join(dataRoot, "practice") }
+
+// openPractices finds the open practice instance of a folder. It is the one registry shared by the
+// services of a process, on purpose: the console opens the practice instance, and the real instance
+// must reach it to apply a deletion or withdrawn consent to its copies (applyPracticePrivacy). It holds
+// nothing but the lookup; each service keeps its own state.
+var openPractices practiceRegistry
+
+type practiceRegistry struct {
+	mu     sync.Mutex
+	byRoot map[string]*Service
+}
+
+func (r *practiceRegistry) add(s *Service) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.byRoot == nil {
+		r.byRoot = map[string]*Service{}
+	}
+	r.byRoot[filepath.Clean(s.DataRoot)] = s
+}
+
+// remove forgets s, not a newer instance opened on the same folder after a reset.
+func (r *practiceRegistry) remove(s *Service) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if key := filepath.Clean(s.DataRoot); r.byRoot[key] == s {
+		delete(r.byRoot, key)
+	}
+}
+
+func (r *practiceRegistry) find(root string) *Service {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.byRoot[filepath.Clean(root)]
+}
 
 // Practice reports whether this service is the practice instance.
 func (s *Service) Practice() bool { return s.practice }
@@ -140,9 +176,12 @@ func OpenPractice(ctx context.Context, dataRoot, locale string, log *slog.Logger
 	}
 	s := &Service{DataRoot: root, Clock: clock.Real{}, I18n: i18n.New(), CfgPath: filepath.Join(root, "config.yaml"),
 		WebBuild: true, watchers: map[chan Event]struct{}{}, practice: true, Store: store}
+	openPractices.add(s) // Close removes it
 	// its lines still reach the daemon's log file, tagged, but not the real instance's console log
 	s.Log = s.CaptureLogs(log.With("instance", "practice"))
-	s.cfg.Store(&configSnapshot{reg: buildRegistry(offlineProviders(config.Default("", root)), s.Log, s.Clock.Now)})
+	reg := buildRegistry(offlineProviders(config.Default("", root)), s.Log, s.Clock.Now)
+	reg.hooks = &s.hooks
+	s.cfg.Store(&configSnapshot{reg: reg})
 	if err := s.reloadConfig(); err != nil {
 		_ = s.Close()
 		return nil, err

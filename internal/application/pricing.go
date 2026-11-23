@@ -100,17 +100,21 @@ const (
 	priceListMinAge = time.Hour
 )
 
+// priceState holds one service's price lists by provider (Service.priceLists).
 type priceState struct {
+	once       sync.Once
 	mu         sync.Mutex
 	lists      map[string]*priceList
 	refreshing map[string]bool
 }
 
-var priceStates sync.Map // *Service → *priceState
-
 func (s *Service) prices() *priceState {
-	v, _ := priceStates.LoadOrStore(s, &priceState{lists: map[string]*priceList{}, refreshing: map[string]bool{}})
-	return v.(*priceState)
+	st := &s.priceLists
+	st.once.Do(func() {
+		st.lists = map[string]*priceList{}
+		st.refreshing = map[string]bool{}
+	})
+	return st
 }
 
 // pricer is the adapter hook for one provider.

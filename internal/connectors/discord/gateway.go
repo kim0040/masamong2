@@ -56,6 +56,7 @@ type Gateway struct {
 	workCtx           context.Context // replies and commands; cancelled after the shutdown grace
 	cancelWork        context.CancelFunc
 	stopping          atomic.Bool
+	grace             shutdownGrace   // how long replies get at shutdown; zero = turnGrace and afterGrace
 	more              moreStore       // the rest of trimmed replies (shape.go)
 	interims          interimRegistry // the bot's "still looking" lines: never captured, their delete never reconciled (interim.go)
 	interimHook       func(*interim)  // tests: sees each turn's line as it is made
@@ -299,7 +300,8 @@ func waitContext(ctx context.Context, delay time.Duration) bool {
 
 // Replies in progress at shutdown get turnGrace to finish (the session stays open meanwhile); then they
 // are cancelled, and a turn that did not make it tells its caller the bot is restarting (LIVE-20).
-var (
+// A test shortens them for its own gateway (Gateway.grace).
+const (
 	turnGrace  = 12 * time.Second
 	afterGrace = 3 * time.Second
 )
@@ -321,13 +323,13 @@ func (g *Gateway) shutdown(sess *discordgo.Session) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(turnGrace):
+	case <-time.After(g.grace.turnLimit()):
 		if g.cancelWork != nil {
 			g.cancelWork()
 		}
 		select {
 		case <-done:
-		case <-time.After(afterGrace):
+		case <-time.After(g.grace.afterLimit()):
 		}
 	}
 	if g.cancelWork != nil {
@@ -1350,8 +1352,11 @@ func featureButton(parts []string, ictx InvokeContext, requestID string) (action
 		Invoker: &action.Invoker{Via: "command", GuildID: ictx.GuildID, ChannelID: ictx.ChannelID, UserID: ictx.UserID, Private: ictx.GuildID == "", Name: ictx.UserName}}, true
 }
 
-// extraButtons are feature button families registered next to their commands (feature -> parser).
-var extraButtons = map[string]func(parts []string) (string, map[string]any, bool){}
+// extraButtons are the feature button families (feature -> parser); the parsers live next to their
+// commands. The table is never changed.
+var extraButtons = map[string]func(parts []string) (string, map[string]any, bool){
+	"mem": memoryButton, // memory_buttons.go
+}
 
 // buttonRequest maps a poll button (poll:vote:<id>:<option>, poll:result:<id>, poll:close:<id>) to
 // its Action. Votes and closes apply to the poll as it is when the press arrives (latest), so people
