@@ -485,7 +485,9 @@ def time_bounds(
     """
 
     del scale
-    now = datetime.fromtimestamp(float(anchor_ts))
+    # The anchor is epoch seconds, a definite instant: the replay "now" is that instant in UTC (the Go
+    # port turns an epoch into time.Unix(ts, 0).UTC()), never a wall clock in this computer's zone.
+    now = datetime.fromtimestamp(float(anchor_ts), tz=timezone.utc)
     ref = TimeReference(mode="replay", now=now, source="anchor_ts")
     scope = resolve_time_scope({"kind": kind, "from": frm, "to": to}, reference=ref)
     if scope.status == "invalid":

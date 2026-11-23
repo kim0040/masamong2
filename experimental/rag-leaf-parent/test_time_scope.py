@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import time
 import unittest
 from datetime import datetime, timedelta, timezone
 
@@ -44,25 +46,54 @@ class ParsePlanV2Tests(unittest.TestCase):
 
 class TimeBoundsTests(unittest.TestCase):
     def test_relative_and_absolute(self) -> None:
-        anchor = datetime(2026, 9, 10, 15, 0).timestamp()
+        # The anchor is epoch seconds (an instant); the replay "now" is that instant in UTC and the
+        # day boundaries are UTC days — never the zone of the computer the test runs on.
+        anchor = datetime(2026, 9, 10, 15, 0, tzinfo=timezone.utc).timestamp()
+
+        def utc_day(ts: float) -> int:
+            return datetime.fromtimestamp(ts, tz=timezone.utc).day
+
         lo, hi = time_bounds("today", anchor_ts=anchor)
-        self.assertEqual(datetime.fromtimestamp(lo).hour, 0)
-        self.assertEqual(datetime.fromtimestamp(lo).day, 10)
-        self.assertEqual(datetime.fromtimestamp(hi).day, 11)
+        self.assertEqual(datetime.fromtimestamp(lo, tz=timezone.utc).hour, 0)
+        self.assertEqual(utc_day(lo), 10)
+        self.assertEqual(utc_day(hi), 11)
         lo, hi = time_bounds("yesterday", anchor_ts=anchor)
-        self.assertEqual(datetime.fromtimestamp(lo).day, 9)
-        self.assertEqual(datetime.fromtimestamp(hi).day, 10)
+        self.assertEqual(utc_day(lo), 9)
+        self.assertEqual(utc_day(hi), 10)
         lo, hi = time_bounds("last_week", anchor_ts=anchor)
-        self.assertEqual(datetime.fromtimestamp(lo).day, 3)
-        self.assertEqual(datetime.fromtimestamp(hi).day, 11)
+        self.assertEqual(utc_day(lo), 3)
+        self.assertEqual(utc_day(hi), 11)
         lo, _ = time_bounds("this_month", anchor_ts=anchor)
-        self.assertEqual(datetime.fromtimestamp(lo).day, 1)
+        self.assertEqual(utc_day(lo), 1)
         lo, hi = time_bounds("between", anchor_ts=anchor, frm="2026-02-01", to="2026-01-01")
         self.assertLess(lo, hi)  # swapped bounds normalised
         self.assertIsNone(time_bounds("between", anchor_ts=anchor, frm="??", to="2026-01-01"))
         lo1, hi1 = time_bounds("last_week", anchor_ts=anchor, scale=2.0)
         lo2, hi2 = time_bounds("last_week", anchor_ts=anchor, scale=1.0)
         self.assertEqual((lo1, hi1), (lo2, hi2))  # hard window ignores recovery scale
+
+    @unittest.skipUnless(hasattr(time, "tzset"), "switching this process's zone needs time.tzset (POSIX)")
+    def test_one_anchor_epoch_gives_the_same_bounds_in_every_zone(self) -> None:
+        # The sandbox used to read the anchor as a wall clock in this computer's zone, so the same
+        # epoch named a different "today" on a machine in Seoul than on the UTC CI runner.
+        anchor = datetime(2026, 9, 10, 15, 0, tzinfo=timezone.utc).timestamp()
+        saved = os.environ.get("TZ")
+        want = None
+        try:
+            for host_zone in ("UTC0", "KST-9", "PST8PDT"):
+                os.environ["TZ"] = host_zone
+                time.tzset()
+                bounds = {kind: time_bounds(kind, anchor_ts=anchor)
+                          for kind in ("today", "yesterday", "last_week", "this_month")}
+                if want is None:
+                    want = bounds
+                self.assertEqual(bounds, want, host_zone)
+        finally:
+            if saved is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = saved
+            time.tzset()
 
 
 class NarrowTimeTests(unittest.TestCase):
