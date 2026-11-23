@@ -12,6 +12,7 @@
 | action | — |
 | activity | — |
 | agent | — |
+| alerts | — |
 | autostart | — |
 | backfill | — |
 | backup | — |
