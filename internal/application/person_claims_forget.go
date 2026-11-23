@@ -240,8 +240,9 @@ func (s *Service) personStatementSuppressedTx(tx *sql.Tx, c store.PersonClaim) (
 }
 
 // deleteEpisodeClaimsTx deletes the claims resting on an episode an operator deletes: the ones its items
-// derive, and for a remembered fact ("remember this", an explicit episode) the explicit claims on its
-// message, which follow no item.
+// derive, for a remembered fact ("remember this", an explicit episode) the explicit claims on its message,
+// which follow no item, and the claims the same extraction saved live (extract:) on the lines the episode
+// was made from (its segment).
 func deleteEpisodeClaimsTx(tx *sql.Tx, episode string) error {
 	if !tableExists(tx, "person_claim") {
 		return nil
@@ -249,18 +250,26 @@ func deleteEpisodeClaimsTx(tx *sql.Tx, episode string) error {
 	if _, err := deleteClaimsWhere(tx, `SELECT c.id FROM episode_item i JOIN person_claim c ON c.source='episode_item:'||i.id WHERE i.episode_id=?`, episode); err != nil {
 		return err
 	}
+	if _, err := deleteClaimsWhere(tx, `SELECT c.id FROM person_claim c JOIN channel_episode e ON e.id=? WHERE c.source>=? AND c.source<? AND c.guild_id=e.guild_id
+		AND EXISTS(SELECT 1 FROM json_each(c.evidence) a JOIN json_each(e.segment) b ON a.value=b.value)`, episode, livePeoplePrefix, liveSourceEnd); err != nil {
+		return err
+	}
 	_, err := deleteClaimsWhere(tx, `SELECT c.id FROM person_claim c JOIN channel_episode e ON e.id=? WHERE e.source=? AND c.source=? AND c.guild_id=e.guild_id
 		AND EXISTS(SELECT 1 FROM json_each(c.evidence) a JOIN json_each(e.segment) b ON a.value=b.value)`, episode, explicitSource, store.SourceExplicit)
 	return err
 }
 
+// liveSourceEnd is the first source after every extract:<id> (':' + 1 is ';'), for a range scan.
+const liveSourceEnd = "extract;"
+
 // deleteRoomClaimsTx deletes the claims of a room's memory an operator deletes: the ones derived from its
-// items and the explicit ones said there.
+// items, the ones live extraction saved there and the explicit ones said there.
 func deleteRoomClaimsTx(tx *sql.Tx, room string) error {
 	if !tableExists(tx, "person_claim") {
 		return nil
 	}
-	_, err := deleteClaimsWhere(tx, `SELECT id FROM person_claim WHERE room_id=? AND (source=? OR (source>='episode_item:' AND source<'episode_item;'))`, room, store.SourceExplicit)
+	_, err := deleteClaimsWhere(tx, `SELECT id FROM person_claim WHERE room_id=? AND (source=? OR (source>='episode_item:' AND source<'episode_item;')
+		OR (source>=? AND source<?))`, room, store.SourceExplicit, livePeoplePrefix, liveSourceEnd)
 	return err
 }
 

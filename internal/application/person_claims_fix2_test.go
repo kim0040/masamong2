@@ -122,3 +122,73 @@ func TestSelfStatementNamingAnotherPersonDoesNotTravel(t *testing.T) {
 		t.Errorf("control: the speaker's own statement is not read in #other: %q", got)
 	}
 }
+
+// An operator's forget of one episode, or of a room's whole memory, also deletes the statements live
+// extraction saved from the same lines (source extract:), which follow no item. The controls: a live
+// statement on a line outside the forgotten episode's segment survives the episode forget, and one in
+// another room survives both.
+func TestEpisodeForgetRemovesLiveClaims(t *testing.T) {
+	t.Parallel()
+	for _, by := range []string{"id", "room"} {
+		t.Run(by, func(t *testing.T) {
+			t.Parallel()
+			s, m, e := memorySvc(t)
+			applyDoc(t, s, func(d *config.Document) { d.Guilds["g"].Channels["c2"] = config.ChannelPolicy{Capture: true} })
+			m.extract = func(string) string {
+				return `{"episodes":[{"op":"create","link_to":null,"kind":"event","title":"이사","items":[
+				 {"kind":"fact","text":"{p1}가 move-sentinel로 이사함","by":["p1"],"ev":["m1"]}],"status":"done","importance":3}],
+				 "people":[{"about":"p1","kind":"status","topic":"residence","text":"{p1}는 live-sentinel에 산다","by":["p1"],"ev":["m1"]}]}`
+			}
+			at := time.Now().Add(-3 * time.Hour)
+			sayIn(e, at,
+				said{"9201", "101", "민수", "나 새 동네로 이사했어 지난주에"}, said{"9202", "202", "영희", "오 정말? 축하해 이사"},
+				said{"9203", "101", "민수", "응 고마워 집들이 할게"}, said{"9204", "202", "영희", "좋아 꼭 불러줘 집들이"})
+			if rep := s.RunRoomMemory(t.Context()); rep.Episodes != 1 || rep.PeopleClaims() == 0 {
+				t.Fatalf("control: %+v", rep)
+			}
+			f := reviewPerson{s, m, e, at.Add(time.Hour)}
+			a := store.PersonRef("101")
+			keep := func(channel, id, sentinel string) {
+				t.Helper()
+				line := f.source(t, "g", channel, id, "101", "민수", f.at)
+				c := store.PersonClaim{GuildID: "g", SubjectRef: a, SpeakerRef: a, Kind: "like", Topic: sentinel, Text: "{@" + a + "}는 " + sentinel + "을 좋아함",
+					Evidence: []string{line}, Source: "extract:" + line, Link: store.LinkSelf}
+				if n, err := s.SavePersonClaimsForTest(t.Context(), c); err != nil || n != 1 {
+					t.Fatalf("control write %s: %d (%v)", sentinel, n, err)
+				}
+			}
+			keep("c", "9301", "same-room-sentinel")
+			keep("c2", "9302", "other-room-sentinel")
+			in := map[string]any{"guild_id": "g", "channel_id": "c"}
+			if by == "id" {
+				var ep string
+				if err := s.Store.DB.QueryRow(`SELECT id FROM channel_episode`).Scan(&ep); err != nil {
+					t.Fatal(err)
+				}
+				in = map[string]any{"id": ep}
+			}
+			if r := exec(s, "memory.episodes.forget", in); !r.OK {
+				t.Fatalf("forget: %+v", r)
+			}
+			if n := personClaimCount(t, s, "instr(text,'move-sentinel')>0"); n != 0 {
+				t.Fatalf("control: the derived claim went with its item: %d", n)
+			}
+			if n := personClaimCount(t, s, "instr(text,'live-sentinel')>0"); n != 0 {
+				t.Errorf("after the operator's forget, %d live-extracted statement(s) of the same lines remain", n)
+			}
+			if got := f.askIn(t, "c", "<@101> 어떤 사람이야?"); strings.Contains(got, "live-sentinel") {
+				t.Errorf("the forgotten conversation is still read: %q", got)
+			}
+			if n := personClaimCount(t, s, "instr(text,'other-room-sentinel')>0"); n != 1 {
+				t.Errorf("a live statement of another room went with the forget: %d", n)
+			}
+			want := 1 // outside the episode's segment
+			if by == "room" {
+				want = 0 // the whole room's memory
+			}
+			if n := personClaimCount(t, s, "instr(text,'same-room-sentinel')>0"); n != want {
+				t.Errorf("a live statement of the same room outside the episode: %d, want %d", n, want)
+			}
+		})
+	}
+}
