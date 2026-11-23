@@ -99,8 +99,7 @@ func TestBatchProbeSpendCountsAgainstTheLivePass(t *testing.T) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv("FAKE_BATCH_EMBED_KEY", "synthetic")
-	s := privacyService(t)
+	s := privacyServiceEnv(t, map[string]string{"FAKE_BATCH_EMBED_KEY": "synthetic"})
 	if r := s.mutateConfig(action.Request{}, func(d *config.Document) error {
 		d.Providers["batchhost"] = config.Provider{Kind: config.KindOpenAI, BaseURL: srv.URL, CredentialRef: "env:FAKE_BATCH_EMBED_KEY"}
 		d.Models["embed"] = config.Model{Provider: "batchhost", Model: "fake/embed"}
