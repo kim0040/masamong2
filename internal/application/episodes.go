@@ -161,6 +161,12 @@ func (s *Service) RunRoomMemory(ctx context.Context) RoomMemoryReport {
 		return rep
 	}
 	doc := s.Doc()
+	if doc.Memory.Capture && doc.Memory.PeopleOn() {
+		// live people extraction runs from here: the one-line path asks only about lines captured after
+		if err := s.markLiveBoundary(db); err != nil {
+			s.Log.Warn("memory: the live people boundary was not written", "err", err)
+		}
+	}
 	for _, r := range rooms {
 		if ctx.Err() != nil {
 			return rep

@@ -261,6 +261,7 @@ func TestLiveSelfStatementOfOneLine(t *testing.T) {
 		return `{"people":[{"about":"p1","kind":"status","topic":"residence","text":"{p1}는 광양에 산다","by":["p1"],"ev":["m1"]},
 			{"about":"p1","kind":"trait","topic":"x","text":"{p1}는 친절함","by":["p1"],"ev":["m9"]}]}`
 	}
+	liveStarted(t, svc)
 	base := time.Now().Add(-8 * time.Hour)
 	say := func(id, text string, at time.Time, answered bool) {
 		t.Helper()
@@ -305,6 +306,7 @@ func TestLiveSelfStatementStopsAtTheBudget(t *testing.T) {
 	svc, m, eng := roomSvc(t)
 	applyDoc(t, svc, func(d *config.Document) { d.Memory.DerivedBudgetUSD = "0.000012" })
 	m.extract = func(string) string { return `{"people":[]}` }
+	liveStarted(t, svc)
 	base := time.Now().Add(-8 * time.Hour)
 	for i := 0; i < 3; i++ {
 		at := base.Add(time.Duration(i) * 2 * time.Hour)
@@ -318,6 +320,16 @@ func TestLiveSelfStatementStopsAtTheBudget(t *testing.T) {
 	rep := svc.RunRoomMemory(context.Background())
 	if rep.StoppedBy != "budget" || rep.PeopleCalls() == 0 || rep.PeopleCalls() >= 3 || m.calls("episode") != rep.PeopleCalls() {
 		t.Fatalf("the budget did not stop the one-line path: %+v calls=%d", rep, m.calls("episode"))
+	}
+}
+
+// liveStarted runs one room memory pass before the test's lines arrive: live people extraction has
+// started, so the one-line path may ask about the lines captured after it (a line stored before it is
+// never bought).
+func liveStarted(t *testing.T, svc *application.Service) {
+	t.Helper()
+	if rep := svc.RunRoomMemory(context.Background()); rep.PeopleCalls() != 0 {
+		t.Fatalf("the first pass asked: %+v", rep)
 	}
 }
 

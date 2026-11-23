@@ -202,6 +202,7 @@ func TestLiveOneLineDoesNotSendTombstonedText(t *testing.T) {
 			m.extract = func(string) string {
 				return `{"people":[{"about":"p1","kind":"status","topic":"residence","text":"{p1}는 광양에 산다","by":["p1"],"ev":["m1"]}]}`
 			}
+			liveStarted(t, svc)
 			at := time.Now().Add(-8 * time.Hour)
 			if tc.channel != "c" {
 				svc.NoteThread("g", tc.channel, "c", false)
@@ -438,6 +439,7 @@ func TestRestartDoesNotRepurchaseSavedOneLineExtraction(t *testing.T) {
 		}
 		return n
 	}
+	liveStarted(t, svc)
 	say("6001", "<@999> 나 광양에 살아 요즘", base)
 	heal := failAdminWrites(t, svc, "r7_cursor", "episodes:cursor:%")
 	if rep := svc.RunRoomMemory(context.Background()); rep.PeopleCalls() != 1 || rep.PeopleClaims() != 1 || m.calls("episode") != 1 {

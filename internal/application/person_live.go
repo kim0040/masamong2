@@ -31,6 +31,64 @@ const livePeoplePrefix = "extract:"
 // result is saved, until the room's saved cursor covers them (liveAsked).
 const liveAskedPrefix = "people:live_asked:"
 
+// liveBoundaryKey is where live people extraction started in this database (liveBoundary).
+const liveBoundaryKey = "people:live_boundary"
+
+// liveBoundary is written once, the first time live people extraction runs in this database (a room
+// memory pass with person memory on): the time, and the last observation captured before it (rowid, the
+// capture order: a clock of one-second steps could not tell a line stored just before it from one just
+// after). The one-line path asks only about lines captured after it: a stored line from before the upgrade
+// (an unsealed singleton the bot was addressed with) is never bought on the first pass. Episode
+// extraction of segments is unchanged.
+type liveBoundary struct {
+	At    string `json:"at"`
+	RowID int64  `json:"rowid"`
+}
+
+// markLiveBoundary writes liveBoundary when there is none yet; a value once written is never moved.
+func (s *Service) markLiveBoundary(db *storage.Store) error {
+	if ok, err := s.kvGet(liveBoundaryKey, &liveBoundary{}); err == nil && ok {
+		return nil
+	}
+	var mark int64
+	if err := db.Reader().QueryRow(`SELECT COALESCE(MAX(rowid),0) FROM memory_observations`).Scan(&mark); err != nil {
+		return err
+	}
+	at := s.Clock.Now().UTC().Format(time.RFC3339Nano)
+	return kvUpdate(s, liveBoundaryKey, func(b *liveBoundary) *liveBoundary {
+		if b != nil && b.At != "" {
+			return b // written meanwhile: kept
+		}
+		return &liveBoundary{At: at, RowID: mark}
+	})
+}
+
+// afterLiveBoundary reports whether a line was captured after live people extraction started. No
+// boundary, or an unreadable one, is false (nothing is bought); so is a line no longer stored.
+func (s *Service) afterLiveBoundary(db *storage.Store, id string) (bool, error) {
+	var b liveBoundary
+	ok, err := s.kvGet(liveBoundaryKey, &b)
+	if err != nil {
+		var syntax *json.SyntaxError
+		var kind *json.UnmarshalTypeError
+		if errors.As(err, &syntax) || errors.As(err, &kind) {
+			return false, nil
+		}
+		return false, err
+	}
+	if !ok || b.At == "" {
+		return false, nil
+	}
+	var rowid int64
+	switch err := db.Reader().QueryRow(`SELECT rowid FROM memory_observations WHERE observation_id=?`, id).Scan(&rowid); {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	return rowid > b.RowID, nil
+}
+
 // liveClaims turns a segment's validated people facts into claims for the write gate and counts the facts
 // it skips. A fact is one speaker's statement or nothing: its "by" is one person and every line it cites
 // was written by that person (a bot line, or a line of another author, is never evidence). A fact the
@@ -422,6 +480,10 @@ func (s *Service) extractSelfStatement(ctx context.Context, db *storage.Store, r
 	// a line paid for and saved before is not asked again, even when the room cursor could not record it
 	one := lines[slices.IndexFunc(lines, func(l roomLine) bool { return !l.Bot })]
 	if asked, err := s.liveAsked(r.room, one.ID); err != nil || asked {
+		return ps, err
+	}
+	// a line stored before live people extraction started (before the upgrade) is never bought
+	if after, err := s.afterLiveBoundary(db, one.ID); err != nil || !after {
 		return ps, err
 	}
 	// what is no longer current is never sent (the gate's check after the answer could not undo that):
