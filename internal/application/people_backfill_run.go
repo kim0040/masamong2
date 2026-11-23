@@ -10,6 +10,7 @@ import (
 	"errors"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -364,14 +365,17 @@ func (s *Service) pbStartPilot(ctx context.Context, req action.Request, db *stor
 	}
 	var resume *store.BackfillRun
 	now := s.Clock.Now().UTC().Format(time.RFC3339)
+	// a busy run refuses the pilot before anything is superseded
+	for _, r := range runs {
+		if ((r.State == store.BackfillPiloting || r.State == store.BackfillSubmitted) && pbLoops.m[s][r.ID] != nil) ||
+			r.State == store.BackfillSubmitted || pbHasInFlight(r) {
+			// a worker on it, or sent batches no worker polls: the operator continues that run, never a second one beside it
+			return action.Fail(req, errcode.ConfigConflict, "people_backfill.busy", s.msg(req, "people_backfill.busy"), map[string]any{"run": pbRunJSON(db, r)})
+		}
+	}
 	for i := range runs {
 		r := runs[i]
 		switch {
-		case (r.State == store.BackfillPiloting || r.State == store.BackfillSubmitted) && pbLoops.m[s][r.ID] != nil:
-			return action.Fail(req, errcode.ConfigConflict, "people_backfill.busy", s.msg(req, "people_backfill.busy"), map[string]any{"run": pbRunJSON(db, r)})
-		case r.State == store.BackfillSubmitted || pbHasInFlight(r):
-			// sent batches no worker polls: the operator continues that run, never a second one beside it
-			return action.Fail(req, errcode.ConfigConflict, "people_backfill.busy", s.msg(req, "people_backfill.busy"), map[string]any{"run": pbRunJSON(db, r)})
 		case r.Token == plan.Token && r.PilotDone && (r.State == store.BackfillPiloted || r.State == store.BackfillStopped):
 			// this plan's pilot is done: report it again, nothing is sent
 			return action.OK(req, map[string]any{"mode": "pilot", "run": pbRunJSON(db, r), "model_calls": 0})
@@ -982,10 +986,22 @@ func (s *Service) pbStartRun(ctx context.Context, req action.Request, db *storag
 		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	if !started {
-		var fail *action.Result
-		if plan, fail = s.pbConfirmedPlan(ctx, req, db, in); fail != nil {
+		rebuilt, changed, fail := s.pbCheckPlan(ctx, req, db, in)
+		if changed {
+			// a finished pilot goes on when only windows outside it changed (a message deleted or captured
+			// while the operator read the pilot): the paid answers are kept
+			var ok bool
+			if rebuilt, ok, err = s.pbRebasePilot(ctx, db, strVal(in, "confirm", ""), rebuilt); err != nil {
+				return s.failErr(req, errcode.IO, "error.storage", err, nil)
+			}
+			if ok {
+				fail = nil
+			}
+		}
+		if fail != nil {
 			return *fail
 		}
+		plan = rebuilt
 	}
 	model, ok := pbModels[strVal(in, "model", "")]
 	if !ok {
@@ -1051,6 +1067,100 @@ func (s *Service) pbStartRun(ctx context.Context, req action.Request, db *storag
 	}
 	s.Log.Info("people backfill: run started", "run", runID, "model", string(model))
 	return action.OK(req, map[string]any{"mode": "run", "run": pbRunJSON(db, *run)})
+}
+
+// pbRebasePilot moves the finished, not yet started pilot run of token confirm onto plan, the plan as it
+// is now, when plan still holds every pilot window: windows outside the pilot are replaced by the plan's,
+// the pilot windows keep their stored answers (an answer whose prompt changed is not applied, and the
+// window goes out in a batch). The run takes the plan's token. False: no such run, or a pilot window is
+// gone (a new pilot is needed).
+func (s *Service) pbRebasePilot(ctx context.Context, db *storage.Store, confirm string, plan pbPlan) (pbPlan, bool, error) {
+	pbLoops.Lock()
+	defer pbLoops.Unlock()
+	runs, err := store.BackfillRuns(db.Reader(), plan.Params.Guild, store.BackfillPiloted, store.BackfillStopped)
+	if err != nil || confirm == "" {
+		return plan, false, err
+	}
+	var run *store.BackfillRun
+	for i, r := range runs {
+		var was pbParams
+		// the same plan (server, rooms, range and cap), changed only in its lines
+		same := json.Unmarshal(r.Params, &was) == nil && was.Guild == plan.Params.Guild && slices.Equal(was.Rooms, plan.Params.Rooms) &&
+			was.Since == plan.Params.Since && was.Until == plan.Params.Until && was.BudgetUSD == plan.Params.BudgetUSD
+		if same && r.Token == confirm && r.PilotDone && r.Model == "" && pbLoops.m[s][r.ID] == nil && !pbHasInFlight(r) {
+			run = &runs[i]
+			break
+		}
+	}
+	if run == nil {
+		return plan, false, nil
+	}
+	byID := map[string]pbWindow{}
+	for _, w := range plan.Windows {
+		byID[w.ID] = w
+	}
+	now := s.Clock.Now().UTC().Format(time.RFC3339)
+	ok := true
+	err = db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+		have, err := store.BackfillWindows(tx, run.ID, false)
+		if err != nil {
+			return err
+		}
+		kept := map[string]bool{}
+		for _, w := range have {
+			if w.Pilot {
+				if _, in := byID[w.ID]; !in {
+					ok = false
+					return nil
+				}
+			}
+		}
+		for _, w := range have {
+			pw, in := byID[w.ID]
+			if !in {
+				if err := store.DeleteBackfillWindow(tx, run.ID, w.ID); err != nil {
+					return err
+				}
+				continue
+			}
+			kept[w.ID] = true
+			w.Seq, w.Lines, w.Obs, w.UpdatedAt = pw.Seq, pw.Lines, pw.Obs, now
+			w.FirstAt, w.LastAt = pw.First.UTC().Format(time.RFC3339Nano), pw.Last.UTC().Format(time.RFC3339Nano)
+			if w.State == store.WindowQueued || w.State == store.WindowSkipped {
+				w.State = store.WindowQueued
+				if pw.Skipped {
+					w.State = store.WindowSkipped
+				}
+			}
+			if err := store.SaveBackfillWindow(tx, w); err != nil {
+				return err
+			}
+		}
+		var add []store.BackfillWindow
+		for _, w := range plan.Windows {
+			if kept[w.ID] {
+				continue
+			}
+			state := store.WindowQueued
+			if w.Skipped {
+				state = store.WindowSkipped
+			}
+			add = append(add, store.BackfillWindow{RunID: run.ID, ID: w.ID, Room: w.Room, Seq: w.Seq, Lines: w.Lines, Obs: w.Obs,
+				FirstAt: w.First.UTC().Format(time.RFC3339Nano), LastAt: w.Last.UTC().Format(time.RFC3339Nano), State: state, UpdatedAt: now})
+		}
+		if err := store.InsertBackfillWindows(tx, add); err != nil {
+			return err
+		}
+		from := run.State
+		run.Token, run.Windows, run.UpdatedAt = plan.Token, len(plan.Windows), now
+		run.Params, _ = json.Marshal(plan.Params)
+		return store.SaveBackfillRun(tx, *run, from)
+	})
+	if err != nil || !ok {
+		return plan, false, err
+	}
+	s.Log.Info("people backfill: pilot kept for a changed plan", "run", run.ID, "windows", len(plan.Windows))
+	return plan, true, nil
 }
 
 // pbStartedPlan is the plan of a run that already started (a model chosen) whose token confirm names:

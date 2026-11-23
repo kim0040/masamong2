@@ -634,42 +634,49 @@ func (s *Service) pbDryRun(ctx context.Context, req action.Request, db *storage.
 // built again from the observations. A token that is not the stored one, or a plan that no longer gives
 // it, is refused with the current plan's dry-run output (and that plan is stored).
 func (s *Service) pbConfirmedPlan(ctx context.Context, req action.Request, db *storage.Store, in map[string]any) (pbPlan, *action.Result) {
+	plan, _, fail := s.pbCheckPlan(ctx, req, db, in)
+	return plan, fail
+}
+
+// pbCheckPlan is pbConfirmedPlan that also hands back the plan as it is now when it changed (changed:
+// the plan built again, with its new token stored, and the plan_changed failure).
+func (s *Service) pbCheckPlan(ctx context.Context, req action.Request, db *storage.Store, in map[string]any) (pbPlan, bool, *action.Result) {
 	confirm := strVal(in, "confirm", "")
 	guild, err := pbGuild(db, in)
 	if err != nil {
 		res := s.failErr(req, errcode.IO, "error.storage", err, nil)
-		return pbPlan{}, &res
+		return pbPlan{}, false, &res
 	}
 	var stored pbParams
 	ok, err := s.kvGet(pbPlanKey+guild, &stored)
 	if err != nil {
 		res := s.failErr(req, errcode.IO, "error.storage", err, nil)
-		return pbPlan{}, &res
+		return pbPlan{}, false, &res
 	}
 	if guild == "" || !ok || confirm == "" {
 		res := action.Fail(req, errcode.InvalidInput, "people_backfill.confirm_needed", s.msg(req, "people_backfill.confirm_needed"), map[string]any{"field": "confirm"})
-		return pbPlan{}, &res
+		return pbPlan{}, false, &res
 	}
 	params := stored
 	params.Token, params.CreatedAt = "", ""
 	plan, err := s.pbBuildPlan(ctx, db, params)
 	if err != nil {
 		res := s.failErr(req, errcode.IO, "error.storage", err, nil)
-		return pbPlan{}, &res
+		return pbPlan{}, false, &res
 	}
 	if plan.Token != confirm || stored.Token != confirm {
 		plan.Params.CreatedAt = s.Clock.Now().UTC().Format(time.RFC3339)
 		if err := s.kvSet(pbPlanKey+guild, plan.Params); err != nil {
 			res := s.failErr(req, errcode.IO, "error.storage", err, nil)
-			return pbPlan{}, &res
+			return pbPlan{}, false, &res
 		}
 		spent, _ := store.BackfillGuildSpent(db.Reader(), guild)
 		res := action.Fail(req, errcode.StaleRevision, "people_backfill.plan_changed", s.msg(req, "people_backfill.plan_changed"),
 			map[string]any{"dry_run": s.pbDryRunOutput(plan, spent)})
-		return pbPlan{}, &res
+		return plan, true, &res
 	}
 	plan.Params.CreatedAt = stored.CreatedAt
-	return plan, nil
+	return plan, false, nil
 }
 
 // ---------------------------------------------------------------------------

@@ -2079,3 +2079,107 @@ func TestPeopleBackfillCompletedPlanDoesNotResend(t *testing.T) {
 		}
 	}
 }
+
+// A finished pilot goes on when only windows outside it changed: a message of a window the pilot did not
+// send is deleted while the operator reads the pilot, and run with the piloted token keeps the paid
+// answers (no pilot call again) and sends the rest. When a pilot window itself is gone, run refuses.
+func TestPeopleBackfillRunKeepsPilotWhenOnlyOtherWindowsChanged(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	token, run := pbPiloted(t, s, nil)
+	ws, _ := store.BackfillWindows(s.Store.Reader(), run.ID, false)
+	var outside store.BackfillWindow
+	for _, w := range ws {
+		if !w.Pilot && w.State == store.WindowQueued {
+			outside = w
+			break
+		}
+	}
+	if outside.ID == "" {
+		t.Fatal("no window outside the pilot")
+	}
+	// an old message of Mina captured late, inside that window's first run of her lines: the plan changes
+	// (its token covers every line), the windows' ids do not
+	first, _ := time.Parse(time.RFC3339Nano, outside.FirstAt)
+	e, _ := s.MemoryEngine()
+	if ok, err := e.Capture(engine.LiveMessage{GuildID: "g1", ChannelID: "c1", MessageID: "late1", AuthorID: "101", AuthorName: "Mina",
+		Content: "and I really like latecomer things", At: first.Add(30 * time.Second)}); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if again := pbDry(t, s, nil); again["token"] == token || again["windows"].(float64) != 70 {
+		t.Fatalf("the late line: %v windows, token changed %v", again["windows"], again["token"] != token)
+	}
+	h.mu.Lock()
+	chats := len(h.chats)
+	h.mu.Unlock()
+	res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token})
+	if !res.OK {
+		t.Fatalf("run after a change outside the pilot: %+v", res.Error)
+	}
+	done := pbWait(t, s, "run", pbState(store.BackfillDone))
+	h.mu.Lock()
+	again := len(h.chats) - chats
+	h.mu.Unlock()
+	if done.ID != run.ID || again != 0 {
+		t.Fatalf("the pilot was not kept: run %s, %d pilot calls again", done.ID, again)
+	}
+	after, _ := store.BackfillWindows(s.Store.Reader(), run.ID, false)
+	applied := 0
+	for _, w := range after {
+		if w.ID == outside.ID && !slices.Contains(w.Obs, corpus.DiscordLiveObservationID(engine.RoomKey("g1", "c1"), "late1")) {
+			t.Fatal("the changed window kept its old lines")
+		}
+		if w.State == store.WindowApplied {
+			applied++
+		}
+	}
+	if applied != 70 {
+		t.Fatalf("applied %d windows, want 70", applied)
+	}
+	sawLate := false
+	for _, text := range h.requestTexts() {
+		sawLate = sawLate || strings.Contains(text, "latecomer things")
+	}
+	if !sawLate {
+		t.Fatal("the late line was not sent")
+	}
+
+	// a second server state: a pilot window loses its first line, so the pilot no longer matches the plan
+	h2 := newPBHost(t)
+	s2 := pbService(t, h2, "anthropic")
+	pbSeed(t, s2, 70)
+	token2, run2 := pbPiloted(t, s2, nil)
+	pilots, _ := store.BackfillWindows(s2.Store.Reader(), run2.ID, true)
+	if _, err := s2.Store.DB.Exec(`UPDATE memory_observations SET deleted_at='2026-11-01T00:00:00Z', content='' WHERE observation_id=?`, pilots[0].Obs[0]); err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := pbExec(t, s2, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token2}); res.OK || res.Error.MessageKey != "people_backfill.plan_changed" {
+		t.Fatalf("a run whose pilot window changed: %+v", res.Error)
+	}
+}
+
+// A busy run refuses a new pilot before an older plan's pilot is superseded: its answers stay.
+func TestPeopleBackfillBusyRefusesBeforeSupersede(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	_, run := pbPiloted(t, s, nil)
+	// an older run of the server with a batch in flight that no worker polls
+	busy := store.BackfillRun{ID: "pb_busy", GuildID: "g1", State: store.BackfillStopped, Token: "busy-token", Params: []byte(`{}`), Model: "claude-haiku-5-5",
+		Provider: "claude", BudgetUSD: 3, PilotDone: true, Batches: []byte(`[{"key":"pbb_x","state":"unknown","model":"claude-haiku-5-5","windows":1,"max_usd":0.01,"at":"2026-01-01T00:00:00Z"}]`),
+		CreatedAt: "2026-01-01T00:00:00Z", UpdatedAt: "2026-01-01T00:00:00Z"}
+	if err := store.InsertBackfillRun(s.Store.DB, busy); err != nil {
+		t.Fatal(err)
+	}
+	pbSegment(t, s, 80, [3]string{"101", "Mina", "I really like another plan"}, [3]string{"102", "Joon", "I really like it as well"})
+	dry := pbDry(t, s, nil)
+	res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": dry["token"], "guild_id": "g1"})
+	if res.OK || res.Error.MessageKey != "people_backfill.busy" {
+		t.Fatalf("a pilot beside a busy run: %+v", res)
+	}
+	kept, _, _ := store.LoadBackfillRun(s.Store.Reader(), run.ID)
+	if kept.State != store.BackfillPiloted || len(pbStoredFacts(t, s, run.ID)) == 0 {
+		t.Fatalf("the refused pilot superseded the older plan's run: %s", kept.State)
+	}
+}

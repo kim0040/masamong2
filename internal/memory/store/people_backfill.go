@@ -292,6 +292,12 @@ func SaveBackfillWindow(q backfillQuerier, w BackfillWindow) error {
 	return err
 }
 
+// DeleteBackfillWindow removes one window of a run (a run moved onto a newer plan before it started).
+func DeleteBackfillWindow(q backfillQuerier, runID, id string) error {
+	_, err := q.Exec(`DELETE FROM people_backfill_window WHERE run_id=? AND id=?`, runID, id)
+	return err
+}
+
 // LoadBackfillWindow reads one window of a run; ok is false when there is none.
 func LoadBackfillWindow(q backfillQuerier, runID, id string) (BackfillWindow, bool, error) {
 	w, err := scanBackfillWindow(q.QueryRow(`SELECT `+backfillWindowCols+` FROM people_backfill_window WHERE run_id=? AND id=?`, runID, id))
