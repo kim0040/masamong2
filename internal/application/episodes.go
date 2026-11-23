@@ -77,6 +77,9 @@ type RoomMemoryReport struct {
 	Failed      int    `json:"failed"`
 	States      int    `json:"states"`
 	StoppedBy   string `json:"stopped_by,omitempty"`
+	// person memory: model calls made for one-line self statements and claims saved (counts only)
+	PeopleCalls  int `json:"people_calls,omitempty"`
+	PeopleClaims int `json:"people_claims,omitempty"`
 }
 
 // memRoom is one room room memory is made for.
@@ -115,7 +118,8 @@ func (s *Service) roomMemoryPass(ctx context.Context) {
 		rep := s.RunRoomMemory(ctx)
 		if rep.Segments+rep.States+rep.Expired+rep.Regenerated > 0 || rep.StoppedBy != "" {
 			s.Log.Info("memory: room memory pass", "segments", rep.Segments, "episodes", rep.Episodes, "failed", rep.Failed,
-				"states", rep.States, "expired", rep.Expired, "regenerated", rep.Regenerated, "stopped_by", rep.StoppedBy)
+				"states", rep.States, "expired", rep.Expired, "regenerated", rep.Regenerated, "stopped_by", rep.StoppedBy,
+				"people_calls", rep.PeopleCalls, "people_claims", rep.PeopleClaims)
 		}
 	})
 }
@@ -163,6 +167,7 @@ func (s *Service) RunRoomMemory(ctx context.Context) RoomMemoryReport {
 			if s.derivedAllows(spendEpisode) {
 				st, err := s.extractRoom(ctx, db, r, now, passSegments)
 				rep.Segments, rep.Episodes, rep.Failed = rep.Segments+st.segments, rep.Episodes+st.saved, rep.Failed+st.failed
+				rep.PeopleCalls, rep.PeopleClaims = rep.PeopleCalls+st.peopleCalls, rep.PeopleClaims+st.claims
 				if stop(err) {
 					return rep
 				}
@@ -184,6 +189,7 @@ func (s *Service) RunRoomMemory(ctx context.Context) RoomMemoryReport {
 	}
 	st, err := s.continueKakaoExtractions(ctx, db, now)
 	rep.Segments, rep.Episodes, rep.Failed = rep.Segments+st.segments, rep.Episodes+st.saved, rep.Failed+st.failed
+	rep.PeopleCalls, rep.PeopleClaims = rep.PeopleCalls+st.peopleCalls, rep.PeopleClaims+st.claims
 	stop(err)
 	return rep
 }
@@ -458,7 +464,9 @@ type episodeCursor struct {
 // sealAfterRefusals is how many refused saves in a row seal a segment.
 const sealAfterRefusals = 2
 
-type extractStats struct{ segments, saved, failed int }
+// extractStats counts a room's extraction; peopleCalls and claims are person memory (calls for one-line
+// self statements, claims written by live extraction).
+type extractStats struct{ segments, saved, failed, peopleCalls, claims int }
 
 // extractRoom extracts up to limit closed segments of a room and moves its cursor on.
 func (s *Service) extractRoom(ctx context.Context, db *storage.Store, r memRoom, now time.Time, limit int) (extractStats, error) {
@@ -529,7 +537,9 @@ func (s *Service) extractRoom(ctx context.Context, db *storage.Store, r memRoom,
 		for _, id := range sg.IDs {
 			segLines = append(segLines, byID[id])
 		}
-		saved, err := s.extractSegment(ctx, db, r, segLines, bots, pack, botName)
+		saved, ps, err := s.extractSegment(ctx, db, r, segLines, bots, pack, botName)
+		st.peopleCalls += ps.calls
+		st.claims += ps.claims
 		switch {
 		case errors.Is(err, errEvidenceDeleted):
 			if cur.Refused == nil {
@@ -719,9 +729,15 @@ func (s *Service) keepValidPart(kind string, keep bool, problems []string) error
 	return nil
 }
 
+// peopleStats is what person memory did for one segment (counts only).
+type peopleStats struct{ calls, claims int }
+
 // extractSegment asks the model about one closed segment and saves what validates. It returns how many
-// episodes were created or changed.
-func (s *Service) extractSegment(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, bots []episodes.Message, pack *lang.Pack, botName string) (int, error) {
+// episodes were created or changed. A segment of one line the bot was addressed with asks the people-only
+// prompt instead (extractSelfStatement); the people list of an episode answer is parsed apart and a bad
+// one costs only the claims.
+func (s *Service) extractSegment(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, bots []episodes.Message, pack *lang.Pack, botName string) (int, peopleStats, error) {
+	var ps peopleStats
 	human := map[string]bool{}
 	for _, l := range lines {
 		if !l.Bot {
@@ -729,20 +745,27 @@ func (s *Service) extractSegment(ctx context.Context, db *storage.Store, r memRo
 		}
 	}
 	if len(human) < 2 {
-		return 0, nil // one message is not a conversation: nothing to remember, nothing spent
+		// one message is not a conversation: no episode and, unless it is a short statement made to the
+		// bot, nothing spent
+		calls, claims, err := s.extractSelfStatement(ctx, db, r, lines, bots, pack, botName)
+		return 0, peopleStats{calls, claims}, err
 	}
 	msgs := segmentMessages(lines, bots)
-	p := episodes.Build(episodes.Input{Lines: msgs, BotName: botName, Now: lines[len(lines)-1].At, Location: s.instanceZone(),
-		Plans: s.openPlans(db, r.room), RefOf: func(m episodes.Message) string { return personRefOf(r, m) }, LabelOf: s.refLabels(db, r.room)})
+	readAt := s.Clock.Now().UTC().Format(time.RFC3339Nano)
+	p := episodes.Build(s.personBuild(db, r, episodes.Input{Lines: msgs, BotName: botName, Now: lines[len(lines)-1].At, Location: s.instanceZone(),
+		Plans: s.openPlans(db, r.room), RefOf: func(m episodes.Message) string { return personRefOf(r, m) }, LabelOf: s.refLabels(db, r.room)}, lines))
 	system := lang.Fill(pack.Memory.EpisodeExtractSystem, "bot", botName)
-	prompt := lang.Fill(pack.Memory.EpisodeExtract, "now", p.Now, "people", p.People(), "plans", p.Plans, "lines", p.Lines)
+	prompt := p.FillExtract(pack.Memory.EpisodeExtract)
 	var res episodes.Result
+	var facts []episodes.PersonFact
 	err := s.askValidated(ctx, spendEpisode, system, prompt, extractTokens, func(text string, final bool) error {
 		var err error
 		res, err = p.Parse(text)
 		if err != nil {
 			return err
 		}
+		// the people list is validated apart: whatever it holds, the episodes are judged on their own
+		facts, _ = p.ParsePeople(text, episodes.PeopleOptions{})
 		if !res.Clean() {
 			// Every episode and item that is kept passed its own checks, so on the last answer the
 			// valid ones are saved: one item citing the bot's line used to drop the whole conversation
@@ -752,18 +775,24 @@ func (s *Service) extractSegment(ctx context.Context, db *storage.Store, r memRo
 		return nil
 	})
 	if err != nil {
-		return 0, err
+		return 0, ps, err
 	}
-	if len(res.Ops) == 0 {
-		return 0, nil
+	claims, _ := liveClaims(r, liveSource(lines), readAt, facts, lines)
+	if len(res.Ops) == 0 && len(claims) == 0 {
+		return 0, ps, nil
 	}
-	return s.saveEpisodeOps(ctx, db, r, lines, res.Ops, "")
+	changed, saved, err := s.saveEpisodeOps(ctx, db, r, lines, res.Ops, "", claims)
+	ps.claims = saved
+	return changed, ps, err
 }
 
 // saveEpisodeOps commits validated operations with their evidence. It refuses the whole answer when a
 // line the model read was edited, deleted or withdrawn meanwhile (errEvidenceDeleted). supersedes names
-// the episode a regeneration replaces (deleted in the same transaction).
-func (s *Service) saveEpisodeOps(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, ops []episodes.Op, supersedes string) (int, error) {
+// the episode a regeneration replaces (deleted in the same transaction). claims are the person claims of
+// the same answer: they go through the write gate in the same transaction (a claim the gate refuses is
+// skipped, never the answer), after the items they may upgrade. It returns the episodes changed and the
+// claims written.
+func (s *Service) saveEpisodeOps(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, ops []episodes.Op, supersedes string, claims []store.PersonClaim) (int, int, error) {
 	byID := map[string]roomLine{}
 	var segment []string
 	for _, l := range lines {
@@ -774,7 +803,7 @@ func (s *Service) saveEpisodeOps(ctx context.Context, db *storage.Store, r memRo
 	}
 	loc := s.instanceZone()
 	nowS := s.Clock.Now().UTC().Format(time.RFC3339)
-	changed := 0
+	changed, people := 0, 0
 	err := db.WithWriterContext(ctx, func(tx *sql.Tx) error {
 		for _, l := range lines {
 			if l.Bot {
@@ -848,9 +877,14 @@ func (s *Service) saveEpisodeOps(ctx context.Context, db *storage.Store, r memRo
 				}
 			}
 		}
-		return nil
+		n, err := s.savePeopleTx(ctx, tx, claims)
+		people = n
+		return err
 	})
-	return changed, err
+	if err == nil && people > 0 {
+		s.noteLiveSince(r.guild)
+	}
+	return changed, people, err
 }
 
 // omitExplicitFactDuplicates drops only model-extracted facts that satisfy the shared explicit-fact
@@ -1140,17 +1174,21 @@ func (s *Service) regenerateEpisodes(ctx context.Context, db *storage.Store, now
 			continue
 		}
 		pack, botName := s.roomVoice(j.r)
-		p := episodes.Build(episodes.Input{Lines: withReplies(lines, nil), BotName: botName, Now: lines[len(lines)-1].At, Location: s.instanceZone(),
-			RefOf: func(m episodes.Message) string { return personRefOf(j.r, m) }, LabelOf: s.refLabels(db, j.r.room)})
+		readAt := s.Clock.Now().UTC().Format(time.RFC3339Nano)
+		regenLines := withReplies(lines, nil)
+		p := episodes.Build(s.personBuild(db, j.r, episodes.Input{Lines: regenLines, BotName: botName, Now: lines[len(lines)-1].At, Location: s.instanceZone(),
+			RefOf: func(m episodes.Message) string { return personRefOf(j.r, m) }, LabelOf: s.refLabels(db, j.r.room)}, lines))
 		system := lang.Fill(pack.Memory.EpisodeExtractSystem, "bot", botName)
-		prompt := lang.Fill(pack.Memory.EpisodeExtract, "now", p.Now, "people", p.People(), "plans", p.Plans, "lines", p.Lines)
+		prompt := p.FillExtract(pack.Memory.EpisodeExtract)
 		var res episodes.Result
+		var facts []episodes.PersonFact
 		// a regeneration replaces the episode, so it takes a clean answer only
 		err = s.askValidated(ctx, spendEpisode, system, prompt, extractTokens, func(text string, _ bool) error {
 			var err error
 			if res, err = p.Parse(text); err != nil {
 				return err
 			}
+			facts, _ = p.ParsePeople(text, episodes.PeopleOptions{}) // apart: a bad list costs only the claims
 			if !res.Clean() {
 				return invalidAnswer(res.Problems)
 			}
@@ -1167,7 +1205,9 @@ func (s *Service) regenerateEpisodes(ctx context.Context, db *storage.Store, now
 		case err != nil:
 			return n, err
 		}
-		_, err = s.saveEpisodeOps(ctx, db, j.r, lines, res.Ops, j.id)
+		// the same statements made again are the same claims (the id is the statement's), so they merge
+		claims, _ := liveClaims(j.r, liveSource(lines), readAt, facts, lines)
+		_, _, err = s.saveEpisodeOps(ctx, db, j.r, lines, res.Ops, j.id, claims)
 		if errors.Is(err, errEvidenceDeleted) {
 			continue
 		}
