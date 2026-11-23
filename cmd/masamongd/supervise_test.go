@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -17,6 +19,7 @@ import (
 	"time"
 
 	"masamong/internal/launcher"
+	"masamong/internal/testutil"
 	"masamong/internal/transport/web"
 )
 
@@ -125,7 +128,15 @@ func fakeServingDaemon(dir string, code int) {
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/health":
-			fmt.Fprint(w, `{"ok":true}`)
+			// answers the launcher's challenge like the real console (from the address the request
+			// arrived on), or the Windows stop request is refused before it is sent
+			c := r.URL.Query().Get(launcher.ChallengeParam)
+			addr, ok := r.Context().Value(http.LocalAddrContextKey).(net.Addr)
+			if !launcher.ValidChallenge(c) || !ok {
+				fmt.Fprint(w, `{"ok":true}`)
+				return
+			}
+			fmt.Fprintf(w, `{"ok":true,"proof":%q}`, launcher.EndpointProof(token, addr.String(), c))
 		case "/api/login":
 			// Exercise the actual token file and request path without logging its contents.
 			b, _ := io.ReadAll(r.Body)
@@ -220,6 +231,59 @@ func TestChildStopGraceExceedsDaemonBudget(t *testing.T) {
 	if grace < 55*time.Second || grace > 65*time.Second {
 		t.Fatalf("grace %s, want about 60s", grace)
 	}
+}
+
+// The Windows supervisor stops its child through the console's stop API (terminate in
+// supervise_windows.go), so the fake console must pass the launcher's checks, endpoint proof included.
+// This runs on every system so a launcher change the fake does not follow fails here, not only on
+// Windows CI.
+func TestFakeConsoleTakesTheChildStopRequest(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "data")
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(self, "--data-root", root) // the root the supervisor pins on its child
+	cmd.Env = append(os.Environ(), fakeDaemonEnv+"="+dir, "MASAMONG_FAKE_SCRIPT=80",
+		supervisedEnv+"="+strconv.Itoa(os.Getpid()))
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-exited
+	})
+	waitForDaemon(t, root)
+	token, err := web.ReadToken(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := launcher.RequestStopChild(context.Background(), root, cmd.Process.Pid, token); err != nil {
+		t.Fatalf("the fake console refused the stop request: %v", err)
+	}
+	select {
+	case err := <-exited:
+		exited <- err // for the cleanup
+		if err != nil {
+			t.Fatalf("fake console exit: %v", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the fake console did not stop")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "clean")); err != nil {
+		t.Fatalf("clean marker: %v", err)
+	}
+}
+
+func waitForDaemon(t *testing.T, root string) {
+	t.Helper()
+	testutil.WaitFor(t, 30*time.Second, "the fake daemon to become ready", func() bool {
+		_, ok := launcher.ReadInfo(root)
+		return ok
+	})
 }
 
 func TestSupervisorPinsDataRootOnTheChildArgv(t *testing.T) {
