@@ -431,13 +431,14 @@ func (s *Service) alertsAction(ctx context.Context, req action.Request) action.R
 		if why == "discord_offline" {
 			code = errcode.DiscordNotConnected
 		}
-		return action.Fail(req, code, "generic.error", "alerts cannot be sent: "+why, map[string]any{"reason": why})
+		return s.failErr(req, code, "alerts.cannot_send", errors.New("alerts cannot be sent: "+why), map[string]any{"reason": why})
 	}
 	locale := s.alertLocale()
 	d := s.sendAlert(ctx, dm, locale, []string{uiCatalog().T(locale, "alerts.test_line")}, false, true)
 	status["last"] = d
 	if d.Sent == 0 {
-		return action.Fail(req, errcode.ProviderUnavailable, "generic.error", "no operator could be reached: "+d.Reason, map[string]any{"reason": d.Reason, "last": d})
+		return s.failErr(req, errcode.ProviderUnavailable, "alerts.unreachable", errors.New("no operator could be reached: "+d.Reason),
+			map[string]any{"reason": d.Reason, "last": d})
 	}
 	return action.OK(req, status)
 }

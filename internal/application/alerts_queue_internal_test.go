@@ -375,3 +375,26 @@ func TestAlertStatusTakesTheFirstAttemptAfterARestart(t *testing.T) {
 		t.Fatalf("last attempt = %+v, want the attempt of this run", last)
 	}
 }
+
+// alerts.test fails with a message key in the request's language, not English or Go text; the reason
+// stays in the arguments, where the console reads it.
+func TestAlertTestFailuresAnswerWithMessageKeys(t *testing.T) {
+	s, dm := alertQueueService(t)
+	ctx := context.Background()
+	dm.mu.Lock()
+	dm.fail = true
+	dm.mu.Unlock()
+	check := func(key, reason string) {
+		t.Helper()
+		req := action.Request{Action: "alerts.test", Locale: "ko"}
+		r := s.Execute(ctx, req)
+		if r.OK || r.Error.MessageKey != key || r.Error.Message != s.msg(req, key) || r.Error.Args["reason"] != reason {
+			t.Fatalf("alerts.test = %+v, want key %s with reason %s", r.Error, key, reason)
+		}
+	}
+	check("alerts.unreachable", "send_failed")
+	doc := s.Doc()
+	doc.Access.Operators = nil
+	s.setDoc(doc, s.Revision())
+	check("alerts.cannot_send", "no_operators")
+}

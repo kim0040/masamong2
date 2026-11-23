@@ -26,6 +26,8 @@
   "web.not_public": "该地址不是公开网页，无法读取。",
   "polls.invalid": "投票未被接受。需要一个问题（最多 300 个字符）和 2 到 10 个选项（每个最多 55 个字符）。",
   "polls.vote_invalid": "该投票未被接受。投票可能已关闭，或所选项与投票不匹配。",
+  "alerts.cannot_send": "现在无法向运维人员发送提醒。请检查是否已设置运维人员，以及 Discord 是否已连接。",
+  "alerts.unreachable": "未能向任何运维人员发送提醒。详情请查看服务日志。",
   "memory.not_ready": "记忆功能尚未就绪。请完成初始设置，并在设置中检查记忆所用的模型。",
   "memory.failed": "记忆处理未能完成。详情请查看服务日志。",
   "memory.provider_missing": "此记忆处理尚未配置模型。请在设置中添加密钥。",
