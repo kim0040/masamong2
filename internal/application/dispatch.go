@@ -147,7 +147,7 @@ func (s *Service) summariesChannel(ctx context.Context, req action.Request) acti
 
 func (s *Service) runtimeHistoryAction(req action.Request) action.Result {
 	if _, err := s.adminDB(); err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	return s.runtimeHistory(req)
 }

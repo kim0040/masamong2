@@ -154,7 +154,7 @@ func (s *Service) channelSummary(ctx context.Context, req action.Request) action
 	}
 	eng, err := s.MemoryEngine()
 	if err != nil {
-		return action.Fail(req, errcode.NotSetup, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.NotSetup, "memory.not_ready", err, nil)
 	}
 	lookBack := min(1000, max(10, intVal(in, "look_back", summaryLookBack)))
 	incrementMax := max(1, intVal(in, "increment_max", summaryIncrementMax))
@@ -163,7 +163,7 @@ func (s *Service) channelSummary(ctx context.Context, req action.Request) action
 	rev := s.roomRevision(room)
 	msgs, err := eng.Store.RecentMessages(room, lookBack)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	title := s.msg(req, "summary.title")
 	if len(msgs) < max(1, intVal(in, "min_messages", summaryMinMessages)) {
@@ -204,7 +204,7 @@ func (s *Service) channelSummary(ctx context.Context, req action.Request) action
 		if errors.Is(err, ErrChatBudget) {
 			return action.Fail(req, errcode.BudgetExceeded, "summary.budget", s.msg(req, "summary.budget"), nil)
 		}
-		return action.Fail(req, errcode.ProviderError, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.ProviderError, "feature.model_failed", err, nil)
 	}
 	now := s.Clock.Now().UTC().Format(time.RFC3339Nano)
 	if s.roomRevision(room) != rev {

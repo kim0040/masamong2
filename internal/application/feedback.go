@@ -440,7 +440,7 @@ func (s *Service) turnFeedback(ids []string) (rated map[string]map[string]any, i
 func (s *Service) feedbackAction(req action.Request) action.Result {
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	since := s.Clock.Now().AddDate(0, 0, -max(intVal(inputMap(req), "days", 30), 1)).UTC().Format(time.RFC3339)
 	// Only what people rated: the implicit signals (below) and the operator's marks (operator_marks.go) are counted apart and never as good or bad.

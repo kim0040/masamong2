@@ -228,7 +228,7 @@ func (s *Service) memoryBackfill(ctx context.Context, req action.Request) action
 	}
 	rep, err := s.Backfill(ctx, "manual", guildID, channelID)
 	if err != nil {
-		return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), map[string]any{"report": rep})
+		return s.failErr(req, errcode.InvalidInput, "backfill.failed", err, map[string]any{"report": rep})
 	}
 	return action.OK(req, map[string]any{"report": rep})
 }

@@ -96,8 +96,8 @@ func TestUpdateApplyInstallsTheReleaseAndRestarts(t *testing.T) {
 	}
 	// a sum that does not match changes nothing
 	badSum = true
-	if r := exec(svc, "updates.apply", map[string]any{"confirm": "0.3.0"}); r.OK || !strings.Contains(r.Error.Message, "SHA256SUMS") {
-		t.Fatalf("a damaged download must be refused: %+v", r.Error)
+	if r := exec(svc, "updates.apply", map[string]any{"confirm": "0.3.0"}); r.OK || r.Error.MessageKey != "update.checksum_failed" || r.Error.Message != svc.I18n.T("en", "update.checksum_failed") || strings.Contains(r.Error.Message, "does not match") {
+		t.Fatalf("a damaged download must be refused in plain words: %+v", r.Error)
 	}
 	if b, _ := os.ReadFile(filepath.Join(bin, "masamongd")); string(b) != "old masamongd" {
 		t.Fatal("a refused update changed the programs")

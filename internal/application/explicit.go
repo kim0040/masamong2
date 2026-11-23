@@ -1032,7 +1032,7 @@ func (s *Service) mineAction(ctx context.Context, req action.Request) action.Res
 		confirm := strVal(in, "confirm", "")
 		showPreview := func(plan forgetPlan) action.Result {
 			if plan.err != nil {
-				return action.Fail(req, errcode.IO, "generic.error", plan.err.Error(), nil)
+				return s.failErr(req, errcode.IO, "error.storage", plan.err, nil)
 			}
 			preview := map[string]any{"applied": false, "scope": scope, "items": plan.count, "episodes": len(plan.episodes), "cards": plan.cards, "token": plan.token}
 			if confirm != "" {
@@ -1052,7 +1052,7 @@ func (s *Service) mineAction(ctx context.Context, req action.Request) action.Res
 			return showPreview(s.forgetPreview(db, guild, ref, ids))
 		}
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		res := action.OK(req, map[string]any{"applied": true, "deleted": n, "scope": scope})
 		if command {

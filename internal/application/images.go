@@ -181,9 +181,9 @@ func (s *Service) images(ctx context.Context, req action.Request) action.Result 
 	if fail != nil {
 		switch fail.kind {
 		case imageFailSetup:
-			return action.Fail(req, errcode.ProviderUnconfigured, "generic.error", fail.err.Error(), nil)
+			return s.failErr(req, errcode.ProviderUnconfigured, "provider.unconfigured", fail.err, map[string]any{"provider": m.Provider}, "provider", m.Provider)
 		case imageFailIO:
-			return action.Fail(req, errcode.IO, "generic.error", fail.err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.file", fail.err, nil)
 		}
 		return s.providerFail(req, m.Provider, fail.err)
 	}

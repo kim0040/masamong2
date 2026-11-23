@@ -35,14 +35,14 @@ func (s *Service) storageActions(ctx context.Context, req action.Request) action
 func (s *Service) storageStatus(ctx context.Context, req action.Request) action.Result {
 	tables, err := s.Store.Tables()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	counts := map[string]int64{}
 	var total int64
 	for _, t := range tables {
 		n, err := s.Store.CountRead(ctx, t)
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		counts[t] = n
 		total += n
@@ -97,7 +97,7 @@ func (s *Service) storageMigrate(ctx context.Context, req action.Request) action
 		}
 		dsn, err := storage.ResolveDSN(ref)
 		if err != nil {
-			return action.Fail(req, errcode.InvalidInput, "generic.error", "dsn_ref: "+err.Error(), nil)
+			return s.failErr(req, errcode.InvalidInput, "storage.dsn_invalid", err, nil)
 		}
 		if s.Store.Backend == storage.BackendTiDB && storage.RedactDSN(dsn) == s.Store.Path() {
 			return action.Fail(req, errcode.InvalidInput, "generic.error", "target is the current database", nil)
@@ -108,11 +108,11 @@ func (s *Service) storageMigrate(ctx context.Context, req action.Request) action
 		// previous bot's) is refused before any table is created in it.
 		existing, err := storage.InspectTiDB(dsn)
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", "target: "+err.Error(), map[string]any{"to": to})
+			return s.failErr(req, errcode.IO, "storage.target_failed", err, map[string]any{"to": to})
 		}
 		ours, err := s.productTables()
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "storage.switch_failed", err, nil)
 		}
 		var foreign []string
 		for _, t := range existing {
@@ -128,7 +128,7 @@ func (s *Service) storageMigrate(ctx context.Context, req action.Request) action
 			// an empty database stays empty until the move itself runs
 			plan, err := s.planIntoEmpty(ctx)
 			if err != nil {
-				return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+				return s.failErr(req, errcode.IO, "storage.switch_failed", err, nil)
 			}
 			return action.OK(req, map[string]any{"dry_run": true, "applied": false, "target_empty": true,
 				"from": map[string]any{"backend": s.Store.Backend, "location": s.Store.Path()},
@@ -145,7 +145,7 @@ func (s *Service) storageMigrate(ctx context.Context, req action.Request) action
 	}
 	dst, err := openMigrationTarget(opt)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", "target: "+err.Error(), map[string]any{"to": to})
+		return s.failErr(req, errcode.IO, "storage.target_failed", err, map[string]any{"to": to})
 	}
 	defer dst.Close()
 	from := map[string]any{"backend": s.Store.Backend, "location": s.Store.Path()}
@@ -153,14 +153,14 @@ func (s *Service) storageMigrate(ctx context.Context, req action.Request) action
 	if !confirm {
 		plan, err := storage.PlanTransfer(ctx, s.Store, dst)
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "storage.switch_failed", err, nil)
 		}
 		return action.OK(req, map[string]any{"dry_run": true, "applied": false, "from": from, "to": dest, "plan": plan,
 			"ready": plan.Ready(), "message": s.msg(req, "storage.migrate.plan")})
 	}
 	plan, err := storage.Transfer(ctx, s.Store, dst, nil)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), map[string]any{"plan": plan, "switched": false})
+		return s.failErr(req, errcode.IO, "storage.switch_failed", err, map[string]any{"plan": plan, "switched": false})
 	}
 	if !plan.Verified() {
 		return action.Fail(req, errcode.IO, "storage.migrate.mismatch", s.msg(req, "storage.migrate.mismatch"), map[string]any{"plan": plan, "switched": false})
@@ -170,12 +170,12 @@ func (s *Service) storageMigrate(ctx context.Context, req action.Request) action
 		prev := storage.SettingsPath(s.DataRoot) + ".before-" + s.Clock.Now().UTC().Format("20060102T150405Z")
 		if raw, err := os.ReadFile(storage.SettingsPath(s.DataRoot)); err == nil {
 			if err := os.WriteFile(prev, raw, 0o600); err != nil {
-				return action.Fail(req, errcode.IO, "generic.error", err.Error(), out)
+				return s.failErr(req, errcode.IO, "storage.switch_failed", err, out)
 			}
 			out["previous_settings"] = filepath.Base(prev)
 		}
 		if err := storage.SaveSettings(s.DataRoot, target); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), out)
+			return s.failErr(req, errcode.IO, "storage.switch_failed", err, out)
 		}
 		out["switched"], out["restart_required"] = true, true
 	}

@@ -757,7 +757,7 @@ func (s *Service) mutateConfig(req action.Request, fn func(*config.Document) err
 	}
 	raw, err := config.Marshal(doc)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "config.failed", err, nil)
 	}
 	base := live.rev
 	if req.BaseRevision > 0 {
@@ -803,7 +803,7 @@ func (s *Service) stats(req action.Request) action.Result {
 	// hundreds of thousands of messages must not make captures and replies wait on a 1-core box.
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	r := db.Reader()
 	var polls, jobs, messages int

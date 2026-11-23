@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,7 +91,9 @@ type daemonExecutor struct {
 func (d *daemonExecutor) Execute(ctx context.Context, req action.Request) action.Result {
 	res, err := d.client.Execute(ctx, req)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		// the person gets one plain sentence; the transport error (an address, a socket) goes to the log
+		slog.Warn("daemon request failed", "action", req.Action, "err", err)
+		return action.Fail(req, errcode.IO, "daemon.unreachable", d.catalog.T(req.Locale, "daemon.unreachable"), nil)
 	}
 	return res
 }

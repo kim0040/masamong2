@@ -47,7 +47,7 @@ func (s *Service) discordCheck(ctx context.Context, req action.Request) action.R
 		if errors.As(err, &pe) && (pe.Status == 401 || pe.Status == 403) {
 			return action.Fail(req, errcode.InvalidInput, "generic.error", "Discord refused the token: reset it in the Developer Portal (Bot → Reset Token) and paste the new one", map[string]any{"reason": "token_rejected"})
 		}
-		return action.Fail(req, errcode.ProviderUnavailable, "generic.error", "Discord could not be reached: "+err.Error(), map[string]any{"reason": "unreachable"})
+		return s.failErr(req, errcode.ProviderUnavailable, "discord.check_unreachable", err, map[string]any{"reason": "unreachable"})
 	}
 	var app struct {
 		ID    string `json:"id"`

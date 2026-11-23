@@ -36,7 +36,7 @@ func (s *Service) instanceReset(req action.Request) action.Result {
 	}
 	unlock, err := lockMaintenance(s.DataRoot, false)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "reset.failed", err, nil)
 	}
 	defer unlock()
 	in := inputMap(req)
@@ -47,21 +47,21 @@ func (s *Service) instanceReset(req action.Request) action.Result {
 	if _, given := in["backup"]; !given || boolVal(in, "backup") { // a backup unless asked not to
 		name, _, err := s.createBackupLocked(backupPreReset)
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", "backup failed, nothing was changed: "+err.Error(), nil)
+			return s.failErr(req, errcode.IO, "reset.backup_failed", err, nil)
 		}
 		backup = name
 	}
 	j, err := newMaintenance(s.DataRoot, "reset")
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "reset.failed", err, nil)
 	}
 	opt, err := storage.OptionsFromEnv(s.DataRoot, storage.Settings{})
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "reset.failed", err, nil)
 	}
 	j.DBPath, err = filepath.Abs(opt.SQLitePath)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "reset.failed", err, nil)
 	}
 	deleteKeys := boolVal(in, "delete_keys")
 	j.DeleteKeys, j.Safety = deleteKeys, backup
@@ -81,10 +81,10 @@ func (s *Service) instanceReset(req action.Request) action.Result {
 		}
 	}
 	if err := validateMaintenance(&j); err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "reset.failed", err, nil)
 	}
 	if err := saveMaintenance(filepath.Join(s.DataRoot, maintenancePending), &j, "requested"); err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "reset.failed", err, nil)
 	}
 	s.Log.Info("reset requested; restarting", "backup", backup, "delete_keys", deleteKeys)
 	s.requestLifecycle(lifecycleRestart)

@@ -106,7 +106,7 @@ func (s *Service) turnMarks(ids []string) map[string]string {
 func (s *Service) turnMarkAction(req action.Request) action.Result {
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	in := inputMap(req)
 	id, verdict := strVal(in, "id", ""), strVal(in, "verdict", "")
@@ -119,11 +119,11 @@ func (s *Service) turnMarkAction(req action.Request) action.Result {
 		if err == sql.ErrNoRows {
 			return action.Fail(req, errcode.InvalidInput, "generic.error", "turn not found", map[string]any{"reason": "gone"})
 		}
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	if verdict == "clear" { // taking a mark back is always allowed
 		if _, err := db.DB.Exec(`DELETE FROM turn_feedback WHERE turn_id=? AND user_hash=? AND source=?`, id, operatorRef, operatorSource); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		s.emit("turn", id, map[string]any{"mark": ""})
 		return action.OK(req, map[string]any{"id": id, "mark": ""})
@@ -141,7 +141,7 @@ func (s *Service) turnMarkAction(req action.Request) action.Result {
 			ON DUPLICATE KEY UPDATE rating=VALUES(rating), at=VALUES(at)`
 	}
 	if _, err := db.DB.Exec(q, id, operatorRef, operatorSource, rating, now); err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	s.emit("turn", id, map[string]any{"mark": verdict})
 	return action.OK(req, map[string]any{"id": id, "mark": verdict})
@@ -163,7 +163,7 @@ const (
 func (s *Service) turnSampleAction(req action.Request) action.Result {
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	in := inputMap(req)
 	n := min(max(intVal(in, "n", sampleDefault), 1), sampleMax)
@@ -184,7 +184,7 @@ func (s *Service) turnSampleAction(req action.Request) action.Result {
 	}
 	rows, err := db.Reader().Query(`SELECT id, tools FROM turn_log WHERE `+strings.Join(where, " AND ")+` ORDER BY at DESC LIMIT `+fmt.Sprint(samplePool), args...)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	var pool []string
 	for rows.Next() {
@@ -222,12 +222,12 @@ func (s *Service) turnSampleAction(req action.Request) action.Result {
 func (s *Service) turnMarksAction(req action.Request) action.Result {
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	since := s.Clock.Now().AddDate(0, 0, -max(intVal(inputMap(req), "days", 30), 1)).UTC().Format(time.RFC3339)
 	rows, err := db.Reader().Query(`SELECT f.rating, t.tools FROM turn_feedback f JOIN turn_log t ON t.id=f.turn_id WHERE f.source=? AND f.at>=?`, operatorSource, since)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	defer rows.Close()
 	total := map[string]int{"right": 0, "wrong": 0, "stale": 0}

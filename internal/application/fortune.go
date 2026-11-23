@@ -623,7 +623,7 @@ func (s *Service) featureFail(req action.Request, err error) action.Result {
 	if errors.Is(err, ErrChatBudget) {
 		return action.Fail(req, errcode.BudgetExceeded, "summary.budget", s.msg(req, "summary.budget"), nil)
 	}
-	return action.Fail(req, errcode.ProviderError, "feature.model_failed", s.msg(req, "feature.model_failed"), map[string]any{"error": err.Error()})
+	return s.failErr(req, errcode.ProviderError, "feature.model_failed", err, nil)
 }
 
 // zodiac is one sign's fortune for today, or the twelve signs ranked; both are shared by everyone and

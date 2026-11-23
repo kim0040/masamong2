@@ -779,7 +779,7 @@ func (s *Service) statsRollupAction(ctx context.Context, req action.Request) act
 		return action.Fail(req, errcode.InvalidInput, "generic.error", "force rewrites finished days from since: give since", nil)
 	}
 	if !s.statsOn() {
-		return action.Fail(req, errcode.FeatureDisabled, "generic.error", errStatsOff.Error(), nil)
+		return s.failErr(req, errcode.FeatureDisabled, "stats.off", errStatsOff, nil)
 	}
 	wctx, done, ok := s.detachedWork(ctx)
 	if !ok {
@@ -794,7 +794,7 @@ func (s *Service) statsRollupAction(ctx context.Context, req action.Request) act
 	release()
 	res := map[string]any{"zone": out.Zone, "finished": out.Finished, "through": out.Through, "skipped": out.Skipped}
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), res)
+		return s.failErr(req, errcode.IO, "error.storage", err, res)
 	}
 	return action.OK(req, res)
 }

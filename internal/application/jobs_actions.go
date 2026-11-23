@@ -14,7 +14,7 @@ func (s *Service) jobsAction(req action.Request) action.Result {
 	case "jobs.list":
 		list, err := listJobs(s.Store)
 		if err != nil {
-			return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+			return s.failErr(req, "IO", "error.storage", err, nil)
 		}
 		items := make([]map[string]any, 0, len(list))
 		for _, j := range list {
@@ -39,7 +39,7 @@ func (s *Service) jobsAction(req action.Request) action.Result {
 			prev, prevStatus := j.LeaseToken, j.Status
 			j, err = jobs.Cancel(j)
 			if err != nil {
-				return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+				return s.failErr(req, errcode.InvalidInput, "jobs.not_changeable", err, nil)
 			}
 			err = s.saveJobExpected(j, prev, prevStatus)
 			if err != nil && err.Error() == errcode.LeaseMismatch && attempt < 5 {
@@ -47,7 +47,7 @@ func (s *Service) jobsAction(req action.Request) action.Result {
 				continue
 			}
 			if err != nil {
-				return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+				return s.failErr(req, "IO", "error.storage", err, nil)
 			}
 			s.jobChanged(j)
 			return action.OK(req, jobJSON(j))
@@ -55,7 +55,7 @@ func (s *Service) jobsAction(req action.Request) action.Result {
 	case "jobs.watch":
 		list, err := listJobs(s.Store)
 		if err != nil {
-			return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+			return s.failErr(req, "IO", "error.storage", err, nil)
 		}
 		items := make([]map[string]any, 0, len(list))
 		for _, j := range list {
@@ -73,7 +73,7 @@ func (s *Service) jobsAction(req action.Request) action.Result {
 			prev, prevStatus := j.LeaseToken, j.Status
 			j, err = jobs.Retry(j)
 			if err != nil {
-				return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+				return s.failErr(req, errcode.InvalidInput, "jobs.not_changeable", err, nil)
 			}
 			err = s.saveJobExpected(j, prev, prevStatus)
 			if err != nil && err.Error() == errcode.LeaseMismatch && attempt < 5 {
@@ -84,7 +84,7 @@ func (s *Service) jobsAction(req action.Request) action.Result {
 				continue
 			}
 			if err != nil {
-				return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+				return s.failErr(req, "IO", "error.storage", err, nil)
 			}
 			break
 		}

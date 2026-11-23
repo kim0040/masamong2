@@ -102,7 +102,7 @@ func (s *Service) episodesList(req action.Request, db *storage.Store, in map[str
 		(SELECT COUNT(*) FROM episode_item i WHERE i.episode_id=e.id), (SELECT COUNT(*) FROM episode_item i WHERE i.episode_id=e.id AND i.state<>'active')
 		FROM channel_episode e WHERE `+strings.Join(where, " AND ")+` ORDER BY e.last_seen DESC LIMIT ?`, args...)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	type listed struct {
 		id, room, guild, channel, source, kind, title, status, due, when, participants, first, last, expires string
@@ -113,12 +113,12 @@ func (s *Service) episodesList(req action.Request, db *storage.Store, in map[str
 		var e listed
 		if err := rows.Scan(&e.id, &e.room, &e.guild, &e.channel, &e.source, &e.kind, &e.title, &e.status, &e.due, &e.when, &e.importance, &e.participants, &e.first, &e.last, &e.expires, &e.regen, &e.items, &e.hidden); err != nil {
 			rows.Close()
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		found = append(found, e)
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	// labels after the cursor is closed: refLabels reads the same reader pool (two at once would hold a
 	// small host's two connections and wait for a third)
@@ -152,7 +152,7 @@ func (s *Service) episodeShow(req action.Request, db *storage.Store, in map[stri
 		return action.Fail(req, errcode.InvalidInput, "generic.error", "no such episode", nil)
 	}
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	labelOf := s.refLabels(db, room)
 	render := func(text string) string { return episodes.StoredText(text, labelOf, "?") }
@@ -164,7 +164,7 @@ func (s *Service) episodeShow(req action.Request, db *storage.Store, in map[stri
 	}
 	rows, err := db.Reader().Query(`SELECT id,kind,text,evidence,by_refs,state FROM episode_item WHERE episode_id=? ORDER BY created_at, rowid`, id)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	type itemRow struct{ id, kind, text, ev, by, state string }
 	var items []itemRow
@@ -237,7 +237,7 @@ func (s *Service) episodesForget(req action.Request, db *storage.Store, in map[s
 		return store.DeleteRoomMemory(tx, room)
 	})
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	if room != "" {
 		_ = s.kvSet(cursorKey(room), episodeCursor{BlockStart: s.Clock.Now().UTC().Format("2006-01-02T15:04:05+00:00")}) // not made again from what was forgotten
@@ -276,7 +276,7 @@ func (s *Service) episodesExtract(ctx context.Context, req action.Request, db *s
 	if boolVal(in, "dry_run") {
 		est, err := s.kakaoEstimate(db, r)
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		est["dry_run"], est["block_id"], est["source"], est["budget_usd"] = true, block.ID, r.source, budget
 		est["derived_budget_usd"], est["derived_spent_usd"] = s.Doc().Memory.DerivedBudget(), s.derivedSpent()
@@ -293,7 +293,7 @@ func (s *Service) episodesExtract(ctx context.Context, req action.Request, db *s
 		job.Stopped = ""
 	}
 	if err := s.kvSet(kakaoJobKey(r.room), job); err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	rooms := s.kakaoJobs()
 	if !containsString(rooms, r.room) {
@@ -304,7 +304,7 @@ func (s *Service) episodesExtract(ctx context.Context, req action.Request, db *s
 		if !s.derivedAllows(spendEpisode) {
 			job.Stopped = "budget"
 		} else if _, err := s.stepKakao(ctx, db, &job, s.Clock.Now(), max(1, limit)); err != nil && job.Stopped != "budget" {
-			return action.Fail(req, errcode.ProviderError, "generic.error", err.Error(), map[string]any{"job": job})
+			return s.failErr(req, errcode.ProviderError, "feature.model_failed", err, map[string]any{"job": job})
 		}
 	}
 	s.emit("memory", "episodes", nil)

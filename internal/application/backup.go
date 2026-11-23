@@ -136,12 +136,12 @@ func (s *Service) detachedWork(ctx context.Context) (context.Context, func(), bo
 func (s *Service) backup(ctx context.Context, req action.Request) action.Result {
 	unlock, err := lockMaintenanceContext(ctx, s.DataRoot, req.Action == "backup.list")
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.file", err, nil)
 	}
 	defer unlock()
 	dir := s.backupDir()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.file", err, nil)
 	}
 	in := inputMap(req)
 	switch req.Action {
@@ -155,31 +155,31 @@ func (s *Service) backup(ctx context.Context, req action.Request) action.Result 
 		defer done()
 		name, manifest, err := s.createBackupLockedContext(wctx, backupManual)
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.file", err, nil)
 		}
 		return action.OK(req, map[string]any{"name": name, "path": filepath.Join(dir, name), "manifest": manifest, "message": s.msg(req, "backup.created")})
 	case "backup.delete":
 		name := strVal(in, "name", "")
 		target, err := s.backupPath(name)
 		if err != nil {
-			return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.InvalidInput, "backup.invalid_name", err, nil)
 		}
 		if _, err := os.Stat(filepath.Join(target, "manifest.json")); err != nil {
 			return action.Fail(req, errcode.InvalidInput, "generic.error", "no such backup: "+name, nil)
 		}
 		if err := os.RemoveAll(target); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.file", err, nil)
 		}
 		return action.OK(req, map[string]any{"deleted": name})
 	case "backup.verify", "backup.restoreDryRun":
 		name := strVal(in, "name", strVal(in, "path", ""))
 		target, err := s.backupPath(name)
 		if err != nil {
-			return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.InvalidInput, "backup.invalid_name", err, nil)
 		}
 		m, err := verifyBackupDirContext(ctx, target, false)
 		if err != nil {
-			return action.Fail(req, errcode.BackupVerifyFailed, "generic.error", err.Error(), map[string]any{"name": name})
+			return s.failErr(req, errcode.BackupVerifyFailed, "backup.verify_failed", err, map[string]any{"name": name})
 		}
 		out := map[string]any{"ok": true, "name": name, "manifest": m}
 		if req.Action == "backup.restoreDryRun" {
@@ -198,7 +198,7 @@ func (s *Service) backup(ctx context.Context, req action.Request) action.Result 
 		name := strVal(in, "name", "")
 		target, err := s.backupPath(name)
 		if err != nil {
-			return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.InvalidInput, "backup.invalid_name", err, nil)
 		}
 		if strVal(in, "confirm", "") != name {
 			return action.Fail(req, errcode.InvalidInput, "generic.error", "confirm must repeat the backup name", nil)
@@ -209,15 +209,15 @@ func (s *Service) backup(ctx context.Context, req action.Request) action.Result 
 		}
 		defer done()
 		if _, err := verifyBackupDirContext(wctx, target, false); err != nil {
-			return action.Fail(req, errcode.BackupVerifyFailed, "generic.error", err.Error(), map[string]any{"name": name})
+			return s.failErr(req, errcode.BackupVerifyFailed, "backup.verify_failed", err, map[string]any{"name": name})
 		}
 		safety, _, err := s.createBackupLockedContext(wctx, backupPreRestore)
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", "safety backup failed, nothing was changed: "+err.Error(), nil)
+			return s.failErr(req, errcode.IO, "backup.safety_failed", err, nil)
 		}
 		j, err := newMaintenance(s.DataRoot, "restore")
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.file", err, nil)
 		}
 		j.Name, j.Safety = name, safety
 		j.DBPath, err = filepath.Abs(s.Store.Path())
@@ -228,7 +228,7 @@ func (s *Service) backup(ctx context.Context, req action.Request) action.Result 
 			err = saveMaintenance(filepath.Join(s.DataRoot, maintenancePending), &j, "requested")
 		}
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.file", err, nil)
 		}
 		out := map[string]any{"pending": true, "name": name, "safety_backup": safety, "message": s.msg(req, "backup.restore.pending")}
 		if s.Daemon && strVal(in, "restart", "true") != "false" {

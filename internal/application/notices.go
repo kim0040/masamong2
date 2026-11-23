@@ -830,7 +830,7 @@ func (s *Service) boardStatusCard(req action.Request, c *notices.Catalog, sub no
 func (s *Service) noticesConsole(req action.Request, c *notices.Catalog, origin string) action.Result {
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	state := map[string]map[string]any{}
 	if rows, err := db.DB.Query(`SELECT source_id, last_run, ok, error, items, new_items, warnings FROM notice_state`); err == nil {
@@ -896,7 +896,7 @@ func (s *Service) noticesSubscribe(ctx context.Context, req action.Request) acti
 	}
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	switch op {
 	case "delete":
@@ -946,7 +946,7 @@ func (s *Service) noticesSubscribe(ctx context.Context, req action.Request) acti
 			sub.DeliveryTime = tt.Format("15:04")
 		}
 		if err := s.saveNoticeSub(sub); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		sub, _ = s.noticeSub(userID, kind)
 		// read the new boards soon instead of waiting for the next scheduled run
@@ -962,7 +962,7 @@ func (s *Service) noticesSubscribe(ctx context.Context, req action.Request) acti
 		tt, _ := time.Parse("15:04", t)
 		sub.DeliveryTime = tt.Format("15:04")
 		if err := s.saveNoticeSub(sub); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		return done("saved", "notices.time_set", "time", sub.DeliveryTime)
 	case "mute", "unmute":
@@ -979,7 +979,7 @@ func (s *Service) noticesSubscribe(ctx context.Context, req action.Request) acti
 		}
 		sub.Profile.Muted = muted
 		if err := s.saveNoticeSub(sub); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		return done("saved", "notices."+op+"d_topic", "topic", c.TopicLabel(topic))
 	case "status":
@@ -1106,13 +1106,13 @@ func (s *Service) splitSchoolText(c *notices.Catalog, text string) map[string]an
 func (s *Service) noticesSubscribeConsole(ctx context.Context, req action.Request, c *notices.Catalog, in map[string]any, op string) action.Result {
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	switch op {
 	case "collect":
 		rep, err := s.collectNotices(ctx, strSlice(in, "sources"))
 		if err != nil {
-			return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.InvalidInput, "notices.collect_failed", err, nil)
 		}
 		return action.OK(req, map[string]any{"report": rep})
 	case "delete", "pause", "resume":
@@ -1129,7 +1129,7 @@ func (s *Service) noticesSubscribeConsole(ctx context.Context, req action.Reques
 	}
 	rows, err := db.DB.Query(`SELECT user_id, kind, delivery_time, active, last_delivery, updated_at FROM notice_subs ORDER BY updated_at DESC LIMIT 500`)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	list := []map[string]any{}
 	for rows.Next() {
@@ -1167,7 +1167,7 @@ func (s *Service) transferRecent(req action.Request) action.Result {
 	}
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	q := `SELECT item_key, source_id, title, url, published, fingerprint FROM notice_items WHERE kind='transfer' AND changed_at >= ?`
 	args := []any{s.Clock.Now().AddDate(0, 0, -max(1, intVal(in, "days", 30))).UTC().Format(time.RFC3339)}
@@ -1181,7 +1181,7 @@ func (s *Service) transferRecent(req action.Request) action.Result {
 	args = append(args, min(25, max(1, intVal(in, "limit", 10))))
 	rows, err := db.DB.Query(q, args...)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	var list []rankedNotice
 	for rows.Next() {

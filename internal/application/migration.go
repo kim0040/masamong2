@@ -43,22 +43,22 @@ func (s *Service) migrationApply(req action.Request) action.Result {
 	}
 	path, err := s.importPath(path)
 	if err != nil {
-		return action.Fail(req, errcode.PermissionDenied, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.PermissionDenied, "import.path_denied", err, nil)
 	}
 	if _, err := os.Stat(path); err != nil {
 		return action.Fail(req, errcode.InvalidInput, "generic.error", "database not found", nil)
 	}
 	old, err := sql.Open("sqlite", "file:"+url.PathEscape(path)+"?mode=ro&immutable=1")
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.file", err, nil)
 	}
 	defer old.Close()
 	if err := old.Ping(); err != nil {
-		return action.Fail(req, errcode.InvalidInput, "generic.error", "not a SQLite database: "+err.Error(), nil)
+		return s.failErr(req, errcode.InvalidInput, "migration.not_sqlite", err, nil)
 	}
 	plan, err := s.migrateV1(old, boolVal(in, "confirm"))
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), map[string]any{"plan": plan})
+		return s.failErr(req, errcode.IO, "migration.failed", err, map[string]any{"plan": plan})
 	}
 	return action.OK(req, map[string]any{"plan": plan})
 }

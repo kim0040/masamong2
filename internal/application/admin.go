@@ -338,7 +338,7 @@ func (s *Service) kvSet(key string, v any) error {
 
 func (s *Service) adminActions(ctx context.Context, req action.Request) action.Result {
 	if _, err := s.adminDB(); err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	switch req.Action {
 	case "admin.prefs", "admin.prefs.set":
@@ -422,7 +422,7 @@ func (s *Service) adminPrefs(req action.Request) action.Result {
 	key := "prefs:" + adminID(req)
 	prefs := map[string]any{}
 	if _, err := s.kvGet(key, &prefs); err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	if req.Action == "admin.prefs.set" {
 		in := inputMap(req)
@@ -442,7 +442,7 @@ func (s *Service) adminPrefs(req action.Request) action.Result {
 			}
 		}
 		if err := s.kvSet(key, prefs); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 	}
 	return action.OK(req, map[string]any{"prefs": prefs})
@@ -531,7 +531,7 @@ func (s *Service) runtimePause(req action.Request) action.Result {
 		st.Reason = strVal(in, "reason", "")
 		st.At = s.Clock.Now().UTC().Format(time.RFC3339)
 		if err := s.kvSet("runtime:pause", st); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		s.emit("runtime", "pause", map[string]any{"all": st.All})
 	}
@@ -798,14 +798,14 @@ func (s *Service) turnsAction(req action.Request) action.Result {
 	rows, err := db.Reader().Query(`SELECT id, at, guild_id, channel_id, outcome, tools, hits, cost_usd, latency_ms, lab, body FROM turn_log WHERE `+
 		strings.Join(where, " AND ")+` ORDER BY at DESC LIMIT `+fmt.Sprint(limit), args...)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	defer rows.Close()
 	list := []TurnRecord{}
 	for rows.Next() {
 		t, err := scanTurn(rows.Scan, false)
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		list = append(list, t)
 	}
@@ -1061,7 +1061,7 @@ func patchSummary(v any) string {
 func (s *Service) auditList(req action.Request) action.Result {
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	in := inputMap(req)
 	where, args := []string{"1=1"}, []any{}
@@ -1101,7 +1101,7 @@ func (s *Service) auditList(req action.Request) action.Result {
 	rows, err := db.DB.Query(`SELECT id, at, action, via, ok, code, rev_before, rev_after, summary, actor, actor_id, guild_id FROM audit_log WHERE `+
 		strings.Join(where, " AND ")+` ORDER BY id DESC LIMIT `+fmt.Sprint(limit+1), args...)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	defer rows.Close()
 	list := []map[string]any{}
@@ -1111,7 +1111,7 @@ func (s *Service) auditList(req action.Request) action.Result {
 		var at, act, via, code, summary, actor, aid, guild string
 		var ok, rb, ra int
 		if err := rows.Scan(&id, &at, &act, &via, &ok, &code, &rb, &ra, &summary, &actor, &aid, &guild); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		if len(list) == limit {
 			next = list[len(list)-1]["id"].(int64)
@@ -1121,7 +1121,7 @@ func (s *Service) auditList(req action.Request) action.Result {
 			"revision_before": rb, "revision_after": ra, "summary": summary, "actor": actor, "actor_id": aid, "guild_id": guild})
 	}
 	if err := rows.Err(); err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	out := map[string]any{"entries": list}
 	if next > 0 {
@@ -1629,11 +1629,11 @@ func (s *Service) labReviews(req action.Request) action.Result {
 func (s *Service) configDocument(req action.Request) action.Result {
 	cur, err := docTree(s.Doc())
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "config.failed", err, nil)
 	}
 	def, err := docTree(config.Default(s.Doc().Instance.ID, s.Doc().Instance.DataDir))
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "config.failed", err, nil)
 	}
 	res := action.OK(req, map[string]any{"revision": s.Revision(), "document": cur, "defaults": def, "schema": config.Schema()})
 	res.Revision = s.Revision()
@@ -1671,7 +1671,7 @@ func (s *Service) configPatch(req action.Request) action.Result {
 	}
 	tree, err := docTree(live.doc)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "config.failed", err, nil)
 	}
 	for _, o := range ops {
 		m, _ := o.(map[string]any)
@@ -1688,7 +1688,7 @@ func (s *Service) configPatch(req action.Request) action.Result {
 			continue
 		}
 		if err := config.TreeSet(tree, path, plainJSON(m["value"])); err != nil {
-			return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+			return s.configFail(req, errcode.InvalidInput, err, nil)
 		}
 	}
 	candidate, err := config.FromTree(tree)
