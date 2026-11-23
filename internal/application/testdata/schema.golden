@@ -1,0 +1,1041 @@
+# The database layout of internal/application (E7 step 2a). Rewrite with: go test ./internal/application -run TestSchema -update
+== adminSQLite (24)
+  0  ee971ebcf3a4  CREATE TABLE IF NOT EXISTS config_snapshots ( id TEXT PRIMARY KEY, name 
+  1  529385d59271  CREATE TABLE IF NOT EXISTS activity_counts ( day TEXT NOT NULL, guild_id
+  2  7d8033925941  CREATE TABLE IF NOT EXISTS memory_reviews ( leaf_id TEXT PRIMARY KEY, ro
+  3  1f6b31a7f832  CREATE TABLE IF NOT EXISTS eval_runs ( id TEXT PRIMARY KEY, at TEXT NOT 
+  4  ae41f757522c  CREATE TABLE IF NOT EXISTS admin_state ( k TEXT PRIMARY KEY, v TEXT NOT 
+  5  e40565780beb  CREATE TABLE IF NOT EXISTS audit_log ( id INTEGER PRIMARY KEY AUTOINCREM
+  6  9d36915e9324  CREATE TABLE IF NOT EXISTS turn_log ( id TEXT PRIMARY KEY, at TEXT NOT N
+  7  32250115c767  CREATE INDEX IF NOT EXISTS idx_turn_log_at ON turn_log(at)
+  8  59fcce8df8ef  CREATE INDEX IF NOT EXISTS idx_turn_log_day ON turn_log(day, outcome)
+  9  287ce4d5c2d6  CREATE TABLE IF NOT EXISTS lab_reviews ( id TEXT PRIMARY KEY, at TEXT NO
+ 10  bda6bed59626  CREATE TABLE IF NOT EXISTS delivery_ledger ( id INTEGER PRIMARY KEY AUTO
+ 11  f225345813fd  CREATE INDEX IF NOT EXISTS idx_delivery_ledger_turn ON delivery_ledger(t
+ 12  fa6359424c57  CREATE TABLE IF NOT EXISTS reply_messages ( message_id TEXT PRIMARY KEY,
+ 13  869e6fd7af89  CREATE TABLE IF NOT EXISTS turn_feedback ( turn_id TEXT NOT NULL, user_h
+ 14  21376651a94b  CREATE INDEX IF NOT EXISTS idx_turn_feedback_at ON turn_feedback(at)
+ 15  067d373fe17e  CREATE TABLE IF NOT EXISTS llm_calls ( id INTEGER PRIMARY KEY AUTOINCREM
+ 16  a46a61f2bced  CREATE INDEX IF NOT EXISTS idx_llm_calls_turn ON llm_calls(turn_id)
+ 17  2f1a5b52178b  CREATE INDEX IF NOT EXISTS idx_llm_calls_created ON llm_calls(created_at
+ 18  81e905b0df85  CREATE TABLE IF NOT EXISTS tool_calls ( id INTEGER PRIMARY KEY AUTOINCRE
+ 19  0489e25df6b0  CREATE INDEX IF NOT EXISTS idx_tool_calls_turn ON tool_calls(turn_id)
+ 20  cc3e43b090b6  CREATE INDEX IF NOT EXISTS idx_tool_calls_created ON tool_calls(created_
+ 21  fe18bab36881  CREATE TABLE IF NOT EXISTS stats_daily ( day TEXT NOT NULL, metric TEXT 
+ 22  5dda01b30d3e  CREATE INDEX IF NOT EXISTS idx_stats_daily_metric ON stats_daily(metric,
+ 23  ee8bc76f6d67  CREATE TABLE IF NOT EXISTS stats_days ( grp TEXT NOT NULL, day TEXT NOT 
+== adminTiDB (15)
+  0  67d63b7ba364  CREATE TABLE IF NOT EXISTS config_snapshots ( id VARCHAR(64) NOT NULL PR
+  1  d306397725a3  CREATE TABLE IF NOT EXISTS activity_counts ( day VARCHAR(10) NOT NULL, g
+  2  597f2325cb01  CREATE TABLE IF NOT EXISTS memory_reviews ( leaf_id VARCHAR(64) NOT NULL
+  3  2a847f9bd97e  CREATE TABLE IF NOT EXISTS eval_runs ( id VARCHAR(64) NOT NULL PRIMARY K
+  4  1ff5e329cc17  CREATE TABLE IF NOT EXISTS admin_state ( k VARCHAR(128) NOT NULL PRIMARY
+  5  99a8af3af02f  CREATE TABLE IF NOT EXISTS audit_log ( id BIGINT NOT NULL AUTO_INCREMENT
+  6  c84f074b1727  CREATE TABLE IF NOT EXISTS turn_log ( id VARCHAR(64) NOT NULL PRIMARY KE
+  7  5b8b86730825  CREATE TABLE IF NOT EXISTS lab_reviews ( id VARCHAR(64) NOT NULL PRIMARY
+  8  2abae0621091  CREATE TABLE IF NOT EXISTS delivery_ledger ( id BIGINT NOT NULL AUTO_INC
+  9  daf6cf47c210  CREATE TABLE IF NOT EXISTS reply_messages ( message_id VARCHAR(64) NOT N
+ 10  3e19ac4f6dd5  CREATE TABLE IF NOT EXISTS turn_feedback ( turn_id VARCHAR(64) NOT NULL,
+ 11  ef0ffe16ca10  CREATE TABLE IF NOT EXISTS llm_calls ( id BIGINT NOT NULL AUTO_INCREMENT
+ 12  4c1fd5a809c5  CREATE TABLE IF NOT EXISTS tool_calls ( id BIGINT NOT NULL AUTO_INCREMEN
+ 13  5a53309ea437  CREATE TABLE IF NOT EXISTS stats_daily ( day VARCHAR(10) NOT NULL, metri
+ 14  1c8cda140832  CREATE TABLE IF NOT EXISTS stats_days ( grp VARCHAR(32) NOT NULL, day VA
+== featureDDL (51)
+  0  d898683ce5fd  CREATE TABLE IF NOT EXISTS consent_state ( user_id TEXT NOT NULL, scope 
+  1  a52fa5d758f8  CREATE TABLE IF NOT EXISTS consent_audit ( id INTEGER PRIMARY KEY AUTOIN
+  2  945af077f802  CREATE INDEX IF NOT EXISTS idx_consent_audit_user ON consent_audit(user_
+  3  5676dfcb8ed3  CREATE TABLE IF NOT EXISTS banter_channel_state ( guild_id TEXT NOT NULL
+  4  aeb5e036a59f  CREATE TABLE IF NOT EXISTS banter_turns ( turn_id TEXT PRIMARY KEY, guil
+  5  96de0043dbc9  CREATE INDEX IF NOT EXISTS idx_banter_turns_created ON banter_turns(crea
+  6  8a23e38c207f  CREATE TABLE IF NOT EXISTS thread_parents ( thread_id TEXT PRIMARY KEY, 
+  7  a0ec1ba267be  CREATE TABLE IF NOT EXISTS person_card_item ( id TEXT PRIMARY KEY, guild
+  8  a590dcc2386f  CREATE INDEX IF NOT EXISTS idx_person_card_person ON person_card_item(gu
+  9  a7f8572d72c8  CREATE TABLE IF NOT EXISTS person_relation ( guild_id TEXT NOT NULL, a_r
+ 10  5022c33d90d7  CREATE TABLE IF NOT EXISTS memory_explicit ( episode_id TEXT PRIMARY KEY
+ 11  678fd29f1033  CREATE INDEX IF NOT EXISTS idx_memory_explicit_person ON memory_explicit
+ 12  42c94f04cfdf  CREATE TABLE IF NOT EXISTS conversation_log ( id TEXT PRIMARY KEY, guild
+ 13  eb510d4f6788  CREATE INDEX IF NOT EXISTS idx_conversation_log_channel ON conversation_
+ 14  ec42eb447220  CREATE INDEX IF NOT EXISTS idx_conversation_log_kind ON conversation_log
+ 15  7d2e236c9edb  CREATE INDEX IF NOT EXISTS idx_conversation_log_author ON conversation_l
+ 16  2950490f5aa1  CREATE TABLE IF NOT EXISTS fortune_profiles ( user_id TEXT PRIMARY KEY, 
+ 17  34fded9c385c  CREATE TABLE IF NOT EXISTS fortune_usage ( user_id TEXT NOT NULL, day TE
+ 18  7a8315573882  CREATE TABLE IF NOT EXISTS fortune_cache ( cache_key TEXT PRIMARY KEY, c
+ 19  044801c16db5  CREATE TABLE IF NOT EXISTS notice_state ( source_id TEXT PRIMARY KEY, la
+ 20  4a0dcd46a553  CREATE TABLE IF NOT EXISTS notice_items ( item_key TEXT PRIMARY KEY, sou
+ 21  ca942173ed0a  CREATE INDEX IF NOT EXISTS idx_notice_items_source ON notice_items(sourc
+ 22  4f83a6cc3afc  CREATE TABLE IF NOT EXISTS notice_subs ( user_id TEXT NOT NULL, kind TEX
+ 23  4388d37277ec  CREATE TABLE IF NOT EXISTS notice_delivered ( user_id TEXT NOT NULL, ite
+ 24  3339b0964b4d  CREATE TABLE IF NOT EXISTS notice_delivery_outcomes ( user_id TEXT NOT N
+ 25  19676b422dbd  CREATE TABLE IF NOT EXISTS participation_log ( id TEXT PRIMARY KEY, guil
+ 26  5472ffea016b  CREATE INDEX IF NOT EXISTS idx_participation_log_channel ON participatio
+ 27  32386959ba20  CREATE TABLE IF NOT EXISTS participation_spoke_turns ( turn_id TEXT PRIM
+ 28  dc790faf8e90  CREATE INDEX IF NOT EXISTS idx_participation_spoke_turns_created ON part
+ 29  51753545db77  CREATE TABLE IF NOT EXISTS poll_messages ( message_id TEXT PRIMARY KEY, 
+ 30  0162742ab20e  CREATE INDEX IF NOT EXISTS idx_poll_messages_poll ON poll_messages(poll_
+ 31  454c1f95b34d  CREATE TABLE IF NOT EXISTS user_prefs ( user_id TEXT PRIMARY KEY, locale
+ 32  c800927a3e89  CREATE TABLE IF NOT EXISTS reminders ( id TEXT PRIMARY KEY, owner_id TEX
+ 33  59c73fde482d  CREATE TABLE IF NOT EXISTS reminder_context ( reminder_id TEXT NOT NULL,
+ 34  47f2843df282  CREATE INDEX IF NOT EXISTS idx_reminder_context_message ON reminder_cont
+ 35  bc9f1e03a6e7  CREATE INDEX IF NOT EXISTS idx_reminder_context_author ON reminder_conte
+ 36  a4dbf14f2235  CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(status, due_at
+ 37  108c92e6ef45  CREATE INDEX IF NOT EXISTS idx_reminders_owner ON reminders(owner_id, st
+ 38  134c3dc7b975  CREATE INDEX IF NOT EXISTS idx_reminders_channel ON reminders(guild_id, 
+ 39  5233e7a087ec  CREATE TABLE IF NOT EXISTS reminder_offers ( id TEXT PRIMARY KEY, guild_
+ 40  74ecee4ef715  CREATE TABLE IF NOT EXISTS channel_style ( guild_id TEXT NOT NULL, chann
+ 41  dafadf7baef9  CREATE TABLE IF NOT EXISTS channel_summary ( guild_id TEXT NOT NULL, cha
+ 42  2afa7f04778c  CREATE TABLE IF NOT EXISTS channel_threads ( thread_id TEXT PRIMARY KEY,
+ 43  b2f22a66b370  CREATE INDEX IF NOT EXISTS idx_channel_threads_parent ON channel_threads
+ 44  35cca72169da  CREATE INDEX IF NOT EXISTS idx_channel_threads_open ON channel_threads(s
+ 45  0c8d55d329f6  CREATE TABLE IF NOT EXISTS thread_participants ( thread_id TEXT NOT NULL
+ 46  d64c72bd3468  CREATE INDEX IF NOT EXISTS idx_thread_participants_user ON thread_partic
+ 47  04b0fe547caf  CREATE TABLE IF NOT EXISTS thread_tombstones (thread_id TEXT PRIMARY KEY
+ 48  c986480f9feb  INSERT OR IGNORE INTO thread_tombstones(thread_id) SELECT thread_id FROM
+ 49  d5e7fedd47d2  INSERT OR IGNORE INTO thread_parents(thread_id,guild_id,parent_id) SELEC
+ 50  770e9e6d3377  CREATE TABLE IF NOT EXISTS update_news_sent ( version TEXT NOT NULL, tar
+== pruneRules (21)
+  0  turns table=turn_log column=at days=turns dayOnly=false extra=""
+  1  traces table=traces column=created_at days=traces dayOnly=false extra=""
+  2  audit table=audit_log column=at days=audit dayOnly=false extra=""
+  3  channel_ops table=channel_ops_log column=created_at days=audit dayOnly=false extra=""
+  4  usage_detail table=tool_usage column=day days=usage dayOnly=true extra="scope<>'all'"
+  5  usage_totals table=tool_usage column=day days=turns dayOnly=true extra="scope='all'"
+  6  query_cache table=memory_embed_cache column=created_at days=query_cache dayOnly=false extra="kind='query'"
+  7  reminders table=reminders column=updated_at days=context dayOnly=false extra="status IN ('sent','cancelled','missed','failed','unknown')"
+  8  reminders_stale table=reminders column=updated_at days=pending dayOnly=false extra="status='proposed'"
+  9  reminder_offers table=reminder_offers column=expires_at days=pending dayOnly=false extra=""
+ 10  participation_log table=participation_log column=created_at days=turn_detail dayOnly=false extra=""
+ 11  activity table=activity_counts column=day days=turns dayOnly=true extra=""
+ 12  feedback table=turn_feedback column=at days=turns dayOnly=false extra=""
+ 13  reply_messages table=reply_messages column=at days=turn_detail dayOnly=false extra=""
+ 14  chat_context table=chat_turns column=created_at days=context dayOnly=false extra=""
+ 15  delivery_ledger table=delivery_ledger column=created_at days=ledger dayOnly=false extra=""
+ 16  conversation_log table=conversation_log column=created_at days=turns dayOnly=false extra=""
+ 17  channel_threads table=channel_threads column=last_at days=turns dayOnly=false extra="state<>'open'"
+ 18  llm_calls table=llm_calls column=created_at days=ledger dayOnly=false extra=""
+ 19  tool_calls table=tool_calls column=created_at days=ledger dayOnly=false extra=""
+ 20  poll_messages table=poll_messages column=created_at days=usage dayOnly=false extra=""
+== sqlite_master of the store the application opens (154 objects)
+-- index idx_banter_turns_created on banter_turns
+CREATE INDEX idx_banter_turns_created ON banter_turns(created_at)
+-- index idx_channel_episode_channel on channel_episode
+CREATE INDEX idx_channel_episode_channel ON channel_episode(guild_id, channel_id, last_seen)
+-- index idx_channel_episode_expiry on channel_episode
+CREATE INDEX idx_channel_episode_expiry ON channel_episode(expires_at) WHERE expires_at<>''
+-- index idx_channel_episode_regen on channel_episode
+CREATE INDEX idx_channel_episode_regen ON channel_episode(regen) WHERE regen<>0
+-- index idx_channel_episode_room on channel_episode
+CREATE INDEX idx_channel_episode_room ON channel_episode(room, status)
+-- index idx_channel_ops_log_scope on channel_ops_log
+CREATE INDEX idx_channel_ops_log_scope
+			ON channel_ops_log(guild_id, channel_id, id DESC)
+-- index idx_channel_threads_open on channel_threads
+CREATE INDEX idx_channel_threads_open ON channel_threads(state, last_at)
+-- index idx_channel_threads_parent on channel_threads
+CREATE INDEX idx_channel_threads_parent ON channel_threads(guild_id, parent_id)
+-- index idx_chat_turns_channel on chat_turns
+CREATE INDEX idx_chat_turns_channel ON chat_turns(channel_key, id)
+-- index idx_chat_turns_native on chat_turns
+CREATE INDEX idx_chat_turns_native ON chat_turns(native_id)
+-- index idx_chat_turns_speaker on chat_turns
+CREATE INDEX idx_chat_turns_speaker ON chat_turns(speaker_id)
+-- index idx_consent_audit_user on consent_audit
+CREATE INDEX idx_consent_audit_user ON consent_audit(user_id, id)
+-- index idx_conversation_log_author on conversation_log
+CREATE INDEX idx_conversation_log_author ON conversation_log(author_ref)
+-- index idx_conversation_log_channel on conversation_log
+CREATE INDEX idx_conversation_log_channel ON conversation_log(guild_id, channel_id, created_at)
+-- index idx_conversation_log_kind on conversation_log
+CREATE INDEX idx_conversation_log_kind ON conversation_log(kind, created_at)
+-- index idx_delivery_ledger_turn on delivery_ledger
+CREATE INDEX idx_delivery_ledger_turn ON delivery_ledger(turn_id)
+-- index idx_episode_item_episode on episode_item
+CREATE INDEX idx_episode_item_episode ON episode_item(episode_id)
+-- index idx_episode_leaf_leaf on episode_leaf
+CREATE INDEX idx_episode_leaf_leaf ON episode_leaf(leaf_id)
+-- index idx_evidence_holder_id on evidence_holders
+CREATE INDEX idx_evidence_holder_id ON evidence_holders(holder_id)
+-- index idx_evidence_links_holder on evidence_links
+CREATE INDEX idx_evidence_links_holder ON evidence_links(holder,source)
+-- index idx_llm_calls_created on llm_calls
+CREATE INDEX idx_llm_calls_created ON llm_calls(created_at)
+-- index idx_llm_calls_turn on llm_calls
+CREATE INDEX idx_llm_calls_turn ON llm_calls(turn_id)
+-- index idx_memory_alias_observation on memory_observation_aliases
+CREATE INDEX idx_memory_alias_observation ON memory_observation_aliases(observation_id)
+-- index idx_memory_embed_cache_kind on memory_embed_cache
+CREATE INDEX idx_memory_embed_cache_kind ON memory_embed_cache(kind, created_at)
+-- index idx_memory_explicit_person on memory_explicit
+CREATE INDEX idx_memory_explicit_person ON memory_explicit(guild_id, person_ref, key)
+-- index idx_memory_leaves_hash on memory_leaves
+CREATE INDEX idx_memory_leaves_hash ON memory_leaves(body_hash)
+-- index idx_memory_leaves_room on memory_leaves
+CREATE INDEX idx_memory_leaves_room ON memory_leaves(room)
+-- index idx_memory_leaves_room_end on memory_leaves
+CREATE INDEX idx_memory_leaves_room_end ON memory_leaves(room, end_time)
+-- index idx_memory_leaves_room_recipe on memory_leaves
+CREATE INDEX idx_memory_leaves_room_recipe ON memory_leaves(room,recipe)
+-- index idx_memory_message_vectors_room on memory_message_vectors
+CREATE INDEX idx_memory_message_vectors_room ON memory_message_vectors(room, embed_space)
+-- index idx_memory_obs_account on memory_observations
+CREATE INDEX idx_memory_obs_account ON memory_observations(platform, actor_account)
+-- index idx_memory_obs_native on memory_observations
+CREATE UNIQUE INDEX idx_memory_obs_native ON memory_observations(platform, native_message_id)
+-- index idx_memory_obs_person_name on memory_observations
+CREATE INDEX idx_memory_obs_person_name ON memory_observations(trim(actor_label,char(9,10,11,12,13,32,133,160,5760,8192,8193,8194,8195,8196,8197,8198,8199,8200,8201,8202,8232,8233,8239,8287,12288)) COLLATE NOCASE,actor_account,source_room) WHERE deleted_at='' AND platform='discord' AND record_kind='human_text'
+-- index idx_memory_obs_room on memory_observations
+CREATE INDEX idx_memory_obs_room ON memory_observations(room, parsed_time)
+-- index idx_memory_obs_room_live on memory_observations
+CREATE INDEX idx_memory_obs_room_live ON memory_observations(room, deleted_at, parsed_time, actor_label)
+-- index idx_notice_items_source on notice_items
+CREATE INDEX idx_notice_items_source ON notice_items(source_id, changed_at)
+-- index idx_participation_log_author on participation_log
+CREATE INDEX idx_participation_log_author ON participation_log(author_ref)
+-- index idx_participation_log_channel on participation_log
+CREATE INDEX idx_participation_log_channel ON participation_log(guild_id, channel_id, created_at)
+-- index idx_participation_spoke_turns_created on participation_spoke_turns
+CREATE INDEX idx_participation_spoke_turns_created ON participation_spoke_turns(created_at)
+-- index idx_person_alias_name on person_alias
+CREATE INDEX idx_person_alias_name ON person_alias(guild_id,folded)
+-- index idx_person_alias_source on person_alias_source
+CREATE INDEX idx_person_alias_source ON person_alias_source(guild_id,person_ref,label,room,at,observation)
+-- index idx_person_card_person on person_card_item
+CREATE INDEX idx_person_card_person ON person_card_item(guild_id, person_ref, state)
+-- index idx_poll_messages_poll on poll_messages
+CREATE INDEX idx_poll_messages_poll ON poll_messages(poll_id)
+-- index idx_reminder_context_author on reminder_context
+CREATE INDEX idx_reminder_context_author ON reminder_context(author_id)
+-- index idx_reminder_context_message on reminder_context
+CREATE INDEX idx_reminder_context_message ON reminder_context(message_id)
+-- index idx_reminders_channel on reminders
+CREATE INDEX idx_reminders_channel ON reminders(guild_id, channel_id, created_at)
+-- index idx_reminders_due on reminders
+CREATE INDEX idx_reminders_due ON reminders(status, due_at)
+-- index idx_reminders_owner on reminders
+CREATE INDEX idx_reminders_owner ON reminders(owner_id, status)
+-- index idx_reply_messages_channel on reply_messages
+CREATE INDEX idx_reply_messages_channel ON reply_messages(guild_id,channel_id)
+-- index idx_reply_messages_turn on reply_messages
+CREATE INDEX idx_reply_messages_turn ON reply_messages(turn_id)
+-- index idx_stats_daily_metric on stats_daily
+CREATE INDEX idx_stats_daily_metric ON stats_daily(metric, day)
+-- index idx_thread_participants_user on thread_participants
+CREATE INDEX idx_thread_participants_user ON thread_participants(user_id)
+-- index idx_tool_calls_created on tool_calls
+CREATE INDEX idx_tool_calls_created ON tool_calls(created_at)
+-- index idx_tool_calls_turn on tool_calls
+CREATE INDEX idx_tool_calls_turn ON tool_calls(turn_id)
+-- index idx_turn_feedback_at on turn_feedback
+CREATE INDEX idx_turn_feedback_at ON turn_feedback(at)
+-- index idx_turn_log_at on turn_log
+CREATE INDEX idx_turn_log_at ON turn_log(at)
+-- index idx_turn_log_day on turn_log
+CREATE INDEX idx_turn_log_day ON turn_log(day, outcome)
+-- index idx_turn_log_evidence on turn_log
+CREATE INDEX idx_turn_log_evidence ON turn_log(evidence_state) WHERE evidence_state<>1
+-- index idx_turn_log_speaker on turn_log
+CREATE INDEX idx_turn_log_speaker ON turn_log(speaker_ref)
+-- table activity_counts on activity_counts
+CREATE TABLE activity_counts (
+		day TEXT NOT NULL,
+		guild_id TEXT NOT NULL,
+		channel_id TEXT NOT NULL,
+		user_id TEXT NOT NULL,
+		name TEXT NOT NULL DEFAULT '',
+		n INTEGER NOT NULL DEFAULT 0,
+		last_at TEXT NOT NULL,
+		PRIMARY KEY (day, guild_id, channel_id, user_id)
+	)
+-- table admin_state on admin_state
+CREATE TABLE admin_state (
+		k TEXT PRIMARY KEY,
+		v TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)
+-- table audit_log on audit_log
+CREATE TABLE audit_log (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		at TEXT NOT NULL,
+		action TEXT NOT NULL,
+		via TEXT NOT NULL,
+		ok INTEGER NOT NULL,
+		code TEXT NOT NULL DEFAULT '',
+		rev_before INTEGER NOT NULL DEFAULT 0,
+		rev_after INTEGER NOT NULL DEFAULT 0,
+		summary TEXT NOT NULL DEFAULT '',
+		actor TEXT NOT NULL DEFAULT ''
+	, actor_id TEXT NOT NULL DEFAULT '', guild_id TEXT NOT NULL DEFAULT '')
+-- table banter_channel_state on banter_channel_state
+CREATE TABLE banter_channel_state (
+			guild_id TEXT NOT NULL,
+			channel_id TEXT NOT NULL,
+			lines TEXT NOT NULL DEFAULT '[]',
+			emoji TEXT NOT NULL DEFAULT '[]',
+			muted_until TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY(guild_id, channel_id)
+		)
+-- table banter_turns on banter_turns
+CREATE TABLE banter_turns (
+			turn_id TEXT PRIMARY KEY,
+			guild_id TEXT NOT NULL,
+			channel_id TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)
+-- table channel_episode on channel_episode
+CREATE TABLE channel_episode (
+		id TEXT PRIMARY KEY,
+		guild_id TEXT NOT NULL,
+		channel_id TEXT NOT NULL,
+		room TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		title TEXT NOT NULL,
+		status TEXT NOT NULL,
+		due_at TEXT NOT NULL DEFAULT '',
+		when_text TEXT NOT NULL DEFAULT '',
+		importance INTEGER NOT NULL DEFAULT 2,
+		source TEXT NOT NULL,
+		participants TEXT NOT NULL DEFAULT '[]',
+		segment TEXT NOT NULL DEFAULT '[]',
+		first_seen TEXT NOT NULL,
+		last_seen TEXT NOT NULL,
+		expires_at TEXT NOT NULL DEFAULT '',
+		supersedes_id TEXT NOT NULL DEFAULT '',
+		regen INTEGER NOT NULL DEFAULT 0,
+		updated_at TEXT NOT NULL,
+		revision INTEGER NOT NULL DEFAULT 1
+	)
+-- table channel_ops_log on channel_ops_log
+CREATE TABLE channel_ops_log (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			guild_id TEXT NOT NULL,
+			channel_id TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			summary TEXT NOT NULL,
+			revision INTEGER,
+			created_at TEXT NOT NULL
+		)
+-- table channel_state on channel_state
+CREATE TABLE channel_state (
+		guild_id TEXT NOT NULL,
+		channel_id TEXT NOT NULL,
+		room TEXT NOT NULL,
+		body TEXT NOT NULL,
+		evidence TEXT NOT NULL,
+		anchor_observation TEXT NOT NULL DEFAULT '',
+		anchor_time TEXT NOT NULL DEFAULT '',
+		revision INTEGER NOT NULL DEFAULT 1,
+		updated_n INTEGER NOT NULL DEFAULT 0,
+		updated_at TEXT NOT NULL,
+		PRIMARY KEY(guild_id, channel_id)
+	)
+-- table channel_style on channel_style
+CREATE TABLE channel_style (
+		guild_id TEXT NOT NULL,
+		channel_id TEXT NOT NULL,
+		version INTEGER NOT NULL,
+		state TEXT NOT NULL,
+		stats TEXT NOT NULL DEFAULT '{}',
+		items TEXT NOT NULL DEFAULT '[]',
+		note TEXT NOT NULL DEFAULT '',
+		messages INTEGER NOT NULL DEFAULT 0,
+		cost_usd REAL NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL,
+		decided_at TEXT NOT NULL DEFAULT '',
+		PRIMARY KEY (guild_id, channel_id, version))
+-- table channel_summary on channel_summary
+CREATE TABLE channel_summary (
+		guild_id TEXT NOT NULL,
+		channel_id TEXT NOT NULL,
+		anchor_observation TEXT NOT NULL,
+		anchor_time TEXT NOT NULL,
+		summary TEXT NOT NULL,
+		messages INTEGER NOT NULL DEFAULT 0,
+		updated_at TEXT NOT NULL, evidence_state INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY(guild_id, channel_id)
+	)
+-- table channel_threads on channel_threads
+CREATE TABLE channel_threads (
+		thread_id TEXT PRIMARY KEY,
+		guild_id TEXT NOT NULL,
+		parent_id TEXT NOT NULL,
+		bot_owned INTEGER NOT NULL DEFAULT 0,
+		owner_id TEXT NOT NULL DEFAULT '',
+		origin_turn TEXT NOT NULL DEFAULT '',
+		state TEXT NOT NULL DEFAULT 'open',
+		created_at TEXT NOT NULL,
+		last_at TEXT NOT NULL,
+		closed_at TEXT NOT NULL DEFAULT '',
+		close_reason TEXT NOT NULL DEFAULT ''
+	)
+-- table chat_turns on chat_turns
+CREATE TABLE chat_turns (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		channel_key TEXT NOT NULL,
+		role TEXT NOT NULL,
+		speaker TEXT NOT NULL DEFAULT '',
+		content TEXT NOT NULL,
+		created_at TEXT NOT NULL
+	, native_id TEXT NOT NULL DEFAULT '', spoken_at TEXT NOT NULL DEFAULT '', delivery_turn TEXT NOT NULL DEFAULT '', delivery_spans TEXT, call_address INTEGER, speaker_id TEXT NOT NULL DEFAULT '', evidence_state INTEGER NOT NULL DEFAULT 0)
+-- table config_revisions on config_revisions
+CREATE TABLE config_revisions (
+			revision INTEGER PRIMARY KEY,
+			status TEXT NOT NULL,
+			content_hash TEXT NOT NULL,
+			content TEXT NOT NULL,
+			base_revision INTEGER,
+			created_at TEXT NOT NULL
+		)
+-- table config_snapshots on config_snapshots
+CREATE TABLE config_snapshots (
+	id TEXT PRIMARY KEY,
+	name TEXT NOT NULL,
+	note TEXT NOT NULL DEFAULT '',
+	at TEXT NOT NULL,
+	revision INTEGER NOT NULL,
+	actor TEXT NOT NULL DEFAULT '',
+	yaml TEXT NOT NULL
+)
+-- table consent_audit on consent_audit
+CREATE TABLE consent_audit (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id TEXT NOT NULL,
+		scope TEXT NOT NULL,
+		status TEXT NOT NULL,
+		policy_version TEXT NOT NULL,
+		via TEXT NOT NULL,
+		at TEXT NOT NULL
+	)
+-- table consent_state on consent_state
+CREATE TABLE consent_state (
+		user_id TEXT NOT NULL,
+		scope TEXT NOT NULL,
+		status TEXT NOT NULL,
+		policy_version TEXT NOT NULL DEFAULT '',
+		granted_at TEXT NOT NULL DEFAULT '',
+		withdrawn_at TEXT NOT NULL DEFAULT '',
+		updated_at TEXT NOT NULL,
+		PRIMARY KEY(user_id, scope)
+	)
+-- table consents on consents
+CREATE TABLE consents (
+			subject TEXT PRIMARY KEY,
+			granted INTEGER NOT NULL,
+			updated_at TEXT NOT NULL
+		)
+-- table conversation_log on conversation_log
+CREATE TABLE conversation_log (
+		id TEXT PRIMARY KEY,
+		guild_id TEXT NOT NULL,
+		channel_id TEXT NOT NULL,
+		message_id TEXT NOT NULL DEFAULT '',
+		author_ref TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		decision TEXT NOT NULL,
+		mode TEXT NOT NULL DEFAULT '',
+		score REAL NOT NULL DEFAULT 0,
+		features TEXT NOT NULL DEFAULT '{}',
+		outcome TEXT NOT NULL DEFAULT '',
+		outcome_at TEXT NOT NULL DEFAULT '',
+		cost_usd REAL NOT NULL DEFAULT 0
+	)
+-- table delivery_ledger on delivery_ledger
+CREATE TABLE delivery_ledger (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		turn_id TEXT NOT NULL,
+		guild_id TEXT NOT NULL,
+		channel_id TEXT NOT NULL,
+		parts INTEGER NOT NULL,
+		sent INTEGER NOT NULL,
+		retries INTEGER NOT NULL,
+		class TEXT NOT NULL DEFAULT '',
+		reference_dropped INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL
+	)
+-- table episode_item on episode_item
+CREATE TABLE episode_item (
+		id TEXT PRIMARY KEY,
+		episode_id TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		text TEXT NOT NULL,
+		evidence TEXT NOT NULL,
+		by_refs TEXT NOT NULL DEFAULT '[]',
+		state TEXT NOT NULL DEFAULT 'active',
+		created_at TEXT NOT NULL
+	)
+-- table episode_leaf on episode_leaf
+CREATE TABLE episode_leaf (
+		episode_id TEXT NOT NULL,
+		leaf_id TEXT NOT NULL,
+		PRIMARY KEY(episode_id, leaf_id)
+	) WITHOUT ROWID
+-- table eval_runs on eval_runs
+CREATE TABLE eval_runs (
+	id TEXT PRIMARY KEY,
+	at TEXT NOT NULL,
+	params TEXT NOT NULL,
+	summary TEXT NOT NULL,
+	items TEXT NOT NULL
+, evidence_state INTEGER NOT NULL DEFAULT 0)
+-- table evidence_holders on evidence_holders
+CREATE TABLE evidence_holders(id INTEGER PRIMARY KEY, holder_kind TEXT NOT NULL, holder_id TEXT NOT NULL, UNIQUE(holder_kind,holder_id))
+-- table evidence_links on evidence_links
+CREATE TABLE evidence_links(source INTEGER NOT NULL, holder INTEGER NOT NULL, PRIMARY KEY(source,holder)) WITHOUT ROWID
+-- table evidence_sources on evidence_sources
+CREATE TABLE evidence_sources(id INTEGER PRIMARY KEY, source_id TEXT NOT NULL UNIQUE)
+-- table fortune_cache on fortune_cache
+CREATE TABLE fortune_cache (
+			cache_key TEXT PRIMARY KEY,
+			content TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)
+-- table fortune_profiles on fortune_profiles
+CREATE TABLE fortune_profiles (
+			user_id TEXT PRIMARY KEY,
+			birth_date TEXT NOT NULL,
+			birth_time TEXT NOT NULL DEFAULT '',
+			gender TEXT NOT NULL DEFAULT '',
+			birth_place TEXT NOT NULL DEFAULT '',
+			display_name TEXT NOT NULL DEFAULT '',
+			sub_time TEXT NOT NULL DEFAULT '',
+			sub_active INTEGER NOT NULL DEFAULT 0,
+			last_sent TEXT NOT NULL DEFAULT '',
+			job TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)
+-- table fortune_usage on fortune_usage
+CREATE TABLE fortune_usage (
+			user_id TEXT NOT NULL,
+			day TEXT NOT NULL,
+			n INTEGER NOT NULL,
+			PRIMARY KEY(user_id, day)
+		)
+-- table jobs on jobs
+CREATE TABLE jobs (
+			id TEXT PRIMARY KEY,
+			type TEXT NOT NULL,
+			status TEXT NOT NULL,
+			idempotency_key TEXT UNIQUE,
+			lease_token TEXT,
+			lease_expires_at TEXT,
+			attempt INTEGER NOT NULL DEFAULT 0,
+			checkpoint TEXT,
+			payload TEXT,
+			result TEXT,
+			error_code TEXT,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)
+-- table lab_reviews on lab_reviews
+CREATE TABLE lab_reviews (
+		id TEXT PRIMARY KEY,
+		at TEXT NOT NULL,
+		channel_key TEXT NOT NULL,
+		question TEXT NOT NULL,
+		answer TEXT NOT NULL,
+		verdict TEXT NOT NULL,
+		tags TEXT NOT NULL DEFAULT '',
+		note TEXT NOT NULL DEFAULT '',
+		meta TEXT NOT NULL DEFAULT '{}'
+	, evidence_state INTEGER NOT NULL DEFAULT 0)
+-- table llm_calls on llm_calls
+CREATE TABLE llm_calls (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		turn_id TEXT NOT NULL DEFAULT '',
+		job_id TEXT NOT NULL DEFAULT '',
+		role TEXT NOT NULL,
+		call_count INTEGER NOT NULL DEFAULT 1,
+		model TEXT NOT NULL DEFAULT '',
+		provider TEXT NOT NULL DEFAULT '',
+		prompt_tokens INTEGER NOT NULL DEFAULT 0,
+		completion_tokens INTEGER NOT NULL DEFAULT 0,
+		cached_tokens INTEGER NOT NULL DEFAULT 0,
+		latency_ms INTEGER NOT NULL DEFAULT 0,
+		cost_usd REAL NOT NULL DEFAULT 0,
+		class TEXT NOT NULL DEFAULT '',
+		fallback INTEGER NOT NULL DEFAULT 0,
+		finish_reason TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL
+	)
+-- table memory_batch_plans on memory_batch_plans
+CREATE TABLE memory_batch_plans (
+		room TEXT PRIMARY KEY,
+		generation TEXT NOT NULL DEFAULT '',
+		state TEXT NOT NULL,
+		items INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		plan TEXT NOT NULL)
+-- table memory_embed_cache on memory_embed_cache
+CREATE TABLE memory_embed_cache (
+		cache_key TEXT PRIMARY KEY,
+		vec BLOB NOT NULL,
+		created_at TEXT NOT NULL
+	, kind TEXT NOT NULL DEFAULT '')
+-- table memory_explicit on memory_explicit
+CREATE TABLE memory_explicit (
+			episode_id TEXT PRIMARY KEY,
+			guild_id TEXT NOT NULL,
+			person_ref TEXT NOT NULL,
+			key TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)
+-- table memory_identity_migration on memory_identity_migration
+CREATE TABLE memory_identity_migration(id INTEGER PRIMARY KEY, done INTEGER NOT NULL)
+-- table memory_leaf_sync on memory_leaf_sync
+CREATE TABLE memory_leaf_sync (
+			room TEXT PRIMARY KEY, valid INTEGER NOT NULL DEFAULT 0,
+			signature TEXT NOT NULL DEFAULT '', timezone TEXT NOT NULL DEFAULT '',
+			revision BIGINT NOT NULL DEFAULT 0, observed_revision BIGINT NOT NULL DEFAULT -1,
+			last_time TEXT NOT NULL DEFAULT '', last_source TEXT NOT NULL DEFAULT '', last_id TEXT NOT NULL DEFAULT '',
+			dirty_time TEXT, dirty_source TEXT NOT NULL DEFAULT '', dirty_id TEXT NOT NULL DEFAULT '', added BIGINT NOT NULL DEFAULT 0,
+			restart_id TEXT NOT NULL DEFAULT '', tail_ids TEXT NOT NULL DEFAULT '[]',
+			prefix_messages BIGINT NOT NULL DEFAULT 0, prefix_leaves BIGINT NOT NULL DEFAULT 0,
+			tail_messages BIGINT NOT NULL DEFAULT 0)
+-- table memory_leaves on memory_leaves
+CREATE TABLE memory_leaves (
+		leaf_id TEXT PRIMARY KEY,
+		room TEXT NOT NULL,
+		recipe TEXT NOT NULL,
+		first_observation_id TEXT NOT NULL,
+		observation_ids TEXT NOT NULL,
+		n INTEGER NOT NULL,
+		body TEXT NOT NULL,
+		body_hash TEXT NOT NULL,
+		speakers TEXT NOT NULL,
+		end_time TEXT NOT NULL DEFAULT '',
+		closed INTEGER NOT NULL DEFAULT 0,
+		summary TEXT NOT NULL DEFAULT '',
+		embed_space TEXT NOT NULL DEFAULT '',
+		leaf_vec BLOB,
+		summary_vec BLOB,
+		updated_at TEXT NOT NULL
+	)
+-- table memory_message_vector_migration on memory_message_vector_migration
+CREATE TABLE memory_message_vector_migration(id INTEGER PRIMARY KEY, done INTEGER NOT NULL)
+-- table memory_message_vectors on memory_message_vectors
+CREATE TABLE memory_message_vectors (
+		observation_id TEXT PRIMARY KEY,
+		room TEXT NOT NULL,
+		embed_space TEXT NOT NULL,
+		text_hash TEXT NOT NULL,
+		label TEXT NOT NULL DEFAULT '',
+		vec BLOB NOT NULL,
+		updated_at TEXT NOT NULL
+	, fmt INTEGER NOT NULL DEFAULT 0)
+-- table memory_observation_aliases on memory_observation_aliases
+CREATE TABLE memory_observation_aliases(alias_id TEXT PRIMARY KEY, observation_id TEXT NOT NULL)
+-- table memory_observations on memory_observations
+CREATE TABLE memory_observations (
+		observation_id TEXT PRIMARY KEY,
+		platform TEXT NOT NULL,
+		collection TEXT NOT NULL,
+		source_room TEXT NOT NULL,
+		room TEXT NOT NULL,
+		native_message_id TEXT,
+		actor_label TEXT NOT NULL,
+		actor_account TEXT NOT NULL DEFAULT '',
+		content TEXT NOT NULL,
+		parsed_time TEXT NOT NULL,
+		record_kind TEXT NOT NULL,
+		imported_at TEXT NOT NULL
+	, edited_at TEXT NOT NULL DEFAULT '', deleted_at TEXT NOT NULL DEFAULT '')
+-- table memory_privacy_migration on memory_privacy_migration
+CREATE TABLE memory_privacy_migration(id INTEGER PRIMARY KEY,done INTEGER NOT NULL)
+-- table memory_reviews on memory_reviews
+CREATE TABLE memory_reviews (
+	leaf_id TEXT PRIMARY KEY,
+	room TEXT NOT NULL,
+	kind TEXT NOT NULL,
+	note TEXT NOT NULL DEFAULT '',
+	excerpt TEXT NOT NULL DEFAULT '',
+	at TEXT NOT NULL,
+	actor TEXT NOT NULL DEFAULT ''
+, evidence_state INTEGER NOT NULL DEFAULT 0)
+-- table memory_revision_sequence on memory_revision_sequence
+CREATE TABLE memory_revision_sequence(id INTEGER PRIMARY KEY, revision BIGINT NOT NULL)
+-- table memory_rooms on memory_rooms
+CREATE TABLE memory_rooms (
+		room TEXT PRIMARY KEY,
+		collection TEXT NOT NULL,
+		platform TEXT NOT NULL,
+		label TEXT NOT NULL DEFAULT '',
+		naive_timezone TEXT NOT NULL DEFAULT '',
+		updated_at TEXT NOT NULL
+	, revision BIGINT NOT NULL DEFAULT 0, evidence_revision BIGINT NOT NULL DEFAULT -1, active_recipe VARCHAR(96) NOT NULL DEFAULT '', pending_sync BIGINT NOT NULL DEFAULT 1)
+-- table memory_spend on memory_spend
+CREATE TABLE memory_spend (
+		day TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		usd REAL NOT NULL,
+		calls INTEGER NOT NULL,
+		PRIMARY KEY(day, kind)
+	)
+-- table message_kept_revisions on message_kept_revisions
+CREATE TABLE message_kept_revisions(native_id TEXT PRIMARY KEY, at TEXT NOT NULL)
+-- table notice_delivered on notice_delivered
+CREATE TABLE notice_delivered (
+			user_id TEXT NOT NULL,
+			item_key TEXT NOT NULL,
+			fingerprint TEXT NOT NULL,
+			delivered_at TEXT NOT NULL,
+			PRIMARY KEY(user_id, item_key)
+		)
+-- table notice_delivery_outcomes on notice_delivery_outcomes
+CREATE TABLE notice_delivery_outcomes (
+			user_id TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			delivery_date TEXT NOT NULL,
+			state TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(user_id, kind, delivery_date)
+		)
+-- table notice_items on notice_items
+CREATE TABLE notice_items (
+			item_key TEXT PRIMARY KEY,
+			source_id TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			title TEXT NOT NULL,
+			url TEXT NOT NULL,
+			published TEXT NOT NULL DEFAULT '',
+			category TEXT NOT NULL DEFAULT '',
+			pinned INTEGER NOT NULL DEFAULT 0,
+			fingerprint TEXT NOT NULL,
+			body TEXT NOT NULL DEFAULT '',
+			signals TEXT NOT NULL DEFAULT '',
+			first_seen TEXT NOT NULL,
+			changed_at TEXT NOT NULL,
+			detail_at TEXT NOT NULL DEFAULT ''
+		)
+-- table notice_state on notice_state
+CREATE TABLE notice_state (
+			source_id TEXT PRIMARY KEY,
+			last_run TEXT NOT NULL,
+			ok INTEGER NOT NULL,
+			error TEXT NOT NULL DEFAULT '',
+			items INTEGER NOT NULL DEFAULT 0,
+			new_items INTEGER NOT NULL DEFAULT 0,
+			warnings TEXT NOT NULL DEFAULT ''
+		)
+-- table notice_subs on notice_subs
+CREATE TABLE notice_subs (
+			user_id TEXT NOT NULL,
+			kind TEXT NOT NULL,
+			profile TEXT NOT NULL DEFAULT '',
+			sources TEXT NOT NULL DEFAULT '',
+			delivery_time TEXT NOT NULL DEFAULT '',
+			active INTEGER NOT NULL DEFAULT 1,
+			last_delivery TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(user_id, kind)
+		)
+-- table participation_log on participation_log
+CREATE TABLE participation_log (
+		id TEXT PRIMARY KEY,
+		guild_id TEXT NOT NULL,
+		channel_id TEXT NOT NULL,
+		message_id TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		mode TEXT NOT NULL DEFAULT '',
+		kind TEXT NOT NULL DEFAULT '',
+		state TEXT NOT NULL,
+		reason TEXT NOT NULL DEFAULT '',
+		score REAL NOT NULL DEFAULT 0,
+		message TEXT NOT NULL DEFAULT '',
+		draft TEXT NOT NULL DEFAULT '',
+		features TEXT NOT NULL DEFAULT '{}',
+		verdict TEXT NOT NULL DEFAULT '',
+		cost_usd REAL NOT NULL DEFAULT 0
+	, author_ref TEXT NOT NULL DEFAULT '', evidence_state INTEGER NOT NULL DEFAULT 0)
+-- table participation_spoke_turns on participation_spoke_turns
+CREATE TABLE participation_spoke_turns (
+			turn_id TEXT PRIMARY KEY,
+			guild_id TEXT NOT NULL,
+			channel_id TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		)
+-- table person_alias on person_alias
+CREATE TABLE person_alias(guild_id TEXT NOT NULL,person_ref TEXT NOT NULL,label TEXT NOT NULL,
+			room TEXT NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,last_source TEXT NOT NULL,folded TEXT NOT NULL,PRIMARY KEY(guild_id,person_ref,label,room)) WITHOUT ROWID
+-- table person_alias_fill on person_alias_fill
+CREATE TABLE person_alias_fill(id INTEGER PRIMARY KEY,cursor INTEGER NOT NULL)
+-- table person_alias_source on person_alias_source
+CREATE TABLE person_alias_source(observation TEXT PRIMARY KEY,guild_id TEXT NOT NULL,person_ref TEXT NOT NULL,
+			label TEXT NOT NULL,room TEXT NOT NULL,at TEXT NOT NULL,folded TEXT NOT NULL) WITHOUT ROWID
+-- table person_card_item on person_card_item
+CREATE TABLE person_card_item (
+			id TEXT PRIMARY KEY,
+			guild_id TEXT NOT NULL,
+			person_ref TEXT NOT NULL,
+			key TEXT NOT NULL,
+			text TEXT NOT NULL,
+			evidence TEXT NOT NULL,
+			episodes TEXT NOT NULL DEFAULT '[]',
+			origin TEXT NOT NULL,
+			state TEXT NOT NULL DEFAULT 'active',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		)
+-- table person_relation on person_relation
+CREATE TABLE person_relation (
+			guild_id TEXT NOT NULL,
+			a_ref TEXT NOT NULL,
+			b_ref TEXT NOT NULL,
+			replies INTEGER NOT NULL DEFAULT 0,
+			mentions INTEGER NOT NULL DEFAULT 0,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(guild_id, a_ref, b_ref)
+		) WITHOUT ROWID
+-- table poll_messages on poll_messages
+CREATE TABLE poll_messages (
+		message_id TEXT PRIMARY KEY,
+		poll_id TEXT NOT NULL,
+		channel_id TEXT NOT NULL,
+		created_at TEXT NOT NULL
+	)
+-- table polls on polls
+CREATE TABLE polls (
+			id TEXT PRIMARY KEY,
+			scope_key TEXT NOT NULL,
+			revision INTEGER NOT NULL,
+			state TEXT NOT NULL,
+			created_at TEXT NOT NULL DEFAULT ''
+		)
+-- table privacy_settled on privacy_settled
+CREATE TABLE privacy_settled(seq INTEGER PRIMARY KEY AUTOINCREMENT, source_id TEXT NOT NULL UNIQUE)
+-- table privacy_tombstones on privacy_tombstones
+CREATE TABLE privacy_tombstones(kind TEXT NOT NULL, source_id TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY(kind,source_id)) WITHOUT ROWID
+-- table redaction_jobs on redaction_jobs
+CREATE TABLE redaction_jobs (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		payload TEXT NOT NULL,
+		created_at TEXT NOT NULL
+	)
+-- table reminder_context on reminder_context
+CREATE TABLE reminder_context (
+			reminder_id TEXT NOT NULL,
+			seq INTEGER NOT NULL,
+			message_id TEXT NOT NULL DEFAULT '',
+			author_id TEXT NOT NULL DEFAULT '',
+			author_name TEXT NOT NULL DEFAULT '',
+			text TEXT NOT NULL,
+			at TEXT NOT NULL DEFAULT '',
+			PRIMARY KEY (reminder_id, seq)
+		)
+-- table reminder_offers on reminder_offers
+CREATE TABLE reminder_offers (
+			id TEXT PRIMARY KEY,
+			guild_id TEXT NOT NULL,
+			channel_id TEXT NOT NULL,
+			message_id TEXT NOT NULL DEFAULT '',
+			content TEXT NOT NULL,
+			original_text TEXT NOT NULL DEFAULT '',
+			timezone TEXT NOT NULL,
+			candidates TEXT NOT NULL DEFAULT '[]',
+			precision TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			expires_at TEXT NOT NULL
+		)
+-- table reminders on reminders
+CREATE TABLE reminders (
+			id TEXT PRIMARY KEY,
+			owner_id TEXT NOT NULL,
+			owner_name TEXT NOT NULL DEFAULT '',
+			guild_id TEXT NOT NULL DEFAULT '',
+			channel_id TEXT NOT NULL DEFAULT '',
+			destination TEXT NOT NULL DEFAULT '',
+			content TEXT NOT NULL,
+			original_text TEXT NOT NULL DEFAULT '',
+			timezone TEXT NOT NULL,
+			locale TEXT NOT NULL DEFAULT '',
+			candidates TEXT NOT NULL DEFAULT '[]',
+			precision TEXT NOT NULL DEFAULT '',
+			due_at TEXT NOT NULL DEFAULT '',
+			status TEXT NOT NULL,
+			version INTEGER NOT NULL DEFAULT 1,
+			attempts INTEGER NOT NULL DEFAULT 0,
+			error TEXT NOT NULL DEFAULT '',
+			delivered_id TEXT NOT NULL DEFAULT '',
+			offer_id TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		, repeat_rule TEXT NOT NULL DEFAULT '', repeat_until TEXT NOT NULL DEFAULT '', repeat_max INTEGER NOT NULL DEFAULT 0, occurrences INTEGER NOT NULL DEFAULT 0, sending_at TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT '', task TEXT NOT NULL DEFAULT '')
+-- table reply_messages on reply_messages
+CREATE TABLE reply_messages (
+		message_id TEXT PRIMARY KEY,
+		turn_id TEXT NOT NULL,
+		guild_id TEXT NOT NULL,
+		channel_id TEXT NOT NULL,
+		at TEXT NOT NULL
+	, request_id TEXT, part_end INTEGER NOT NULL DEFAULT 0, rest_start INTEGER NOT NULL DEFAULT 0)
+-- table schema_migrations on schema_migrations
+CREATE TABLE schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at TEXT NOT NULL
+		)
+-- table stats_daily on stats_daily
+CREATE TABLE stats_daily (
+		day TEXT NOT NULL,
+		metric TEXT NOT NULL,
+		dims TEXT NOT NULL DEFAULT '',
+		n INTEGER NOT NULL DEFAULT 0,
+		vals TEXT NOT NULL DEFAULT '{}',
+		PRIMARY KEY(day, metric, dims)
+	) WITHOUT ROWID
+-- table stats_days on stats_days
+CREATE TABLE stats_days (
+		grp TEXT NOT NULL,
+		day TEXT NOT NULL,
+		zone TEXT NOT NULL DEFAULT '',
+		source TEXT NOT NULL DEFAULT 'local',
+		at TEXT NOT NULL,
+		PRIMARY KEY(grp, day)
+	) WITHOUT ROWID
+-- table thread_parents on thread_parents
+CREATE TABLE thread_parents (
+		thread_id TEXT PRIMARY KEY,
+		guild_id TEXT NOT NULL,
+		parent_id TEXT NOT NULL
+	)
+-- table thread_participants on thread_participants
+CREATE TABLE thread_participants (
+			thread_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			added_at TEXT NOT NULL,
+			PRIMARY KEY(thread_id, user_id)
+		)
+-- table thread_tombstones on thread_tombstones
+CREATE TABLE thread_tombstones (thread_id TEXT PRIMARY KEY)
+-- table tool_calls on tool_calls
+CREATE TABLE tool_calls (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		turn_id TEXT NOT NULL DEFAULT '',
+		tool TEXT NOT NULL,
+		param_keys TEXT NOT NULL DEFAULT '[]',
+		param_sources TEXT NOT NULL DEFAULT '{}',
+		guard TEXT NOT NULL DEFAULT 'allowed',
+		status TEXT NOT NULL DEFAULT '',
+		latency_ms INTEGER NOT NULL DEFAULT 0,
+		cost_usd REAL NOT NULL DEFAULT 0,
+		result_chars INTEGER NOT NULL DEFAULT 0,
+		class TEXT NOT NULL DEFAULT '',
+		provider TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL
+	)
+-- table tool_usage on tool_usage
+CREATE TABLE tool_usage (
+	day VARCHAR(10) NOT NULL,
+	tool VARCHAR(128) NOT NULL,
+	scope VARCHAR(16) NOT NULL,
+	subject VARCHAR(191) NOT NULL,
+	n INTEGER NOT NULL,
+	last_at VARCHAR(40) NOT NULL,
+	PRIMARY KEY(day, tool, scope, subject)
+)
+-- table traces on traces
+CREATE TABLE traces (
+			id TEXT PRIMARY KEY,
+			body TEXT NOT NULL,
+			created_at TEXT NOT NULL
+		, evidence_state INTEGER NOT NULL DEFAULT 0)
+-- table turn_feedback on turn_feedback
+CREATE TABLE turn_feedback (
+		turn_id TEXT NOT NULL,
+		user_hash TEXT NOT NULL,
+		source TEXT NOT NULL,
+		rating INTEGER NOT NULL,
+		reason TEXT NOT NULL DEFAULT '',
+		at TEXT NOT NULL,
+		PRIMARY KEY (turn_id, user_hash, source)
+	)
+-- table turn_log on turn_log
+CREATE TABLE turn_log (
+		id TEXT PRIMARY KEY,
+		at TEXT NOT NULL,
+		day TEXT NOT NULL,
+		hour INTEGER NOT NULL,
+		guild_id TEXT NOT NULL,
+		channel_id TEXT NOT NULL,
+		outcome TEXT NOT NULL,
+		tools TEXT NOT NULL DEFAULT '',
+		hits INTEGER NOT NULL DEFAULT 0,
+		cost_usd REAL NOT NULL DEFAULT 0,
+		latency_ms INTEGER NOT NULL DEFAULT 0,
+		lab INTEGER NOT NULL DEFAULT 0,
+		body TEXT NOT NULL
+	, speaker_ref TEXT NOT NULL DEFAULT '', evidence_state INTEGER NOT NULL DEFAULT 0)
+-- table update_news_sent on update_news_sent
+CREATE TABLE update_news_sent (
+		version TEXT NOT NULL,
+		target TEXT NOT NULL,
+		state TEXT NOT NULL,
+		at TEXT NOT NULL,
+		PRIMARY KEY(version, target)
+	)
+-- table user_prefs on user_prefs
+CREATE TABLE user_prefs (
+		user_id TEXT PRIMARY KEY,
+		locale TEXT NOT NULL DEFAULT '',
+		timezone TEXT NOT NULL DEFAULT '',
+		quiet_start TEXT NOT NULL DEFAULT '',
+		quiet_end TEXT NOT NULL DEFAULT '',
+		weather_region TEXT NOT NULL DEFAULT '',
+		update_news INTEGER NOT NULL DEFAULT 0,
+		updated_at TEXT NOT NULL
+	)
+-- trigger evidence_links_cleanup on evidence_links
+CREATE TRIGGER evidence_links_cleanup AFTER DELETE ON evidence_links BEGIN
+			 DELETE FROM evidence_sources WHERE id=OLD.source AND NOT EXISTS(SELECT 1 FROM evidence_links WHERE source=OLD.source);
+			 DELETE FROM evidence_holders WHERE id=OLD.holder AND NOT EXISTS(SELECT 1 FROM evidence_links WHERE holder=OLD.holder);
+			 END
+-- trigger evidence_refs_delete on evidence_refs
+CREATE TRIGGER evidence_refs_delete INSTEAD OF DELETE ON evidence_refs BEGIN
+			 DELETE FROM evidence_links WHERE source=(SELECT id FROM evidence_sources WHERE source_id=OLD.source_id) AND holder=(SELECT id FROM evidence_holders WHERE holder_kind=OLD.holder_kind AND holder_id=OLD.holder_id);
+			 END
+-- trigger evidence_refs_insert on evidence_refs
+CREATE TRIGGER evidence_refs_insert INSTEAD OF INSERT ON evidence_refs BEGIN
+			 INSERT OR IGNORE INTO evidence_sources(source_id) VALUES(NEW.source_id);
+			 INSERT OR IGNORE INTO evidence_holders(holder_kind,holder_id) VALUES(NEW.holder_kind,NEW.holder_id);
+			 INSERT OR IGNORE INTO evidence_links(source,holder) SELECT s.id,h.id FROM evidence_sources s,evidence_holders h WHERE s.source_id=NEW.source_id AND h.holder_kind=NEW.holder_kind AND h.holder_id=NEW.holder_id;
+			 END
+-- trigger memory_leaf_sync_delete on memory_leaves
+CREATE TRIGGER memory_leaf_sync_delete AFTER DELETE ON memory_leaves BEGIN
+			UPDATE memory_leaf_sync SET valid=0 WHERE room=OLD.room AND valid=1; END
+-- trigger memory_leaf_sync_insert on memory_leaves
+CREATE TRIGGER memory_leaf_sync_insert AFTER INSERT ON memory_leaves BEGIN
+			UPDATE memory_leaf_sync SET valid=0 WHERE room=NEW.room AND valid=1; END
+-- trigger memory_leaf_sync_recipe on memory_rooms
+CREATE TRIGGER memory_leaf_sync_recipe AFTER UPDATE OF active_recipe ON memory_rooms WHEN OLD.active_recipe<>NEW.active_recipe BEGIN
+			UPDATE memory_leaf_sync SET valid=0 WHERE room=NEW.room AND valid=1; END
+-- trigger memory_leaf_sync_update on memory_leaves
+CREATE TRIGGER memory_leaf_sync_update AFTER UPDATE OF room,recipe,first_observation_id,observation_ids,n,body,body_hash,speakers,end_time,closed ON memory_leaves BEGIN
+			UPDATE memory_leaf_sync SET valid=0 WHERE room IN (OLD.room,NEW.room) AND valid=1; END
+-- trigger person_alias_delete on memory_observations
+CREATE TRIGGER person_alias_delete AFTER DELETE ON memory_observations
+			BEGIN DELETE FROM person_alias_source WHERE observation=old.observation_id; END
+-- trigger person_alias_edit on memory_observations
+CREATE TRIGGER person_alias_edit AFTER UPDATE OF deleted_at,edited_at,actor_label,actor_account,source_room,content ON memory_observations
+			BEGIN DELETE FROM person_alias_source WHERE observation=old.observation_id; END
+-- trigger person_alias_lost on person_alias_source
+CREATE TRIGGER person_alias_lost AFTER DELETE ON person_alias_source BEGIN
+			DELETE FROM person_alias WHERE (guild_id,person_ref,label,room)=(old.guild_id,old.person_ref,old.label,old.room)
+			AND NOT EXISTS(SELECT 1 FROM person_alias_source WHERE (guild_id,person_ref,label,room)=(old.guild_id,old.person_ref,old.label,old.room));
+			UPDATE person_alias SET first_seen=(SELECT at FROM person_alias_source WHERE
+			(guild_id,person_ref,label,room)=(old.guild_id,old.person_ref,old.label,old.room) ORDER BY at LIMIT 1),
+			(last_seen,last_source)=(SELECT at,observation FROM person_alias_source WHERE
+			(guild_id,person_ref,label,room)=(old.guild_id,old.person_ref,old.label,old.room) ORDER BY at DESC,observation DESC LIMIT 1)
+			WHERE (guild_id,person_ref,label,room)=(old.guild_id,old.person_ref,old.label,old.room); END
+-- trigger person_alias_seen on person_alias_source
+CREATE TRIGGER person_alias_seen AFTER INSERT ON person_alias_source BEGIN
+			INSERT INTO person_alias(guild_id,person_ref,label,room,first_seen,last_seen,last_source,folded)
+			VALUES(new.guild_id,new.person_ref,new.label,new.room,new.at,new.at,new.observation,new.folded)
+			ON CONFLICT(guild_id,person_ref,label,room) DO UPDATE SET
+			last_source=CASE WHEN (new.at,new.observation)>(last_seen,last_source) THEN new.observation ELSE last_source END,
+			first_seen=min(first_seen,new.at),last_seen=max(last_seen,new.at); END
+-- trigger privacy_settled_insert on privacy_tombstones
+CREATE TRIGGER privacy_settled_insert AFTER INSERT ON privacy_tombstones BEGIN DELETE FROM privacy_settled WHERE source_id=NEW.source_id; END
+-- trigger privacy_settled_update on privacy_tombstones
+CREATE TRIGGER privacy_settled_update AFTER UPDATE ON privacy_tombstones BEGIN DELETE FROM privacy_settled WHERE source_id=NEW.source_id; END
+-- view evidence_refs on evidence_refs
+CREATE VIEW evidence_refs AS SELECT s.source_id,h.holder_kind,h.holder_id FROM evidence_links r JOIN evidence_sources s ON s.id=r.source JOIN evidence_holders h ON h.id=r.holder
