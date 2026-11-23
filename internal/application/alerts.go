@@ -57,6 +57,9 @@ var alertSkip = map[string]bool{
 var severityRank = map[string]int{"info": 0, "warn": 1, "danger": 2}
 
 type alertEvent struct {
+	// ID tells events apart that are otherwise equal (same key, arguments and second), so a send removes
+	// from the queue only the ones it carried. Events queued before it existed have none.
+	ID   string         `json:"id,omitempty"`
 	Key  string         `json:"key"`
 	Args map[string]any `json:"args,omitempty"`
 	At   string         `json:"at"`
@@ -75,9 +78,16 @@ type alertDelivery struct {
 	Failed int    `json:"failed"` // operators not reached
 	Reason string `json:"reason,omitempty"`
 	Test   bool   `json:"test,omitempty"`
+	// Attempt numbers the attempts in the order they started (alerts:attempts), so one that ends after a
+	// later one does not replace it as the last
+	Attempt int64 `json:"attempt,omitempty"`
 }
 
-const alertQueueKey = "alerts:queue"
+const (
+	alertQueueKey    = "alerts:queue"
+	alertLastKey     = "alerts:last"
+	alertAttemptsKey = "alerts:attempts"
+)
 
 // alertTicks holds the stores whose alert tick is running: two ticks of one instance at once would send
 // the same new items twice. The scheduler never overlaps them; an entry lives only while its tick runs.
@@ -88,7 +98,7 @@ func (s *Service) queueAlert(key string, args map[string]any) {
 	if s.Store == nil || s.practice {
 		return
 	}
-	e := alertEvent{Key: key, Args: args, At: s.Clock.Now().UTC().Format(time.RFC3339)}
+	e := alertEvent{ID: newID("al_"), Key: key, Args: args, At: s.Clock.Now().UTC().Format(time.RFC3339)}
 	err := kvUpdate(s, alertQueueKey, func(q []alertEvent) []alertEvent {
 		q = append(q, e)
 		if len(q) > alertMaxQueued {
@@ -101,9 +111,9 @@ func (s *Service) queueAlert(key string, args map[string]any) {
 	}
 }
 
-// dropSentAlerts removes from the queue the events one message carried. They were its first events; what
-// was queued while the message went out stays for the next one. (Were an event cut by the cap meanwhile
-// and an identical one queued after it, that one goes instead: the operators read the same line.)
+// dropSentAlerts removes from the queue the events one message carried, matched by their ID; what was
+// queued while the message went out stays for the next one, even an event equal to a sent one that the
+// cap pushed out meanwhile.
 func (s *Service) dropSentAlerts(sent []alertEvent) error {
 	if len(sent) == 0 {
 		return nil
@@ -126,7 +136,7 @@ func (s *Service) dropSentAlerts(sent []alertEvent) error {
 }
 
 func alertIdentity(e alertEvent) string {
-	b, _ := json.Marshal(e) // map keys are sorted: equal events give equal text
+	b, _ := json.Marshal(e) // the ID makes it unique; map keys are sorted, so an old event without one matches its equal
 	return string(b)
 }
 
@@ -332,7 +342,7 @@ func (s *Service) sendAlert(ctx context.Context, dm DiscordSender, locale string
 	if test {
 		card.Title = c.T(locale, "alerts.test_title")
 	}
-	d := alertDelivery{At: s.Clock.Now().UTC().Format(time.RFC3339), Items: len(lines), Test: test}
+	d := alertDelivery{At: s.Clock.Now().UTC().Format(time.RFC3339), Items: len(lines), Test: test, Attempt: s.nextAlertAttempt()}
 	ops := append([]string(nil), s.Doc().Access.Operators...)
 	sort.Strings(ops)
 	closed := 0
@@ -359,8 +369,31 @@ func (s *Service) sendAlert(ctx context.Context, dm DiscordSender, locale string
 	} else if closed > 0 && d.Reason == "" {
 		d.Reason = "dm_closed_some"
 	}
-	_ = s.kvSet("alerts:last", d)
+	s.recordAlertAttempt(d)
 	return d
+}
+
+// nextAlertAttempt numbers a delivery attempt as it starts (0 when the count could not be kept).
+func (s *Service) nextAlertAttempt() int64 {
+	var n int64
+	if err := kvUpdate(s, alertAttemptsKey, func(prev int64) int64 { n = prev + 1; return n }); err != nil {
+		return 0
+	}
+	return n
+}
+
+// recordAlertAttempt keeps d as the last attempt for the console, unless an attempt that started after it
+// (a test sent while a tick's send waited) is kept already; an unnumbered one is kept as before.
+func (s *Service) recordAlertAttempt(d alertDelivery) {
+	err := kvUpdate(s, alertLastKey, func(prev alertDelivery) alertDelivery {
+		if d.Attempt > 0 && prev.Attempt > d.Attempt {
+			return prev
+		}
+		return d
+	})
+	if err != nil && s.Log != nil {
+		s.Log.Warn("alert attempt not recorded", "err", err)
+	}
 }
 
 // alertsAction: alerts.status (settings, readiness, last delivery) and alerts.test (send one now).
@@ -369,7 +402,7 @@ func (s *Service) alertsAction(ctx context.Context, req action.Request) action.R
 	var last *alertDelivery
 	if s.Store != nil {
 		var d alertDelivery
-		if ok, _ := s.kvGet("alerts:last", &d); ok {
+		if ok, _ := s.kvGet(alertLastKey, &d); ok {
 			last = &d
 		}
 	}

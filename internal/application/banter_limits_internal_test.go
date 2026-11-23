@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"masamong/internal/testutil"
 )
 
 // These tests pin the banter ladder's limits and what is stored for a restart, so the change that moved
@@ -257,4 +259,56 @@ func TestBanterDecisionsDoNotWaitForTheStore(t *testing.T) {
 		<-stepped
 		<-other
 	})
+}
+
+// syncClock is a clock the test moves while the service's goroutines read it.
+type syncClock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func (c *syncClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *syncClock) Advance(d time.Duration) {
+	c.mu.Lock()
+	c.t = c.t.Add(d)
+	c.mu.Unlock()
+}
+
+// The first 👎 lookup reads the stored turns while a banter line is noted: the noted turn stays, in memory
+// and in the store, so a 👎 on it still mutes lines (Sol review of E8, finding 2).
+func TestBanterTurnNotedWhileTheTurnsAreReadIsKept(t *testing.T) {
+	s, mc := banterLimitsService(t)
+	clk := &syncClock{t: mc.t}
+	s.Clock = clk
+	if s.banterStep("g", "a") != "line" {
+		t.Fatal("precondition: a line is allowed")
+	}
+	release := takeWriter(t, s)
+	looked := make(chan struct{})
+	go func() { defer close(looked); s.banterDisliked("turn-unknown") }() // the first lookup reads the turns
+	waitsInStore(t, "(*Service).loadBanterTurns(")
+	clk.Advance(2 * time.Minute) // past any slack for a clock that runs on while the store waits
+	noted := make(chan struct{})
+	go func() { defer close(noted); s.noteBanter("g", "a", "line", "turn-new") }()
+	testutil.WaitFor(t, lockScopeWait, "the note in memory", func() bool {
+		s.banter.mu.Lock()
+		defer s.banter.mu.Unlock()
+		_, ok := s.banter.turns["turn-new"]
+		return ok
+	})
+	release()
+	<-looked
+	<-noted
+	if n := countWhere(t, s, `SELECT COUNT(*) FROM banter_turns WHERE turn_id='turn-new'`); n != 1 {
+		t.Fatalf("the noted turn's row: %d, want 1", n)
+	}
+	s.banterDisliked("turn-new")
+	if got := s.banterStep("g", "a"); got != "emoji" {
+		t.Fatalf("after a 👎 on the noted line: %q, want emoji", got)
+	}
 }

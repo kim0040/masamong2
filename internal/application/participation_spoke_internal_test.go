@@ -191,9 +191,9 @@ func TestParticipationDecisionsDoNotWaitForTheStore(t *testing.T) {
 	})
 }
 
-// Observe reads whether the author may be counted only when a collected row waited before it took the
-// lock (nil otherwise). A row collected since is newer than the message: it is left for the next one,
-// except that a row whose window ended is settled as silent all the same.
+// advanceWatches settles only the rows whose window ended when the author's answer was not read (nil).
+// Observe reads it whenever rows wait once it holds the lock (TestObserveSettlesAWatchThatBeganWhileItRead),
+// so nil reaches it only with no row waiting or a configuration that kept changing.
 func TestAdvanceWatchesWithoutTheAuthorsAnswer(t *testing.T) {
 	s, clk := banterLimitsService(t)
 	c := &partChannel{watches: []nextWatch{

@@ -116,7 +116,7 @@ type ObservedMessage struct {
 type partMsg struct {
 	id, author, name, text string
 	at                     time.Time
-	bot                    bool
+	bot, call              bool // call: the message mentions or replies to the bot (BotCall "mention")
 }
 
 type partCandidate struct {
@@ -306,59 +306,27 @@ func (s *Service) Observe(m ObservedMessage) {
 	s.noteThreadActivity(m)
 	s.implicitObserve(m)
 	key := m.GuildID + ":" + m.ChannelID
-	// the author's consent is read before the lock is taken, and only when a collected row waits for it
-	var counted *bool
-	if !m.FromBot && s.watching(key) {
-		ok := s.authorCounted(m)
-		counted = &ok
+	// the message is said, and answers a waiting candidate, before anything is read for it
+	arrived := s.arriveObserved(key, m)
+	if m.FromBot {
+		return
 	}
-	r := s.observeReads(m)
-	c := s.lockPartChannel(key)
+	c, r := s.lockObserved(key, m, arrived.watched)
 	defer s.part.mu.Unlock()
-	startWork := s.ownedGo
-	if s.part.startWork != nil {
-		startWork = s.part.startWork
-	}
-	c.version++
-	c.recent = append(c.recent, partMsg{id: m.MessageID, author: m.AuthorID, name: m.AuthorName, text: clip(m.Content, 400), at: m.At, bot: m.FromBot})
-	if len(c.recent) > 20 {
-		c.recent = c.recent[len(c.recent)-20:]
-	}
+	startWork := s.partWork()
+	quietCue := false
 	if r.mode == "shadow" || r.mode == "conservative" {
-		pack := s.voiceFor(m.GuildID, s.channelPolicy(m.GuildID, m.ChannelID)).Pack
-		if react, logged := s.backoffObserve(c, m, pack); logged != "" {
+		if react, logged := s.backoffObserve(c, m, r.pack); logged != "" {
 			startWork("participation back-off", func(_ context.Context) { s.backoffAfter(m, react, logged) })
+			quietCue = logged == "quiet_cue"
 		}
 	}
 	// what happened after the collected moments of this channel
-	if done := s.advanceWatches(c, m, counted); len(done) > 0 {
+	if done := s.advanceWatches(c, m, r.counted); len(done) > 0 {
 		startWork("participation next", func(_ context.Context) { s.writeNext(done) })
 	}
-	// someone else spoke while a candidate waited: people are handling it
-	if p := c.pending; p != nil && (m.FromBot || m.AuthorID != p.msg.author) {
-		p.timer.Stop()
-		c.pending = nil
-		reason := "people_answered"
-		if m.FromBot {
-			reason = "bot_answered"
-		} else if p.collect {
-			p.next = "answered"
-			if m.BotCall == "mention" {
-				p.next = "called_bot"
-			}
-		}
-		startWork("participation cancellation", func(_ context.Context) {
-			s.logParticipation(p, s.participationModeOf(p.guild, p.channel), partCancelled, reason, 0, "", 0)
-		})
-	} else if p != nil && p.collect && p.next == "" {
-		// the same person went on while their moment waited
-		p.next = "continued"
-		if m.BotCall == "mention" {
-			p.next = "called_bot"
-		}
-	}
-	if m.FromBot {
-		return
+	if !quietCue { // a quiet cue drops the candidate it answers with no log entry (backoffObserve)
+		s.logAnswered(arrived.answered, arrived.reason, startWork)
 	}
 	mode := r.mode
 	if mode == "off" {
@@ -392,7 +360,7 @@ func (s *Service) Observe(m ObservedMessage) {
 	reason := ""
 	cfg := doc.Participation
 	switch {
-	case c.pending != nil:
+	case arrived.waitingBefore(c):
 		reason = "candidate_waiting"
 	case r.filter != "":
 		reason = r.filter // blocked, opted out, paused, capture off: what the store says (observeReads)
@@ -416,10 +384,18 @@ func (s *Service) Observe(m ObservedMessage) {
 		c.filtered[reason]++
 		return
 	}
-	cand := &partCandidate{key: key, guild: m.GuildID, channel: m.ChannelID, kind: kind, version: c.version, gen: c.gen, signals: sig,
+	cand := &partCandidate{key: key, guild: m.GuildID, channel: m.ChannelID, kind: kind, version: arrived.version, gen: arrived.gen, signals: sig,
 		msg: partMsg{id: m.MessageID, author: m.AuthorID, name: m.AuthorName, text: clip(m.Content, 400), at: m.At}}
 	if collect {
 		cand.collect, cand.features = true, s.momentFeatures(m.GuildID, m.ChannelID, m.At, m.Content)
+	}
+	if reason := answeredSince(c, arrived, cand); reason != "" {
+		s.logAnswered(cand, reason, startWork) // later messages came while this one's reads ran
+		return
+	}
+	if c.pending != nil { // the same person's later message is a candidate already
+		c.filtered["candidate_waiting"]++
+		return
 	}
 	wait := cfg.Wait()
 	if kind == participation.Plan {
@@ -463,11 +439,7 @@ func (s *Service) considerCandidate(cand *partCandidate) {
 		return
 	}
 	defer done()
-	gone := !s.partAllowed(cand) // may change in the wait; asks the store, so before the lock
-	// what the channel and the person allow for collecting may have changed during the wait; read for every
-	// mode, since the mode is read under the lock (a switch away from collect during the wait still counts)
-	collectWhy := s.collectSkip(cand.guild, cand.channel, cand.msg.author)
-	c := s.lockPartChannel(cand.key)
+	c, rd := s.lockCandidate(cand)
 	if c.pending != cand {
 		s.part.mu.Unlock()
 		return
@@ -477,9 +449,9 @@ func (s *Service) considerCandidate(cand *partCandidate) {
 	// speaking budget and the follow-up marks are written there)
 	c.inflight.Add(1)
 	defer c.inflight.Add(-1)
-	if s.participationModeOf(cand.guild, cand.channel) == "collect" {
-		if collectWhy != "" {
-			c.filtered[collectWhy]++
+	if rd.mode == "collect" {
+		if rd.collectWhy != "" {
+			c.filtered[rd.collectWhy]++
 			s.part.mu.Unlock()
 			return
 		}
@@ -492,7 +464,7 @@ func (s *Service) considerCandidate(cand *partCandidate) {
 		s.logParticipation(cand, "collect", partCollected, reason, 0, "", 0)
 		return
 	}
-	if cand.collect && !gone {
+	if cand.collect && !rd.gone {
 		// made in collect mode, which checked no budget: the mode changed during the wait, so the limits
 		// that speaking and judging answer to apply now
 		if why := s.candidateBlocked(c, s.Clock.Now()); why != "" {
@@ -503,7 +475,7 @@ func (s *Service) considerCandidate(cand *partCandidate) {
 			return
 		}
 	}
-	if why := backoffBlocked(c, s.Clock.Now()); why != "" || gone {
+	if why := backoffBlocked(c, s.Clock.Now()); why != "" || rd.gone {
 		// muted or just called while the candidate waited, or the person or channel no longer allows it
 		s.part.mu.Unlock()
 		return
@@ -782,9 +754,9 @@ func (s *Service) collectMention(in ChatInput) {
 // source message replied to by someone else, or the same author speaking again. Watches past their window
 // end as silent. It returns the rows to write (the caller holds s.part.mu and writes them after).
 //
-// Whether the author may be counted is the same for every watch; the caller reads it before taking the lock
-// when rows were waiting. nil means none was waiting then: a row collected since is newer than this message,
-// which settles it only when its window has ended (the store is not asked under the lock).
+// Whether the author may be counted is the same for every watch; Observe reads it before taking the lock
+// whenever rows wait (lockObserved). nil means it was not read: the message settles only the rows whose
+// window ended (the store is not asked under the lock).
 func (s *Service) advanceWatches(c *partChannel, m ObservedMessage, counted *bool) []nextResult {
 	if len(c.watches) == 0 || m.FromBot {
 		return nil
@@ -822,14 +794,6 @@ func (s *Service) advanceWatches(c *partChannel, m ObservedMessage, counted *boo
 // authorCounted is whether what this message's author did may be recorded as what happened next.
 func (s *Service) authorCounted(m ObservedMessage) bool {
 	return !s.BlockedIn(m.GuildID, m.AuthorID) && s.ConsentAllows(m.AuthorID, privacy.Participation) && s.MemoryAllowed(m.AuthorID)
-}
-
-// watching is whether a channel has collected rows waiting for what happens next.
-func (s *Service) watching(key string) bool {
-	s.part.mu.Lock()
-	defer s.part.mu.Unlock()
-	c := s.part.chans[key]
-	return c != nil && len(c.watches) > 0
 }
 
 // sweepCollectNext ends the watches whose window has passed with "silent". The scheduler calls it every
