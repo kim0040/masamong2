@@ -190,9 +190,10 @@ func (s *Service) setConsent(userID, scope, status, via string) (privacy.State, 
 			userID, scope, status, p.Version, via, now); err != nil {
 			return err
 		}
-		// a withdrawn person's words leave the paid backfill's stored pilot answers in every server
+		// a withdrawn person's words leave the paid backfill's stored pilot answers in every server: only the
+		// facts that name them, and a failure there never holds back the withdrawal
 		if status == privacy.Withdrawn && (scope == privacy.Memory || scope == privacy.Profile) {
-			return s.pbRecheckPilotTx(tx, "")
+			return s.pbRecheckSoftTx(tx, "withdrawal", 1, func() error { return s.pbRecheckPersonTx(tx, personRef(userID)) })
 		}
 		return nil
 	})

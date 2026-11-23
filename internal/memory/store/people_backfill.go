@@ -338,8 +338,22 @@ func BackfillWindows(q backfillQuerier, runID string, pilotOnly bool, states ...
 // BackfillAnswered lists the pilot windows holding stored answers of the server's runs (every server's
 // when guild is "").
 func BackfillAnswered(q backfillQuerier, guild string) ([]BackfillWindow, error) {
+	return BackfillAnsweredFor(q, guild, nil, "")
+}
+
+// BackfillAnsweredFor is BackfillAnswered narrowed to what a change can touch: with obs, the windows
+// holding one of those observations; with text, the windows whose stored answers contain it (a person
+// reference: a coarse first cut, the caller checks each fact). Neither narrows when empty.
+func BackfillAnsweredFor(q backfillQuerier, guild string, obs []string, text string) ([]BackfillWindow, error) {
+	ids := ""
+	if len(obs) > 0 {
+		raw, _ := json.Marshal(obs)
+		ids = string(raw)
+	}
 	rows, err := q.Query(`SELECT `+backfillWindowCols+` FROM people_backfill_window WHERE run_id IN (SELECT id FROM people_backfill_run WHERE ?='' OR guild_id=?)
-		AND pilot=1 AND result<>'' ORDER BY run_id, seq`, guild, guild)
+		AND pilot=1 AND result<>''
+		AND (?='' OR EXISTS(SELECT 1 FROM json_each(obs) a WHERE a.value IN (SELECT value FROM json_each(?))))
+		AND (?='' OR instr(result,?)>0) ORDER BY run_id, seq`, guild, guild, ids, ids, text, text)
 	if err != nil {
 		return nil, err
 	}

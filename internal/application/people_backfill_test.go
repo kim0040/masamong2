@@ -1235,9 +1235,9 @@ func TestPeopleBackfillReservationIsAnUpperBound(t *testing.T) {
 	}
 }
 
-// An answer cut at its output limit, a JSON object that is not the people list, or plain text is a
-// failed window (billed, sent again up to the attempt limit, then failed), never an applied window with
-// nothing to say; a complete empty list is.
+// An answer cut at its output limit, a JSON object that is not the people list, a people value that is
+// not a list (null), or plain text is a failed window (billed, sent again up to the attempt limit, then
+// failed), never an applied window with nothing to say; a complete empty list is.
 func TestPeopleBackfillRejectsIncompleteAnswer(t *testing.T) {
 	h := newPBHost(t)
 	s := pbService(t, h, "anthropic")
@@ -1246,10 +1246,11 @@ func TestPeopleBackfillRejectsIncompleteAnswer(t *testing.T) {
 	pbBatchOnly(t, s, run)
 	full := `{"people":[{"about":"p1","kind":"like","topic":"x","text":"{p1} likes x","by":["p1"],"ev":["m1"]}]}`
 	answers := map[string][2]string{
-		"topic3a today": {full[:len(full)-20], "max_tokens"},
-		"topic4a today": {`{"answer":"nothing here"}`, "end_turn"},
-		"topic8a today": {"I cannot find anything about people.", "end_turn"},
-		"topic9a today": {`{"people":[]}`, "end_turn"},
+		"topic3a today":  {full[:len(full)-20], "max_tokens"},
+		"topic4a today":  {`{"answer":"nothing here"}`, "end_turn"},
+		"topic8a today":  {"I cannot find anything about people.", "end_turn"},
+		"topic9a today":  {`{"people":[]}`, "end_turn"},
+		"topic10a today": {`{"people":null}`, "end_turn"},
 	}
 	h.mu.Lock()
 	h.rewrite = func(_, prompt string) (string, string, bool) {
@@ -1266,7 +1267,7 @@ func TestPeopleBackfillRejectsIncompleteAnswer(t *testing.T) {
 	}
 	done := pbWait(t, s, "run", pbState(store.BackfillDone))
 	ws, _ := store.BackfillWindows(s.Store.Reader(), done.ID, false)
-	for _, i := range []int{3, 4, 8} {
+	for _, i := range []int{3, 4, 8, 10} {
 		if w := ws[i]; w.State != store.WindowFailed || w.Attempts != pbMaxAttempts || w.Claims != 0 || w.CostUSD <= 0 {
 			t.Fatalf("window %d: %+v", i, w)
 		}
@@ -1275,7 +1276,7 @@ func TestPeopleBackfillRejectsIncompleteAnswer(t *testing.T) {
 		t.Fatalf("a complete empty answer: %+v", w)
 	}
 	c, _ := store.CountBackfillWindows(s.Store.Reader(), done.ID)
-	if c.States[store.WindowFailed] != 3 || c.States[store.WindowApplied] != 67 {
+	if c.States[store.WindowFailed] != 4 || c.States[store.WindowApplied] != 66 {
 		t.Fatalf("windows: %+v", c)
 	}
 }
@@ -2215,5 +2216,344 @@ func TestPeopleBackfillNoSensitiveWarns(t *testing.T) {
 	run := out["run"].(map[string]any)
 	if n, _ := run["claims_pending"].(float64); n == 0 || n != run["claims"].(float64) {
 		t.Fatalf("pending claims in status: %v of %v", run["claims_pending"], run["claims"])
+	}
+}
+
+// A pilot cut by a crash between a send's stored intent and its answer may have
+// been billed. Confirming a different plan supersedes that run and drops its stored answers, intent
+// included; the possibly billed maximum must stay counted in the server's total, before the new plan is
+// admitted and after the old run is superseded.
+func TestPeopleBackfillSupersedeKeepsCrashReservation(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	_, old := pbPiloted(t, s, nil)
+	ws, _ := store.BackfillWindows(s.Store.Reader(), old.ID, true)
+	w := ws[0]
+	have := pbAnswers(w.Result)
+	const intent = 0.5
+	have[string(peoplebackfill.ModelSonnet)] = pbAnswer{Hash: "h", Intent: intent}
+	w.Result, _ = json.Marshal(have)
+	if err := store.SaveBackfillWindow(s.Store.DB, w); err != nil {
+		t.Fatal(err)
+	}
+	// as a restart leaves a cut pilot
+	if _, err := s.Store.DB.Exec(`UPDATE people_backfill_run SET state='stopped', stopped_by='restart', pilot_done=0 WHERE id=?`, old.ID); err != nil {
+		t.Fatal(err)
+	}
+	// another plan of the same server (another cap): the unsettled maximum counts in its dry run
+	dry := pbDry(t, s, map[string]any{"budget_usd": "6"})
+	pilotHigh := dry["cost_usd"].(map[string]any)["pilot"].(map[string]any)["high"].(float64)
+	if got := dry["spent_usd"].(float64); got < old.SpentUSD+intent-1e-6 {
+		t.Fatalf("dry run spend %v leaves out the unsettled send (run %v + %v)", got, old.SpentUSD, intent)
+	}
+	// room for the new pilot only if the possibly billed send is left out: refused, nothing superseded
+	pbSetSpent(t, s, old.ID, 6-pilotHigh-intent/2)
+	res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": dry["token"], "guild_id": "g1"})
+	if res.OK || res.Error.Code != errcode.BudgetExceeded {
+		t.Fatalf("a new plan admitted against a possibly billed send: %+v", res)
+	}
+	if kept, _, _ := store.LoadBackfillRun(s.Store.Reader(), old.ID); kept.State != store.BackfillStopped {
+		t.Fatalf("the refused pilot superseded the old run: %s", kept.State)
+	}
+	// with room for both, the new pilot starts: the old run's send is charged at its maximum as it goes
+	base := 6 - pilotHigh - intent - 0.5
+	pbSetSpent(t, s, old.ID, base)
+	h.mu.Lock()
+	before := len(h.chats)
+	h.mu.Unlock()
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": dry["token"], "guild_id": "g1"}); !res.OK {
+		t.Fatalf("pilot with room: %+v", res.Error)
+	}
+	fresh := pbWait(t, s, "new pilot", func(r store.BackfillRun) bool { return r.ID != old.ID && r.State == store.BackfillPiloted })
+	gone, _, _ := store.LoadBackfillRun(s.Store.Reader(), old.ID)
+	if gone.State != store.BackfillSuperseded || len(pbStoredFacts(t, s, old.ID)) != 0 {
+		t.Fatalf("the old run: %s, %d stored facts", gone.State, len(pbStoredFacts(t, s, old.ID)))
+	}
+	if gone.SpentUSD < base+intent-1e-9 {
+		t.Fatalf("the superseded run dropped its unsettled send: spent %v, want %v", gone.SpentUSD, base+intent)
+	}
+	total, err := pbGuildSpent(s.Store.Reader(), "g1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total < base+intent+fresh.SpentUSD-1e-9 || total > 6+1e-9 {
+		t.Fatalf("server total %v: old %v + %v, new %v, cap 6", total, base, intent, fresh.SpentUSD)
+	}
+	h.mu.Lock()
+	sent := len(h.chats) - before
+	h.mu.Unlock()
+	if sent != 2*peoplebackfill.PilotSize {
+		t.Fatalf("the new pilot sent %d calls", sent)
+	}
+}
+
+// pbThreadSeed captures n segments in the thread t1 of server g1: Mina and Joon each say what they like,
+// with a sentinel per segment.
+func pbThreadSeed(t *testing.T, s *Service, n int) {
+	t.Helper()
+	e, err := s.MemoryEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 9, 1, 2, 30, 0, 0, time.UTC)
+	for i := range n {
+		at := base.Add(time.Duration(i) * 3 * time.Hour)
+		for k, m := range []engine.LiveMessage{
+			{MessageID: fmt.Sprintf("8%03d1", i), AuthorID: "101", AuthorName: "Mina", Content: fmt.Sprintf("I really like threadsentinel%da here", i)},
+			{MessageID: fmt.Sprintf("8%03d2", i), AuthorID: "102", AuthorName: "Joon", Content: fmt.Sprintf("I really like threadsentinel%db too", i)},
+		} {
+			m.GuildID, m.ChannelID, m.At = "g1", "t1", at.Add(time.Duration(k)*time.Minute)
+			if ok, err := e.Capture(m); err != nil || !ok {
+				t.Fatal(ok, err)
+			}
+		}
+	}
+}
+
+// pbTombstoneThreadOnBuild writes t1's thread tombstone when the first window of t1 is built while armed
+// is set (between that build and its send), and reports whether it did.
+func pbTombstoneThreadOnBuild(t *testing.T, s *Service, armed *atomic.Bool) *atomic.Bool {
+	t.Helper()
+	var done atomic.Bool
+	var mu sync.Mutex // a send built meanwhile waits here until the tombstone is written
+	pbBuilt = func(windowID string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !armed.Load() || done.Load() {
+			return
+		}
+		runs, err := store.BackfillRuns(s.Store.Reader(), "g1")
+		if err != nil || len(runs) == 0 {
+			t.Error("no run", err)
+			return
+		}
+		w, _, err := store.LoadBackfillWindow(s.Store.Reader(), runs[0].ID, windowID)
+		if err != nil || w.Room != engine.RoomKey("g1", "t1") {
+			return
+		}
+		if _, err := s.Store.DB.Exec(`INSERT OR IGNORE INTO thread_tombstones(thread_id) VALUES('t1')`); err != nil {
+			t.Error(err)
+		}
+		done.Store(true)
+	}
+	t.Cleanup(func() { pbBuilt = nil })
+	return &done
+}
+
+// A deleted thread keeps its stored observations (its tombstone is written apart),
+// and nothing of it may leave the process: a thread deleted after a window's build is caught by the
+// check made just before the send, on the pilot's standard calls and in a batch, and the dry run plans no
+// window of a deleted thread. The ordinary channel's lines are the control.
+func TestPeopleBackfillDoesNotSendDeletedThread(t *testing.T) {
+	t.Run("pilot", func(t *testing.T) {
+		h := newPBHost(t)
+		s := pbService(t, h, "anthropic")
+		pbSeed(t, s, 70)
+		pbThreadSeed(t, s, 12)
+		var armed atomic.Bool
+		armed.Store(true)
+		hit := pbTombstoneThreadOnBuild(t, s, &armed)
+		if dry := pbDry(t, s, nil); dry["windows"].(float64) != 82 {
+			t.Fatalf("control: the live thread is planned: %v windows", dry["windows"])
+		}
+		_, run := pbPiloted(t, s, nil)
+		if !hit.Load() {
+			t.Fatal("no window of the thread was built in the pilot")
+		}
+		if sent := h.bodies(); strings.Contains(sent, "threadsentinel") {
+			t.Fatal("a line of a deleted thread left the process")
+		} else if !strings.Contains(sent, "topic3a today") {
+			t.Fatal("control: the channel's lines were not sent")
+		}
+		for _, w := range pbStoredFacts(t, s, run.ID) {
+			if strings.Contains(w.Text, "threadsentinel") {
+				t.Fatalf("a fact of the deleted thread was stored: %+v", w)
+			}
+		}
+		dry := pbDry(t, s, nil)
+		if dry["windows"].(float64) != 70 || dry["sent_windows"].(float64) != 70 {
+			t.Fatalf("the dry run plans the deleted thread: %v windows, %v to send", dry["windows"], dry["sent_windows"])
+		}
+	})
+	t.Run("run", func(t *testing.T) {
+		h := newPBHost(t)
+		s := pbService(t, h, "anthropic")
+		pbSeed(t, s, 70)
+		pbThreadSeed(t, s, 12)
+		var armed atomic.Bool
+		hit := pbTombstoneThreadOnBuild(t, s, &armed)
+		token, _ := pbPiloted(t, s, nil)
+		h.mu.Lock()
+		creates := len(h.creates)
+		h.mu.Unlock()
+		armed.Store(true)
+		if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+			t.Fatal(res.Error)
+		}
+		done := pbWait(t, s, "run", pbState(store.BackfillDone))
+		if !hit.Load() {
+			t.Fatal("no window of the thread was built in the run")
+		}
+		var all []string
+		for _, c := range h.creations()[creates:] {
+			pbStrings(c, "", &all)
+		}
+		batches := strings.Join(all, "\n")
+		if strings.Contains(batches, "threadsentinel") {
+			t.Fatal("a line of a deleted thread went out in a batch")
+		}
+		if !strings.Contains(batches, "a today") {
+			t.Fatal("control: the channel's lines were not sent in a batch")
+		}
+		ws, _ := store.BackfillWindows(s.Store.Reader(), done.ID, false)
+		for _, w := range ws {
+			if w.Room == engine.RoomKey("g1", "t1") && !w.Pilot && w.State != store.WindowSkipped {
+				t.Fatalf("a window of the deleted thread: %+v", w)
+			}
+		}
+	})
+}
+
+// The pilot review follows chat's hidden-topic rule: once hearsay on a topic about a person was hidden,
+// hearsay on that topic stays out of the review, even a statement made after the hide by someone else,
+// until the person says it themselves. Their own statement on the topic is the control that shows it again.
+func TestPeopleBackfillReviewKeepsHiddenTopicHidden(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	pbPiloted(t, s, nil)
+	mina := store.PersonRef("101")
+	review := func() []map[string]any {
+		res, out := pbExec(t, s, "memory.people.backfill.review", map[string]any{"guild_id": "g1"})
+		if !res.OK || out["available"] != true {
+			t.Fatalf("review: %+v %v", res.Error, out)
+		}
+		var items []map[string]any
+		for _, it := range out["items"].([]any) {
+			items = append(items, it.(map[string]any))
+		}
+		return items
+	}
+	// what Joon said about Mina's drinks (the hearsay the review set holds)
+	hearsay := func(items []map[string]any) map[string]bool {
+		topics := map[string]bool{}
+		for _, m := range items {
+			if m["subject"] == "Mina" && slices.Contains(m["speakers"].([]any), any("Joon")) && strings.HasPrefix(m["topic"].(string), "tea") {
+				topics[m["topic"].(string)] = true
+			}
+		}
+		return topics
+	}
+	topics := hearsay(review())
+	if len(topics) == 0 {
+		t.Fatal("the review set has no hearsay on Mina's drinks to start with")
+	}
+	// the topics were hidden about Mina before any of it was said (the markers' time is before the lines)
+	for topic := range topics {
+		if _, err := s.Store.DB.Exec(`INSERT INTO person_memory_suppress(guild_id,person_ref,role,scope,before_ts,by,created_at) VALUES('g1',?,'subject',?,'2026-08-01T00:00:00.000000000Z','self','x')`,
+			mina, "topic:"+store.PersonTopicKey("trait", topic)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if left := hearsay(review()); len(left) != 0 {
+		t.Fatalf("hearsay on a hidden topic is shown in the review: %v", left)
+	}
+	// Mina says one of them herself after the hide: hearsay on that topic is shown again
+	var open string
+	for topic := range topics {
+		open = topic
+		break
+	}
+	var line string
+	if err := s.Store.Reader().QueryRow(`SELECT observation_id FROM memory_observations WHERE actor_account='101' ORDER BY parsed_time LIMIT 1`).Scan(&line); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Store.WithWriter(func(tx *sql.Tx) error {
+		n, err := s.savePersonClaims(t.Context(), tx, []store.PersonClaim{{GuildID: "g1", SubjectRef: mina, SpeakerRef: mina, Kind: "trait", Topic: open,
+			Text: "{@" + mina + "} drinks " + open, Evidence: []string{line}, Source: "extract:pb-test", Link: store.LinkSelf}})
+		if err == nil && n != 1 {
+			err = fmt.Errorf("the self statement was not saved: %d", n)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if again := hearsay(review()); !again[open] || len(again) != 1 {
+		t.Fatalf("after Mina said %q herself, the review shows hearsay on %v", open, again)
+	}
+}
+
+// A pilot window keeps its id while a line inside it goes (the id is the room, the first and last line
+// and the prompt version) or while one of its lines is edited. Such a window is no longer the one the
+// pilot reviewed: the run refuses with plan_changed (a new pilot is needed) and sends no batch, instead of
+// moving the pilot onto the changed plan and sending the window straight to a batch.
+func TestPeopleBackfillRejectsChangedPilotWithSameWindowID(t *testing.T) {
+	for _, how := range []string{"deleted", "edited"} {
+		t.Run(how, func(t *testing.T) {
+			h := newPBHost(t)
+			s := pbService(t, h, "anthropic")
+			pbSeed(t, s, 70)
+			token, run := pbPiloted(t, s, nil)
+			pilots, _ := store.BackfillWindows(s.Store.Reader(), run.ID, true)
+			var w store.BackfillWindow
+			for _, p := range pilots {
+				if len(p.Obs) >= 3 {
+					w = p
+					break
+				}
+			}
+			if w.ID == "" {
+				t.Fatal("no pilot window with an inside line")
+			}
+			inside := w.Obs[1]
+			if how == "deleted" {
+				if _, err := s.Store.DB.Exec(`UPDATE memory_observations SET deleted_at='2026-11-01T00:00:00Z', content='' WHERE observation_id=?`, inside); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if _, err := s.Store.DB.Exec(`UPDATE memory_observations SET content='I really like editedtopic now', edited_at='2026-10-01T00:00:00Z' WHERE observation_id=?`, inside); err != nil {
+					t.Fatal(err)
+				}
+				// and a line captured late outside the pilot, so the plan changes and the pilot is moved onto it
+				var outside store.BackfillWindow
+				all, _ := store.BackfillWindows(s.Store.Reader(), run.ID, false)
+				for _, o := range all {
+					if !o.Pilot && o.State == store.WindowQueued {
+						outside = o
+						break
+					}
+				}
+				first, _ := time.Parse(time.RFC3339Nano, outside.FirstAt)
+				e, _ := s.MemoryEngine()
+				if ok, err := e.Capture(engine.LiveMessage{GuildID: "g1", ChannelID: "c1", MessageID: "late2", AuthorID: "101", AuthorName: "Mina",
+					Content: "and I really like latecomer things", At: first.Add(30 * time.Second)}); err != nil || !ok {
+					t.Fatal(ok, err)
+				}
+			}
+			dry := pbDry(t, s, nil)
+			if dry["token"] == token {
+				t.Fatal("the plan did not change")
+			}
+			ids := map[string]bool{}
+			for _, p := range pilots {
+				ids[p.ID] = true
+			}
+			if dry["windows"].(float64) != 70 || !ids[w.ID] {
+				t.Fatalf("windows: %v", dry["windows"])
+			}
+			res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token})
+			if res.OK || res.Error.MessageKey != "people_backfill.plan_changed" {
+				t.Fatalf("a run whose pilot window changed under the same id: %+v", res)
+			}
+			time.Sleep(100 * time.Millisecond)
+			if n := len(h.creations()); n != 0 {
+				t.Fatalf("%d batches were sent", n)
+			}
+			kept, _, _ := store.LoadBackfillRun(s.Store.Reader(), run.ID)
+			if kept.Token != token || kept.State != store.BackfillPiloted {
+				t.Fatalf("the pilot was moved onto the changed plan: %+v", kept)
+			}
+		})
 	}
 }

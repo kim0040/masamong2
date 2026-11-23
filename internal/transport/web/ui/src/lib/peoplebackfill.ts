@@ -17,8 +17,12 @@ export type DryRun = {
   tokens?: { input?: number; output?: number }
   cost_usd?: { pilot?: Range; haiku?: { batch?: Range }; sonnet?: { batch?: Range } }
   budget_usd?: number
+  /** spent and left: every run and pilot of the server so far, against the cap (it is one total per server) */
+  spent_usd?: number
+  left_usd?: number
   within_budget?: { haiku?: boolean; sonnet?: boolean }
   provider_ready?: boolean
+  warnings?: string[]
   token?: string
 }
 
@@ -28,7 +32,11 @@ export type Run = {
   state: string
   model?: string
   budget_usd?: number
+  /** this run's own spend; the cap is checked against guild_spent_usd, every run of the server */
   spent_usd?: number
+  guild_spent_usd?: number
+  /** claims this run stored pending (a server that keeps sensitive topics out): not read until checked */
+  claims_pending?: number
   stopped_by?: string
   pilot_done?: boolean
   token?: string
@@ -40,8 +48,8 @@ export type Run = {
   pilot?: { windows?: number; cost_usd?: number; name_links?: number; disagreements?: number; hearsay?: number; review_items?: number; models?: Record<string, PilotModel> }
 }
 
-/** The cap the operator typed: a number above 0 and up to 100 (the action's own range). */
-/** The server refuses more than this per server in total (owner: 3 dollars by default, up to 6 for Sonnet). */
+/** The cap the operator typed: a number above 0 and up to MAX_BUDGET_USD. The server refuses more than this
+ *  per server in total (owner: 3 dollars by default, up to 6 for Sonnet). */
 export const MAX_BUDGET_USD = 6
 
 export function parseBudget(v: string): number | null {
@@ -55,6 +63,36 @@ export function rangeParts(r: Range | null | undefined): { low: number; high: nu
   const high = r.high ?? r.low ?? 0
   return { low: Math.min(r.low ?? high, high), high }
 }
+
+/** The cap is one total per server across its pilots and runs, so what is spent and left is the server's,
+ *  not the newest run's: a run after a 2.90 dollar run has 0.10 left of a 3 dollar cap. Null when the
+ *  server total is unknown (no cap, or a status without it): the page then shows no figure rather than
+ *  the run's own spend, which would look like money still left. */
+export function serverSpend(run: Run | null | undefined): { spent: number; cap: number; left: number } | null {
+  const cap = run?.budget_usd
+  const spent = run?.guild_spent_usd
+  if (typeof cap !== 'number' || !(cap > 0) || typeof spent !== 'number' || !Number.isFinite(spent)) return null
+  return { spent, cap, left: Math.max(0, cap - spent) }
+}
+
+/** The same figures from an estimate: spent and left are already the server's totals there. */
+export function planSpend(plan: DryRun | null | undefined): { spent: number; cap: number; left: number } | null {
+  const cap = plan?.budget_usd
+  const spent = plan?.spent_usd
+  if (typeof cap !== 'number' || !(cap > 0) || typeof spent !== 'number' || !Number.isFinite(spent)) return null
+  const left = plan?.left_usd
+  return { spent, cap, left: Math.max(0, typeof left === 'number' && Number.isFinite(left) ? left : cap - spent) }
+}
+
+/** The estimate warns that this server keeps sensitive topics out, which the paid fill does not check:
+ *  what it adds waits pending and is not used until something checks it. */
+export function pendingWarning(plan: DryRun | null | undefined): boolean {
+  const w = plan?.warnings
+  return Array.isArray(w) && w.includes('no_sensitive_pending')
+}
+
+/** How many claims of the run wait pending (0 when none or unknown). */
+export const pendingClaims = (run: Run | null | undefined) => (typeof run?.claims_pending === 'number' && run.claims_pending > 0 ? run.claims_pending : 0)
 
 /** "claude-haiku-5-5" is the haiku run, and so on; anything else is no model. */
 export function modelKey(id: string | undefined): ModelKey | '' {

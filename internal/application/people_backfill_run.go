@@ -136,7 +136,8 @@ const pbBuildTries = 3
 var pbBuilt func(windowID string)
 
 // pbComplete reports an answer the model finished (not cut at its output limit) that holds a JSON object
-// whose "people" value is a list (an empty list is a complete answer).
+// whose "people" value is a list (an empty list is a complete answer; null, a missing value or anything
+// else is not).
 func pbComplete(res openai.ChatResult) bool {
 	if res.FinishReason == "length" {
 		return false
@@ -150,7 +151,7 @@ func pbComplete(res openai.ChatResult) bool {
 		return false
 	}
 	var list []json.RawMessage
-	return json.Unmarshal(doc["people"], &list) == nil && doc["people"] != nil
+	return doc["people"] != nil && json.Unmarshal(doc["people"], &list) == nil && list != nil // "null" leaves list nil
 }
 
 func pbAnswers(raw []byte) map[string]pbAnswer {
@@ -349,7 +350,7 @@ func (s *Service) pbStartPilot(ctx context.Context, req action.Request, db *stor
 		l, h := pbEstimate(pilot, m, peoplebackfill.ModeStandard)
 		low, high = low+l, high+h
 	}
-	spent, err := store.BackfillGuildSpent(db.Reader(), guild)
+	spent, err := pbGuildSpent(db.Reader(), guild)
 	if err != nil {
 		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
@@ -382,11 +383,15 @@ func (s *Service) pbStartPilot(ctx context.Context, req action.Request, db *stor
 		case r.Token == plan.Token && !r.PilotDone && resume == nil && (r.State == store.BackfillPiloting || r.State == store.BackfillStopped):
 			resume = &runs[i] // a pilot of this plan that a restart or the budget stopped
 		case r.State == store.BackfillPiloting || r.State == store.BackfillPiloted || r.State == store.BackfillStopped:
-			// an older plan's run: superseded, its stored answers dropped
+			// an older plan's run: superseded, its stored answers dropped. A send a crash cut is charged at
+			// its maximum first (pbGuildSpent counted it until now): it may have been billed
 			from := r.State
 			r.State, r.UpdatedAt = store.BackfillSuperseded, now
 			err := db.WithWriterContext(ctx, func(tx *sql.Tx) error {
 				if err := store.SaveBackfillRun(tx, r, from); err != nil {
+					return err
+				}
+				if err := pbSettleIntentsTx(tx, r.ID, s.Clock.Now().UTC()); err != nil {
 					return err
 				}
 				return store.ClearBackfillResults(tx, r.ID, now)
@@ -468,7 +473,7 @@ func (s *Service) pbPilot(ctx context.Context, runID string, a *openai.Adapter) 
 			}
 		}
 	}
-	spent, err := store.BackfillGuildSpent(db.Reader(), run.GuildID)
+	spent, err := pbGuildSpent(db.Reader(), run.GuildID)
 	if err != nil {
 		s.Log.Warn("people backfill: spend not read", "run", runID, "err", err)
 		return
@@ -693,11 +698,18 @@ func (s *Service) pbPilotStoreTx(tx *sql.Tx, run store.BackfillRun, windowID str
 // pbFactPasses applies the write gate, read-only, to a stored pilot fact: what a claim of it would face
 // when written (evidence current and the speaker's own, read before any edit, consent, tombstones of
 // every person the text names, the suppress markers), plus the statement-level forget and hide check.
-// The pilot keeps, and its review shows, only facts that pass. lines (may be nil) are the texts the model read.
+// A person who withdrew profile consent leaves the pilot as they leave every prompt (pbSendable): no fact
+// said by them or naming them stays, not only the facts about them. The pilot keeps, and its review shows,
+// only facts that pass. lines (may be nil) are the texts the model read.
 func (s *Service) pbFactPasses(tx *sql.Tx, guild, runID string, f episodes.PersonFact, readAt string, lines map[string]string,
 	memoryOut, profileOut map[string]bool) (bool, error) {
 	if len(f.By) != 1 {
 		return false, nil
+	}
+	for _, ref := range append([]string{f.About, f.By[0]}, episodes.TextRefs(f.Text)...) {
+		if profileOut[ref] {
+			return false, nil
+		}
 	}
 	c := store.PersonClaim{GuildID: guild, SubjectRef: f.About, SpeakerRef: f.By[0], Kind: f.Kind, Topic: f.Topic, Text: f.Text,
 		Evidence: f.Ev, Source: "backfill:" + runID, Link: f.Link, ReadAt: readAt}
@@ -716,8 +728,9 @@ func (s *Service) pbFactPasses(tx *sql.Tx, guild, runID string, f episodes.Perso
 }
 
 // pbGateAnswers keeps, in place, the facts of a window's answers that pass pbFactPasses; changed reports
-// that one was dropped.
-func (s *Service) pbGateAnswers(tx *sql.Tx, guild, runID string, have map[string]pbAnswer, lines map[string]string) (changed bool, err error) {
+// that one was dropped. With only set, a fact it does not select is kept without a check.
+func (s *Service) pbGateAnswers(tx *sql.Tx, guild, runID string, have map[string]pbAnswer, lines map[string]string,
+	only ...func(episodes.PersonFact) bool) (changed bool, err error) {
 	memoryOut, err := withdrawnRefsTx(tx, privacy.Memory)
 	if err != nil {
 		return false, err
@@ -729,6 +742,10 @@ func (s *Service) pbGateAnswers(tx *sql.Tx, guild, runID string, have map[string
 	for m, ans := range have {
 		var kept []episodes.PersonFact
 		for _, f := range ans.Facts {
+			if len(only) > 0 && !only[0](f) {
+				kept = append(kept, f)
+				continue
+			}
 			ok, err := s.pbFactPasses(tx, guild, runID, f, ans.ReadAt, lines, memoryOut, profileOut)
 			if err != nil {
 				return false, err
@@ -748,14 +765,67 @@ func (s *Service) pbGateAnswers(tx *sql.Tx, guild, runID string, have map[string
 // pbRecheckPilotTx takes out of the stored pilot answers every fact that no longer passes the gate, so
 // the pilot's copy of what people said goes with a forget, a hide, a deletion or an edit of a line, and a
 // withdrawal of consent, as the claims do. It runs in the caller's transaction, after the caller wrote its
-// marker, tombstone, redaction or withdrawal (guild "" checks every server's runs).
+// marker, tombstone, redaction or withdrawal (guild "" checks every server's runs). This is the full pass,
+// for the rare member and operator controls (hide, forget); a deleted or edited line and a withdrawal,
+// which come often and wait for the writer, use pbRecheckLinesTx and pbRecheckPersonTx.
 func (s *Service) pbRecheckPilotTx(tx *sql.Tx, guild string) error {
+	return s.pbRecheckScopedTx(tx, guild, nil, "")
+}
+
+// pbRecheckLinesTx re-checks only the stored pilot windows that hold one of obs (lines just deleted or
+// edited): a fact rests on lines of its own window only, so no other window can change.
+func (s *Service) pbRecheckLinesTx(tx *sql.Tx, guild string, obs []string) error {
+	if len(obs) == 0 {
+		return nil // no stored line changed
+	}
+	return s.pbRecheckScopedTx(tx, guild, obs, "")
+}
+
+// pbRecheckPersonTx re-checks, in every server, only the stored pilot facts that name ref: about them, said
+// by them or naming them in the text. A withdrawal changes nothing for a fact that names someone else only
+// (its evidence lines are its speaker's own).
+func (s *Service) pbRecheckPersonTx(tx *sql.Tx, ref string) error {
+	if ref == "" {
+		return nil
+	}
+	return s.pbRecheckScopedTx(tx, "", nil, ref)
+}
+
+// pbRecheckSoftTx runs the re-check that follows a member's own change (a deleted or edited line, a
+// withdrawal of consent) inside a savepoint. If it fails, its own writes are rolled back, the failure is
+// logged with counts only (never text: an error may quote a stored answer) and the member's change still
+// commits: a deletion or a withdrawal is never held back by the pilot copy. A fact the purge missed is not
+// read: the review and the apply gate every stored fact again. A failure to roll back is returned.
+func (s *Service) pbRecheckSoftTx(tx *sql.Tx, after string, count int, recheck func() error) error {
+	if _, err := tx.Exec(`SAVEPOINT pb_recheck`); err != nil {
+		s.Log.Warn("people backfill: pilot copy not re-checked", "after", after, "count", count, "class", string(errclass.Of(err)))
+		return nil
+	}
+	if err := recheck(); err != nil {
+		s.Log.Warn("people backfill: pilot copy not re-checked", "after", after, "count", count, "class", string(errclass.Of(err)))
+		if _, err := tx.Exec(`ROLLBACK TO pb_recheck`); err != nil {
+			return err
+		}
+	}
+	_, err := tx.Exec(`RELEASE pb_recheck`)
+	return err
+}
+
+// pbRecheckScopedTx is the re-check over the windows of guild that hold one of obs (all when empty), and
+// over the facts that name person (all when "").
+func (s *Service) pbRecheckScopedTx(tx *sql.Tx, guild string, obs []string, person string) error {
 	if !tableExists(tx, "people_backfill_window") {
 		return nil
 	}
-	ws, err := store.BackfillAnswered(tx, guild)
+	ws, err := store.BackfillAnsweredFor(tx, guild, obs, person)
 	if err != nil {
 		return err
+	}
+	var only []func(episodes.PersonFact) bool
+	if person != "" {
+		only = append(only, func(f episodes.PersonFact) bool {
+			return f.About == person || slices.Contains(f.By, person) || slices.Contains(episodes.TextRefs(f.Text), person)
+		})
 	}
 	guilds := map[string]string{}
 	now := s.Clock.Now().UTC().Format(time.RFC3339)
@@ -772,7 +842,7 @@ func (s *Service) pbRecheckPilotTx(tx *sql.Tx, guild string) error {
 			guilds[w.RunID] = g
 		}
 		have := pbAnswers(w.Result)
-		changed, err := s.pbGateAnswers(tx, g, w.RunID, have, nil)
+		changed, err := s.pbGateAnswers(tx, g, w.RunID, have, nil, only...)
 		if err != nil {
 			return err
 		}
@@ -793,36 +863,41 @@ func (s *Service) pbRecheckPilotTx(tx *sql.Tx, guild string) error {
 // them again only under a new reservation.
 func (s *Service) pbSettleLeftIntents(db *storage.Store, runID string) error {
 	now := s.Clock.Now().UTC()
-	return db.WithWriterContext(context.Background(), func(tx *sql.Tx) error {
-		ws, err := store.BackfillWindows(tx, runID, true)
-		if err != nil {
-			return err
-		}
-		for _, w := range ws {
-			have := pbAnswers(w.Result)
-			held := 0.0
-			for m, ans := range have {
-				if ans.Intent <= 0 {
-					continue
-				}
-				held += ans.Intent
-				have[m] = pbAnswer{Hash: ans.Hash, ReadAt: ans.ReadAt, Failed: pbUnknownClass, Unknown: true, USD: ans.Intent}
-			}
-			if held == 0 {
+	return db.WithWriterContext(context.Background(), func(tx *sql.Tx) error { return pbSettleIntentsTx(tx, runID, now) })
+}
+
+// pbSettleIntentsTx is pbSettleLeftIntents in the caller's transaction: a resumed pilot runs it before it
+// sends, and a run superseded by another plan before its stored answers (and the intents with them) are
+// dropped, so a possibly billed send stays in the server's total either way.
+func pbSettleIntentsTx(tx *sql.Tx, runID string, now time.Time) error {
+	ws, err := store.BackfillWindows(tx, runID, true)
+	if err != nil {
+		return err
+	}
+	for _, w := range ws {
+		have := pbAnswers(w.Result)
+		held := 0.0
+		for m, ans := range have {
+			if ans.Intent <= 0 {
 				continue
 			}
-			w.Result, _ = json.Marshal(have)
-			w.CostUSD += held
-			w.UpdatedAt = now.Format(time.RFC3339)
-			if err := store.SaveBackfillWindow(tx, w); err != nil {
-				return err
-			}
-			if err := store.AddBackfillRunSpend(tx, runID, held, now.Format(time.RFC3339)); err != nil {
-				return err
-			}
+			held += ans.Intent
+			have[m] = pbAnswer{Hash: ans.Hash, ReadAt: ans.ReadAt, Failed: pbUnknownClass, Unknown: true, USD: ans.Intent}
 		}
-		return nil
-	})
+		if held == 0 {
+			continue
+		}
+		w.Result, _ = json.Marshal(have)
+		w.CostUSD += held
+		w.UpdatedAt = now.Format(time.RFC3339)
+		if err := store.SaveBackfillWindow(tx, w); err != nil {
+			return err
+		}
+		if err := store.AddBackfillRunSpend(tx, runID, held, now.Format(time.RFC3339)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // pbReviewItem is one claim of the pilot review set (ids only; the text is read when shown).
@@ -1099,6 +1174,18 @@ func (s *Service) pbRebasePilot(ctx context.Context, db *storage.Store, confirm 
 	for _, w := range plan.Windows {
 		byID[w.ID] = w
 	}
+	// a pilot window that kept its id while its lines changed (one inside it gone or captured late, the
+	// id being its room, first and last line) or while its prompt changed (an edit, a withdrawal) is no
+	// longer the window the pilot reviewed: a new pilot is needed, it is never sent straight to a batch
+	pilots, err := store.BackfillWindows(db.Reader(), run.ID, true)
+	if err != nil {
+		return plan, false, err
+	}
+	for _, w := range pilots {
+		if changed, err := s.pbPilotWindowChanged(db, run.GuildID, w, byID); err != nil || changed {
+			return plan, false, err
+		}
+	}
 	now := s.Clock.Now().UTC().Format(time.RFC3339)
 	ok := true
 	err = db.WithWriterContext(ctx, func(tx *sql.Tx) error {
@@ -1109,7 +1196,7 @@ func (s *Service) pbRebasePilot(ctx context.Context, db *storage.Store, confirm 
 		kept := map[string]bool{}
 		for _, w := range have {
 			if w.Pilot {
-				if _, in := byID[w.ID]; !in {
+				if pw, in := byID[w.ID]; !in || !slices.Equal(pw.Obs, w.Obs) {
 					ok = false
 					return nil
 				}
@@ -1161,6 +1248,31 @@ func (s *Service) pbRebasePilot(ctx context.Context, db *storage.Store, confirm 
 	}
 	s.Log.Info("people backfill: pilot kept for a changed plan", "run", run.ID, "windows", len(plan.Windows))
 	return plan, true, nil
+}
+
+// pbPilotWindowChanged reports whether a stored pilot window is not in plan any more as the pilot saw it:
+// gone, holding other lines under the same id, or giving another prompt than the one its stored answers
+// were given (a window the pilot found nothing to send in that now has something, or the reverse).
+func (s *Service) pbPilotWindowChanged(db *storage.Store, guild string, w store.BackfillWindow, plan map[string]pbWindow) (bool, error) {
+	pw, in := plan[w.ID]
+	if !in || !slices.Equal(pw.Obs, w.Obs) {
+		return true, nil
+	}
+	bp, err := s.pbBuildPrompt(db, guild, w)
+	if err != nil {
+		return false, err
+	}
+	for _, a := range pbAnswers(w.Result) {
+		switch {
+		case a.Skipped:
+			if bp.ok {
+				return true, nil
+			}
+		case !bp.ok || a.Hash != bp.hash:
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // pbStartedPlan is the plan of a run that already started (a model chosen) whose token confirm names:
@@ -1416,7 +1528,7 @@ func (s *Service) pbSubmit(ctx context.Context, db *storage.Store, runID string,
 	if err != nil {
 		return false, true, err
 	}
-	spent, err := store.BackfillGuildSpent(db.Reader(), run.GuildID) // the cap is the server's total across its runs
+	spent, err := pbGuildSpent(db.Reader(), run.GuildID) // the cap is the server's total across its runs
 	if err != nil {
 		return false, true, err
 	}
@@ -1824,8 +1936,12 @@ func (s *Service) peopleBackfillReview(ctx context.Context, req action.Request, 
 	defer tx.Rollback()
 	memoryOut, err := withdrawnRefsTx(tx, privacy.Memory)
 	if err == nil {
-		var profileOut map[string]bool
+		var profileOut, denied map[string]bool
 		profileOut, err = withdrawnRefsTx(tx, privacy.Profile)
+		if err == nil {
+			denied, err = s.deniedPeople(tx, run.GuildID)
+		}
+		topicHidden := s.pbTopicHidden(tx, run.GuildID, denied)
 		kept := cands[:0]
 		for _, c := range cands {
 			if err != nil {
@@ -1833,6 +1949,9 @@ func (s *Service) peopleBackfillReview(ctx context.Context, req action.Request, 
 			}
 			var ok bool
 			ok, err = s.pbFactPasses(tx, run.GuildID, run.ID, c.f, c.ans.ReadAt, c.bp.text, memoryOut, profileOut)
+			if ok && topicHidden(c.f) {
+				ok = false // hearsay on a hidden topic, as a chat turn would leave it out
+			}
 			if ok {
 				kept = append(kept, c)
 			} else {
@@ -1860,6 +1979,50 @@ func (s *Service) peopleBackfillReview(ctx context.Context, req action.Request, 
 		out["items"] = []any{}
 	}
 	return action.OK(req, out)
+}
+
+// pbTopicHidden is chat's hidden-topic rule (hiddenTopic) for the pilot review: hearsay on a topic that
+// was hidden about its subject stays hidden, even when it was said after the hide, until the subject said
+// it themselves after the hide in a statement that may be read (usableClaim), in any room of the server
+// (the review is the operator's, of the whole server).
+func (s *Service) pbTopicHidden(tx *sql.Tx, guild string, denied map[string]bool) func(episodes.PersonFact) bool {
+	type person struct {
+		markers  map[string]string
+		unlocked func(kind, topic, at string) bool
+	}
+	people := map[string]person{}
+	usable := map[string]bool{}
+	return func(f episodes.PersonFact) bool {
+		if len(f.By) != 1 || f.By[0] == f.About || store.PersonTopic(f.Topic) == "" {
+			return false
+		}
+		p, ok := people[f.About]
+		if !ok {
+			p.markers = topicMarkers(tx, guild, f.About)
+			rooms := map[string]bool{}
+			if len(p.markers) > 0 {
+				if rows, err := tx.Query(`SELECT DISTINCT room_id FROM person_claim WHERE guild_id=? AND subject_ref=?`, guild, f.About); err == nil {
+					for rows.Next() {
+						var room string
+						if rows.Scan(&room) == nil {
+							rooms[room] = true
+						}
+					}
+					rows.Close()
+				}
+			}
+			p.unlocked = topicUnlocker(tx, guild, f.About, rooms, func(c claimRow) bool {
+				v, seen := usable[c.id]
+				if !seen {
+					v = usableClaim(tx, c, denied)
+					usable[c.id] = v
+				}
+				return v
+			})
+			people[f.About] = p
+		}
+		return hiddenTopic(claimRow{subject: f.About, speaker: f.By[0], kind: f.Kind, topic: store.PersonTopic(f.Topic)}, p.markers, p.unlocked)
+	}
 }
 
 func pbLabel(bp pbPrompt, ref string) string {

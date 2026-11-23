@@ -486,9 +486,11 @@ func TestForgetAllRemovesStatementsNamingThePerson(t *testing.T) {
 	ctx := context.Background()
 	a, b := store.PersonRef("101"), store.PersonRef("202")
 	f.source(t, "g", "c", "r1-label-b", "202", "영희", f.at)
-	ev := f.source(t, "g", "c", "r1-said", "101", "민수", f.at)
-	c := store.PersonClaim{GuildID: "g", SubjectRef: a, SpeakerRef: a, Kind: "relation", Topic: "친구",
-		Text: "{@" + a + "}는 {@" + b + "}와 매주 술을 마심", Evidence: []string{ev}, Source: "backfill:pb_test", Link: store.LinkSelf}
+	f.source(t, "g", "c", "r1-label-a", "101", "민수", f.at)
+	// said by a third member about 민수, naming 영희 (a statement of one's own names only its subject)
+	ev := f.source(t, "g", "c", "r1-said", "404", "준호", f.at)
+	c := store.PersonClaim{GuildID: "g", SubjectRef: a, SpeakerRef: store.PersonRef("404"), Kind: "relation", Topic: "친구",
+		Text: "{@" + a + "}는 {@" + b + "}와 매주 술을 마심", Evidence: []string{ev}, Source: "backfill:pb_test", Link: store.LinkMention}
 	if n, err := s.SavePersonClaimsForTest(ctx, c); err != nil || n != 1 {
 		t.Fatalf("control write: %d (%v)", n, err)
 	}
