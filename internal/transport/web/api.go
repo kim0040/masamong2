@@ -32,10 +32,17 @@ import (
 )
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	// encode first: a value that cannot be encoded must not produce a 200 with a truncated body
+	body, err := json.Marshal(v)
+	if err != nil {
+		status, body = http.StatusInternalServerError, []byte(`{"ok":false,"error":{"code":"INTERNAL","message":"encoding failed"}}`)
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	// the status line is committed: a failed write means the connection is gone, so there is no one
+	// left to report it to
+	_, _ = w.Write(body)
 }
 
 func apiError(w http.ResponseWriter, status int, code, msg string) {
@@ -579,7 +586,12 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			data, _ := json.Marshal(map[string]any{"kind": ev.Kind, "ref": ev.Ref, "revision": ev.Revision})
+			data, err := json.Marshal(map[string]any{"kind": ev.Kind, "ref": ev.Ref, "revision": ev.Revision})
+			if err != nil {
+				// cannot happen for strings and ints; a skipped change would never be fetched, so the
+				// stream ends and the client reconnects to a fresh state instead
+				return
+			}
 			if err := write(fmt.Sprintf("id: %d\nevent: change\ndata: %s\n\n", ev.ID, data)); err != nil {
 				return
 			}

@@ -69,13 +69,13 @@ func fileFallbackNote(err error) string {
 }
 
 // storedSecret is a key written to its store, not yet committed to config. rollback puts the previous
-// value back; commit drops the backup and removes an older console-written key file the new reference
-// replaced.
+// value back and reports whether that worked; commit drops the backup and removes an older
+// console-written key file the new reference replaced.
 type storedSecret struct {
 	ref      string
 	where    string // keychain | file
 	note     string // why a key is in a file although a credential store exists (empty otherwise)
-	rollback func()
+	rollback func() error
 	commit   func(replaceOld bool)
 }
 
@@ -96,12 +96,11 @@ func (s *Server) storeSecret(id, value, previousRef string) (storedSecret, error
 		if err := secrets.KeychainWrite(acct, value); err == nil {
 			ref := "keychain:" + acct
 			return storedSecret{ref: ref, where: "keychain",
-				rollback: func() {
+				rollback: func() error {
 					if readErr == nil && old != "" {
-						_ = secrets.KeychainWrite(acct, old)
-					} else {
-						_ = secrets.KeychainDelete(acct)
+						return secrets.KeychainWrite(acct, old)
 					}
+					return secrets.KeychainDelete(acct)
 				},
 				commit: func(replaceOld bool) {
 					if replaceOld {
@@ -155,11 +154,12 @@ func (s *Server) storeSecret(id, value, previousRef string) (storedSecret, error
 	}
 	ref := "file:" + path
 	return storedSecret{ref: ref, where: "file", note: fallbackNote,
-		rollback: func() {
-			_ = os.Remove(path)
+		rollback: func() error {
+			rerr := os.Remove(path)
 			if backup != "" {
-				_ = os.Rename(backup, path)
+				rerr = errors.Join(rerr, os.Rename(backup, path))
 			}
+			return rerr
 		},
 		commit: func(replaceOld bool) {
 			if backup != "" {
@@ -259,7 +259,11 @@ func (s *Server) apiSecret(w http.ResponseWriter, r *http.Request) {
 	req.Locale, req.RequestID, req.Operator = s.langFor(r), "web", operator(sess)
 	res := s.svc.Execute(r.Context(), req)
 	if !res.OK {
-		st.rollback()
+		// the change failed and the previous key could not be put back: the caller sees the change's
+		// failure, and this log keeps the rollback's
+		if rerr := st.rollback(); rerr != nil {
+			s.log.Error("put the previous key back after a failed change", "err", rerr)
+		}
 	} else {
 		st.commit(true)
 		if res.Output == nil {
