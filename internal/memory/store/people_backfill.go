@@ -227,7 +227,7 @@ func BackfillRuns(q backfillQuerier, guild string, states ...string) ([]Backfill
 		query += ` AND state IN (` + placeholders(len(states)) + `)`
 		args = append(args, toAny(states)...)
 	}
-	rows, err := q.Query(query+` ORDER BY created_at DESC, id DESC`, args...)
+	rows, err := q.Query(query+` ORDER BY created_at DESC, rowid DESC`, args...) // two runs of one second: the later insert first
 	if err != nil {
 		return nil, err
 	}

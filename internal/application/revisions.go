@@ -317,7 +317,11 @@ func (s *Service) commitSourceChange(ctx context.Context, guildID, channelID str
 		if err != nil {
 			return err
 		}
-		return s.enqueueRedactionTx(tx, j)
+		if err := s.enqueueRedactionTx(tx, j); err != nil {
+			return err
+		}
+		// a stored pilot answer of the paid backfill that cites these lines is purged now, not at apply
+		return s.pbRecheckPilotTx(tx, guildID)
 	})
 	if err != nil {
 		return err

@@ -2732,7 +2732,7 @@ add("pb", {
     "s1": ("1. 비용 계산", "1. Estimate the cost"),
     "s1_desc": ("모델을 부르지 않아서 비용이 들지 않아요. 저장된 대화를 구간으로 나눠 얼마가 들지 계산만 해요.", "No model is called, so this is free. It splits the stored conversations into windows and only works out the price."),
     "budget": ("비용 한도 (USD)", "Spending cap (USD)"),
-    "budget_hint": ("이 한도를 넘기기 전에 멈춰요. 기본은 3달러예요.", "It stops before passing this cap. The default is 3 dollars."),
+    "budget_hint": ("이 서버의 시범과 본 실행을 합친 한도예요. 넘기기 전에 멈춰요. 기본 3달러, 최대 6달러예요.", "One cap for this server's pilot and runs together. It stops before passing it. 3 dollars by default, 6 at most."),
     "budget_bad": ("0보다 크고 100 이하인 숫자를 넣어 주세요.", "Enter a number above 0 and up to 100."),
     "estimate": ("비용 계산하기", "Estimate cost"),
     "no_provider": ("Anthropic 직접 연결이 없어요. 연결 화면에서 Anthropic 키를 먼저 추가해 주세요.", "There is no direct Anthropic connection. Add an Anthropic key in Connections first."),

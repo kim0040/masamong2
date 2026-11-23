@@ -6,6 +6,7 @@ import (
 	"masamong/internal/lang"
 	"masamong/internal/memory/episodes"
 	"masamong/internal/memory/search"
+	"masamong/internal/memory/store"
 	"masamong/internal/storage"
 )
 
@@ -48,6 +49,8 @@ func (s *Service) mentionedPeople(db *storage.Store, guild string, msgs []episod
 	}
 	var out []episodes.Person
 	seen := map[string]bool{}
+	// a person with a tombstone of their own is not shown either (pbPromptCurrent checks the same)
+	gone := func(ref string) (bool, error) { return store.SourceBlocked(tx, ref) }
 	for _, m := range msgs {
 		if m.Bot {
 			continue
@@ -56,6 +59,12 @@ func (s *Service) mentionedPeople(db *storage.Store, guild string, msgs []episod
 			id := sub[1]
 			ref := personRef(id)
 			if authors[id] || seen[ref] || ref == botRef || base.denied[ref] {
+				continue
+			}
+			if blocked, err := gone(ref); err != nil || blocked {
+				if err != nil {
+					return nil, err
+				}
 				continue
 			}
 			if label := base.label(ref); label != "" {
@@ -73,6 +82,12 @@ func (s *Service) mentionedPeople(db *storage.Store, guild string, msgs []episod
 		}
 		for _, ref := range names.match(text, matches) {
 			if seen[ref] || names.denied[ref] || ref == botRef || ref == personRef(m.Account) {
+				continue
+			}
+			if blocked, err := gone(ref); err != nil || blocked {
+				if err != nil {
+					return nil, err
+				}
 				continue
 			}
 			if label := base.label(ref); label != "" {

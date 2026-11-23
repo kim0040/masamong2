@@ -2163,7 +2163,7 @@
   "pause.undo": "Undo",
   "pb.budget": "Spending cap (USD)",
   "pb.budget_bad": "Enter a number above 0 and up to 100.",
-  "pb.budget_hint": "It stops before passing this cap. The default is 3 dollars.",
+  "pb.budget_hint": "One cap for this server's pilot and runs together. It stops before passing it. 3 dollars by default, 6 at most.",
   "pb.cap": "Cap {cap} (to change it, estimate again)",
   "pb.col.answered": "Answered",
   "pb.col.cap": "Cap {cap}",

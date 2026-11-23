@@ -84,6 +84,9 @@ internal/catalog의 모든 Action: CLI 명령, 콘솔 경로와 internal/applica
 | memory.episodes.show | executable | read | `memory episodes show` | `/memory` | [episodes_actions.go · episodeShow](../../internal/application/episodes_actions.go) |
 | memory.mine.forget | executable | internal_write | `memory mine forget` | `/memory` | [explicit.go · mineAction](../../internal/application/explicit.go) |
 | memory.mine.show | executable | read | `memory mine show` | `/memory` | [explicit.go · mineAction](../../internal/application/explicit.go) |
+| memory.people.backfill | executable | external_write | `memory people backfill` | `/memory` | [people_backfill.go · peopleBackfillAction](../../internal/application/people_backfill.go) |
+| memory.people.backfill.review | executable | read | `memory people review` | `/memory` | [people_backfill_run.go · peopleBackfillReview](../../internal/application/people_backfill_run.go) |
+| memory.person.hide | executable | internal_write | `memory person hide` | `/memory` | [person_claims_forget.go · personAction](../../internal/application/person_claims_forget.go) |
 | memory.reindex | executable | external_write | `memory reindex` | `/blocks` | [memory.go · memoryActions](../../internal/application/memory.go) |
 | memory.review | executable | internal_write | `memory review` | `/memory` | [memory_review.go · memoryReviewAction](../../internal/application/memory_review.go) |
 | memory.reviews | executable | read | `memory reviews` | `/memory` | [memory_review.go · memoryReviewAction](../../internal/application/memory_review.go) |

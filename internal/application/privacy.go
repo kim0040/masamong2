@@ -186,9 +186,15 @@ func (s *Service) setConsent(userID, scope, status, via string) (privacy.State, 
 			updated_at=excluded.updated_at`, userID, scope, status, p.Version, granted, withdrawn, now); err != nil {
 			return err
 		}
-		_, err := tx.Exec(`INSERT INTO consent_audit(user_id, scope, status, policy_version, via, at) VALUES(?,?,?,?,?,?)`,
-			userID, scope, status, p.Version, via, now)
-		return err
+		if _, err := tx.Exec(`INSERT INTO consent_audit(user_id, scope, status, policy_version, via, at) VALUES(?,?,?,?,?,?)`,
+			userID, scope, status, p.Version, via, now); err != nil {
+			return err
+		}
+		// a withdrawn person's words leave the paid backfill's stored pilot answers in every server
+		if status == privacy.Withdrawn && (scope == privacy.Memory || scope == privacy.Profile) {
+			return s.pbRecheckPilotTx(tx, "")
+		}
+		return nil
 	})
 	if err != nil {
 		return privacy.State{}, err

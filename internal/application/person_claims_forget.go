@@ -69,6 +69,10 @@ func (s *Service) hideClaimTx(tx *sql.Tx, id, by string) (bool, error) {
 			return false, err
 		}
 	}
+	// the paid backfill's stored pilot answers are another copy: the new markers purge them too
+	if err := s.pbRecheckPilotTx(tx, guild); err != nil {
+		return false, err
+	}
 	return true, nil
 }
 
@@ -171,7 +175,12 @@ func (s *Service) forgetPersonTx(tx *sql.Tx, guild, ref, by string) (int, error)
 			return 0, err
 		}
 	}
-	return deleteClaimsOf(tx, guild, ref, true)
+	n, err := deleteClaimsOf(tx, guild, ref, true)
+	if err != nil {
+		return 0, err
+	}
+	// the paid backfill's stored pilot answers are another copy: the new markers purge them too
+	return n, s.pbRecheckPilotTx(tx, guild)
 }
 
 // personStatementSuppressedTx reports whether a forget or hide marker, or a member's correction, covers a

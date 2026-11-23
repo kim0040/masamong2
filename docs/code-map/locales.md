@@ -43,6 +43,7 @@
 | models | — |
 | notices | — |
 | overview | — |
+| people_backfill | — |
 | places | — |
 | poll | — |
 | polls | — |

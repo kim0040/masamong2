@@ -41,9 +41,12 @@ export type Run = {
 }
 
 /** The cap the operator typed: a number above 0 and up to 100 (the action's own range). */
+/** The server refuses more than this per server in total (owner: 3 dollars by default, up to 6 for Sonnet). */
+export const MAX_BUDGET_USD = 6
+
 export function parseBudget(v: string): number | null {
   const n = Number(String(v).trim().replace(',', '.'))
-  return Number.isFinite(n) && n > 0 && n <= 100 ? n : null
+  return Number.isFinite(n) && n > 0 && n <= MAX_BUDGET_USD ? n : null
 }
 
 /** Low to high as the console prints it; one number when both ends agree or only one is known. */
