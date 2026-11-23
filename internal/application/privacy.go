@@ -334,11 +334,8 @@ func (s *Service) applyPracticePrivacy(fn func(*Service) error) error {
 		return nil
 	}
 	root := PracticeRoot(s.DataRoot)
-	if target := openPractices.find(root); target != nil {
-		if _, done, ok := target.beginWork(context.Background()); ok {
-			defer done()
-			return fn(target)
-		}
+	if ok, err := applyToOpenPractice(root, fn); ok {
+		return err
 	}
 	path := filepath.Join(root, "masamong.db")
 	if _, err := os.Stat(path); os.IsNotExist(err) {
@@ -351,8 +348,29 @@ func (s *Service) applyPracticePrivacy(fn func(*Service) error) error {
 		return err
 	}
 	p := &Service{DataRoot: root, Store: st, Clock: s.Clock, I18n: s.I18n, Log: s.Log, practice: true, watchers: map[chan Event]struct{}{}}
-	defer p.Close()
-	return fn(p)
+	err = fn(p)
+	_ = p.Close()
+	if err != nil {
+		return err
+	}
+	// a practice instance that finished opening while the change went to its database directly may
+	// hold caches read before it (consent): apply the change to it too. The change is idempotent.
+	if ok, err := applyToOpenPractice(root, fn); ok {
+		return err
+	}
+	return nil
+}
+
+// applyToOpenPractice runs fn on an open practice service of root, newest first, skipping one that is
+// closing or refuses new work. ok is false when none took it.
+func applyToOpenPractice(root string, fn func(*Service) error) (ok bool, err error) {
+	for _, target := range openPractices.open(root) {
+		if _, done, admitted := target.beginWork(context.Background()); admitted {
+			defer done()
+			return true, fn(target)
+		}
+	}
+	return false, nil
 }
 
 // consentNotice shows a policy and the button that records agreement to it.

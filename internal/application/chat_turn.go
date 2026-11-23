@@ -61,9 +61,9 @@ func (s *Service) ChatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 		in.NameOnly, in.FollowUp, in.Proactive = false, false, false
 	}
 	started := time.Now()
+	in.clockStart = s.Clock.Now() // the ordering stamp of liveToBot is on the same clock as RevisedAt, taken where started was
 	in.turnID = newID("turn_")
 	in.started = started
-	in.clockStart = s.Clock.Now() // the ordering stamp of liveToBot is on the same clock as RevisedAt
 	flight, land := s.flyTurn(in)
 	defer land()
 	in.flight = flight

@@ -109,3 +109,51 @@ func TestOpenPracticeRegistersAfterItIsReady(t *testing.T) {
 		t.Fatal("a fully opened practice service is not registered")
 	}
 }
+
+// Review round 2: removing a service clears its slot in the registry's backing array, so a closed
+// service is not kept alive while another one stays open on the folder.
+func TestPracticeRegistryRemoveClearsTheSlot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "practice")
+	a := &Service{DataRoot: root, practice: true}
+	b := &Service{DataRoot: root, practice: true}
+	openPractices.add(a)
+	openPractices.add(b)
+	t.Cleanup(func() { openPractices.remove(a) })
+	openPractices.remove(b)
+	openPractices.mu.Lock()
+	list := openPractices.byRoot[filepath.Clean(root)]
+	stale := list[:cap(list)]
+	openPractices.mu.Unlock()
+	for i := len(list); i < len(stale); i++ {
+		if stale[i] == b {
+			t.Fatalf("the removed service is still held in slot %d of the registry", i)
+		}
+	}
+}
+
+// Review round 2: a practice instance that finishes opening while a privacy change goes to its
+// database directly gets the change too, so caches it read before the change do not outlive it.
+func TestPracticePrivacyReachesAnInstancePublishedDuringTheFallback(t *testing.T) {
+	data := t.TempDir()
+	p, err := OpenPractice(context.Background(), data, "en", slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = p.Close() })
+	openPractices.remove(p) // as if it were still opening when the change arrived
+	real := &Service{DataRoot: data}
+	var ran []*Service
+	err = real.applyPracticePrivacy(func(target *Service) error {
+		ran = append(ran, target)
+		if len(ran) == 1 {
+			openPractices.add(p) // it finishes opening while the change goes to the database directly
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ran) != 2 || ran[0] == p || ran[1] != p {
+		t.Fatalf("the change reached %d services (fallback first, then the published one expected): %v", len(ran), ran)
+	}
+}

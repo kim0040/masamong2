@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -67,17 +68,32 @@ func (r *practiceRegistry) remove(s *Service) {
 	defer r.mu.Unlock()
 	key := filepath.Clean(s.DataRoot)
 	list := r.byRoot[key]
-	for i, o := range list {
-		if o == s {
-			list = append(list[:i], list[i+1:]...)
-			break
-		}
+	if i := slices.Index(list, s); i >= 0 {
+		list = slices.Delete(list, i, i+1) // clears the freed slot, so a closed service is not kept alive
 	}
 	if len(list) == 0 {
 		delete(r.byRoot, key)
 	} else {
 		r.byRoot[key] = list
 	}
+}
+
+// open returns the folder's services that are not closing, newest first.
+func (r *practiceRegistry) open(root string) []*Service {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	list := r.byRoot[filepath.Clean(root)]
+	out := make([]*Service, 0, len(list))
+	for i := len(list) - 1; i >= 0; i-- {
+		s := list[i]
+		s.lifeMu.Lock()
+		closing := s.closing
+		s.lifeMu.Unlock()
+		if !closing {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // find returns the newest still-open service of the folder. A service already in Close is skipped
