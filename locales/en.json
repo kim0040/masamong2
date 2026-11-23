@@ -1299,6 +1299,7 @@
   "memory.mine.empty": "I do not keep anything about you in this server yet.",
   "memory.mine.footer": "Only you can see this. To delete it, use /forgetme. Server admins can also see and delete it in the console (Memory).",
   "memory.mine.card": "About you",
+  "memory.mine.said_by": "said by {name}",
   "memory.mine.episodes": "Conversations you are part of",
   "memory.mine.more": "…and {n} more",
   "memory.mine.console": "Open the console",

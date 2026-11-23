@@ -89,6 +89,7 @@
     "state_block": "<estado_de_la_sala de referencia>\n{header}\n{topics}\n</estado_de_la_sala>",
     "card_block": "<fichas_de_personas de referencia>\n{header}\n{cards}\n</fichas_de_personas>",
     "kakao_source": "sala de KakaoTalk {label}",
+    "said_by": "(según {name})",
     "statuses": {
       "open": "en discusión",
       "decided": "decidido",

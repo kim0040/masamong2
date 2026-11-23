@@ -333,6 +333,20 @@ func (s *Service) rememberFact(ctx context.Context, db *storage.Store, in ChatIn
 	if len(key) > 40 {
 		key = key[:40]
 	}
+	// "remember this" about someone else is also what the speaker told about them (a told claim), when the
+	// message names exactly one other person and the server keeps hearsay
+	var about turnPerson
+	if !self && s.Doc().Memory.PeopleOn() && !s.guildPrivacy(in.GuildID).NoHearsay {
+		var others []turnPerson
+		for _, p := range s.targetPeople(db, in, nil) {
+			if !p.caller {
+				others = append(others, p)
+			}
+		}
+		if len(others) == 1 {
+			about = others[0]
+		}
+	}
 	importance := 3
 	if self {
 		importance = 5
@@ -375,6 +389,9 @@ func (s *Service) rememberFact(ctx context.Context, db *storage.Store, in ChatIn
 			}
 			rows.Close()
 			for _, oldID := range old { // the newer fact on the same topic replaces the older one
+				if err := deleteExplicitClaims(tx, oldID); err != nil {
+					return err
+				}
 				if err := deleteEpisodeTx(tx, oldID); err != nil {
 					return err
 				}
@@ -387,6 +404,9 @@ func (s *Service) rememberFact(ctx context.Context, db *storage.Store, in ChatIn
 			if err := s.supersedeAutoFactsForExplicit(tx, in.GuildID, ref, obs, text); err != nil {
 				return err
 			}
+		}
+		if err := s.saveExplicitClaim(tx, in.GuildID, ref, self, about, key, text, obs); err != nil {
+			return err
 		}
 		participants, _ := json.Marshal([]string{ref})
 		seg, _ := json.Marshal([]string{obs})
@@ -419,11 +439,6 @@ func (s *Service) rememberFact(ctx context.Context, db *storage.Store, in ChatIn
 	}
 	if saved == 0 {
 		return refuse("no_consent")
-	}
-	if self && s.Doc().Memory.CardsOn() {
-		if _, err := s.promoteCards(ctx, db); err != nil {
-			s.Log.WarnContext(ctx, "memory: person cards not updated", "err", err)
-		}
 	}
 	s.emit("memory", "episodes", nil)
 	res.Data["saved"] = true
@@ -553,7 +568,7 @@ func (s *Service) markWrong(ctx context.Context, db *storage.Store, items []myIt
 	n := 0
 	err := db.WithWriterContext(ctx, func(tx *sql.Tx) error {
 		touched := map[string]bool{}
-		var evidence []string
+		var evidence, hidden []string
 		for _, it := range items {
 			res, err := tx.Exec(`UPDATE episode_item SET state='hidden' WHERE id=? AND state='active'`, it.ID)
 			if err != nil {
@@ -563,7 +578,12 @@ func (s *Service) markWrong(ctx context.Context, db *storage.Store, items []myIt
 				n++
 				touched[it.Episode] = true
 				evidence = append(evidence, it.Evidence...)
+				hidden = append(hidden, it.ID)
 			}
+		}
+		// the statements about people these items gave are hidden too, and never written again
+		if _, err := s.itemClaimsTx(tx, hidden, true, store.SuppressBySelf); err != nil {
+			return err
 		}
 		if err := s.closeCorrected(tx, touched); err != nil {
 			return err
@@ -698,6 +718,7 @@ type forgetPlan struct {
 	err      error
 	episodes []string // episodes the person is a participant of
 	cards    int
+	claims   int // person memory statements about the person or said by them (all only)
 	all      bool
 	token    string
 }
@@ -772,6 +793,7 @@ func allForgetPlan(tx *sql.Tx, guild, ref string) forgetPlan {
 	}
 	rows, err := tx.Query(`SELECT 'episode',e.id,e.participants FROM channel_episode e WHERE e.guild_id=?1 AND EXISTS(SELECT 1 FROM json_each(e.participants) WHERE value=?2)
 		UNION ALL SELECT 'card',id,json_array(state,text,evidence,updated_at) FROM person_card_item WHERE guild_id=?1 AND person_ref=?2
+		UNION ALL SELECT 'claim',id,state FROM person_claim WHERE guild_id=?1 AND (subject_ref=?2 OR speaker_ref=?2)
 		UNION ALL SELECT 'explicit',episode_id,key FROM memory_explicit WHERE guild_id=?1 AND person_ref=?2
 		UNION ALL SELECT 'relation',json_array(a_ref,b_ref),json_array(replies,mentions) FROM person_relation WHERE guild_id=?1 AND (a_ref=?2 OR b_ref=?2)
 		UNION ALL SELECT 'state',holder_id,'' FROM evidence_refs WHERE holder_kind=?3 AND source_id=?2 AND instr(holder_id,'state:'||?1||':')=1
@@ -792,6 +814,8 @@ func allForgetPlan(tx *sql.Tx, guild, ref string) forgetPlan {
 			p.episodes = append(p.episodes, id)
 		case "card":
 			p.cards++
+		case "claim":
+			p.claims++
 		}
 	}
 	p.err = rows.Err()
@@ -830,8 +854,9 @@ func (s *Service) forgetPreview(db *storage.Store, guild, ref string, ids []stri
 
 var errForgetChanged = errors.New("forget preview changed")
 
-// applyForget deletes what the plan shows.
-func (s *Service) applyForget(ctx context.Context, db *storage.Store, guild, ref string, p forgetPlan) (int, error) {
+// applyForget deletes what the plan shows. by is who asked (store.SuppressBySelf or SuppressByOp): the
+// person memory markers record it.
+func (s *Service) applyForget(ctx context.Context, db *storage.Store, guild, ref string, p forgetPlan, by string) (int, error) {
 	deleted := 0
 	err := db.WithWriterContext(ctx, func(tx *sql.Tx) error {
 		touched := map[string]bool{}
@@ -863,6 +888,14 @@ func (s *Service) applyForget(ctx context.Context, db *storage.Store, guild, ref
 				return err
 			}
 		} else {
+			ids := make([]string, 0, len(p.items))
+			for _, it := range p.items {
+				ids = append(ids, it.ID)
+			}
+			// the statements about people these items gave go with them, and are never written again
+			if _, err := s.itemClaimsTx(tx, ids, false, by); err != nil {
+				return err
+			}
 			for _, it := range p.items {
 				if _, err := tx.Exec(`DELETE FROM evidence_refs WHERE holder_kind=? AND holder_id=?`, store.HolderEpisodeItem, it.ID); err != nil {
 					return err
@@ -893,6 +926,10 @@ func (s *Service) applyForget(ctx context.Context, db *storage.Store, guild, ref
 			}
 			n, err := deleteCardsOf(tx, guild, ref)
 			if err != nil {
+				return err
+			}
+			deleted += n
+			if n, err = s.forgetPersonTx(tx, guild, ref, by); err != nil {
 				return err
 			}
 			deleted += n
@@ -933,11 +970,12 @@ func (s *Service) applyForget(ctx context.Context, db *storage.Store, guild, ref
 //
 // memory.mine.show {guild_id, user_id} →
 //
-//	{"items":[{"id","episode_id","kind","text","channel_id","created_at","explicit"}], "episodes":N, "person_card":[text], "console":"/memory"}
+//	{"items":[{"id","episode_id","kind","text","channel_id","created_at","explicit"}], "episodes":N,
+//	 "person":[{"id","kind","text","origin","said_by":[name],"observed_at","evidence_n","state"}], "person_card":[text], "console":"/memory"}
 //
 // memory.mine.forget {guild_id, user_id, confirm?, scope?: pending|all} →
 //
-//	preview: {"applied":false,"scope","items":N,"episodes":N,"cards":N,"token"}
+//	preview: {"applied":false,"scope","items":N,"episodes":N,"cards":N,"person_items":N,"token"}
 //	confirm: {"applied":true,"deleted":N} — refused with a fresh preview when what it would delete changed.
 //
 // From Discord the invoker is always the person and the server is where the command ran; the console (an
@@ -990,22 +1028,22 @@ func (s *Service) mineAction(ctx context.Context, req action.Request) action.Res
 			list = append(list, map[string]any{"id": it.ID, "episode_id": it.Episode, "kind": it.Kind, "text": episodes.StoredText(it.Text, labelIn(it.Room), "?"),
 				"channel_id": it.Channel, "created_at": it.Created, "explicit": told[it.Episode]})
 		}
-		channel := ""
-		if req.Invoker != nil {
-			channel = req.Invoker.ChannelID
-		}
-		labelRoom := roomOf(guild, channel)
-		if channel == "" && len(items) > 0 {
-			labelRoom = items[0].Room // the console names no channel: names come from the newest item's room
-		}
-		labelOf := labelIn(labelRoom)
 		var eps int
 		_ = db.Reader().QueryRow(`SELECT COUNT(DISTINCT e.id) FROM channel_episode e, json_each(e.participants) x WHERE e.guild_id=? AND x.value=?`, guild, ref).Scan(&eps)
-		card := []string{}
-		if tableReady(db, "person_card_item") {
-			card = append(card, s.cardOf(db, guild, ref, labelOf)...)
+		// person memory: names come from each statement's own room
+		person, claims := s.personClaimsView(ctx, db, guild, ref, labelIn)
+		card := []string{} // the active statements as lines (older clients read person_card)
+		for i, c := range claims {
+			if c.state != store.PersonActive {
+				continue
+			}
+			line := fmt.Sprint(person[i]["text"])
+			if said, _ := person[i]["said_by"].([]string); len(said) > 0 {
+				line += " (" + s.msg(req, "memory.mine.said_by", "name", said[0]) + ")"
+			}
+			card = append(card, line)
 		}
-		out := map[string]any{"items": list, "episodes": eps, "person_card": card, "console": "/memory"}
+		out := map[string]any{"items": list, "episodes": eps, "person": person, "person_card": card, "console": "/memory"}
 		if u := s.consoleLink("/memory"); u != "" {
 			out["console_url"] = u
 		}
@@ -1034,7 +1072,8 @@ func (s *Service) mineAction(ctx context.Context, req action.Request) action.Res
 			if plan.err != nil {
 				return s.failErr(req, errcode.IO, "error.storage", plan.err, nil)
 			}
-			preview := map[string]any{"applied": false, "scope": scope, "items": plan.count, "episodes": len(plan.episodes), "cards": plan.cards, "token": plan.token}
+			preview := map[string]any{"applied": false, "scope": scope, "items": plan.count, "episodes": len(plan.episodes), "cards": plan.cards,
+				"person_items": plan.claims, "token": plan.token}
 			if confirm != "" {
 				preview["stale"] = true // what it would delete changed since the preview
 			}
@@ -1047,7 +1086,11 @@ func (s *Service) mineAction(ctx context.Context, req action.Request) action.Res
 		if confirm == "" || confirm != plan.token || plan.err != nil {
 			return showPreview(plan)
 		}
-		n, err := s.applyForget(ctx, db, guild, ref, plan)
+		by := store.SuppressByOp
+		if req.Invoker != nil && req.Invoker.UserID == user {
+			by = store.SuppressBySelf
+		}
+		n, err := s.applyForget(ctx, db, guild, ref, plan, by)
 		if errors.Is(err, errForgetChanged) {
 			return showPreview(s.forgetPreview(db, guild, ref, ids))
 		}
@@ -1112,11 +1155,11 @@ func (s *Service) mineCard(req action.Request, items []map[string]any, eps int, 
 
 func (s *Service) forgetCard(req action.Request, p forgetPlan, scope string, stale bool) action.Card {
 	c := action.Card{Title: s.msg(req, "memory.forget.title"), Ephemeral: true, Tone: "warn"}
-	if p.count == 0 && len(p.episodes) == 0 && p.cards == 0 {
+	if p.count == 0 && len(p.episodes) == 0 && p.cards == 0 && p.claims == 0 {
 		c.Text, c.Tone = s.msg(req, "memory.forget.nothing"), "neutral"
 		return c
 	}
-	text := s.msg(req, "memory.forget.preview", "items", p.count, "episodes", len(p.episodes), "cards", p.cards)
+	text := s.msg(req, "memory.forget.preview", "items", p.count, "episodes", len(p.episodes), "cards", p.cards+p.claims)
 	if stale {
 		text = s.msg(req, "memory.forget.stale") + "\n" + text
 	}

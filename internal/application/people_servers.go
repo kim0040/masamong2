@@ -115,8 +115,9 @@ func (s *Service) peopleServers(req action.Request) action.Result {
 			}
 		}
 	}
-	if db.IsSQLite() && tableReady(db, "person_card_item") {
-		cardRows, err := db.Reader().Query(`SELECT guild_id, person_ref, COUNT(*) FROM person_card_item WHERE state='active' GROUP BY guild_id, person_ref`)
+	if db.IsSQLite() && tableReady(db, "person_claim") {
+		// person memory: the active statements about each person (person_card_item is no longer written)
+		cardRows, err := db.Reader().Query(`SELECT guild_id, subject_ref, COUNT(*) FROM person_claim WHERE state='active' GROUP BY guild_id, subject_ref`)
 		if err != nil {
 			return action.Fail(req, errcode.IO, "generic.error", s.msg(req, "generic.error"), nil)
 		}

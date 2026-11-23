@@ -191,8 +191,8 @@ func (s *Service) personClaimPasses(tx *sql.Tx, c *store.PersonClaim, memoryOut,
 	switch c.State {
 	case "", store.PersonActive:
 		c.State = store.PersonActive
-		if s.guildPrivacy(c.GuildID).NoSensitive {
-			c.State = store.PersonPending // read only after the classifier passed it
+		if s.guildPrivacy(c.GuildID).NoSensitive && c.Source != store.SourceExplicit {
+			c.State = store.PersonPending // read only after the classifier passed it (an explicit fact was classified when it was asked for)
 		}
 	case store.PersonPending, store.PersonHidden:
 	default:
@@ -245,6 +245,16 @@ func writePersonClaim(tx *sql.Tx, c store.PersonClaim, now string) (int, error) 
 		if _, err := tx.Exec(`UPDATE person_claim SET kind=?,topic=?,text=?,source=?,link=? WHERE id=?`, c.Kind, c.Topic, c.Text, c.Source, c.Link, c.ID); err != nil {
 			return 0, err
 		}
+	case strings.HasPrefix(source, "episode_item:") && strings.HasPrefix(c.Source, "episode_item:") && source != c.Source:
+		// an item made again (a regenerated episode): the statement now rests on the new item once the
+		// old one is gone; the row keeps its state
+		var active bool
+		if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM episode_item WHERE id=? AND state='active')`, strings.TrimPrefix(source, "episode_item:")).Scan(&active); err != nil || active {
+			return 0, err
+		}
+		if _, err := tx.Exec(`UPDATE person_claim SET text=?,source=? WHERE id=?`, c.Text, c.Source, c.ID); err != nil {
+			return 0, err
+		}
 	default:
 		return 0, nil // already written: idempotent
 	}
@@ -261,4 +271,58 @@ func deletePersonClaimTx(tx *sql.Tx, id string) error {
 	}
 	_, err := tx.Exec(`DELETE FROM person_claim WHERE id=?`, id)
 	return err
+}
+
+// deleteClaimsCiting deletes the claims whose evidence index holds any of keys (observation ids, native
+// message ids or person references) and returns how many went.
+func deleteClaimsCiting(tx *sql.Tx, keys []string) (int, error) {
+	if len(keys) == 0 {
+		return 0, nil
+	}
+	raw, _ := json.Marshal(uniqueStrings(keys))
+	return deleteClaimsWhere(tx, `SELECT DISTINCT holder_id FROM evidence_refs WHERE holder_kind=? AND source_id IN (SELECT value FROM json_each(?))`,
+		store.HolderPersonClaim, string(raw))
+}
+
+// deleteClaimsOf deletes a person's claims in one server (every server when guild is ""): the ones
+// about them, and with speaker also the ones they said about others.
+func deleteClaimsOf(tx *sql.Tx, guild, ref string, speaker bool) (int, error) {
+	if ref == "" || !tableExists(tx, "person_claim") {
+		return 0, nil
+	}
+	q := `SELECT id FROM person_claim WHERE (subject_ref=?1 OR (?2 AND speaker_ref=?1))`
+	args := []any{ref, speaker}
+	if guild != "" {
+		q += ` AND guild_id=?3`
+		args = append(args, guild)
+	}
+	return deleteClaimsWhere(tx, q, args...)
+}
+
+// deleteClaimsWhere deletes the claims whose ids the query returns.
+func deleteClaimsWhere(tx *sql.Tx, query string, args ...any) (int, error) {
+	rows, err := tx.Query(query, args...)
+	if err != nil {
+		return 0, err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		ids = append(ids, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return 0, err
+	}
+	for _, id := range ids {
+		if err := deletePersonClaimTx(tx, id); err != nil {
+			return 0, err
+		}
+	}
+	return len(ids), nil
 }

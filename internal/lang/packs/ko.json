@@ -89,6 +89,7 @@
     "state_block": "<방 상태 참고용>\n{header}\n{topics}\n</방 상태>",
     "card_block": "<사람 카드 참고용>\n{header}\n{cards}\n</사람 카드>",
     "kakao_source": "카톡방 {label}",
+    "said_by": "({name} 말)",
     "statuses": {
       "open": "논의 중",
       "decided": "정해짐",

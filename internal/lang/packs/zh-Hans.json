@@ -89,6 +89,7 @@
     "state_block": "<房间状态 参考>\n{header}\n{topics}\n</房间状态>",
     "card_block": "<人物卡片 参考>\n{header}\n{cards}\n</人物卡片>",
     "kakao_source": "KakaoTalk 群 {label}",
+    "said_by": "({name}说)",
     "statuses": {
       "open": "讨论中",
       "decided": "已决定",

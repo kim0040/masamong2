@@ -100,6 +100,7 @@ func buildAll() []Descriptor {
 		exec("memory.episodes.forget", "memory episodes forget", "/memory", "internal_write"),
 		exec("memory.mine.show", "memory mine show", "/memory", "read"),
 		exec("memory.mine.forget", "memory mine forget", "/memory", "internal_write"),
+		exec("memory.person.hide", "memory person hide", "/memory", "internal_write"),
 		exec("memory.episodes.extract", "memory episodes extract", "/blocks", "external_write"),
 		exec("memory.state.show", "memory state show", "/memory", "read"),
 		exec("events.timeline", "events", "/memory", "read"),

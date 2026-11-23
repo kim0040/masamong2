@@ -1299,6 +1299,7 @@
   "memory.mine.empty": "Todavía no guardo nada sobre ti en este servidor.",
   "memory.mine.footer": "Solo tú ves esto. Para borrarlo, usa /olvidame. Los administradores del servidor también pueden verlo y borrarlo en la consola (Memoria).",
   "memory.mine.card": "Sobre ti",
+  "memory.mine.said_by": "según {name}",
   "memory.mine.episodes": "Conversaciones en las que participas",
   "memory.mine.more": "…y {n} más",
   "memory.mine.console": "Abrir la consola",

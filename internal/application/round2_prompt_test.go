@@ -44,22 +44,25 @@ func TestRound2PendingThreadDeletion(t *testing.T) {
 	}
 }
 
-// Only an explicit request about the caller adds their card; a first-person
-// aside next to an unrelated question adds no person block.
+// The caller's own statements come on every turn; what others said about the
+// caller only on an explicit request about the caller, not on a first-person
+// aside next to an unrelated question.
 func TestRound2IncidentalSelfRecall(t *testing.T) {
 	t.Parallel()
 	s, m, e := memorySvc(t)
 	f := reviewPerson{s, m, e, time.Now().UTC().Add(-3 * time.Hour)}
 	ev := f.source(t, "g", "c", "caller-source", "303", "지수", f.at)
-	f.fact(t, "g", "c", "caller-only-marker", "303", "303", ev)
+	f.fact(t, "g", "c", "zebra-kiwi-note", "303", "303", ev)
+	said := f.source(t, "g", "c", "friend-source", "202", "영희", f.at)
+	f.fact(t, "g", "c", "caller-only-marker", "303", "202", said)
 	for _, q := range []string{"날 기억해?", "나에 대해 뭐 알아?", "나는 뭘 좋아해?"} {
-		if got := block(f.ask(t, q), cardOpen, cardClose); !strings.Contains(got, "caller-only-marker") {
+		if got := block(f.ask(t, q), cardOpen, cardClose); !strings.Contains(got, "caller-only-marker") || !strings.Contains(got, "zebra-kiwi-note") {
 			t.Fatalf("%q: explicit self request lost the caller's card: %q", q, got)
 		}
 	}
 	for _, q := range []string{"오늘 서울 날씨 알려줘.", "나는 기억력이 좋아. 오늘 서울 날씨 알려줘.", "제가 기억하기로는 오늘 비 온대요. 맞아?"} {
-		if got := block(f.ask(t, q), cardOpen, cardClose); got != "" {
-			t.Fatalf("%q: incidental first person recalled the caller's card: %q", q, got)
+		if got := block(f.ask(t, q), cardOpen, cardClose); strings.Contains(got, "caller-only-marker") || !strings.Contains(got, "zebra-kiwi-note") {
+			t.Fatalf("%q: incidental first person recalled what others said about the caller: %q", q, got)
 		}
 	}
 }

@@ -974,6 +974,10 @@ func (s *Service) insertItems(tx *sql.Tx, episodeID string, items []episodes.Ite
 		if err := indexCopy(tx, store.HolderEpisodeItem, id, keys, false); err != nil {
 			return n, err
 		}
+		// person memory: the item's statements about people, in the same transaction (no model call)
+		if err := s.derivePersonClaimsTx(tx, deriveItem{id: id, kind: it.Kind, text: it.Text, saved: at, evidence: it.Evidence, by: it.By}); err != nil {
+			return n, err
+		}
 		n++
 	}
 	return n, nil

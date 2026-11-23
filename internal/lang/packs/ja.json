@@ -89,6 +89,7 @@
     "state_block": "<部屋の状況 参考用>\n{header}\n{topics}\n</部屋の状況>",
     "card_block": "<人物カード 参考用>\n{header}\n{cards}\n</人物カード>",
     "kakao_source": "カカオトークの部屋 {label}",
+    "said_by": "({name}談)",
     "statuses": {
       "open": "相談中",
       "decided": "決定",
