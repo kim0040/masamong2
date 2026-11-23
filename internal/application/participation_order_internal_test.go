@@ -162,8 +162,9 @@ func TestObserveUsesTheModeCurrentAfterTheMuteRestore(t *testing.T) {
 			Content: "마사몽 이거 알아?", At: clk.t, Addressed: true, BotCall: "mention"})
 	}()
 	waitsInStore(t, "(*Service).Observe(")
-	doc := s.Doc()
-	doc.Guilds["g"].Channels["a"] = config.ChannelPolicy{Respond: "mention", Participation: "conservative"}
+	doc := s.Doc() // a snapshot others read: its maps are replaced, not changed
+	doc.Guilds = map[string]config.GuildSettings{"g": {Locale: "ko", Channels: map[string]config.ChannelPolicy{
+		"a": {Respond: "mention", Participation: "conservative"}, "b": {Respond: "mention", Participation: "off"}}}}
 	s.setDoc(doc, s.Revision())
 	release()
 	<-called
