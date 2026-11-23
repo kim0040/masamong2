@@ -344,7 +344,7 @@ func (s *Service) applyCandidateLocked(req action.Request, candidate []byte, bas
 			if _, perr := config.ValidateCandidate(candidate); directKeyOf(perr) != nil {
 				return s.configFail(req, code, perr, details)
 			}
-			return s.failErr(req, code, "config.invalid", err, details)
+			return s.failErr(req, code, "config.invalid", err, details, "reason", err.Error())
 		}
 		return action.Fail(req, code, "config.conflict", s.msg(req, "config.conflict"), details)
 	}

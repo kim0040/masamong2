@@ -210,6 +210,9 @@ func (s *Service) updateApply(ctx context.Context, req action.Request) action.Re
 	}
 	arcPath, err := downloadRelease(ctx, s, st, dir)
 	if err != nil {
+		if errors.Is(err, errUpdateChecksum) {
+			return failKey(errcode.ProviderUnavailable, "update.checksum_failed", err, nil)
+		}
 		return failKey(errcode.ProviderUnavailable, "update.download_failed", err, nil)
 	}
 	// The archive is only needed until the programs are on disk. Drop it before the
@@ -237,6 +240,10 @@ func (s *Service) updateApply(ctx context.Context, req action.Request) action.Re
 	s.requestLifecycle(lifecycleRestart)
 	return action.OK(req, map[string]any{"installed": st.Latest, "from": Version, "backup": backup, "restarting": true, "message": s.msg(req, "updates.installed", "version", st.Latest)})
 }
+
+// errUpdateChecksum marks a download whose digest is not the published one, or that has no published digest:
+// it is told apart from a failed transfer, because retrying the same file will not help.
+var errUpdateChecksum = errors.New("update checksum")
 
 // downloadRelease fetches SHA256SUMS, streams the archive to a temp file in dir while hashing it,
 // and returns that file. The caller deletes it. The sum check is the same one as before: the hex
@@ -270,7 +277,7 @@ func downloadRelease(ctx context.Context, s *Service, st updateState, dir string
 		}
 	}
 	if len(want) != 64 {
-		return "", fmt.Errorf("SHA256SUMS has no line for %s", st.Asset.Name)
+		return "", fmt.Errorf("%w: SHA256SUMS has no line for %s", errUpdateChecksum, st.Asset.Name)
 	}
 	path, sum, err := streamReleaseAsset(ctx, client, st.Asset.URL, dir, st.Asset.Name, updateArchiveMax)
 	if err != nil {
@@ -278,7 +285,7 @@ func downloadRelease(ctx context.Context, s *Service, st updateState, dir string
 	}
 	if hex.EncodeToString(sum) != want {
 		_ = os.Remove(path)
-		return "", fmt.Errorf("%s does not match SHA256SUMS", st.Asset.Name)
+		return "", fmt.Errorf("%w: %s does not match SHA256SUMS", errUpdateChecksum, st.Asset.Name)
 	}
 	return path, nil
 }

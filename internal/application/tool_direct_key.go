@@ -32,7 +32,8 @@ func directKeyOf(err error) *tools.DirectSecretError {
 
 // configFail is the failure of a change the configuration refused. A key written into an operator tool is
 // told in the person's language (the tool and the field, never the value); any other reason keeps the
-// parser's own text, kept in details["detail"] for the operator and out of the sentence. details may be nil.
+// validator's own sentence after the key's words (the setting and the rule it broke are what the operator
+// needs; the same pattern as prefs.invalid). details may be nil.
 func (s *Service) configFail(req action.Request, code string, err error, details map[string]any) action.Result {
 	if direct := directKeyOf(err); direct != nil {
 		if details == nil {
@@ -41,11 +42,5 @@ func (s *Service) configFail(req action.Request, code string, err error, details
 		details["tool"], details["field"] = direct.Tool, direct.Where()
 		return action.Fail(req, code, "tool.direct_key", s.msg(req, "tool.direct_key", "tool", direct.Tool, "field", direct.Where()), details)
 	}
-	if details == nil {
-		details = map[string]any{}
-	}
-	if _, kept := details["detail"]; !kept {
-		details["detail"] = err.Error()
-	}
-	return s.failErr(req, code, "config.invalid", err, details)
+	return s.failErr(req, code, "config.invalid", err, details, "reason", err.Error())
 }

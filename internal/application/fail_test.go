@@ -51,20 +51,18 @@ func TestHTTPToolFailureHasNoServerText(t *testing.T) {
 	}
 }
 
-// A settings file the parser refuses is told in plain words; the parser's own text stays in the details
-// the console shows to operators.
-func TestConfigRefusalIsPlainWordsWithDetailsApart(t *testing.T) {
+// A settings file the validator refuses is told as the key's sentence followed by the validator's own reason
+// (the setting and the rule: that is what the operator has to fix), the way prefs.invalid does.
+func TestConfigRefusalNamesTheReasonAfterTheKeysSentence(t *testing.T) {
 	svc := setupSvc(t)
 	in, _ := json.Marshal(map[string]any{"yaml": "instance: [unterminated\n\t- {"})
 	r := svc.Execute(t.Context(), action.Request{Action: "config.apply", Input: in, Locale: "en", BaseRevision: svc.Revision()})
 	if r.OK || r.Error == nil || r.Error.MessageKey != "config.invalid" {
 		t.Fatalf("%+v", r)
 	}
-	if r.Error.Message != failMessage(svc, "config.invalid") {
-		t.Fatalf("message %q", r.Error.Message)
-	}
-	if d, _ := r.Error.Args["detail"].(string); d == "" || strings.Contains(r.Error.Message, d) {
-		t.Fatalf("detail missing or in the sentence: %+v", r.Error)
+	prefix := strings.TrimSuffix(failMessage(svc, "config.invalid", "reason", "X"), "X")
+	if !strings.HasPrefix(r.Error.Message, prefix) || len(r.Error.Message) <= len(prefix) || strings.Contains(r.Error.Message, "{reason}") {
+		t.Fatalf("message %q, want %q and a reason", r.Error.Message, prefix)
 	}
 }
 

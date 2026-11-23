@@ -23,7 +23,7 @@ var failKeys = []string{
 	"jobs.not_changeable", "backfill.failed", "config.invalid", "config.failed",
 	"migration.not_sqlite", "migration.failed", "reset.failed", "reset.backup_failed", "setup.failed",
 	"storage.dsn_invalid", "storage.target_failed", "storage.switch_failed", "stats.off", "autostart.failed",
-	"update.failed", "update.download_failed", "update.prepare_failed", "update.backup_failed", "update.install_failed",
+	"update.failed", "update.download_failed", "update.checksum_failed", "update.prepare_failed", "update.backup_failed", "update.install_failed",
 	"discord.check_unreachable", "daemon.unreachable", "notices.collect_failed", "tool.http_failed", "feature.model_failed",
 }
 
@@ -45,7 +45,7 @@ func TestFailErrKeysExistInEveryLanguageWithoutPlaceholderLeftovers(t *testing.T
 			if !ok || strings.TrimSpace(text) == "" {
 				t.Errorf("%s: key %s is missing", lang, key)
 			}
-			if key != "tool.http_failed" && strings.Contains(text, "{") {
+			if key != "tool.http_failed" && key != "config.invalid" && strings.Contains(text, "{") {
 				t.Errorf("%s: %s has a placeholder that failErr does not fill: %q", lang, key, text)
 			}
 		}
