@@ -45,7 +45,7 @@
   "update.prepare_failed": "새 버전을 준비하지 못해서 바뀐 것은 없어요. 자세한 내용은 서비스 로그에서 볼 수 있어요.",
   "update.backup_failed": "업데이트 전 백업에 실패해서 아무것도 바꾸지 않았어요.",
   "update.install_failed": "업데이트를 설치하지 못했어요. 복구 작업이 필요할 수 있어요. 자세한 내용은 서비스 로그에서 볼 수 있어요.",
-  "discord.check_unreachable": "디스코드에 연결하지 못했어요. 네트워크를 확인하고 다시 시도해 주세요.",
+  "discord.check_unreachable": "Discord에 연결하지 못했어요. 네트워크를 확인하고 다시 시도해 주세요.",
   "daemon.unreachable": "마사몽 서비스가 답하지 않았어요. 실행 중인지 확인하고 다시 시도해 주세요.",
   "notices.collect_failed": "공지를 모으는 일을 끝내지 못했어요. 자세한 내용은 서비스 로그에서 볼 수 있어요.",
   "tool.http_failed": "{tool}이(가) 답하지 않았어요. 잠시 뒤 다시 시도해 주세요.",
