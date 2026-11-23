@@ -709,6 +709,16 @@ func invalidAnswer(problems []string) error {
 	return fmt.Errorf("%w: %s", errExtractInvalid, clip(strings.Join(problems, "; "), 300))
 }
 
+// keepValidPart settles an answer that has problems: when something valid is left on the last answer
+// it is kept (and what was dropped is logged), otherwise the answer is refused so it is asked again.
+func (s *Service) keepValidPart(kind string, keep bool, problems []string) error {
+	if !keep {
+		return invalidAnswer(problems)
+	}
+	s.Log.Info("memory: kept the valid part of an answer", "kind", kind, "dropped", clip(strings.Join(problems, "; "), 300))
+	return nil
+}
+
 // extractSegment asks the model about one closed segment and saves what validates. It returns how many
 // episodes were created or changed.
 func (s *Service) extractSegment(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, bots []episodes.Message, pack *lang.Pack, botName string) (int, error) {
@@ -737,11 +747,7 @@ func (s *Service) extractSegment(ctx context.Context, db *storage.Store, r memRo
 			// Every episode and item that is kept passed its own checks, so on the last answer the
 			// valid ones are saved: one item citing the bot's line used to drop the whole conversation
 			// (9 conversations in a week on the live bot, 2026-10-29).
-			if final && len(res.Ops) > 0 {
-				s.Log.Info("memory: kept the valid part of an answer", "kind", "episodes", "dropped", clip(strings.Join(res.Problems, "; "), 300))
-				return nil
-			}
-			return invalidAnswer(res.Problems)
+			return s.keepValidPart("episodes", final && len(res.Ops) > 0, res.Problems)
 		}
 		return nil
 	})
@@ -1250,11 +1256,7 @@ func (s *Service) updateRoomState(ctx context.Context, db *storage.Store, r memR
 			// as with episodes: entries that validated are kept from the last answer (a banter note
 			// without evidence left the whole state unchanged 16 times in a week). A state with no entry
 			// left would erase the room's topics, so that one is still refused.
-			if final && !st.Empty() {
-				s.Log.Info("memory: kept the valid part of an answer", "kind", "state", "dropped", clip(strings.Join(problems, "; "), 300))
-				return nil
-			}
-			return invalidAnswer(problems)
+			return s.keepValidPart("state", final && !st.Empty(), problems)
 		}
 		return nil
 	})
