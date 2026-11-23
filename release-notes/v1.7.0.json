@@ -1,0 +1,48 @@
+{
+  "version": "v1.7.0",
+  "date": "2026-11-23",
+  "user": {
+    "en": [
+      "Person memory: the bot now remembers what people say about each other, one short line at a time, and uses it when it answers, chimes in or draws someone. It is on by default.",
+      "What you said about yourself is used anywhere in the server. What others said about you is used with the speaker's name and only in the channel it came from.",
+      "!내기억 and /내기억 now list these lines and who said each one. You can hide a line, and !잊어줘 also deletes what others said about you.",
+      "Drawing: images.generate takes the people to draw and uses what they said about their own looks, likes, traits and nicknames as a reference.",
+      "A one-line message to the bot about yourself, such as a food you like, is now remembered too.",
+      "Words said in a private thread are used only inside that thread."
+    ],
+    "ko": [
+      "사람 기억: 봇이 사람들이 서로에 대해 한 말을 한 줄씩 기억하고, 답할 때나 끼어들 때, 누군가를 그릴 때 써요. 기본으로 켜져 있어요.",
+      "내가 내 얘기로 한 말은 서버 어디서든 쓰고, 남이 나에 대해 한 말은 말한 사람 이름을 붙여 그 말이 나온 채널에서만 써요.",
+      "!내기억과 /내기억에 이 줄들과 누가 말했는지가 나와요. 줄을 숨길 수 있고, !잊어줘는 남이 나에 대해 한 말도 지워요.",
+      "그림: images.generate가 그릴 사람을 받아서, 그 사람이 자기 외모·좋아하는 것·특징·별명으로 한 말을 참고해요.",
+      "봇에게 한 줄로 한 자기 얘기도, 예를 들어 좋아하는 음식도, 이제 기억해요.",
+      "비공개 스레드에서 한 말은 그 스레드 안에서만 써요."
+    ]
+  },
+  "operator": {
+    "en": [
+      "Behaviour change: memory.people is on by default, so existing installs start using what people said about each other, with the speaker's name. Turn it off with memory.people off.",
+      "Strict options cover it: no_hearsay hides what others said, own_card_only keeps the caller's own, card_channel_only keeps it to its channel, and no_sensitive waits for the classifier.",
+      "Upgrading: nothing is rebuilt and no model is called. Summaries, embeddings and messages stay as they are, and existing memory items are read once. Person memory fills mostly from new conversation.",
+      "Console: People shows each person's memory in a server with hide and forget, and has no free-text input. The Memory page has a Person memory tab for the paid backfill.",
+      "Paid backfill, operators only: pulls person memory out of stored Discord history with your Anthropic key. Steps: estimate, a 60-window pilot on Haiku 5.5 and Sonnet 5.5, then a run on Message Batches.",
+      "Backfill cost: one cap per server in total, 3 dollars by default, 6 at most. For 60,000 to 80,000 Discord lines, about 0.2 to 0.3 dollars on Haiku, 4 to 6 on Sonnet. Not in the monthly chat budget.",
+      "The backfill never starts by itself: an update or restart starts nothing. It needs a native Anthropic provider and never rebuilds summaries or embeddings.",
+      "Behaviour change: chime-ins, banter and drawing may use what others said. KakaoTalk speakers are never part of person memory.",
+      "Known limit: placeholder, the coordinator replaces this item with the real list.",
+      "Release files are not signed yet. For the first-launch warning, see https://github.com/kim0040/masamong2/wiki/Installation"
+    ],
+    "ko": [
+      "동작 변경: memory.people이 기본으로 켜져요. 기존 설치도 사람들이 서로에 대해 한 말을 말한 사람 이름과 함께 쓰기 시작해요. 끄려면 memory.people을 off로 하거나 엄격 옵션을 써요.",
+      "엄격 옵션도 적용돼요. no_hearsay는 남이 한 말을 숨기고, own_card_only는 부른 사람 본인 것만, card_channel_only는 그 채널 안에서만, no_sensitive는 분류기를 기다려요.",
+      "업데이트할 때: 아무것도 다시 만들지 않고 모델도 부르지 않아요. 요약·임베딩·메시지는 그대로이고 기존 기억 항목을 한 번 읽을 뿐이에요. 사람 기억은 주로 새 대화에서 채워져요.",
+      "콘솔: 사람·권한에서 서버별로 그 사람의 기억을 보고 숨기거나 잊을 수 있어요. 직접 써 넣는 칸은 없어요. 기억 탐색에는 유료 백필용 사람 기억 탭이 생겼어요.",
+      "유료 백필(운영자 전용): 저장된 Discord 기록에서 사람 기억을 Anthropic 키로 뽑아요. 비용 계산, Haiku 5.5와 Sonnet 5.5로 창 60개 시범, Message Batches 본 실행 순서예요.",
+      "백필 비용: 서버마다 합계 한도 하나예요. 기본 3달러, 최대 6달러예요. Discord 6만~8만 줄이면 Haiku는 0.2~0.3달러, Sonnet은 4~6달러쯤이고 월 대화 예산과는 따로 봐요.",
+      "백필은 저절로 시작하지 않아요. 업데이트나 재시작이 시작하지 않고, 네이티브 Anthropic 공급자가 있어야 하며 요약·임베딩은 다시 만들지 않아요.",
+      "동작 변경: 끼어들기·장난 대꾸·그림에는 남이 한 말도 쓸 수 있어요. 카카오톡 화자는 사람 기억에 들어가지 않아요.",
+      "알려진 한계: 자리표시예요. 코디네이터가 이 항목을 실제 목록으로 바꿔요.",
+      "배포 파일은 아직 서명하지 않았어요. 첫 실행 경고는 https://github.com/kim0040/masamong2/wiki/설치 안내를 봐 주세요."
+    ]
+  }
+}

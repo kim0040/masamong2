@@ -2,11 +2,11 @@
   "note": "Translation record checked by tools/doccheck. When a file of a group changes, bring the other languages along, then run: go run ./tools/doccheck -write",
   "groups": {
     "README": {
-      "README.es.md": "95993026c35bcf0b",
-      "README.ja.md": "0198fbf04475cfcd",
-      "README.ko.md": "a432ca72dbd24302",
-      "README.md": "e347f71e6dc28787",
-      "README.zh-Hans.md": "6d151f6acd02ad98"
+      "README.es.md": "66deed69e728c584",
+      "README.ja.md": "c678c880e4138383",
+      "README.ko.md": "1551a02cdaf80e0d",
+      "README.md": "3a743c05dc5cb4d6",
+      "README.zh-Hans.md": "4a93716756b6832d"
     },
     "wiki/CLI-명령어": {
       "docs/wiki/CLI-Commands.md": "a6860444aae9d031",
@@ -17,16 +17,16 @@
       "docs/wiki/Discord-연결.md": "7884d20bb94a02fe"
     },
     "wiki/Home": {
-      "docs/wiki/English.md": "8fd71fd2835666c0",
-      "docs/wiki/Home.md": "1b4c7e31e22e9543"
+      "docs/wiki/English.md": "3b18faedb9f78110",
+      "docs/wiki/Home.md": "6a6ad07eddd6022a"
     },
     "wiki/개발-가이드": {
       "docs/wiki/Development-Guide.md": "66e9cef19b3f2e01",
       "docs/wiki/개발-가이드.md": "6af821f1d373cdb5"
     },
     "wiki/관리-콘솔": {
-      "docs/wiki/Admin-Console.md": "56aed41f7d1ec529",
-      "docs/wiki/관리-콘솔.md": "015cfd81e1388463"
+      "docs/wiki/Admin-Console.md": "8391c9005f736e27",
+      "docs/wiki/관리-콘솔.md": "78408747d192a887"
     },
     "wiki/기억-블록": {
       "docs/wiki/Memory-Blocks.md": "cb1e1ffb5c7f6bd9",
@@ -53,8 +53,8 @@
       "docs/wiki/보류-중인-결정.md": "82e4b3bec4270bcd"
     },
     "wiki/보안과-개인정보": {
-      "docs/wiki/Security-and-Privacy.md": "4288b5d24de45a84",
-      "docs/wiki/보안과-개인정보.md": "cd6db8b51d9c08ce"
+      "docs/wiki/Security-and-Privacy.md": "6c3a3f952336dc27",
+      "docs/wiki/보안과-개인정보.md": "65230153fe3fde06"
     },
     "wiki/부하-테스트와-장기-운영": {
       "docs/wiki/Load-Testing-and-Long-Running.md": "5c947bb91af06284",
@@ -65,8 +65,8 @@
       "docs/wiki/빠른-시작.md": "03a4489d1fe42530"
     },
     "wiki/설정-레퍼런스": {
-      "docs/wiki/Configuration-Reference.md": "e190d3c9db8115e4",
-      "docs/wiki/설정-레퍼런스.md": "fe4ebe0a4d2b8f3b"
+      "docs/wiki/Configuration-Reference.md": "864328bc675e28bc",
+      "docs/wiki/설정-레퍼런스.md": "af6377f61cbabfdd"
     },
     "wiki/설치": {
       "docs/wiki/Installation.md": "0fadd96bae14101a",
