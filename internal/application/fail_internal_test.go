@@ -25,6 +25,7 @@ var failKeys = []string{
 	"storage.dsn_invalid", "storage.target_failed", "storage.switch_failed", "stats.off", "autostart.failed",
 	"update.failed", "update.download_failed", "update.checksum_failed", "update.prepare_failed", "update.backup_failed", "update.install_failed",
 	"discord.check_unreachable", "daemon.unreachable", "notices.collect_failed", "tool.http_failed", "feature.model_failed",
+	"channels.leave_failed", "channels.source_denied", "channels.view_space_mismatch", "import.failed", "polls.invalid", "polls.vote_invalid",
 }
 
 // goText is what a library or the database would say: it must never reach a result.
@@ -115,6 +116,10 @@ func TestDatabaseFailureAnswersInPlainWords(t *testing.T) {
 	}{
 		{"preferences list", "user_prefs", "preferences.set", map[string]any{}},
 		{"conversation log", "conversation_log", "conversation.log", map[string]any{"guild_id": "g", "channel_id": "c"}},
+		{"activity ranking", "activity_counts", "activity.ranking", map[string]any{"scope": "discord:c"}},
+		{"channel operations log", "channel_ops_log", "channels.ops_log", map[string]any{"guild_id": "g", "channel_id": "c"}},
+		{"settings snapshots", "config_snapshots", "config.snapshots", map[string]any{}},
+		{"poll list", "polls", "polls.result", map[string]any{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, _ := deliveryService(t)

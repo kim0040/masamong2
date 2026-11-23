@@ -49,12 +49,11 @@ func (s *Service) providerResult(req action.Request, provider string, err error)
 	case errors.Is(err, providers.ErrNoCredential):
 		return action.Fail(req, errcode.ProviderUnconfigured, "provider.unconfigured", s.msg(req, "provider.unconfigured", "provider", provider), args)
 	case errors.Is(err, errQuota):
-		args["detail"] = err.Error()
-		return action.Fail(req, errcode.BudgetExceeded, "generic.error", err.Error(), args)
+		return action.Fail(req, errcode.BudgetExceeded, "provider.quota", s.msg(req, "provider.quota", "provider", provider), args)
 	case errors.Is(err, decode.ErrHTMLResponse), errors.Is(err, decode.ErrUnexpected):
 		return action.Fail(req, errcode.ProviderFormat, "generic.error", "provider returned an unexpected format", args)
 	case errors.Is(err, websearch.ErrNotPublic):
-		return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), args)
+		return action.Fail(req, errcode.InvalidInput, "web.not_public", s.msg(req, "web.not_public"), args)
 	case errors.Is(err, decode.ErrKMAService), errors.Is(err, decode.ErrKMATextError), errors.Is(err, fx.ErrProvider), errors.Is(err, openai.ErrAuth), errors.Is(err, websearch.ErrAuth), errors.Is(err, finnhub.ErrForbidden), errors.Is(err, openmeteo.ErrProvider):
 		return action.Fail(req, errcode.ProviderRejected, "generic.error", s.msg(req, "generic.error"), args)
 	case errors.Is(err, finnhub.ErrRateLimited), errors.Is(err, kakao.ErrQuotaExceeded):
@@ -165,7 +164,7 @@ func (s *Service) weatherFor(ctx context.Context, req action.Request) action.Res
 	kmaReady := s.Registry().KMA != nil && s.Registry().KMA.Configured()
 	if gridErr != nil && (source == "kma" || s.Registry().OpenMeteo == nil) {
 		// only KMA could answer, and it does not know this name
-		return action.Fail(req, errcode.InvalidInput, "generic.error", gridErr.Error(), map[string]any{"known_regions": kma.Regions()})
+		return action.Fail(req, errcode.InvalidInput, "weather.place_unknown", s.msg(req, "weather.place_unknown", "region", clip(region, 80)), map[string]any{"known_regions": kma.Regions()})
 	}
 	if source == "kma" || (source == "auto" && gridErr == nil && day == 0 && kmaReady) {
 		if !kmaReady {
@@ -1208,6 +1207,17 @@ func pollCode(err error) string {
 	return errcode.InvalidInput
 }
 
+// pollFail is the failed result for a poll rule: a stale revision says so, a wrong scope or any other
+// refusal gets refusedKey's sentence. The rule's own words go to the log only.
+func (s *Service) pollFail(req action.Request, err error, refusedKey string, args map[string]any) action.Result {
+	code := pollCode(err)
+	key := refusedKey
+	if code == errcode.StaleRevision {
+		key = "error.stale"
+	}
+	return s.failErr(req, code, key, err, args)
+}
+
 func (s *Service) polls(req action.Request) action.Result {
 	in := inputMap(req)
 	switch req.Action {
@@ -1270,13 +1280,13 @@ func (s *Service) polls(req action.Request) action.Result {
 			Options: opts, MaxSelect: maxSel, ClosesAt: &closes,
 		})
 		if err != nil {
-			return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.InvalidInput, "polls.invalid", err, nil)
 		}
 		if err := s.createPoll(p); err != nil {
 			if errors.Is(err, errPollExists) {
 				return action.Fail(req, errcode.InvalidInput, "generic.error", s.msg(req, "generic.error"), map[string]any{"id": p.ID})
 			}
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		out := pollOut(p)
 		out["duration_hours"] = hours
@@ -1311,7 +1321,7 @@ func (s *Service) polls(req action.Request) action.Result {
 			return action.Fail(req, errcode.InvalidInput, "generic.error", "poll not found", nil)
 		}
 		if err != nil {
-			return action.Fail(req, pollCode(err), "generic.error", err.Error(), map[string]any{"revision": p.Revision})
+			return s.pollFail(req, err, "polls.vote_invalid", map[string]any{"revision": p.Revision})
 		}
 		res := action.OK(req, pollOut(p))
 		res.Revision = p.Revision
@@ -1324,7 +1334,7 @@ func (s *Service) polls(req action.Request) action.Result {
 			return action.Fail(req, errcode.InvalidInput, "generic.error", "poll not found", nil)
 		}
 		if err != nil {
-			return action.Fail(req, pollCode(err), "generic.error", err.Error(), map[string]any{"revision": p.Revision})
+			return s.pollFail(req, err, "error.invalid_input", map[string]any{"revision": p.Revision})
 		}
 		res := action.OK(req, pollOut(p))
 		res.Revision = p.Revision
@@ -1334,7 +1344,7 @@ func (s *Service) polls(req action.Request) action.Result {
 		if id == "" {
 			list, err := s.listPolls()
 			if err != nil {
-				return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+				return s.failErr(req, errcode.IO, "error.storage", err, nil)
 			}
 			return action.OK(req, map[string]any{"polls": list})
 		}

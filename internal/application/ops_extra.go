@@ -115,7 +115,7 @@ var snapshotTiDB = `CREATE TABLE IF NOT EXISTS config_snapshots (
 func (s *Service) snapshotsAction(req action.Request) action.Result {
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	in := inputMap(req)
 	cur, _ := config.Marshal(s.Doc())
@@ -128,12 +128,12 @@ func (s *Service) snapshotsAction(req action.Request) action.Result {
 		id := newID("snap_")
 		if _, err := db.DB.Exec(`INSERT INTO config_snapshots(id, name, note, at, revision, actor, yaml) VALUES(?,?,?,?,?,?,?)`,
 			id, name, clip(strVal(in, "note", ""), 400), s.nowString(), s.Revision(), actorName(req), string(cur)); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		return action.OK(req, map[string]any{"id": id, "name": name, "revision": s.Revision()})
 	case "config.snapshot.delete":
 		if _, err := db.DB.Exec(`DELETE FROM config_snapshots WHERE id=?`, strVal(in, "id", "")); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		return action.OK(req, map[string]any{"deleted": strVal(in, "id", "")})
 	case "config.snapshot.restore":
@@ -154,19 +154,19 @@ func (s *Service) snapshotsAction(req action.Request) action.Result {
 		}
 		doc, err := config.ValidateCandidate([]byte(yaml))
 		if err != nil {
-			return action.Fail(req, errcode.ConfigInvalid, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.ConfigInvalid, "config.invalid", err, nil, "reason", err.Error())
 		}
 		// keep what must follow this machine, not the snapshot: instance identity and console address
 		doc.Instance.ID, doc.Instance.DataDir, doc.Admin = s.Doc().Instance.ID, s.Doc().Instance.DataDir, s.Doc().Admin
 		raw, err := config.Marshal(doc)
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "config.failed", err, nil)
 		}
 		return s.applyCandidate(req, raw, base)
 	}
 	rows, err := db.DB.Query(`SELECT id, name, note, at, revision, actor, yaml FROM config_snapshots ORDER BY at DESC LIMIT 200`)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	defer rows.Close()
 	list := []map[string]any{}
@@ -189,7 +189,7 @@ func (s *Service) snapshotsAction(req action.Request) action.Result {
 func (s *Service) reportCreate(req action.Request) action.Result {
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	in := inputMap(req)
 	days := min(max(intVal(in, "days", 30), 1), 365)
@@ -290,7 +290,7 @@ func (s *Service) importsPreview(ctx context.Context, req action.Request) action
 	var err error
 	path, err = s.importPath(path)
 	if err != nil {
-		return action.Fail(req, errcode.PermissionDenied, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.PermissionDenied, "import.path_denied", err, nil)
 	}
 	if strVal(in, "source", "kakao_csv") != "kakao_csv" {
 		return action.Fail(req, errcode.InvalidInput, "generic.error", "preview supports kakao_csv", nil)
@@ -353,7 +353,7 @@ func (s *Service) importsPreview(ctx context.Context, req action.Request) action
 		return s.importFailure(req, err, nil)
 	}
 	if err := flush(); err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	type sp struct {
 		Name string `json:"name"`

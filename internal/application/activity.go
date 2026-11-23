@@ -98,7 +98,7 @@ func (s *Service) activityRanking(req action.Request) action.Result {
 	}
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	now := s.Clock.Now().In(s.instanceZone())
 	from := ""
@@ -118,7 +118,7 @@ func (s *Service) activityRanking(req action.Request) action.Result {
 	}
 	rows, err := db.DB.Query(`SELECT user_id, SUM(n), MAX(last_at) FROM activity_counts WHERE `+where+` GROUP BY user_id`, args...)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	defer rows.Close()
 	// Read every row and close the cursor before MemoryAllowed: on SQLite the writer and reader share one

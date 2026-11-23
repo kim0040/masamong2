@@ -283,7 +283,7 @@ func (s *Service) memoryActions(ctx context.Context, req action.Request) action.
 }
 
 func (s *Service) importFailure(req action.Request, err error, result any) action.Result {
-	key, message := "generic.error", err.Error()
+	key := ""
 	switch {
 	case errors.Is(err, corpus.ErrImportTooLarge):
 		key = "imports.limit.file"
@@ -296,14 +296,14 @@ func (s *Service) importFailure(req action.Request, err error, result any) actio
 	case errors.Is(err, errPreviewSpeakers):
 		key = "imports.limit.speakers"
 	}
-	if key != "generic.error" {
-		message = s.msg(req, key)
-	}
 	detail := map[string]any{}
 	if req.Action == "imports.start" {
 		detail = map[string]any{"result": result, "atomicity": "batch", "resume": "same_file"}
 	}
-	return action.Fail(req, errcode.InvalidInput, key, message, detail)
+	if key == "" { // a read or parse failure: the file's own words go to the log, not to the person
+		return s.failErr(req, errcode.InvalidInput, "import.failed", err, detail)
+	}
+	return action.Fail(req, errcode.InvalidInput, key, s.msg(req, key), detail)
 }
 
 // memoryStatus is memory.blocks.list's extra section.

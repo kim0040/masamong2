@@ -458,7 +458,7 @@ func (s *Service) channelsLeave(req action.Request, in map[string]any) action.Re
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := leaver.LeaveGuild(ctx, guildID); err != nil {
-		return action.Fail(req, errcode.ProviderError, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.ProviderError, "channels.leave_failed", err, nil)
 	}
 	res := s.mutateConfig(req, func(d *config.Document) error {
 		d.Access.Servers = normalizeIDs(slices.DeleteFunc(slices.Clone(d.Access.Servers), func(x string) bool { return x == guildID }))
@@ -484,25 +484,25 @@ func (s *Service) channelsAttachmentAdd(req action.Request, in map[string]any) a
 	}
 	f, err := s.openStagedFile(source)
 	if err != nil {
-		return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.InvalidInput, "channels.source_denied", err, nil)
 	}
 	defer f.Close()
 	sum, size, err := hashFile(f)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.file", err, nil)
 	}
 	stored := sum + filepath.Ext(filename)
 	destDir := s.channelRAGDir(guildID, channelID)
 	if err := os.MkdirAll(destDir, 0o700); err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.file", err, nil)
 	}
 	dest := filepath.Join(destDir, stored)
 	if _, err := os.Stat(dest); err != nil {
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.file", err, nil)
 		}
 		if err := copyFile(f, dest); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.file", err, nil)
 		}
 	}
 	attID := "att_" + sum[:12]
@@ -600,7 +600,7 @@ func (s *Service) channelsOpsLog(req action.Request, in map[string]any) action.R
 		guildID, channelID, limit,
 	)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	defer rows.Close()
 	items := []any{}
@@ -608,7 +608,7 @@ func (s *Service) channelsOpsLog(req action.Request, in map[string]any) action.R
 		var id, rev int
 		var kind, summary, created string
 		if err := rows.Scan(&id, &kind, &summary, &rev, &created); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		items = append(items, map[string]any{"id": id, "kind": kind, "summary": summary, "revision": rev, "created_at": created})
 	}
@@ -691,7 +691,7 @@ func (s *Service) channelsViewAttach(req action.Request, in map[string]any) acti
 	}
 	next, err := blocks.Attach(cur, add, bound)
 	if err != nil {
-		return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.InvalidInput, "channels.view_space_mismatch", err, nil)
 	}
 	res := s.persistView(req, guildID, channelID, next)
 	if res.OK {
