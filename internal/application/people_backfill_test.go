@@ -2,6 +2,7 @@ package application
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
@@ -239,8 +240,9 @@ func pbService(t *testing.T, h *pbFakeHost, api string) *Service {
 	pbConfigure(s, h, api)
 	s.SetDiscord(resolverGateway{})
 	pbPollEvery.Store(int64(20 * time.Millisecond))
-	pbWindowLines = 3 // one synthetic segment per window
-	t.Cleanup(func() { pbPollEvery.Store(0); pbWindowLines = 0 })
+	pbWindowLines = 3        // one synthetic segment per window
+	pbTestOrigin = h.srv.URL // the fake host stands in for api.anthropic.com
+	t.Cleanup(func() { pbPollEvery.Store(0); pbWindowLines = 0; pbTestOrigin = "" })
 	return s
 }
 
@@ -480,8 +482,43 @@ func TestPeopleBackfillNeedsNativeAnthropic(t *testing.T) {
 	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": dry["token"]}); res.OK || res.Error.Code != errcode.ProviderUnconfigured {
 		t.Fatalf("no key: %+v", res.Error)
 	}
+	// the Messages wire format on another host is not Anthropic: a relay, plain HTTP to Anthropic's host,
+	// user info or another port, each with a key; the only such provider is refused before any request
+	for _, base := range []string{"https://relay.invalid/v1", "http://api.anthropic.com/v1", "https://user@api.anthropic.com/v1",
+		"https://api.anthropic.com:8443/v1", "https://api.anthropic.com.relay.invalid/v1"} {
+		d.Providers = map[string]config.Provider{"claude": {Kind: config.KindOpenAI, API: "anthropic", BaseURL: base, CredentialRef: "env:FAKE_CLAUDE_KEY"}}
+		s.setDoc(d, s.Revision())
+		if dry := pbDry(t, s, nil); dry["provider_ready"] != false {
+			t.Fatalf("%s is ready: %v", base, dry)
+		}
+		if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": dry["token"]}); res.OK || res.Error.MessageKey != "people_backfill.no_anthropic" {
+			t.Fatalf("%s: %+v", base, res.Error)
+		}
+	}
+	// the native host is: HTTPS to api.anthropic.com (no request is made by the check)
+	d.Providers = map[string]config.Provider{"claude": {Kind: config.KindOpenAI, BaseURL: "https://api.anthropic.com/v1", CredentialRef: "env:FAKE_CLAUDE_KEY"}}
+	s.setDoc(d, s.Revision())
+	if id, _, err := s.pbAdapter(s.Doc(), ""); err != nil || id != "claude" {
+		t.Fatalf("api.anthropic.com: %q %v", id, err)
+	}
 	if h.count() != 0 {
 		t.Fatalf("host called %d times", h.count())
+	}
+}
+
+// Two foreign origins in the Anthropic wire format: neither is eligible, so the refusal is "no native
+// Anthropic", not "name one" (no credential lookup, no request).
+func TestPeopleBackfillRejectsForeignOrigins(t *testing.T) {
+	s := &Service{}
+	doc := config.Document{Providers: map[string]config.Provider{
+		"a": {Kind: config.KindOpenAI, API: "anthropic", BaseURL: "https://a.invalid/v1"},
+		"b": {Kind: config.KindOpenAI, API: "anthropic", BaseURL: "https://b.invalid/v1"},
+	}}
+	if _, _, err := s.pbAdapter(doc, ""); !errors.Is(err, errPBNoAnthropic) {
+		t.Fatalf("neither origin is Anthropic; got %v", err)
+	}
+	if _, _, err := s.pbAdapter(doc, "a"); !errors.Is(err, errPBNoAnthropic) {
+		t.Fatalf("a named foreign origin; got %v", err)
 	}
 }
 

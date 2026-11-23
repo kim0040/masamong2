@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"slices"
 	"sort"
 	"strings"
@@ -602,15 +603,34 @@ func (s *Service) pbConfirmedPlan(ctx context.Context, req action.Request, db *s
 // the provider
 // ---------------------------------------------------------------------------
 
-// pbAdapter is the backfill's provider: a configured provider whose host family is native Anthropic,
-// with a key. want names one; without it there must be exactly one. Never OpenRouter or another family.
+// pbTestOrigin is the one non-Anthropic origin (scheme://host:port) the backfill may reach: set by tests
+// only, for their fake host. Nothing in config or input can set it.
+var pbTestOrigin string
+
+// pbNativeAnthropic reports whether a provider's base URL is Anthropic's own API: HTTPS to the host
+// api.anthropic.com (default port, no user info). The configured wire format (api: anthropic) is not
+// enough: a relay or reseller speaking the Messages format on another host is refused.
+func pbNativeAnthropic(baseURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || u.User != nil {
+		return false
+	}
+	if pbTestOrigin != "" && strings.EqualFold(u.Scheme+"://"+u.Host, pbTestOrigin) {
+		return true
+	}
+	return u.Scheme == "https" && strings.EqualFold(u.Hostname(), "api.anthropic.com") && (u.Port() == "" || u.Port() == "443")
+}
+
+// pbAdapter is the backfill's provider: a configured provider whose destination is native Anthropic
+// (pbNativeAnthropic, checked on the base URL the adapter will call) in the Anthropic wire format, with a
+// key. want names one; without it there must be exactly one. Never OpenRouter, a relay or another family.
 func (s *Service) pbAdapter(doc config.Document, want string) (string, *openai.Adapter, error) {
 	if s.practice {
 		return "", nil, errPBNoAnthropic
 	}
 	var found []string
 	for id, p := range doc.Providers {
-		if p.Kind != config.KindOpenAI || p.Disabled || openai.ResolveAPI(p.API, p.BaseURL) != openai.APIAnthropic {
+		if p.Kind != config.KindOpenAI || p.Disabled || openai.ResolveAPI(p.API, p.BaseURL) != openai.APIAnthropic || !pbNativeAnthropic(p.BaseURL) {
 			continue
 		}
 		if want != "" && id != want {
@@ -634,6 +654,9 @@ func (s *Service) pbAdapter(doc config.Document, want string) (string, *openai.A
 	client := providers.NewClient(120*time.Second, s.Log)
 	client.MaxBody = 64 << 20
 	a := newLLMAdapter(client, p, cred)
+	if a.API != openai.APIAnthropic || !pbNativeAnthropic(a.BaseURL) {
+		return id, nil, errPBNoAnthropic // the resolved destination, checked again
+	}
 	a.Price, a.CachedPrice, a.ContextPrice = s.pricer(id), s.cachedPricer(id), s.contextPricer(id)
 	a.Gate = s.llmGate(id)
 	s.shareCaps(a, id, p)
