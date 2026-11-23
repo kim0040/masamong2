@@ -12,7 +12,8 @@ import (
 )
 
 // The stored pilot answers are re-checked inside the writer transaction of every deleted or edited
-// message and of every withdrawal. These tests pin what those re-checks reach.
+// message and of every withdrawal. These tests pin what those re-checks reach and that every wired path
+// purges the copy.
 
 // pbNativeOf is the Discord message id of an observation.
 func pbNativeOf(t *testing.T, s *Service, obs string) string {
@@ -166,5 +167,78 @@ func TestWithdrawalRechecksOnlyFactsNamingThePerson(t *testing.T) {
 	}
 	if pbHasFact(t, s, run.ID, stale.Text) {
 		t.Fatal("control: the full re-check keeps a fact whose line is deleted")
+	}
+}
+
+// pbTargetAndControl picks a stored self statement of Mina and an unrelated one of Joon, in different
+// windows.
+func pbTargetAndControl(t *testing.T, s *Service, runID string) (target, control episodes.PersonFact) {
+	t.Helper()
+	mina, joon := store.PersonRef("101"), store.PersonRef("102")
+	for _, f := range pbStoredFacts(t, s, runID) {
+		switch {
+		case target.Text == "" && f.About == mina && slices.Equal(f.By, []string{mina}) && !pbNames(f, joon):
+			target = f
+		case target.Text != "" && control.Text == "" && f.About == joon && slices.Equal(f.By, []string{joon}) && !pbNames(f, mina):
+			if _, _, held := pbWindowsHolding(t, s, runID, target.Ev[0]); pbOutside(f, held) {
+				control = f
+			}
+		}
+	}
+	if target.Text == "" || control.Text == "" {
+		t.Fatal("the stored pilot answers lack the facts the test needs")
+	}
+	return target, control
+}
+
+// The wired paths purge the pilot copy: a hide of the claim that says the same thing, and the real message
+// edit and delete handlers of the line it rests on. In each, an unrelated fact stays.
+func TestPilotPurgeWiredOnHideEditAndDelete(t *testing.T) {
+	for _, how := range []string{"hide", "edit", "delete"} {
+		t.Run(how, func(t *testing.T) {
+			h := newPBHost(t)
+			s := pbService(t, h, "anthropic")
+			pbSeed(t, s, 70)
+			_, run := pbPiloted(t, s, nil)
+			target, control := pbTargetAndControl(t, s, run.ID)
+			switch how {
+			case "hide":
+				c := store.PersonClaim{GuildID: "g1", SubjectRef: target.About, SpeakerRef: target.By[0], Kind: target.Kind, Topic: target.Topic,
+					Text: target.Text, Evidence: target.Ev, Source: "backfill:" + run.ID, Link: target.Link}
+				if err := s.Store.WithWriter(func(tx *sql.Tx) error {
+					n, err := s.savePersonClaims(t.Context(), tx, []store.PersonClaim{c})
+					if err == nil && n != 1 {
+						t.Fatalf("control write: %d", n)
+					}
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+				id := store.PersonClaimID("g1", c.SubjectRef, c.SpeakerRef, c.Kind, store.PersonTopic(c.Topic), c.Evidence)
+				if err := s.Store.WithWriter(func(tx *sql.Tx) error {
+					ok, err := s.hideClaimTx(tx, id, store.SuppressBySelf)
+					if err == nil && !ok {
+						t.Fatal("no claim to hide")
+					}
+					return err
+				}); err != nil {
+					t.Fatal(err)
+				}
+			case "edit":
+				if err := s.MessageEdited("g1", "c1", pbNativeOf(t, s, target.Ev[0]), "something else entirely now", time.Now()); err != nil {
+					t.Fatal(err)
+				}
+			case "delete":
+				if err := s.MessagesDeleted("g1", "c1", []string{pbNativeOf(t, s, target.Ev[0])}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if pbHasFact(t, s, run.ID, target.Text) {
+				t.Fatalf("after the %s the stored pilot answers keep the statement", how)
+			}
+			if !pbHasFact(t, s, run.ID, control.Text) {
+				t.Fatalf("control: an unrelated pilot fact went with the %s", how)
+			}
+		})
 	}
 }
