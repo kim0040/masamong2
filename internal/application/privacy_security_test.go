@@ -1,6 +1,7 @@
 package application
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -395,11 +396,14 @@ func TestImportPreviewUsesRequestCancellation(t *testing.T) {
 	if err := os.WriteFile(p, []byte("Date,User,Message\n2026-01-01 10:00:00,Alice,Hello\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
+	var logs bytes.Buffer
+	s.Log = slog.New(slog.NewTextHandler(&logs, nil))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	raw, _ := json.Marshal(map[string]any{"path": p})
 	r := s.Execute(ctx, action.Request{Action: "imports.preview", Input: raw})
-	if r.OK || r.Error == nil || !strings.Contains(r.Error.Message, "canceled") {
-		t.Fatalf("preview ignored context: %+v", r)
+	// the person gets the import sentence; the cancellation is in the log
+	if r.OK || r.Error == nil || r.Error.MessageKey != "import.failed" || !strings.Contains(logs.String(), "canceled") {
+		t.Fatalf("preview ignored context: %+v\n%s", r, logs.String())
 	}
 }
