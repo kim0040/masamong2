@@ -1148,19 +1148,15 @@ func (s *Service) pbStartRun(ctx context.Context, req action.Request, db *storag
 			return *fail
 		}
 		plan = rebuilt
-		if !changed {
-			// an edit or a withdrawal inside a pilot window keeps the plan's token (its ids and counts), so
-			// the stored answers are compared with the prompts as they are now on every start, not only when
-			// the token changed (pbRebasePilot compares them then): a window that is not the one the operator
-			// reviewed needs a new pilot and never goes to a batch
-			stale, err := s.pbPilotStale(db, plan)
-			if err != nil {
-				return s.failErr(req, errcode.IO, "error.storage", err, nil)
-			}
-			if len(stale) > 0 {
-				return s.pbPlanChangedFail(req, db, plan)
-			}
-		}
+	}
+	// an edit or a withdrawal inside a pilot window keeps the plan's token (its ids and counts), so the
+	// stored answers are compared with the prompts as they are now on every start and continue, not only
+	// when the token changed: a window that is not the one the operator reviewed needs a new pilot and
+	// never goes to a batch (answers already applied are cleared and compare nothing)
+	if stale, err := s.pbPilotStale(db, plan); err != nil {
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
+	} else if len(stale) > 0 {
+		return s.pbPlanChangedFail(req, db, plan)
 	}
 	// a purge a member's change could not run comes first; while it cannot run, the run does not start
 	if err := s.pbPurgePending(ctx, db, plan.Params.Guild); err != nil {
@@ -1363,8 +1359,9 @@ func (s *Service) pbPilotWindowChanged(db *storage.Store, guild string, w store.
 	return false, nil
 }
 
-// pbPilotStale are the finished, not yet started pilot runs of plan's token (by id) holding a pilot window
-// whose stored answers no longer fit the window as it is now (pbPilotWindowChanged).
+// pbPilotStale are the finished pilot runs of plan's token (by id), piloted or stopped, holding a queued
+// pilot window whose stored answers no longer fit the window as it is now (pbPilotWindowChanged). A plan without
+// windows (a started run's, not built again) compares each window with its own stored lines.
 func (s *Service) pbPilotStale(db *storage.Store, plan pbPlan) (map[string]bool, error) {
 	runs, err := store.BackfillRuns(db.Reader(), plan.Params.Guild, store.BackfillPiloted, store.BackfillStopped)
 	if err != nil {
@@ -1379,12 +1376,16 @@ func (s *Service) pbPilotStale(db *storage.Store, plan pbPlan) (map[string]bool,
 		if r.Token != plan.Token || !r.PilotDone {
 			continue
 		}
-		pilots, err := store.BackfillWindows(db.Reader(), r.ID, true)
+		pilots, err := store.BackfillWindows(db.Reader(), r.ID, true, store.WindowQueued) // the ones still to apply or send
 		if err != nil {
 			return nil, err
 		}
 		for _, w := range pilots {
-			changed, err := s.pbPilotWindowChanged(db, r.GuildID, w, byID)
+			in := byID
+			if len(plan.Windows) == 0 {
+				in = map[string]pbWindow{w.ID: {ID: w.ID, Obs: w.Obs}}
+			}
+			changed, err := s.pbPilotWindowChanged(db, r.GuildID, w, in)
 			if err != nil {
 				return nil, err
 			}

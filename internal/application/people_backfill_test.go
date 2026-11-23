@@ -2676,6 +2676,18 @@ func TestPeopleBackfillRejectsChangedPilotWithSameWindowID(t *testing.T) {
 		if n := pbCountClaims(t, s, "1=1"); n != 0 {
 			t.Fatalf("%d claims were applied from the pilot", n)
 		}
+		// the run stopped there: continuing it is refused for a new pilot, nothing is batched
+		if _, err := s.Store.DB.Exec(`UPDATE people_backfill_run SET state=? WHERE id=?`, store.BackfillStopped, run.ID); err != nil {
+			t.Fatal(err)
+		}
+		res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": run.Token})
+		if res.OK || res.Error.MessageKey != "people_backfill.plan_changed" {
+			t.Fatalf("continuing a run whose pilot window changed: %+v", res)
+		}
+		time.Sleep(100 * time.Millisecond)
+		if n := len(h.creations()); n != 0 {
+			t.Fatalf("%d batches were sent", n)
+		}
 	})
 }
 
