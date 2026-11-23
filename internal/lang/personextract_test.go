@@ -47,8 +47,14 @@ func TestEpisodeExtractKeepsTheV160Text(t *testing.T) {
 			t.Errorf("%s: last line is no longer the episodes example", tag)
 		}
 		section := cur[begin : end+1]
-		if strings.Count(section, "\n") != 4 {
-			t.Errorf("%s: person section is not two rules: %q", tag, section)
+		if strings.Count(section, "\n") != 5 {
+			t.Errorf("%s: person section is not three rules: %q", tag, section)
+		}
+		// the read side matches these exact keys for a status claim (single-valued topics)
+		for _, key := range statusTopics {
+			if !strings.Contains(section, key) || !strings.Contains(p.Memory.PersonExtract, key) {
+				t.Errorf("%s: the status topic %q is not named in both person prompts", tag, key)
+			}
 		}
 		for _, k := range []string{"episode_extract_system", "channel_state_system", "channel_state"} {
 			var got string
@@ -70,6 +76,9 @@ func TestEpisodeExtractKeepsTheV160Text(t *testing.T) {
 		checkPeopleExample(t, tag+" episode_extract", "{"+example+"}")
 	}
 }
+
+// statusTopics are the topics of a status claim that hold one value at a time (application singleTopics).
+var statusTopics = []string{"residence", "job", "school", "birthday", "relationship_status"}
 
 func checkPeopleExample(t *testing.T, name, obj string) {
 	t.Helper()
