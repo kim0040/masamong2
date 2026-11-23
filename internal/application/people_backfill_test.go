@@ -2217,3 +2217,72 @@ func TestPeopleBackfillNoSensitiveWarns(t *testing.T) {
 		t.Fatalf("pending claims in status: %v of %v", run["claims_pending"], run["claims"])
 	}
 }
+
+// Sol High 5, Astra High 4: a pilot cut by a crash between a send's stored intent and its answer may have
+// been billed. Confirming a different plan supersedes that run and drops its stored answers, intent
+// included; the possibly billed maximum must stay counted in the server's total, before the new plan is
+// admitted and after the old run is superseded.
+func TestPeopleBackfillSupersedeKeepsCrashReservation(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	_, old := pbPiloted(t, s, nil)
+	ws, _ := store.BackfillWindows(s.Store.Reader(), old.ID, true)
+	w := ws[0]
+	have := pbAnswers(w.Result)
+	const intent = 0.5
+	have[string(peoplebackfill.ModelSonnet)] = pbAnswer{Hash: "h", Intent: intent}
+	w.Result, _ = json.Marshal(have)
+	if err := store.SaveBackfillWindow(s.Store.DB, w); err != nil {
+		t.Fatal(err)
+	}
+	// as a restart leaves a cut pilot
+	if _, err := s.Store.DB.Exec(`UPDATE people_backfill_run SET state='stopped', stopped_by='restart', pilot_done=0 WHERE id=?`, old.ID); err != nil {
+		t.Fatal(err)
+	}
+	// another plan of the same server (another cap): the unsettled maximum counts in its dry run
+	dry := pbDry(t, s, map[string]any{"budget_usd": "6"})
+	pilotHigh := dry["cost_usd"].(map[string]any)["pilot"].(map[string]any)["high"].(float64)
+	if got := dry["spent_usd"].(float64); got < old.SpentUSD+intent-1e-6 {
+		t.Fatalf("dry run spend %v leaves out the unsettled send (run %v + %v)", got, old.SpentUSD, intent)
+	}
+	// room for the new pilot only if the possibly billed send is left out: refused, nothing superseded
+	pbSetSpent(t, s, old.ID, 6-pilotHigh-intent/2)
+	res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": dry["token"], "guild_id": "g1"})
+	if res.OK || res.Error.Code != errcode.BudgetExceeded {
+		t.Fatalf("a new plan admitted against a possibly billed send: %+v", res)
+	}
+	if kept, _, _ := store.LoadBackfillRun(s.Store.Reader(), old.ID); kept.State != store.BackfillStopped {
+		t.Fatalf("the refused pilot superseded the old run: %s", kept.State)
+	}
+	// with room for both, the new pilot starts: the old run's send is charged at its maximum as it goes
+	base := 6 - pilotHigh - intent - 0.5
+	pbSetSpent(t, s, old.ID, base)
+	h.mu.Lock()
+	before := len(h.chats)
+	h.mu.Unlock()
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": dry["token"], "guild_id": "g1"}); !res.OK {
+		t.Fatalf("pilot with room: %+v", res.Error)
+	}
+	fresh := pbWait(t, s, "new pilot", func(r store.BackfillRun) bool { return r.ID != old.ID && r.State == store.BackfillPiloted })
+	gone, _, _ := store.LoadBackfillRun(s.Store.Reader(), old.ID)
+	if gone.State != store.BackfillSuperseded || len(pbStoredFacts(t, s, old.ID)) != 0 {
+		t.Fatalf("the old run: %s, %d stored facts", gone.State, len(pbStoredFacts(t, s, old.ID)))
+	}
+	if gone.SpentUSD < base+intent-1e-9 {
+		t.Fatalf("the superseded run dropped its unsettled send: spent %v, want %v", gone.SpentUSD, base+intent)
+	}
+	total, err := pbGuildSpent(s.Store.Reader(), "g1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total < base+intent+fresh.SpentUSD-1e-9 || total > 6+1e-9 {
+		t.Fatalf("server total %v: old %v + %v, new %v, cap 6", total, base, intent, fresh.SpentUSD)
+	}
+	h.mu.Lock()
+	sent := len(h.chats) - before
+	h.mu.Unlock()
+	if sent != 2*peoplebackfill.PilotSize {
+		t.Fatalf("the new pilot sent %d calls", sent)
+	}
+}

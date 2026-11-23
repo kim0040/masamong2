@@ -629,7 +629,7 @@ func (s *Service) pbDryRun(ctx context.Context, req action.Request, db *storage.
 	if err := s.kvSet(pbPlanKey+p.Guild, plan.Params); err != nil {
 		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
-	spent, err := store.BackfillGuildSpent(db.Reader(), p.Guild)
+	spent, err := pbGuildSpent(db.Reader(), p.Guild)
 	if err != nil {
 		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
@@ -676,7 +676,7 @@ func (s *Service) pbCheckPlan(ctx context.Context, req action.Request, db *stora
 			res := s.failErr(req, errcode.IO, "error.storage", err, nil)
 			return pbPlan{}, false, &res
 		}
-		spent, _ := store.BackfillGuildSpent(db.Reader(), guild)
+		spent, _ := pbGuildSpent(db.Reader(), guild)
 		res := action.Fail(req, errcode.StaleRevision, "people_backfill.plan_changed", s.msg(req, "people_backfill.plan_changed"),
 			map[string]any{"dry_run": s.pbDryRunOutput(plan, spent)})
 		return plan, true, &res
@@ -1139,6 +1139,29 @@ func (s *Service) pbRequeue(ctx context.Context, db *storage.Store, runID string
 	return s.pbSettleWindow(ctx, db, runID, w, state, spent, calls)
 }
 
+// pbGuildSpent is the server's backfill total against its cap: what its runs spent, pilots included,
+// plus the reserved maximum of every pilot send whose intent was stored and never settled (a crash cut it
+// between the intent and the answer, so the host may have run and billed it). Such a send counts until it
+// is charged (pbSettleIntentsTx): a new plan is never admitted against money that may already be billed.
+func pbGuildSpent(q *sql.DB, guild string) (float64, error) {
+	spent, err := store.BackfillGuildSpent(q, guild)
+	if err != nil {
+		return 0, err
+	}
+	ws, err := store.BackfillAnswered(q, guild)
+	if err != nil {
+		return 0, err
+	}
+	for _, w := range ws {
+		for _, a := range pbAnswers(w.Result) {
+			if a.Intent > 0 {
+				spent += a.Intent
+			}
+		}
+	}
+	return spent, nil
+}
+
 // pbRunJSON is a run's status: counts only.
 func pbRunJSON(db *storage.Store, run store.BackfillRun) map[string]any {
 	counts, _ := store.CountBackfillWindows(db.Reader(), run.ID)
@@ -1160,7 +1183,7 @@ func pbRunJSON(db *storage.Store, run store.BackfillRun) map[string]any {
 			out["pilot"] = rep
 		}
 	}
-	if spent, err := store.BackfillGuildSpent(db.Reader(), run.GuildID); err == nil {
+	if spent, err := pbGuildSpent(db.Reader(), run.GuildID); err == nil {
 		out["guild_spent_usd"] = usd(spent) // every run of the server, against the cap
 	}
 	var pending int // claims stored pending (a no_sensitive server): not read until classified

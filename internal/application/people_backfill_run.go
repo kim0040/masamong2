@@ -349,7 +349,7 @@ func (s *Service) pbStartPilot(ctx context.Context, req action.Request, db *stor
 		l, h := pbEstimate(pilot, m, peoplebackfill.ModeStandard)
 		low, high = low+l, high+h
 	}
-	spent, err := store.BackfillGuildSpent(db.Reader(), guild)
+	spent, err := pbGuildSpent(db.Reader(), guild)
 	if err != nil {
 		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
@@ -382,11 +382,15 @@ func (s *Service) pbStartPilot(ctx context.Context, req action.Request, db *stor
 		case r.Token == plan.Token && !r.PilotDone && resume == nil && (r.State == store.BackfillPiloting || r.State == store.BackfillStopped):
 			resume = &runs[i] // a pilot of this plan that a restart or the budget stopped
 		case r.State == store.BackfillPiloting || r.State == store.BackfillPiloted || r.State == store.BackfillStopped:
-			// an older plan's run: superseded, its stored answers dropped
+			// an older plan's run: superseded, its stored answers dropped. A send a crash cut is charged at
+			// its maximum first (pbGuildSpent counted it until now): it may have been billed
 			from := r.State
 			r.State, r.UpdatedAt = store.BackfillSuperseded, now
 			err := db.WithWriterContext(ctx, func(tx *sql.Tx) error {
 				if err := store.SaveBackfillRun(tx, r, from); err != nil {
+					return err
+				}
+				if err := pbSettleIntentsTx(tx, r.ID, s.Clock.Now().UTC()); err != nil {
 					return err
 				}
 				return store.ClearBackfillResults(tx, r.ID, now)
@@ -468,7 +472,7 @@ func (s *Service) pbPilot(ctx context.Context, runID string, a *openai.Adapter) 
 			}
 		}
 	}
-	spent, err := store.BackfillGuildSpent(db.Reader(), run.GuildID)
+	spent, err := pbGuildSpent(db.Reader(), run.GuildID)
 	if err != nil {
 		s.Log.Warn("people backfill: spend not read", "run", runID, "err", err)
 		return
@@ -793,36 +797,41 @@ func (s *Service) pbRecheckPilotTx(tx *sql.Tx, guild string) error {
 // them again only under a new reservation.
 func (s *Service) pbSettleLeftIntents(db *storage.Store, runID string) error {
 	now := s.Clock.Now().UTC()
-	return db.WithWriterContext(context.Background(), func(tx *sql.Tx) error {
-		ws, err := store.BackfillWindows(tx, runID, true)
-		if err != nil {
-			return err
-		}
-		for _, w := range ws {
-			have := pbAnswers(w.Result)
-			held := 0.0
-			for m, ans := range have {
-				if ans.Intent <= 0 {
-					continue
-				}
-				held += ans.Intent
-				have[m] = pbAnswer{Hash: ans.Hash, ReadAt: ans.ReadAt, Failed: pbUnknownClass, Unknown: true, USD: ans.Intent}
-			}
-			if held == 0 {
+	return db.WithWriterContext(context.Background(), func(tx *sql.Tx) error { return pbSettleIntentsTx(tx, runID, now) })
+}
+
+// pbSettleIntentsTx is pbSettleLeftIntents in the caller's transaction: a resumed pilot runs it before it
+// sends, and a run superseded by another plan before its stored answers (and the intents with them) are
+// dropped, so a possibly billed send stays in the server's total either way.
+func pbSettleIntentsTx(tx *sql.Tx, runID string, now time.Time) error {
+	ws, err := store.BackfillWindows(tx, runID, true)
+	if err != nil {
+		return err
+	}
+	for _, w := range ws {
+		have := pbAnswers(w.Result)
+		held := 0.0
+		for m, ans := range have {
+			if ans.Intent <= 0 {
 				continue
 			}
-			w.Result, _ = json.Marshal(have)
-			w.CostUSD += held
-			w.UpdatedAt = now.Format(time.RFC3339)
-			if err := store.SaveBackfillWindow(tx, w); err != nil {
-				return err
-			}
-			if err := store.AddBackfillRunSpend(tx, runID, held, now.Format(time.RFC3339)); err != nil {
-				return err
-			}
+			held += ans.Intent
+			have[m] = pbAnswer{Hash: ans.Hash, ReadAt: ans.ReadAt, Failed: pbUnknownClass, Unknown: true, USD: ans.Intent}
 		}
-		return nil
-	})
+		if held == 0 {
+			continue
+		}
+		w.Result, _ = json.Marshal(have)
+		w.CostUSD += held
+		w.UpdatedAt = now.Format(time.RFC3339)
+		if err := store.SaveBackfillWindow(tx, w); err != nil {
+			return err
+		}
+		if err := store.AddBackfillRunSpend(tx, runID, held, now.Format(time.RFC3339)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // pbReviewItem is one claim of the pilot review set (ids only; the text is read when shown).
@@ -1416,7 +1425,7 @@ func (s *Service) pbSubmit(ctx context.Context, db *storage.Store, runID string,
 	if err != nil {
 		return false, true, err
 	}
-	spent, err := store.BackfillGuildSpent(db.Reader(), run.GuildID) // the cap is the server's total across its runs
+	spent, err := pbGuildSpent(db.Reader(), run.GuildID) // the cap is the server's total across its runs
 	if err != nil {
 		return false, true, err
 	}
