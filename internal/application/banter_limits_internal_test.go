@@ -312,3 +312,30 @@ func TestBanterTurnNotedWhileTheTurnsAreReadIsKept(t *testing.T) {
 		t.Fatalf("after a 👎 on the noted line: %q, want emoji", got)
 	}
 }
+
+// After the clock goes back a little, a stored banter turn dated up to a minute ahead is kept for a later
+// run, as before E8; one further ahead is deleted (Sol round-2 review of E8, regression R3).
+func TestBanterTurnSlightlyAheadAfterAClockRollbackIsKept(t *testing.T) {
+	s, clk := banterLimitsService(t)
+	start := clk.t
+	s.banterStep("g", "a")
+	s.noteBanter("g", "a", "line", "turn-near")
+	clk.t = start.Add(2 * time.Minute)
+	s.banterStep("g", "b")
+	s.noteBanter("g", "b", "line", "turn-far")
+	clk.t = start.Add(-30 * time.Second)
+	s = reopenForTest(t, s, clk)
+	s.banterDisliked("turn-unknown") // the first lookup reads the stored turns
+	if n := countWhere(t, s, `SELECT COUNT(*) FROM banter_turns WHERE turn_id='turn-near'`); n != 1 {
+		t.Fatalf("the turn 30 s ahead: %d rows, want 1", n)
+	}
+	if n := countWhere(t, s, `SELECT COUNT(*) FROM banter_turns WHERE turn_id='turn-far'`); n != 0 {
+		t.Fatalf("the turn 2.5 min ahead: %d rows, want 0", n)
+	}
+	clk.t = start.Add(3 * time.Minute)
+	s = reopenForTest(t, s, clk)
+	s.banterDisliked("turn-near")
+	if got := s.banterStep("g", "a"); got != "emoji" {
+		t.Fatalf("after a 👎 on the kept line: %q, want emoji", got)
+	}
+}
