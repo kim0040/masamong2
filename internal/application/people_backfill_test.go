@@ -331,6 +331,15 @@ func pbWait(t *testing.T, s *Service, what string, ok func(store.BackfillRun) bo
 	}
 }
 
+// pbWaitSent waits until the run's first batch is known to the host.
+func pbWaitSent(t *testing.T, s *Service) {
+	t.Helper()
+	pbWait(t, s, "batch sent", func(r store.BackfillRun) bool {
+		bs := pbDecodeBatches(r.Batches)
+		return len(bs) > 0 && bs[0].State == pbBatchSubmitted
+	})
+}
+
 func pbState(state string) func(store.BackfillRun) bool {
 	return func(r store.BackfillRun) bool { return r.State == state }
 }
@@ -690,10 +699,7 @@ func TestPeopleBackfillRestartPollsOnly(t *testing.T) {
 	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
 		t.Fatal(res.Error)
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for len(h.creations()) == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	pbWaitSent(t, s)
 	if len(h.creations()) != 1 {
 		t.Fatal("no batch sent")
 	}
@@ -750,10 +756,7 @@ func TestPeopleBackfillResumedWorkerSendsNothingNew(t *testing.T) {
 	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
 		t.Fatal(res.Error)
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for len(h.creations()) == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	pbWaitSent(t, s)
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -777,7 +780,14 @@ func TestPeopleBackfillResumedWorkerSendsNothingNew(t *testing.T) {
 	if c.States[store.WindowQueued] != 10 || c.States[store.WindowApplied] != 60 {
 		t.Fatalf("windows: %+v", c)
 	}
-	// the operator continues it: only now is the rest sent
+	// the operator continues it: only now is the rest sent. A message deleted meanwhile changes the plan,
+	// not the started run, which is continued by its own token.
+	if _, err := s2.Store.DB.Exec(`UPDATE memory_observations SET deleted_at='2026-11-01T00:00:00Z' WHERE observation_id=(SELECT observation_id FROM memory_observations ORDER BY parsed_time LIMIT 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if res, _ := pbExec(t, s2, "memory.people.backfill", map[string]any{"mode": "run", "model": "sonnet", "confirm": token}); res.OK || res.Error.Code != errcode.InvalidInput {
+		t.Fatalf("another model for a started run: %+v", res.Error)
+	}
 	if res, _ := pbExec(t, s2, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
 		t.Fatal(res.Error)
 	}
@@ -797,10 +807,7 @@ func TestPeopleBackfillApplyGuard(t *testing.T) {
 	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
 		t.Fatal(res.Error)
 	}
-	deadline := time.Now().Add(10 * time.Second)
-	for len(h.creations()) == 0 && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
+	pbWaitSent(t, s)
 	if len(h.creations()) != 1 {
 		t.Fatal("no batch sent")
 	}

@@ -43,6 +43,9 @@ const (
 // pbStopFails is how many failed steps in a row stop a run (stopped_by error).
 const pbStopFails = 10
 
+// pbCreateTimeout bounds one batch create call, which a shutdown waits for.
+const pbCreateTimeout = 2 * time.Minute
+
 // pbPollEvery is how often a run polls its batches, in nanoseconds (0 = one minute; tests shorten it).
 var pbPollEvery atomic.Int64
 
@@ -597,9 +600,15 @@ func pbPilotReport(q *sql.Tx, runID string) (map[string]any, error) {
 
 // pbStartRun is mode=run: after this plan's finished pilot, the chosen model through Message Batches.
 func (s *Service) pbStartRun(ctx context.Context, req action.Request, db *storage.Store, in map[string]any) action.Result {
-	plan, fail := s.pbConfirmedPlan(ctx, req, db, in)
-	if fail != nil {
-		return *fail
+	plan, started, err := s.pbStartedPlan(db, in)
+	if err != nil {
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
+	}
+	if !started {
+		var fail *action.Result
+		if plan, fail = s.pbConfirmedPlan(ctx, req, db, in); fail != nil {
+			return *fail
+		}
 	}
 	model, ok := pbModels[strVal(in, "model", "")]
 	if !ok {
@@ -665,6 +674,27 @@ func (s *Service) pbStartRun(ctx context.Context, req action.Request, db *storag
 	}
 	s.Log.Info("people backfill: run started", "run", runID, "model", string(model))
 	return action.OK(req, map[string]any{"mode": "run", "run": pbRunJSON(db, *run)})
+}
+
+// pbStartedPlan is the plan of a run that already started (a model chosen) whose token confirm names:
+// continuing it reads its own stored windows, so the plan is not built again (members delete and edit
+// messages during a long run, and each window is checked again when it is applied).
+func (s *Service) pbStartedPlan(db *storage.Store, in map[string]any) (pbPlan, bool, error) {
+	confirm := strVal(in, "confirm", "")
+	guild, err := pbGuild(db, in)
+	if err != nil || guild == "" || confirm == "" {
+		return pbPlan{}, false, err
+	}
+	runs, err := store.BackfillRuns(db.Reader(), guild, store.BackfillStopped, store.BackfillSubmitted)
+	if err != nil {
+		return pbPlan{}, false, err
+	}
+	for _, r := range runs {
+		if r.Token == confirm && r.Model != "" && r.PilotDone {
+			return pbPlan{Params: pbParams{Guild: guild}, Token: r.Token}, true, nil
+		}
+	}
+	return pbPlan{}, false, nil
 }
 
 // pbRunLoop drives a run: it settles the batches in flight and, while it may send, submits the next
@@ -976,7 +1006,11 @@ func (s *Service) pbSubmit(ctx context.Context, db *storage.Store, runID string,
 	if err != nil {
 		return false, true, err
 	}
-	ref, err := a.SubmitBatch(ctx, openai.BatchChat, string(model), items, b.Key)
+	// a shutdown does not cut the create call: a cut call leaves a batch the host may run and bill whose
+	// results nobody can read (Anthropic keeps no key to find it by); Close waits for it, bounded
+	cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pbCreateTimeout)
+	ref, err := a.SubmitBatch(cctx, openai.BatchChat, string(model), items, b.Key)
+	cancel()
 	last := &batches[len(batches)-1]
 	var unk *openai.SubmitUnknownError
 	switch {
