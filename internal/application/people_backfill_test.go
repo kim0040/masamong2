@@ -911,13 +911,20 @@ func TestPeopleBackfillApplyGuard(t *testing.T) {
 	if n := pbCountClaims(t, s, `evidence LIKE ?`, "%"+deleted+"%"); n != 0 {
 		t.Fatal("a claim on a deleted line")
 	}
-	// the windows whose lines changed went back to the queue and out again
-	if creates := h.creations(); len(creates) != 2 || len(creates[1]["requests"].([]any)) != 2 {
+	// the windows whose prompt changed went back to the queue and out again: Mina's withdrawal takes her
+	// lines out of every prompt, so all of them, built again without her lines
+	creates := h.creations()
+	if len(creates) != 2 || len(creates[1]["requests"].([]any)) != len(ws) {
 		t.Fatalf("changed windows are sent again: %d batches", len(creates))
+	}
+	var again []string
+	pbStrings(creates[1], "", &again)
+	if body := strings.Join(again, "\n"); strings.Contains(body, "a today") || !strings.Contains(body, "b as well") {
+		t.Fatal("a withdrawn person's lines were sent again")
 	}
 	w3, _, _ := store.LoadBackfillWindow(s.Store.Reader(), run.ID, ws[3].ID)
 	w5, _, _ := store.LoadBackfillWindow(s.Store.Reader(), run.ID, ws[5].ID)
-	if w3.Attempts != 2 || w3.State != store.WindowApplied || w5.Attempts != 1 || w5.Rejected == 0 {
+	if w3.Attempts != 2 || w3.State != store.WindowApplied || w5.Attempts != 2 || w5.Rejected == 0 {
 		t.Fatalf("windows: %+v %+v", w3, w5)
 	}
 }
@@ -1346,5 +1353,130 @@ func TestPeopleBackfillPilotRefusalOfEitherModel(t *testing.T) {
 		if n := pbCountClaims(t, s, `source=? AND evidence LIKE ?`, "backfill:"+done.ID, "%"+id+"%"); n != 0 {
 			t.Fatalf("a claim from the refused window")
 		}
+	}
+}
+
+// pbBodies is the text of every request the host received: Messages bodies and batch create bodies.
+func (h *pbFakeHost) bodies() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var all []string
+	for _, c := range h.chats {
+		pbStrings(c, "", &all)
+	}
+	for _, c := range h.creates {
+		pbStrings(c, "", &all)
+	}
+	return strings.Join(all, "\n")
+}
+
+// No line of a withdrawn, blocked or tombstoned author, and no line with a deletion pending, leaves the
+// process: such lines are left out when a prompt is built, and a line tombstoned between the build and the
+// send (in the pilot and in a batch) is caught by the check in the intent transaction, so the window is
+// built again without it. Live lines of the same windows are the control.
+func TestPeopleBackfillDoesNotSendTombstonedText(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	e, err := s.MemoryEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 9, 1, 1, 0, 0, 0, time.UTC)
+	for i := range 70 {
+		at := base.Add(time.Duration(i)*3*time.Hour + 140*time.Second)
+		for _, m := range []engine.LiveMessage{
+			{MessageID: fmt.Sprintf("%d6", 1000+i), AuthorID: "103", AuthorName: "Sora", Content: fmt.Sprintf("withdrawnsentinel%d is my hobby", i), At: at},
+			{MessageID: fmt.Sprintf("%d7", 1000+i), AuthorID: "104", AuthorName: "Hana", Content: fmt.Sprintf("blockedsentinel%d is my hobby", i), At: at.Add(time.Second)},
+		} {
+			m.GuildID, m.ChannelID = "g1", "c1"
+			if ok, err := e.Capture(m); err != nil || !ok {
+				t.Fatal(ok, err)
+			}
+		}
+	}
+	db := s.Store.DB
+	stamp := "2026-11-01T00:00:00.000000000Z"
+	// before the pilot: Sora withdraws memory, Hana's account is tombstoned, one of Joon's lines has a
+	// deletion pending (its tombstone is committed, the stored row not yet redacted)
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO consent_state(user_id,scope,status,updated_at) VALUES('103','memory','withdrawn',?)`, []any{stamp}},
+		{`INSERT INTO privacy_tombstones(kind,source_id,at) VALUES('account','104',?)`, []any{stamp}},
+		{`INSERT INTO privacy_tombstones(kind,source_id,at) VALUES('message','10032',?)`, []any{stamp}},
+	} {
+		if _, err := db.Exec(q.sql, q.args...); err != nil {
+			t.Fatalf("%s: %v", q.sql, err)
+		}
+	}
+	// between the build and the send: the first window built in each phase loses Mina's line
+	var mu sync.Mutex
+	phase := "pilot"
+	hit := map[string]bool{}
+	var gone, kept []string
+	pbBuilt = func(windowID string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if hit[phase] {
+			return
+		}
+		hit[phase] = true
+		runs, err := store.BackfillRuns(s.Store.Reader(), "g1")
+		if err != nil || len(runs) == 0 {
+			t.Error("no run", err)
+			return
+		}
+		w, _, err := store.LoadBackfillWindow(s.Store.Reader(), runs[0].ID, windowID)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		raw, _ := json.Marshal(w.Obs)
+		var native, mina, joon string
+		if err := s.Store.Reader().QueryRow(`SELECT native_message_id,content FROM memory_observations WHERE observation_id IN (SELECT value FROM json_each(?)) AND actor_account='101' ORDER BY parsed_time LIMIT 1`,
+			string(raw)).Scan(&native, &mina); err != nil {
+			t.Error(err)
+			return
+		}
+		if err := s.Store.Reader().QueryRow(`SELECT content FROM memory_observations WHERE observation_id IN (SELECT value FROM json_each(?)) AND actor_account='102' ORDER BY parsed_time LIMIT 1`,
+			string(raw)).Scan(&joon); err != nil {
+			t.Error(err)
+			return
+		}
+		if _, err := db.Exec(`INSERT INTO privacy_tombstones(kind,source_id,at) VALUES('message',?,?)`, native, stamp); err != nil {
+			t.Error(err)
+		}
+		gone, kept = append(gone, mina), append(kept, joon)
+	}
+	t.Cleanup(func() { pbBuilt = nil })
+
+	token, _ := pbPiloted(t, s, nil)
+	mu.Lock()
+	phase = "run"
+	mu.Unlock()
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+		t.Fatal(res.Error)
+	}
+	pbWait(t, s, "run", pbState(store.BackfillDone))
+	mu.Lock()
+	defer mu.Unlock()
+	if len(gone) != 2 {
+		t.Fatalf("the hook ran %d times, want once per phase", len(gone))
+	}
+	sent := h.bodies()
+	for _, sentinel := range append([]string{"withdrawnsentinel", "blockedsentinel", "topic3b as well"}, gone...) {
+		if strings.Contains(sent, sentinel) {
+			t.Fatalf("%q left the process", sentinel)
+		}
+	}
+	for _, control := range append([]string{"topic3a today", "topic40b as well"}, kept...) {
+		if !strings.Contains(sent, control) {
+			t.Fatalf("control line %q was not sent", control)
+		}
+	}
+	if len(h.creations()) == 0 || len(h.chats) == 0 {
+		t.Fatal("neither the pilot nor a batch was sent")
 	}
 }

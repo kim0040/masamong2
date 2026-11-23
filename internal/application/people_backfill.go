@@ -741,25 +741,32 @@ type pbPrompt struct {
 	text         map[string]string // human line id → the text the model read
 	author       map[string]string // human line id → its speaker reference
 	labels       map[string]string // person reference → the label the prompt showed
+	lines        map[string]string // every line the prompt carries (the bot's too) → its stored text
 	readAt       string
 	ok           bool // a human line of at least the meaningful-rune floor is left
 }
 
-// pbBuildPrompt reads a window's lines as they are now and builds its prompt. Deleted lines drop out.
+// pbBuildPrompt reads a window's lines as they are now and builds its prompt. Only lines that may leave
+// the process go in (pbSendable): deleted lines, lines with a deletion or edit pending, and the lines of
+// a person who withdrew or is blocked drop out.
 func (s *Service) pbBuildPrompt(db *storage.Store, guild string, w store.BackfillWindow) (pbPrompt, error) {
-	bp := pbPrompt{text: map[string]string{}, author: map[string]string{}, labels: map[string]string{}}
+	bp := pbPrompt{text: map[string]string{}, author: map[string]string{}, labels: map[string]string{}, lines: map[string]string{}}
 	bp.readAt = s.Clock.Now().UTC().Format(time.RFC3339Nano)
+	r := pbRoomOf(w.Room)
 	lines, err := s.linesByID(db, w.Obs)
+	if err == nil {
+		lines, err = s.pbSendable(db, guild, r, lines)
+	}
 	if err != nil {
 		return bp, err
 	}
-	r := pbRoomOf(w.Room)
 	pack, botName := s.roomVoice(r)
 	var msgs []episodes.Message
 	botAccount := ""
 	for _, l := range lines {
 		m := l.Message
 		msgs = append(msgs, m)
+		bp.lines[m.ID] = m.Text
 		if m.Bot {
 			if botAccount == "" && m.Account != "" {
 				botAccount = m.Account
@@ -806,6 +813,83 @@ func (s *Service) pbBuildPrompt(db *storage.Store, guild string, w store.Backfil
 	return bp, nil
 }
 
+// pbSendable keeps the lines that may be sent to the provider: the stored line is current (not deleted,
+// no deletion or edit pending, its account not tombstoned) and a human author has not withdrawn memory
+// or profile consent, is not blocked, and has no person tombstone. One read transaction.
+func (s *Service) pbSendable(db *storage.Store, guild string, r memRoom, lines []roomLine) ([]roomLine, error) {
+	if len(lines) == 0 {
+		return nil, nil
+	}
+	tx, err := db.Reader().Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	denied, err := s.deniedPeople(tx, guild)
+	if err != nil {
+		return nil, err
+	}
+	out := lines[:0:0]
+	for _, l := range lines {
+		if ok, err := store.ObservationCurrent(tx, l.ID); err != nil || !ok {
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if !l.Bot {
+			ref := personRefOf(r, l.Message)
+			if denied[ref] {
+				continue
+			}
+			if blocked, err := store.SourceBlocked(tx, ref); err != nil || blocked {
+				if err != nil {
+					return nil, err
+				}
+				continue
+			}
+		}
+		out = append(out, l)
+	}
+	return out, nil
+}
+
+// pbPromptCurrent checks again, in the caller's transaction and just before a send, everything a prompt
+// carries: every line is still stored with the text it had, current, and no person the prompt shows
+// (author or mentioned) has withdrawn, been blocked or tombstoned since it was built. False means build
+// it again: nothing of it may leave.
+func (s *Service) pbPromptCurrent(tx *sql.Tx, guild string, bp pbPrompt) (bool, error) {
+	denied, err := s.deniedPeople(tx, guild)
+	if err != nil {
+		return false, err
+	}
+	for ref := range bp.labels {
+		if denied[ref] {
+			return false, nil
+		}
+		if blocked, err := store.SourceBlocked(tx, ref); err != nil || blocked {
+			return false, err
+		}
+	}
+	for id, text := range bp.lines {
+		var content, deleted string
+		err := tx.QueryRow(`SELECT content,deleted_at FROM memory_observations WHERE observation_id=?`, id).Scan(&content, &deleted)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if deleted != "" || strings.TrimSpace(content) != text {
+			return false, nil
+		}
+		if ok, err := store.ObservationCurrent(tx, id); err != nil || !ok {
+			return false, err
+		}
+	}
+	return true, nil
+}
+
 // pbMentioned are the people a window names without writing in it: accounts of <@id> mentions (with
 // their latest label in the server) and exact single-account alias matches (link name), the same
 // signals a chat turn resolves (readPersonNames and turnNames.match, used read-only here).
@@ -842,6 +926,8 @@ func (s *Service) pbMentioned(db *storage.Store, guild string, msgs []episodes.M
 	}
 	var out []episodes.Person
 	seen := map[string]bool{}
+	// a person with a tombstone of their own is not shown either (pbPromptCurrent checks the same)
+	gone := func(ref string) (bool, error) { return store.SourceBlocked(tx, ref) }
 	for _, m := range msgs {
 		if m.Bot {
 			continue
@@ -850,6 +936,12 @@ func (s *Service) pbMentioned(db *storage.Store, guild string, msgs []episodes.M
 			id := sub[1]
 			ref := personRef(id)
 			if authors[id] || seen[ref] || ref == botRef || base.denied[ref] {
+				continue
+			}
+			if blocked, err := gone(ref); err != nil || blocked {
+				if err != nil {
+					return nil, err
+				}
 				continue
 			}
 			if label := base.label(ref); label != "" {
@@ -867,6 +959,12 @@ func (s *Service) pbMentioned(db *storage.Store, guild string, msgs []episodes.M
 		}
 		for _, ref := range names.match(text, matches) {
 			if seen[ref] || names.denied[ref] || ref == botRef || ref == personRef(m.Account) {
+				continue
+			}
+			if blocked, err := gone(ref); err != nil || blocked {
+				if err != nil {
+					return nil, err
+				}
 				continue
 			}
 			if label := base.label(ref); label != "" {
