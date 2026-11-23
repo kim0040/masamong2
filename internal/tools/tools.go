@@ -365,9 +365,11 @@ var (
 
 	// Words that may stand beside a {credential} reference without being read as a key: the
 	// authentication schemes a service asks for (Authorization: Bearer {credential}). Compared
-	// normalized, like header names.
+	// normalized, like header names. The word right before the reference may name a scheme the list
+	// does not know (ApiKey, Key, Client-ID); it only has to be one scheme-shaped word.
 	authSchemes = []string{"basic", "bearer", "bot", "digest", "hoba", "mutual", "negotiate", "oauth",
 		"privatetoken", "scramsha1", "scramsha256", "token", "aws4hmacsha256"}
+	schemeWordRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._-]*$`)
 )
 
 // normalizedSecretName folds a header or query name for comparison: lowercase, - and _ dropped.
@@ -399,8 +401,10 @@ func SecretQueryName(name string) bool {
 // {credential} placeholder alone (Bearer {credential}, a cookie's session={credential}) is the
 // reference it should be, with or without quotes around it (session="{credential}"). What stands
 // beside the placeholder must be syntax — the name it is assigned to (session=), a separator or a
-// scheme word; any other literal is a key kept in the configuration, with or without an = segment
-// (session={credential}; fallback=x, Bearer lit{credential}, lit {credential}).
+// scheme word; a single word right before the reference reads as the scheme even when the list does
+// not know it (Authorization: ApiKey {credential}). Any other literal is a key kept in the
+// configuration, with or without an = segment (session={credential}; fallback=x, Bearer
+// lit{credential}, Bearer lit {credential}).
 func DirectHeaderValue(value string) bool {
 	v := strings.TrimSpace(value)
 	if v == "" {
@@ -410,16 +414,40 @@ func DirectHeaderValue(value string) bool {
 		return true
 	}
 	v = credQuotedRE.ReplaceAllString(v, "{credential}") // the quotes around the reference alone hold nothing
-	rest := credPlaceRE.ReplaceAllString(v, "")
-	if literalPairRE.MatchString(rest) {
+	before, after, _ := strings.Cut(v, "{credential}")
+	after = credPlaceRE.ReplaceAllString(after, "")
+	if literalPairRE.MatchString(before + after) {
 		return true
 	}
-	for _, seg := range strings.FieldsFunc(rest, func(r rune) bool { return r == ';' || unicode.IsSpace(r) }) {
-		if !strings.HasSuffix(seg, "=") && !slices.Contains(authSchemes, normalizedSecretName(seg)) {
-			return true
+	breaks := func(r rune) bool { return r == ';' || unicode.IsSpace(r) }
+	beforeSegs := strings.FieldsFunc(before, breaks)
+	bare := 0
+	scheme := ""
+	for _, seg := range beforeSegs {
+		if !strings.HasSuffix(seg, "=") {
+			bare++
+			scheme = seg
 		}
 	}
-	return false
+	// the word stands free as the scheme only when it is the single word before the reference and a
+	// space sets it off from it (lit{credential} stays a literal)
+	if bare != 1 || len(before) == 0 || !unicode.IsSpace(rune(before[len(before)-1])) || !schemeWordRE.MatchString(scheme) {
+		scheme = ""
+	}
+	direct := func(segs []string) bool {
+		for _, seg := range segs {
+			if strings.HasSuffix(seg, "=") || slices.Contains(authSchemes, normalizedSecretName(seg)) {
+				continue
+			}
+			if seg == scheme {
+				scheme = ""
+				continue
+			}
+			return true
+		}
+		return false
+	}
+	return direct(beforeSegs) || direct(strings.FieldsFunc(after, breaks))
 }
 
 // DirectSecretError says which field of an operator tool holds a key written into the configuration. The
