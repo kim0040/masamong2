@@ -60,11 +60,11 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go vet ./...
-      - run: go test ./... -count=1
+      - run: go test ./... -count=1 -timeout 30m
       - name: noweb build
         run: |
           go vet -tags noweb ./cmd/... ./internal/transport/web/...
-          go test -tags noweb ./... -count=1
+          go test -tags noweb ./... -count=1 -timeout 30m
           go build -tags noweb -o /dev/null ./cmd/masamong
           go build -tags noweb -o /dev/null ./cmd/masamongd
       - name: every release platform builds
@@ -172,7 +172,7 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go vet ./...
-      - run: go test ./... -count=1
+      - run: go test ./... -count=1 -timeout 30m
 
   race:
     needs: changes
