@@ -14,7 +14,7 @@ func TestRedactDoesNotKeepToken(t *testing.T) {
 
 func TestRedactSecrets(t *testing.T) {
 	const discord = "MTIzNDU2Nzg5MDEyMzQ1Njc4OTA" + ".GabcDE." + "abcdefghijklmnopqrstuvwxyz0123456789" // fake; split so secret scanners do not flag it
-	const google = "AIza" + "SyA1234567890" + "abcdefghijklmnopqrstuv" // fake, split the same way
+	const google = "AIza" + "SyA1234567890" + "abcdefghijklmnopqrstuv"                                  // fake, split the same way
 	for _, c := range []struct{ in, secret string }{
 		{"password: hunter2", "hunter2"},
 		{"call failed Bearer abcdef0123456789.xyz", "abcdef0123456789"},
