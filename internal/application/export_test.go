@@ -13,6 +13,7 @@ import (
 	"masamong/internal/config"
 	"masamong/internal/features/reminders"
 	"masamong/internal/lang"
+	"masamong/internal/memory/store"
 	"masamong/internal/providers"
 	"masamong/internal/providers/openai"
 	"masamong/internal/tools"
@@ -533,4 +534,167 @@ func (s *Service) RecoverAfterCrash() error {
 		return fmt.Errorf("no committed revision after recover")
 	}
 	return nil
+}
+
+// ConversationLogForTest lists the decisions of one kind, oldest first.
+func (s *Service) ConversationLogForTest(kind string) []string {
+	db, err := s.adminDB()
+	if err != nil {
+		return nil
+	}
+	rows, err := db.DB.Query(`SELECT decision FROM conversation_log WHERE kind=? ORDER BY created_at, rowid`, kind)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var d string
+		_ = rows.Scan(&d)
+		out = append(out, d)
+	}
+	return out
+}
+
+// ChannelRoomsForTest is a channel's memory scope.
+func (s *Service) ChannelRoomsForTest(guildID, channelID string) []string {
+	return s.channelRooms(guildID, channelID)
+}
+
+// HoldRedactionForTest keeps the redaction worker from starting, or lets it go again.
+func (s *Service) HoldRedactionForTest(hold bool) { s.redaction.running.Store(hold) }
+
+// QueueEditForTest commits an edit's intent, without the foreground apply MessageEdited does after it: a
+// worker that has not reached the job yet.
+func (s *Service) QueueEditForTest(guildID, channelID, messageID, content string, at time.Time) error {
+	return s.queueSourceChange(guildID, channelID, []string{messageID}, "edit", content, at)
+}
+
+// SettledSourcesForTest lists the sources whose edits are finished.
+func (s *Service) SettledSourcesForTest() []string {
+	rows, err := s.Store.DB.Query(`SELECT source_id FROM privacy_settled`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id string
+		if rows.Scan(&id) == nil {
+			out = append(out, id)
+		}
+	}
+	return out
+}
+
+// KeepLateReplyForTest writes a reply holding these sources, as a turn starting now would, and reports whether
+// it was kept.
+func (s *Service) KeepLateReplyForTest(guildID, channelID, native, speaker string, sources []string) bool {
+	eng, err := s.MemoryEngine()
+	if err != nil {
+		return false
+	}
+	key := "discord:" + guildID + ":" + channelID
+	if err := eng.Store.AppendChatTurns(key, []store.ChatTurn{{Role: "assistant", Content: "late", NativeID: native, SpeakerID: speaker, SourceIDs: sources, ReadAsOf: store.SettledMark(s.Store)}}, 40); err != nil {
+		return false
+	}
+	var n int
+	if s.Store.DB.QueryRow(`SELECT COUNT(*) FROM chat_turns WHERE channel_key=? AND native_id=? AND role='assistant'`, key, native).Scan(&n) != nil {
+		return false
+	}
+	return n > 0
+}
+
+// TurnsInFlightForTest counts the entries of the running turns' registry.
+func (s *Service) TurnsInFlightForTest() int {
+	s.flights.mu.Lock()
+	defer s.flights.mu.Unlock()
+	return len(s.flights.byMessage)
+}
+
+// NoteEditForTest does the first thing MessageEdited does, without the rest: the moment before its intent commits.
+func (s *Service) NoteEditForTest(messageID, words string, at time.Time) {
+	s.flights.edited(messageID, words, at)
+}
+
+// NotedWordsForTest is what the running turns of the message have been told.
+func (s *Service) NotedWordsForTest(messageID string) string {
+	s.flights.mu.Lock()
+	defer s.flights.mu.Unlock()
+	for _, fl := range s.flights.byMessage[messageID] {
+		return fl.words
+	}
+	return ""
+}
+
+// SeedThreadForTest copies the caller's turns of a channel to a new thread.
+func (s *Service) SeedThreadForTest(guildID, parentID, threadID, callerID string) int {
+	return len(s.seedThread(guildID, parentID, threadID, callerID))
+}
+
+// ChannelLineIDsForTest names the lines a turn in the channel would choose its conversation from.
+func (s *Service) ChannelLineIDsForTest(guildID, channelID, messageID string) []string {
+	eng, err := s.MemoryEngine()
+	if err != nil {
+		return nil
+	}
+	lines, _, _ := s.channelLines(ChatInput{GuildID: guildID, ChannelID: channelID, MessageID: messageID}, eng)
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = l.ID
+	}
+	return out
+}
+
+// ThreadBackedOffForTest reports whether the channel rests from thread offers at the service's clock.
+func (s *Service) ThreadBackedOffForTest(guildID, channelID string) bool {
+	return s.threadBackedOff(guildID, channelID, s.Clock.Now())
+}
+
+// LogThreadOfferForTest writes an "offer" row of the decision log at the given time.
+func (s *Service) LogThreadOfferForTest(guildID, channelID string, at time.Time) {
+	db, err := s.adminDB()
+	if err != nil {
+		return
+	}
+	_, _ = db.DB.Exec(`INSERT INTO conversation_log(id,guild_id,channel_id,created_at,kind,decision) VALUES(?,?,?,?,?,?)`,
+		newID("cv_"), guildID, channelID, at.UTC().Format(time.RFC3339Nano), convThread, "offer")
+}
+
+// SetFetchSoftForTest shortens s's soft deadline of page reading (once two pages are in); it returns
+// the restore.
+func SetFetchSoftForTest(s *Service, d time.Duration) func() {
+	return s.changeSearchLimits(func(l *searchLimits) { l.fetchSoft = d })
+}
+
+// SearchDeadlineForTest is how long search.web waits for one service of a kind at a depth.
+func SearchDeadlineForTest(kind, depth string) time.Duration {
+	return defaultSearchLimits.timeout(kind, depth)
+}
+
+// SearchTotalForTest is how long a whole search at a depth may take across the services it tries.
+func SearchTotalForTest(depth string) time.Duration { return defaultSearchLimits.totalTimeout(depth) }
+
+// SetSearchLimitsForTest sets one service's limit and the whole search's limit at a depth in s, and the
+// time under which the next service is not asked; it returns the restore.
+func SetSearchLimitsForTest(s *Service, depth string, own, total, minLeft time.Duration) func() {
+	return s.changeSearchLimits(func(l *searchLimits) {
+		l.deadline[depth], l.total[depth], l.minLeft = own, total, minLeft
+		l.deadlineKind = map[string]time.Duration{}
+	})
+}
+
+// SetFetchDeadlineForTest sets s's hard limit of page reading at a depth; it returns the restore.
+func SetFetchDeadlineForTest(s *Service, depth string, d time.Duration) func() {
+	return s.changeSearchLimits(func(l *searchLimits) { l.fetchHard[depth] = d })
+}
+
+// SetFetchBaseForTest points s's TinyFish Fetch at a test server (before its first page is read).
+func SetFetchBaseForTest(s *Service, url string) {
+	s.hooks.fetchBase.Store(&url)
+}
+
+// SetProbeTimeoutForTest shortens the limit of s's connection checks.
+func SetProbeTimeoutForTest(s *Service, d time.Duration) {
+	s.hooks.probeTimeout.Store(int64(d))
 }
