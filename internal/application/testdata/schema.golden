@@ -40,7 +40,7 @@
  12  4c1fd5a809c5  CREATE TABLE IF NOT EXISTS tool_calls ( id BIGINT NOT NULL AUTO_INCREMEN
  13  5a53309ea437  CREATE TABLE IF NOT EXISTS stats_daily ( day VARCHAR(10) NOT NULL, metri
  14  1c8cda140832  CREATE TABLE IF NOT EXISTS stats_days ( grp VARCHAR(32) NOT NULL, day VA
-== featureDDL (56)
+== featureDDL (60)
   0  d898683ce5fd  CREATE TABLE IF NOT EXISTS consent_state ( user_id TEXT NOT NULL, scope 
   1  a52fa5d758f8  CREATE TABLE IF NOT EXISTS consent_audit ( id INTEGER PRIMARY KEY AUTOIN
   2  945af077f802  CREATE INDEX IF NOT EXISTS idx_consent_audit_user ON consent_audit(user_
@@ -70,33 +70,37 @@
  26  5472ffea016b  CREATE INDEX IF NOT EXISTS idx_participation_log_channel ON participatio
  27  32386959ba20  CREATE TABLE IF NOT EXISTS participation_spoke_turns ( turn_id TEXT PRIM
  28  dc790faf8e90  CREATE INDEX IF NOT EXISTS idx_participation_spoke_turns_created ON part
- 29  71f1e35fa3f9  CREATE TABLE IF NOT EXISTS person_claim ( id TEXT PRIMARY KEY, guild_id 
- 30  6cbd72f15a18  CREATE INDEX IF NOT EXISTS idx_person_claim_subject ON person_claim(guil
- 31  a919c5bd5e14  CREATE INDEX IF NOT EXISTS idx_person_claim_speaker ON person_claim(guil
- 32  61840ba94fb3  CREATE INDEX IF NOT EXISTS idx_person_claim_source ON person_claim(sourc
- 33  92ad53440794  CREATE TABLE IF NOT EXISTS person_memory_suppress ( guild_id TEXT NOT NU
- 34  51753545db77  CREATE TABLE IF NOT EXISTS poll_messages ( message_id TEXT PRIMARY KEY, 
- 35  0162742ab20e  CREATE INDEX IF NOT EXISTS idx_poll_messages_poll ON poll_messages(poll_
- 36  454c1f95b34d  CREATE TABLE IF NOT EXISTS user_prefs ( user_id TEXT PRIMARY KEY, locale
- 37  c800927a3e89  CREATE TABLE IF NOT EXISTS reminders ( id TEXT PRIMARY KEY, owner_id TEX
- 38  59c73fde482d  CREATE TABLE IF NOT EXISTS reminder_context ( reminder_id TEXT NOT NULL,
- 39  47f2843df282  CREATE INDEX IF NOT EXISTS idx_reminder_context_message ON reminder_cont
- 40  bc9f1e03a6e7  CREATE INDEX IF NOT EXISTS idx_reminder_context_author ON reminder_conte
- 41  a4dbf14f2235  CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(status, due_at
- 42  108c92e6ef45  CREATE INDEX IF NOT EXISTS idx_reminders_owner ON reminders(owner_id, st
- 43  134c3dc7b975  CREATE INDEX IF NOT EXISTS idx_reminders_channel ON reminders(guild_id, 
- 44  5233e7a087ec  CREATE TABLE IF NOT EXISTS reminder_offers ( id TEXT PRIMARY KEY, guild_
- 45  74ecee4ef715  CREATE TABLE IF NOT EXISTS channel_style ( guild_id TEXT NOT NULL, chann
- 46  dafadf7baef9  CREATE TABLE IF NOT EXISTS channel_summary ( guild_id TEXT NOT NULL, cha
- 47  2afa7f04778c  CREATE TABLE IF NOT EXISTS channel_threads ( thread_id TEXT PRIMARY KEY,
- 48  b2f22a66b370  CREATE INDEX IF NOT EXISTS idx_channel_threads_parent ON channel_threads
- 49  35cca72169da  CREATE INDEX IF NOT EXISTS idx_channel_threads_open ON channel_threads(s
- 50  0c8d55d329f6  CREATE TABLE IF NOT EXISTS thread_participants ( thread_id TEXT NOT NULL
- 51  d64c72bd3468  CREATE INDEX IF NOT EXISTS idx_thread_participants_user ON thread_partic
- 52  04b0fe547caf  CREATE TABLE IF NOT EXISTS thread_tombstones (thread_id TEXT PRIMARY KEY
- 53  c986480f9feb  INSERT OR IGNORE INTO thread_tombstones(thread_id) SELECT thread_id FROM
- 54  d5e7fedd47d2  INSERT OR IGNORE INTO thread_parents(thread_id,guild_id,parent_id) SELEC
- 55  770e9e6d3377  CREATE TABLE IF NOT EXISTS update_news_sent ( version TEXT NOT NULL, tar
+ 29  08a4bdd1fd91  CREATE TABLE IF NOT EXISTS people_backfill_run ( id TEXT PRIMARY KEY, gu
+ 30  24235303cc03  CREATE INDEX IF NOT EXISTS idx_people_backfill_run_guild ON people_backf
+ 31  101413ce707e  CREATE TABLE IF NOT EXISTS people_backfill_window ( run_id TEXT NOT NULL
+ 32  894b657f96a5  CREATE INDEX IF NOT EXISTS idx_people_backfill_window_state ON people_ba
+ 33  71f1e35fa3f9  CREATE TABLE IF NOT EXISTS person_claim ( id TEXT PRIMARY KEY, guild_id 
+ 34  6cbd72f15a18  CREATE INDEX IF NOT EXISTS idx_person_claim_subject ON person_claim(guil
+ 35  a919c5bd5e14  CREATE INDEX IF NOT EXISTS idx_person_claim_speaker ON person_claim(guil
+ 36  61840ba94fb3  CREATE INDEX IF NOT EXISTS idx_person_claim_source ON person_claim(sourc
+ 37  92ad53440794  CREATE TABLE IF NOT EXISTS person_memory_suppress ( guild_id TEXT NOT NU
+ 38  51753545db77  CREATE TABLE IF NOT EXISTS poll_messages ( message_id TEXT PRIMARY KEY, 
+ 39  0162742ab20e  CREATE INDEX IF NOT EXISTS idx_poll_messages_poll ON poll_messages(poll_
+ 40  454c1f95b34d  CREATE TABLE IF NOT EXISTS user_prefs ( user_id TEXT PRIMARY KEY, locale
+ 41  c800927a3e89  CREATE TABLE IF NOT EXISTS reminders ( id TEXT PRIMARY KEY, owner_id TEX
+ 42  59c73fde482d  CREATE TABLE IF NOT EXISTS reminder_context ( reminder_id TEXT NOT NULL,
+ 43  47f2843df282  CREATE INDEX IF NOT EXISTS idx_reminder_context_message ON reminder_cont
+ 44  bc9f1e03a6e7  CREATE INDEX IF NOT EXISTS idx_reminder_context_author ON reminder_conte
+ 45  a4dbf14f2235  CREATE INDEX IF NOT EXISTS idx_reminders_due ON reminders(status, due_at
+ 46  108c92e6ef45  CREATE INDEX IF NOT EXISTS idx_reminders_owner ON reminders(owner_id, st
+ 47  134c3dc7b975  CREATE INDEX IF NOT EXISTS idx_reminders_channel ON reminders(guild_id, 
+ 48  5233e7a087ec  CREATE TABLE IF NOT EXISTS reminder_offers ( id TEXT PRIMARY KEY, guild_
+ 49  74ecee4ef715  CREATE TABLE IF NOT EXISTS channel_style ( guild_id TEXT NOT NULL, chann
+ 50  dafadf7baef9  CREATE TABLE IF NOT EXISTS channel_summary ( guild_id TEXT NOT NULL, cha
+ 51  2afa7f04778c  CREATE TABLE IF NOT EXISTS channel_threads ( thread_id TEXT PRIMARY KEY,
+ 52  b2f22a66b370  CREATE INDEX IF NOT EXISTS idx_channel_threads_parent ON channel_threads
+ 53  35cca72169da  CREATE INDEX IF NOT EXISTS idx_channel_threads_open ON channel_threads(s
+ 54  0c8d55d329f6  CREATE TABLE IF NOT EXISTS thread_participants ( thread_id TEXT NOT NULL
+ 55  d64c72bd3468  CREATE INDEX IF NOT EXISTS idx_thread_participants_user ON thread_partic
+ 56  04b0fe547caf  CREATE TABLE IF NOT EXISTS thread_tombstones (thread_id TEXT PRIMARY KEY
+ 57  c986480f9feb  INSERT OR IGNORE INTO thread_tombstones(thread_id) SELECT thread_id FROM
+ 58  d5e7fedd47d2  INSERT OR IGNORE INTO thread_parents(thread_id,guild_id,parent_id) SELEC
+ 59  770e9e6d3377  CREATE TABLE IF NOT EXISTS update_news_sent ( version TEXT NOT NULL, tar
 == pruneRules (21)
   0  turns table=turn_log column=at days=turns dayOnly=false extra=""
   1  traces table=traces column=created_at days=traces dayOnly=false extra=""
@@ -119,7 +123,7 @@
  18  llm_calls table=llm_calls column=created_at days=ledger dayOnly=false extra=""
  19  tool_calls table=tool_calls column=created_at days=ledger dayOnly=false extra=""
  20  poll_messages table=poll_messages column=created_at days=usage dayOnly=false extra=""
-== sqlite_master of the store the application opens (159 objects)
+== sqlite_master of the store the application opens (163 objects)
 -- index idx_banter_turns_created on banter_turns
 CREATE INDEX idx_banter_turns_created ON banter_turns(created_at)
 -- index idx_channel_episode_channel on channel_episode
@@ -199,6 +203,10 @@ CREATE INDEX idx_participation_log_author ON participation_log(author_ref)
 CREATE INDEX idx_participation_log_channel ON participation_log(guild_id, channel_id, created_at)
 -- index idx_participation_spoke_turns_created on participation_spoke_turns
 CREATE INDEX idx_participation_spoke_turns_created ON participation_spoke_turns(created_at)
+-- index idx_people_backfill_run_guild on people_backfill_run
+CREATE INDEX idx_people_backfill_run_guild ON people_backfill_run(guild_id, state)
+-- index idx_people_backfill_window_state on people_backfill_window
+CREATE INDEX idx_people_backfill_window_state ON people_backfill_window(run_id, state, seq)
 -- index idx_person_alias_name on person_alias
 CREATE INDEX idx_person_alias_name ON person_alias(guild_id,folded)
 -- index idx_person_alias_source on person_alias_source
@@ -766,6 +774,48 @@ CREATE TABLE participation_spoke_turns (
 			channel_id TEXT NOT NULL,
 			created_at TEXT NOT NULL
 		)
+-- table people_backfill_run on people_backfill_run
+CREATE TABLE people_backfill_run (
+		id TEXT PRIMARY KEY,
+		guild_id TEXT NOT NULL,
+		state TEXT NOT NULL,
+		token TEXT NOT NULL,
+		params TEXT NOT NULL,
+		model TEXT NOT NULL DEFAULT '',
+		provider TEXT NOT NULL DEFAULT '',
+		budget_usd REAL NOT NULL DEFAULT 0,
+		spent_usd REAL NOT NULL DEFAULT 0,
+		stopped_by TEXT NOT NULL DEFAULT '',
+		pilot_done INTEGER NOT NULL DEFAULT 0,
+		pilot TEXT NOT NULL DEFAULT '',
+		batches TEXT NOT NULL DEFAULT '',
+		windows INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)
+-- table people_backfill_window on people_backfill_window
+CREATE TABLE people_backfill_window (
+		run_id TEXT NOT NULL,
+		id TEXT NOT NULL,
+		room TEXT NOT NULL,
+		seq INTEGER NOT NULL,
+		lines INTEGER NOT NULL DEFAULT 0,
+		obs TEXT NOT NULL,
+		first_at TEXT NOT NULL DEFAULT '',
+		last_at TEXT NOT NULL DEFAULT '',
+		state TEXT NOT NULL,
+		pilot INTEGER NOT NULL DEFAULT 0,
+		batch TEXT NOT NULL DEFAULT '',
+		prompt_hash TEXT NOT NULL DEFAULT '',
+		read_at TEXT NOT NULL DEFAULT '',
+		attempts INTEGER NOT NULL DEFAULT 0,
+		claims INTEGER NOT NULL DEFAULT 0,
+		rejected INTEGER NOT NULL DEFAULT 0,
+		cost_usd REAL NOT NULL DEFAULT 0,
+		result TEXT NOT NULL DEFAULT '',
+		updated_at TEXT NOT NULL,
+		PRIMARY KEY(run_id, id)
+	) WITHOUT ROWID
 -- table person_alias on person_alias
 CREATE TABLE person_alias(guild_id TEXT NOT NULL,person_ref TEXT NOT NULL,label TEXT NOT NULL,
 			room TEXT NOT NULL,first_seen TEXT NOT NULL,last_seen TEXT NOT NULL,last_source TEXT NOT NULL,folded TEXT NOT NULL,PRIMARY KEY(guild_id,person_ref,label,room)) WITHOUT ROWID
