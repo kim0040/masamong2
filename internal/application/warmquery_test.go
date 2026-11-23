@@ -69,7 +69,6 @@ func warmSvc(t *testing.T, plan string) (*application.Service, *warmProvider) {
 	t.Helper()
 	f := &warmProvider{}
 	f.plan.Store(&plan)
-	t.Setenv("FAKE_OR_KEY", "k")
 	svc := embedSvc(t, t.TempDir(), f.server(t).URL)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Models["planner"] = config.Model{Provider: "openrouter", Model: "fake/planner"}

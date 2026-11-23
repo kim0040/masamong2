@@ -62,7 +62,6 @@ func (f *flakyEmbedder) server(t *testing.T) *httptest.Server {
 func TestMemoryPassMessageVectorWidthRepairQueuesQuietRoom(t *testing.T) {
 	f := &flakyEmbedder{}
 	srv := f.server(t)
-	t.Setenv("FAKE_OR_KEY", "synthetic")
 	svc := embedSvc(t, t.TempDir(), srv.URL)
 	ctx := context.Background()
 	const active, quiet = "discord:g:active-width", "discord:g:quiet-width"
@@ -129,6 +128,7 @@ func embedSvc(t *testing.T, dir string, url string) *application.Service {
 		if res := exec(svc, "setup.resume", map[string]any{"instance": "gate"}); !res.OK {
 			t.Fatalf("setup: %+v %s", res.Error, raw)
 		}
+		svc.SetEnvForTest(t, "FAKE_OR_KEY", "k")
 		applyDoc(t, svc, func(d *config.Document) {
 			d.Providers["openrouter"] = config.Provider{Kind: config.KindOpenAI, BaseURL: url, CredentialRef: "env:FAKE_OR_KEY"}
 			d.Models["embed"] = config.Model{Provider: "openrouter", Model: "fake/embed"}
@@ -175,7 +175,6 @@ func embedded(t *testing.T, svc *application.Service, room string) int {
 func TestIndexPassRequeuesRoomsAfterProviderError(t *testing.T) {
 	f := &flakyEmbedder{}
 	srv := f.server(t)
-	t.Setenv("FAKE_OR_KEY", "k")
 	svc := embedSvc(t, t.TempDir(), srv.URL)
 	const room = "discord:g:quiet"
 	capture(t, svc, "quiet", 9)
@@ -210,7 +209,6 @@ func TestIndexPassRequeuesRoomsAfterProviderError(t *testing.T) {
 func TestIndexQueueSurvivesRestart(t *testing.T) {
 	f := &flakyEmbedder{}
 	srv := f.server(t)
-	t.Setenv("FAKE_OR_KEY", "k")
 	dir := t.TempDir()
 	svc := embedSvc(t, dir, srv.URL)
 	const room = "discord:g:restart"
@@ -219,7 +217,11 @@ func TestIndexQueueSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	again := embedSvc(t, dir, "")
+	again, err := application.ReopenForTest(svc, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = again.Close() })
 	eng, err := again.MemoryEngine()
 	if err != nil {
 		t.Fatal(err)
@@ -281,7 +283,6 @@ func (f *ledgerSearchProvider) server(t *testing.T) *httptest.Server {
 func TestMemorySearchCallLedgerAndIndexJobSummary(t *testing.T) {
 	f := &ledgerSearchProvider{}
 	srv := f.server(t)
-	t.Setenv("FAKE_OR_KEY", "k")
 	svc := embedSvc(t, t.TempDir(), srv.URL)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Models["rerank"] = config.Model{Provider: "openrouter", Model: "fake/rerank"}

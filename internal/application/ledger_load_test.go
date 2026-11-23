@@ -23,7 +23,6 @@ func TestFullScaleMemoryLedgerWithFakeProvider(t *testing.T) {
 	)
 	f := &ledgerSearchProvider{}
 	srv := f.server(t)
-	t.Setenv("FAKE_OR_KEY", "synthetic")
 	svc := embedSvc(t, t.TempDir(), srv.URL)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Models["embed"] = config.Model{Provider: "openrouter", Model: "fake/embed", Dimensions: 8}

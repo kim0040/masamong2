@@ -436,7 +436,6 @@ func searchSvc(t *testing.T) (*application.Service, *engine.Engine, *promptServe
 		}
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv("FAKE_OR_KEY", "k")
 	svc := embedSvc(t, t.TempDir(), srv.URL)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Models["planner"] = config.Model{Provider: "openrouter", Model: "fake/plan"}
