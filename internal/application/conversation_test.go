@@ -338,11 +338,10 @@ func TestBanterLadder(t *testing.T) {
 
 func restartServiceForTest(t *testing.T, svc *application.Service) *application.Service {
 	t.Helper()
-	dir := svc.DataRoot
 	if err := svc.Close(); err != nil {
 		t.Fatal("close service before simulated restart")
 	}
-	next, err := application.Open(dir, nil, false)
+	next, err := application.ReopenForTest(svc, nil, false)
 	if err != nil {
 		t.Fatal("reopen service for simulated restart")
 	}

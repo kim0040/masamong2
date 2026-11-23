@@ -123,11 +123,10 @@ func TestDMQuotasAreAtomicPersistAndResetAtInstanceMidnight(t *testing.T) {
 			if !svc.ClaimDMNotice("11111", "closed") {
 				t.Fatal("first notice not admitted")
 			}
-			root := svc.DataRoot
 			if err := svc.Close(); err != nil {
 				t.Fatal(err)
 			}
-			reopened, err := application.Open(root, clock.Fixed{T: at}, false)
+			reopened, err := application.ReopenForTest(svc, clock.Fixed{T: at}, false)
 			if err != nil {
 				t.Fatal(err)
 			}

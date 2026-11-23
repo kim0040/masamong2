@@ -35,7 +35,7 @@ func TestCommandWithoutAnswerCarriesOnAsConversation(t *testing.T) {
 	}))
 	defer srv.Close()
 	svc := setupSvc(t)
-	t.Setenv("FAKE_OR_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_OR_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Chat.ToolMode = "planner" // the planner pipeline; the tool loop has its own tests
 		d.Providers["openrouter"] = config.Provider{Kind: config.KindOpenAI, BaseURL: srv.URL, CredentialRef: "env:FAKE_OR_KEY"}

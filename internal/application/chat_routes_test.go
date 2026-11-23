@@ -36,7 +36,7 @@ func chatServer(t *testing.T, content, finish string, calls *atomic.Int32) strin
 
 func routedSvc(t *testing.T, planURL, respURL string) *application.Service {
 	svc := setupSvc(t)
-	t.Setenv("FAKE_OR_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_OR_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["plan-host"] = config.Provider{Kind: config.KindOpenAI, BaseURL: planURL, CredentialRef: "env:FAKE_OR_KEY"}
 		d.Providers["resp-host"] = config.Provider{Kind: config.KindOpenAI, BaseURL: respURL, CredentialRef: "env:FAKE_OR_KEY"}

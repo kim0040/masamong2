@@ -20,7 +20,7 @@ func TestHelpNamesCommandOnlyFeatures(t *testing.T) {
 	var calls atomic.Int32
 	url := chatServer(t, "ok", "stop", &calls)
 	svc := setupSvc(t)
-	t.Setenv("FAKE_OR_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_OR_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["host"] = config.Provider{Kind: config.KindOpenAI, BaseURL: url, CredentialRef: "env:FAKE_OR_KEY"}
 		d.Models["response"] = config.Model{Provider: "host", Model: "m"}
