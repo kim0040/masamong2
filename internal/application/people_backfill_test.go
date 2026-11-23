@@ -826,7 +826,9 @@ func TestPeopleBackfillApplyGuard(t *testing.T) {
 		}
 	}
 	h.running.Store(false)
-	done := pbWait(t, s, "guarded run", func(r store.BackfillRun) bool { return r.State == store.BackfillDone || r.State == store.BackfillStopped })
+	done := pbWait(t, s, "guarded run", func(r store.BackfillRun) bool {
+		return r.State == store.BackfillDone || r.State == store.BackfillStopped
+	})
 	if done.State != store.BackfillDone {
 		t.Fatalf("run: %+v", done)
 	}
