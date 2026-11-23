@@ -123,7 +123,16 @@ func uniqueSpeakers(msgs []corpus.Message) []string {
 	return out
 }
 
-func newLeaf(kind string, msgs []corpus.Message, start, end int, withPrefix bool) Leaf {
+// cut is what a slicer needs besides the messages: the recipe, how many leaves it may still make, and
+// the kind its DocIDs carry.
+type cut struct {
+	recipe Recipe
+	limit  int
+	kind   string
+}
+
+func newLeaf(c cut, msgs []corpus.Message, start, end int) Leaf {
+	kind, withPrefix := c.kind, c.recipe.WithPrefix
 	chunk := msgs[start:end]
 	ids := make([]string, len(chunk))
 	for i, m := range chunk {
@@ -142,7 +151,8 @@ func newLeaf(kind string, msgs []corpus.Message, start, end int, withPrefix bool
 	}
 }
 
-func sliceFixed(msgs []corpus.Message, size, overlap, limit int, kind string, withPrefix bool) []Leaf {
+func sliceFixed(msgs []corpus.Message, c cut) []Leaf {
+	size, overlap, limit := c.recipe.Size, c.recipe.Overlap, c.limit
 	if size <= 0 || overlap < 0 || overlap >= size || limit <= 0 {
 		return nil
 	}
@@ -156,7 +166,7 @@ func sliceFixed(msgs []corpus.Message, size, overlap, limit int, kind string, wi
 		if len(out) > 0 && end == out[len(out)-1].End && end-start <= overlap {
 			break
 		}
-		out = append(out, newLeaf(kind, msgs, start, end, withPrefix))
+		out = append(out, newLeaf(c, msgs, start, end))
 		if end >= len(msgs) {
 			break
 		}
@@ -164,7 +174,8 @@ func sliceFixed(msgs []corpus.Message, size, overlap, limit int, kind string, wi
 	return out
 }
 
-func sliceTimeGap(msgs []corpus.Message, maxSize int, gapMinutes float64, minSize, limit int, kind string, withPrefix bool) []Leaf {
+func sliceTimeGap(msgs []corpus.Message, c cut) []Leaf {
+	maxSize, gapMinutes, minSize, limit := c.recipe.Size, c.recipe.GapMinutes, c.recipe.MinSize, c.limit
 	if maxSize <= 0 || limit <= 0 {
 		return nil
 	}
@@ -185,7 +196,7 @@ func sliceTimeGap(msgs []corpus.Message, maxSize int, gapMinutes float64, minSiz
 			}
 			end++
 		}
-		out = append(out, newLeaf(kind, msgs, start, end, withPrefix))
+		out = append(out, newLeaf(c, msgs, start, end))
 		start = end
 	}
 	return out
@@ -207,9 +218,9 @@ func SlicePerRoom(msgs []corpus.Message, r Recipe, limit int, kind string) []Lea
 		}
 		var segs []Leaf
 		if r.Split == SplitTimeGap {
-			segs = sliceTimeGap(msgs[i:j], r.Size, r.GapMinutes, r.MinSize, limit-len(out), kind, r.WithPrefix)
+			segs = sliceTimeGap(msgs[i:j], cut{recipe: r, limit: limit - len(out), kind: kind})
 		} else {
-			segs = sliceFixed(msgs[i:j], r.Size, r.Overlap, limit-len(out), kind, r.WithPrefix)
+			segs = sliceFixed(msgs[i:j], cut{recipe: r, limit: limit - len(out), kind: kind})
 		}
 		for _, s := range segs {
 			s.Start += i

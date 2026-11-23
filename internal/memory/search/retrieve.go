@@ -543,7 +543,8 @@ func (ix *Index) Retrieve(ctx context.Context, req Request, emb QueryEmbedder, r
 	if total == 0 {
 		total = cfg.charLimit() * max(1, topK)
 	}
-	packed, spans, visible := packSet(ix.Messages, segs, cfg.parentBefore(), cfg.parentAfter(), boolOr(cfg.ContextPrefix, true), cfg.charLimit(), total, ps)
+	packed, spans, visible := packSet(ix.Messages, segs, packWindow{before: cfg.parentBefore(), after: cfg.parentAfter(), withPrefix: boolOr(cfg.ContextPrefix, true)},
+		packLimits{doc: cfg.charLimit(), total: total}, ps)
 	var hits []Hit
 	for i, id := range final {
 		l, _ := ix.Leaf(id)
