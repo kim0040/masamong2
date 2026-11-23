@@ -456,6 +456,46 @@ test('a person memory view: servers the person is in, the latest one by default,
   assert.equal(forgetTotal({ items: 0, episodes: 0, cards: 0, person_items: 2 }), 2) // only person statements: still something to confirm
 })
 
+test('people backfill panel: the cap, the run phase and what the operator may press next', async () => {
+  const m = await load('peoplebackfill.ts', [])
+  assert.equal(m.parseBudget('3'), 3)
+  assert.equal(m.parseBudget(' 2,5 '), 2.5)
+  assert.equal(m.parseBudget('0'), null)
+  assert.equal(m.parseBudget('100.5'), null)
+  assert.equal(m.parseBudget('abc'), null)
+  assert.deepEqual(m.rangeParts({ low: 0.5, high: 0.6 }), { low: 0.5, high: 0.6 })
+  assert.deepEqual(m.rangeParts({ high: 0.6 }), { low: 0.6, high: 0.6 })
+  assert.equal(m.rangeParts(undefined), null)
+  assert.equal(m.modelKey('claude-haiku-5-5'), 'haiku')
+  assert.equal(m.modelKey('claude-sonnet-5-5'), 'sonnet')
+  assert.equal(m.modelKey(''), '')
+  assert.equal(m.modelName('claude-haiku-5-5'), 'Haiku 5.5')
+  assert.equal(m.modelName('other'), 'other')
+
+  assert.deepEqual(['none', 'piloting', 'piloted', 'submitted', 'stopped', 'done', 'superseded'].map((state) => m.phase({ id: 'r', state })), ['none', 'piloting', 'piloted', 'running', 'stopped', 'done', 'none'])
+  assert.equal(m.phase(null), 'none')
+  assert.equal(m.isBusy({ id: 'r', state: 'piloting' }), true)
+  assert.equal(m.isBusy({ id: 'r', state: 'piloted' }), false)
+  assert.equal(m.isBusy({ id: 'r', state: 'stopped' }, true), true)
+  assert.deepEqual(m.progress({ id: 'r', state: 'submitted', windows: { applied: 5, skipped: 1, refused: 1, failed: 1, queued: 2 }, windows_total: 10 }), { done: 8, total: 10 })
+
+  const plan = { token: 'tok', provider_ready: true }
+  const piloted = { id: 'r', state: 'piloted', pilot_done: true, token: 'tok' }
+  assert.deepEqual(m.nextSteps(null, null, false), { pilot: false, run: false, resume: false, review: false })
+  assert.deepEqual(m.nextSteps(plan, null, false), { pilot: true, run: false, resume: false, review: false })
+  assert.deepEqual(m.nextSteps({ ...plan, provider_ready: false }, null, false).pilot, false) // no Anthropic key: no paid step
+  assert.deepEqual(m.nextSteps(plan, piloted, false), { pilot: true, run: true, resume: false, review: true })
+  assert.deepEqual(m.nextSteps(plan, { ...piloted, pilot_done: false }, false).run, false) // the pilot is not finished
+  assert.deepEqual(m.nextSteps(plan, { ...piloted, state: 'stopped' }, false), { pilot: true, run: false, resume: true, review: false })
+  assert.deepEqual(m.nextSteps(plan, { ...piloted, state: 'submitted' }, true), { pilot: false, run: false, resume: false, review: false }) // working: nothing to press
+  assert.equal(m.nextSteps(plan, { ...piloted, state: 'stopped', pilot_done: false }, false).resume, false)
+
+  const groups = m.groupReview([{ part: 'hearsay', text: 'c' }, { part: 'name', text: 'a' }, { part: 'disagreement', text: 'b' }, { part: 'name', text: 'a2' }])
+  assert.deepEqual(groups.map((g) => [g.part, g.items.length]), [['name', 2], ['disagreement', 1], ['hearsay', 1]])
+  assert.deepEqual(m.groupReview([{ part: 'name', text: 'a' }]).map((g) => g.part), ['name'])
+  assert.deepEqual(m.groupReview(null), [])
+})
+
 test('the embedding switch refusal is recognised by its message key, not its English text', async () => {
   const { embedReindexAsk, EMBED_REINDEX_KEY } = await load('embedswitch.ts', [])
   assert.deepEqual(embedReindexAsk({ message_key: EMBED_REINDEX_KEY, args: { reindex: { rooms: 3, leaves: 120, tokens: 9000 } } }), { known: true, rooms: 3, leaves: 120, tokens: 9000 })

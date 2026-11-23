@@ -26,6 +26,7 @@
   import LoadState from '../components/LoadState.svelte'
   import Timeline from '../components/Timeline.svelte'
   import RoomMemory from '../components/RoomMemory.svelte'
+  import PersonBackfill from '../components/PersonBackfill.svelte'
   import * as I from '../lib/icons'
 
   // Search what the bot remembers, with the evidence spans; exclude a wrong or private chunk, attach a
@@ -171,6 +172,7 @@
 <div data-tour="memory-tabs"><Tabs id="memory" bind:active={tab} onchange={(v) => setQuery({ tab: v === 'search' ? null : v })} tabs={[
   { id: 'search', label: t('memory.tab.search'), icon: I.Search },
   { id: 'room', label: t('memory.tab.room'), icon: I.Layers },
+  { id: 'person', label: t('memory.tab.person'), icon: I.UserRoundSearch },
   { id: 'timeline', label: t('memory.tab.timeline'), icon: I.CalendarRange },
   { id: 'reviews', label: t('memory.tab.reviews'), icon: I.PencilLine, count: reviews.data?.reviews?.length },
   { id: 'people', label: t('memory.tab.people'), icon: I.Users, count: people.data?.people?.length }]} /></div>
@@ -232,6 +234,13 @@
     {/if}
   {:else if tab === 'room'}
     <RoomMemory />
+  {:else if tab === 'person'}
+    <div class="person">
+      <Card title={t('pb.intro_title')} description={t('pb.intro_desc')}>
+        <Button href="/people" icon={I.Users}>{t('pb.open_people')}</Button>
+      </Card>
+      <PersonBackfill />
+    </div>
   {:else if tab === 'timeline'}
     <div class="rooms">
       {#each allRooms as r (r.id)}
@@ -441,6 +450,11 @@
     line-clamp: 3;
     -webkit-box-orient: vertical;
     overflow: hidden;
+  }
+  .person {
+    display: grid;
+    gap: var(--s-4);
+    max-width: 920px;
   }
   .people {
     display: grid;
