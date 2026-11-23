@@ -3,6 +3,8 @@ package peoplebackfill
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"slices"
+	"sort"
 	"time"
 
 	"masamong/internal/memory/episodes"
@@ -33,7 +35,7 @@ type MergedLine struct {
 }
 
 // Window is the unit one model call covers: whole segments joined up to MaxWindowLines merged
-// lines. Its claims are written with evidence = observation ids (MergedLine.IDs).
+// lines, in time order. Its claims are written with evidence = observation ids (MergedLine.IDs).
 type Window struct {
 	ID      string // sha256 of room, first and last observation id, prompt version hash
 	Room    string
@@ -85,28 +87,42 @@ func BuildWindows(room string, lines []Line, opt Options) []Window {
 		msgs = append(msgs, episodes.Message{ID: l.ID, Account: l.Ref, At: l.At, Bot: l.Bot, Text: l.Text})
 	}
 	var windows []Window
-	var cur []MergedLine
+	var cur []string // the window's observation ids, segment by segment
 	flush := func() {
 		if len(cur) == 0 {
 			return
 		}
-		windows = append(windows, newWindow(room, cur, opt.PromptHash))
+		windows = append(windows, newWindow(room, mergeRuns(byID, chronological(byID, cur)), opt.PromptHash))
 		cur = nil
 	}
 	for _, seg := range episodes.Split(msgs, now, opt.Split) {
-		merged := mergeRuns(byID, seg.IDs)
-		if len(merged) == 0 {
+		if len(mergeRuns(byID, seg.IDs)) == 0 {
 			continue
 		}
 		// whole segments join: a segment over the limit becomes a window of its own rather than
-		// being cut (the defaults cannot produce one — the segmenter itself caps at 80)
-		if len(cur) > 0 && len(cur)+len(merged) > maxLines {
+		// being cut (the defaults cannot produce one — the segmenter itself caps at 80). The limit
+		// counts the window's merged lines in time order, the order and unit its prompt shows them
+		// in: segments can interleave (a topic resumed after another one started).
+		if len(cur) > 0 && len(mergeRuns(byID, chronological(byID, append(slices.Clone(cur), seg.IDs...)))) > maxLines {
 			flush()
 		}
-		cur = append(cur, merged...)
+		cur = append(cur, seg.IDs...)
 	}
 	flush()
 	return windows
+}
+
+// chronological orders a window's observation ids by time, then id: the order the prompt reads them in.
+func chronological(byID map[string]Line, ids []string) []string {
+	out := slices.Clone(ids)
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := byID[out[i]], byID[out[j]]
+		if a.At.Equal(b.At) {
+			return a.ID < b.ID
+		}
+		return a.At.Before(b.At)
+	})
+	return out
 }
 
 // mergeRuns collapses each maximal run of consecutive same-speaker lines of the segment into one

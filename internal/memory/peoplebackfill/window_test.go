@@ -3,6 +3,7 @@ package peoplebackfill
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 	"testing"
 	"time"
 )
@@ -160,5 +161,37 @@ func TestWindowIDsAreDeterministicAndDistinct(t *testing.T) {
 			t.Fatalf("window id shared across rooms: %s", w.ID)
 		}
 		ids[w.ID] = true
+	}
+}
+
+// TestWindowUsesChronologicalEndpoints: segments can interleave (a topic resumed after another one
+// started); the window's lines, first and last observation (its id) and last time follow time order,
+// not the order of the segments.
+func TestWindowUsesChronologicalEndpoints(t *testing.T) {
+	lines := []Line{
+		// m1, m2, m4 are one topic, m3 another (the segmenter reads words, so the lines are Korean)
+		msg("m1", "111111111111111111", "등산 산길 등산화 정상", 0),
+		msg("m2", "222222222222222222", "등산 산길 등산화 정상 좋아", 1),
+		msg("m3", "333333333333333333", "피자 치즈 오븐 반죽", 2),
+		msg("m4", "111111111111111111", "등산 산길 등산화 다시", 3),
+	}
+	ws := BuildWindows("r", lines, Options{PromptHash: "v1"})
+	if len(ws) != 1 {
+		t.Fatalf("one window: %d", len(ws))
+	}
+	w := ws[0]
+	if w.FirstID != "m1" || w.LastID != "m4" || !w.Last.Equal(t0.Add(3*time.Minute)) {
+		t.Fatalf("endpoints: first %s last %s at %v", w.FirstID, w.LastID, w.Last)
+	}
+	var order []string
+	for _, l := range w.Lines {
+		order = append(order, l.IDs...)
+	}
+	if len(w.Lines) != 4 || strings.Join(order, ",") != "m1,m2,m3,m4" {
+		t.Fatalf("lines in time order: %v", w.Lines)
+	}
+	sum := sha256.Sum256([]byte("r\x00m1\x00m4\x00v1"))
+	if w.ID != hex.EncodeToString(sum[:]) {
+		t.Fatalf("window id %q", w.ID)
 	}
 }
