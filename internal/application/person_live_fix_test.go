@@ -382,3 +382,65 @@ func TestTruncatedPeopleTailKeepsCompleteEpisode(t *testing.T) {
 		}
 	})
 }
+
+// failAdminWrites makes every write of an admin_state key matching like fail, until the returned function
+// is called.
+func failAdminWrites(t *testing.T, s *application.Service, name, like string) func() {
+	t.Helper()
+	for _, ev := range []string{"INSERT", "UPDATE"} {
+		if _, err := s.Store.DB.Exec(`CREATE TRIGGER ` + name + `_` + ev + ` BEFORE ` + ev + ` ON admin_state WHEN NEW.k LIKE '` + like +
+			`' BEGIN SELECT RAISE(ABORT,'synthetic write failure'); END`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return func() {
+		t.Helper()
+		for _, ev := range []string{"INSERT", "UPDATE"} {
+			if _, err := s.Store.DB.Exec(`DROP TRIGGER ` + name + `_` + ev); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+// live_since is written in the transaction of the first live claims: when its write fails, neither the
+// claims nor the marker are kept (the segment is asked again later); once it can be written, both are, and
+// the backfill's default range ends at that first successful save.
+func TestLiveSinceSurvivesFirstSaveMarkerFailure(t *testing.T) {
+	t.Parallel()
+	svc, m, eng := roomSvc(t)
+	m.extract = func(string) string { return peopleAnswer(hikePeople) }
+	sayIn(eng, time.Now().Add(-5*time.Hour), hike...)
+	claims := func() int {
+		t.Helper()
+		var n int
+		if err := svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM person_claim`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	heal := failAdminWrites(t, svc, "r8_live_since", "people:live_since:%")
+	svc.RunRoomMemory(context.Background())
+	var rows int
+	if err := svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM admin_state WHERE k='people:live_since:g'`).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if n := claims(); n != 0 || rows != 0 {
+		t.Fatalf("a failed live_since write: %d claim(s), %d marker row(s) (want both or neither)", n, rows)
+	}
+	heal()
+	before := time.Now().UTC().Add(-time.Second)
+	if rep := svc.RunRoomMemory(context.Background()); rep.PeopleClaims() == 0 || claims() == 0 {
+		t.Fatalf("second pass: %+v", rep)
+	}
+	at, err := time.Parse(time.RFC3339, liveSince(t, svc, "g"))
+	if err != nil || at.Before(before) || at.After(time.Now().UTC().Add(time.Second)) {
+		t.Fatalf("live_since is the first successful save: %v %v (from %v)", at, err, before)
+	}
+	svc = restartServiceForTest(t, svc)
+	if r := exec(svc, "memory.people.backfill", map[string]any{"mode": "dry_run", "guild_id": "g"}); !r.OK {
+		t.Errorf("dry run: %+v", r.Error)
+	} else if r.Output["until_from"] != "live_since" || r.Output["until"] != at.Format(time.RFC3339) {
+		t.Errorf("the dry run's range ends at %v (%v), want live_since %s", r.Output["until"], r.Output["until_from"], at.Format(time.RFC3339))
+	}
+}

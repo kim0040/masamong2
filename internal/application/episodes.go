@@ -807,8 +807,8 @@ func (s *Service) extractSegment(ctx context.Context, db *storage.Store, r memRo
 // line the model read was edited, deleted or withdrawn meanwhile (errEvidenceDeleted). supersedes names
 // the episode a regeneration replaces (deleted in the same transaction). claims are the person claims of
 // the same answer: they go through the write gate in the same transaction (a claim the gate refuses is
-// skipped, never the answer), after the items they may upgrade. It returns the episodes changed and the
-// claims written.
+// skipped, never the answer), after the items they may upgrade; the first live claims of a server write
+// its live_since in the same transaction. It returns the episodes changed and the claims written.
 func (s *Service) saveEpisodeOps(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, ops []episodes.Op, supersedes string, claims []store.PersonClaim) (int, int, error) {
 	byID := map[string]roomLine{}
 	var segment []string
@@ -821,6 +821,7 @@ func (s *Service) saveEpisodeOps(ctx context.Context, db *storage.Store, r memRo
 	loc := s.instanceZone()
 	nowS := s.Clock.Now().UTC().Format(time.RFC3339)
 	changed, people := 0, 0
+	var marks []kvWrite
 	err := db.WithWriterContext(ctx, func(tx *sql.Tx) error {
 		for _, l := range lines {
 			if l.Bot {
@@ -896,10 +897,14 @@ func (s *Service) saveEpisodeOps(ctx context.Context, db *storage.Store, r memRo
 		}
 		n, err := s.savePeopleTx(ctx, tx, claims)
 		people = n
+		if err != nil {
+			return err
+		}
+		marks, err = s.livePeopleMarksTx(tx, db.Backend, r, people)
 		return err
 	})
-	if err == nil && people > 0 {
-		s.noteLiveSince(r.guild)
+	if err == nil {
+		s.kvCacheWrites(marks)
 	}
 	return changed, people, err
 }

@@ -3,11 +3,11 @@ package application
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"regexp"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -26,9 +26,6 @@ import (
 
 // livePeoplePrefix is the source of a live claim: extract:<first observation of the segment>.
 const livePeoplePrefix = "extract:"
-
-// liveSinceMu makes "write once" hold when two rooms save their first claim together.
-var liveSinceMu sync.Mutex
 
 // liveClaims turns a segment's validated people facts into claims for the write gate and counts the facts
 // it skips. A fact is one speaker's statement or nothing: its "by" is one person and every line it cites
@@ -242,19 +239,50 @@ func (s *Service) personBuild(db *storage.Store, r memRoom, in episodes.Input, l
 	return in
 }
 
-// noteLiveSince records, once per server, the time live extraction first saved a person claim. It never
-// overwrites a value, so the backfill's default range stays where it first ended.
-func (s *Service) noteLiveSince(guild string) {
-	liveSinceMu.Lock()
-	defer liveSinceMu.Unlock()
-	var at string
-	ok, err := s.kvGet(pbLiveSinceKey+guild, &at)
-	if err != nil || ok && at != "" {
-		return
+// kvWrite is an admin_state value written inside a transaction, for the cache once it commits.
+type kvWrite struct{ key, raw string }
+
+// kvCacheWrites tells the admin_state cache the values a committed transaction wrote.
+func (s *Service) kvCacheWrites(ws []kvWrite) {
+	for _, w := range ws {
+		s.kv.put(w.key, kvEntry{raw: w.raw, ok: true})
 	}
-	if err := s.kvSet(pbLiveSinceKey+guild, s.Clock.Now().UTC().Format(time.RFC3339)); err != nil {
-		s.Log.Warn("memory: the first live people save was not recorded", "err", err)
+}
+
+// livePeopleMarksTx writes, in the transaction that saves a segment's claims, what must commit with them
+// or not at all. The first live claims of a server record live_since, the time live extraction first saved
+// a person claim: a value once written is never overwritten (the backfill's default range stays where it
+// first ended), and the writer transaction makes "once" hold for rooms saving together. It returns the
+// values written, for the cache.
+func (s *Service) livePeopleMarksTx(tx *sql.Tx, backend string, r memRoom, saved int) ([]kvWrite, error) {
+	var out []kvWrite
+	now := s.Clock.Now().UTC()
+	if saved > 0 {
+		var raw string
+		switch err := tx.QueryRow(`SELECT v FROM admin_state WHERE k=?`, pbLiveSinceKey+r.guild).Scan(&raw); {
+		case errors.Is(err, sql.ErrNoRows), err == nil && (raw == "" || raw == `""`):
+			w, err := kvWriteTx(tx, backend, pbLiveSinceKey+r.guild, now.Format(time.RFC3339), now)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, w)
+		case err != nil:
+			return nil, err
+		}
 	}
+	return out, nil
+}
+
+// kvWriteTx writes one admin_state value inside tx.
+func kvWriteTx(tx *sql.Tx, backend, key string, v any, now time.Time) (kvWrite, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return kvWrite{}, err
+	}
+	if _, err := tx.Exec(kvUpsertSQL(backend), key, string(raw), now.Format(time.RFC3339)); err != nil {
+		return kvWrite{}, err
+	}
+	return kvWrite{key, string(raw)}, nil
 }
 
 // savePeopleTx saves a segment's claims through the write gate inside the caller's transaction and
