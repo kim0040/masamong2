@@ -5,7 +5,7 @@ import "testing"
 // Configured words for a tool replace the words of its first command only: the other commands on the same
 // Action (!이번달운세, !올해운세, !별자리 on fortune.query) keep their own words.
 func TestAliasOverrideKeepsOtherCommandsOnTheAction(t *testing.T) {
-	tbl := NewPrefixTable([]ToolCommand{{Tool: "fortune.query", Aliases: []string{"점괘", "luck"}}})
+	tbl := NewPrefixTable(shippedCatalog(), []ToolCommand{{Tool: "fortune.query", Aliases: []string{"점괘", "luck"}}})
 	for word, want := range map[string]string{
 		"점괘": "fortune", "luck": "fortune",
 		"이번달운세": "fortune-month", "올해운세": "fortune-year", "별자리": "zodiac",

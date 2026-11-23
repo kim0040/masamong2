@@ -2,15 +2,17 @@ package discord
 
 import (
 	"strings"
+
+	"masamong/internal/i18n"
 )
 
 // Builders of the fortune commands.
 
 // buildFortune maps the fortune command's options to its Action input.
 func buildFortune(o map[string]string, c InvokeContext) (string, map[string]any) {
-	verb, rest := splitVerb(o["what"], o["time"], wordsFor("fortune", "verb",
+	verb, rest := splitVerb(o["what"], o["time"], wordsFor(c.words, "fortune", "verb",
 		"today", "detail", "month", "year", "animals", "status", "subscribe", "unsubscribe", "delete", "register"))
-	return fortuneRequest(verb, rest)
+	return fortuneRequest(c.words, verb, rest)
 }
 
 // buildFortuneRegister maps the fortune-register command's options to its Action input.
@@ -36,20 +38,20 @@ func buildFortuneYear(o map[string]string, c InvokeContext) (string, map[string]
 
 // buildSubscribe maps the subscribe command's options to its Action input.
 func buildSubscribe(o map[string]string, c InvokeContext) (string, map[string]any) {
-	return fortuneRequest("subscribe", o["time"])
+	return fortuneRequest(c.words, "subscribe", o["time"])
 }
 
 // buildZodiac maps the zodiac command's options to its Action input.
 func buildZodiac(o map[string]string, c InvokeContext) (string, map[string]any) {
 	sign := strings.TrimSpace(o["sign"])
-	if wordsFor("zodiac", "verb", "ranking")[strings.ToLower(sign)] == "ranking" {
+	if wordsFor(c.words, "zodiac", "verb", "ranking")[strings.ToLower(sign)] == "ranking" {
 		return "fortune.query", map[string]any{"what": "ranking"}
 	}
 	return "fortune.query", map[string]any{"what": "zodiac", "sign": sign}
 }
 
 // fortuneRequest maps a fortune verb (and what follows it) to its Action.
-func fortuneRequest(verb, rest string) (string, map[string]any) {
+func fortuneRequest(cat *i18n.Catalog, verb, rest string) (string, map[string]any) {
 	rest = strings.TrimSpace(rest)
 	switch verb {
 	case "", "today", "detail", "month", "year", "animals": // animals: the twelve 띠, the same for everyone
@@ -58,7 +60,7 @@ func fortuneRequest(verb, rest string) (string, map[string]any) {
 		}
 		return "fortune.query", map[string]any{"what": verb}
 	case "subscribe":
-		if rest == "" || wordsFor("fortune", "value", "off")[strings.ToLower(rest)] == "off" {
+		if rest == "" || wordsFor(cat, "fortune", "value", "off")[strings.ToLower(rest)] == "off" {
 			if rest != "" {
 				return "fortune.subscribe", map[string]any{"op": "unsubscribe"}
 			}

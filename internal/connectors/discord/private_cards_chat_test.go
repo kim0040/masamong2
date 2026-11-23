@@ -50,14 +50,14 @@ func TestPrivatePrefixFailureNeverBecomesARoomReply(t *testing.T) {
 	if res := g.svc.Execute(context.Background(), action.Request{Action: "tools.configure", Input: mustJSON(map[string]any{"id": "reminders.update", "enabled": "off"})}); !res.OK {
 		t.Fatalf("could not switch the reminders tool off: %+v", res.Error)
 	}
-	cmd, _ := ByName("reminders")
+	cmd, _ := ByName(shippedCatalog(), "reminders")
 	g.runCommand(g.sess, roomMessage("m1", "!"+cmd.Aliases[0]), cmd, nil)
 	g.inflight.Wait()
 	if n := calls.Load(); n != 0 {
 		t.Fatalf("the failed personal command asked the model %d times", n)
 	}
 	loc := g.svc.LocaleFor("u1", g.locale("g1"))
-	if room := postsTo(t, fake, "room"); len(room) != 1 || len(room[0].Embeds) != 0 || room[0].Content != messages.T(loc, "discord.private.dm_sent") {
+	if room := postsTo(t, fake, "room"); len(room) != 1 || len(room[0].Embeds) != 0 || room[0].Content != shippedCatalog().T(loc, "discord.private.dm_sent") {
 		t.Fatalf("room posts = %+v, want only the DM line", room)
 	}
 	if dm := postsTo(t, fake, "1"); len(dm) != 1 || len(dm[0].Embeds) == 0 {

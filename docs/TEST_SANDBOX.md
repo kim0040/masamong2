@@ -170,7 +170,7 @@ CLI와 GUI는 같은 카탈로그를 노출한다: 모든 카탈로그 Action은
 
 | 바꿀 것 | 어디 |
 |---|---|
-| 도구 ID·`!` 별칭 | `contracts/sandbox/tool-parity.json` → Discord `Commands()`와 Python `tool_parity.py`가 맞는지 확인 → `go test ./internal/catalog/` · `python3 -m unittest experimental/rag-leaf-parent/test_tool_parity.py` |
+| 도구 ID·`!` 별칭 | `contracts/sandbox/tool-parity.json` → Discord `Commands()`와 Python `tool_parity.py`가 맞는지 확인 → `go test ./internal/catalog ./internal/connectors/discord -run Sandbox`(ID는 catalog, `!` 별칭은 Discord 테스트가 본다) · `(cd experimental/rag-leaf-parent && python3 -m unittest test_tool_parity)`(샌드박스 폴더 안에서 돌린다. 저장소 루트에서 파일 경로로 부르면 import에 실패한다) |
 | leaf→parent / 재순위 | `experimental/rag-leaf-parent/engine.py` + `tools/evaluation/rag_upgrade/` |
 | 관리 콘솔 문구·Action 실행 | `internal/transport/web`, `internal/application` — 샌드박스 HTML을 제품에 이식하지 않음 |
 

@@ -182,18 +182,26 @@ func (s *moreStore) reserve(id string) (moreEntry, func(bool), bool) {
 	}, true
 }
 
-// sendShaped sends a chat reply in the channel's reply shape. It returns what reached the channel (the
-// head only, for a trimmed reply), the message IDs, and the delivery report. lead, when set, is a line
-// said before the answer (the partial-picture notice): it is the first line or bubble, and a trimmed
-// reply keeps it in the part shown, so no path hides it.
-func (g *Gateway) sendShaped(ctx context.Context, s *discordgo.Session, guildID, channelID string, ref *discordgo.MessageReference, text, lead, shape string) (string, []string, deliveryReport) {
-	return g.sendShapedFor(ctx, s, guildID, channelID, ref, text, lead, shape, false, nil)
+// shapedReply is a chat reply to send in the channel's reply shape.
+type shapedReply struct {
+	guildID, channelID string
+	ref                *discordgo.MessageReference
+	text               string
+	// lead, when set, is a line said before the answer (the partial-picture notice): it is the first line or
+	// bubble, and a trimmed reply keeps it in the part shown, so no path hides it.
+	lead  string
+	shape string // plain, bubbles or trim
+	// deep marks a reply that may rest on a deep search: it is trimmed at a greater length. Bubbles are unchanged.
+	deep bool
+	// turnDone, when set, closes when the turn that made the reply has finished (the held rest waits for it).
+	turnDone <-chan struct{}
 }
 
-// sendShapedFor is sendShaped for a reply that may rest on a deep search (deep): such a reply is trimmed at
-// a greater length. Bubbles are unchanged.
-func (g *Gateway) sendShapedFor(ctx context.Context, s *discordgo.Session, guildID, channelID string, ref *discordgo.MessageReference, text, lead, shape string, deep bool, turnDone <-chan struct{}) (string, []string, deliveryReport) {
-	lead = strings.Join(strings.Fields(lead), " ")
+// sendShaped sends a chat reply in the channel's reply shape. It returns what reached the channel (the
+// head only, for a trimmed reply), the message IDs, and the delivery report.
+func (g *Gateway) sendShaped(ctx context.Context, s *discordgo.Session, r shapedReply) (string, []string, deliveryReport) {
+	guildID, channelID, ref, text, shape, turnDone := r.guildID, r.channelID, r.ref, r.text, r.shape, r.turnDone
+	lead := strings.Join(strings.Fields(r.lead), " ")
 	if shape == "plain" {
 		return g.sendReply(ctx, s, guildID, channelID, ref, withLead(lead, text))
 	}
@@ -203,7 +211,7 @@ func (g *Gateway) sendShapedFor(ctx context.Context, s *discordgo.Session, guild
 		}
 	}
 	at, shown := trimAt, trimHead
-	if deep {
+	if r.deep {
 		at, shown = trimAtDeep, trimHeadDeep
 	}
 	head, rest := trimReplyAt(text, at, shown)
@@ -285,7 +293,7 @@ func (g *Gateway) handleMore(s *discordgo.Session, i *discordgo.InteractionCreat
 	if !ok {
 		// kept for an hour in memory only (or the bot restarted): say so instead of doing nothing
 		_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{Content: messages.T(g.locale(i.GuildID), "discord.more.expired"), Flags: discordgo.MessageFlagsEphemeral, AllowedMentions: noMentions}},
+			Data: &discordgo.InteractionResponseData{Content: g.catalog().T(g.locale(i.GuildID), "discord.more.expired"), Flags: discordgo.MessageFlagsEphemeral, AllowedMentions: noMentions}},
 			discordgo.WithContext(ctx))
 		return
 	}

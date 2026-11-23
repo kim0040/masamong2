@@ -85,7 +85,7 @@ func TestChatPictureThatCannotBeSentIsAFailureLine(t *testing.T) {
 // nobody mentioned) instead of a file Discord would refuse; within the limit the card goes out with it.
 func TestPrefixImageCommandOverTheUploadLimitIsAFailureLine(t *testing.T) {
 	g, rec, id := pictureGateway(t, http.StatusOK)
-	cmd, ok := ByName("image")
+	cmd, ok := ByName(shippedCatalog(), "image")
 	if !ok {
 		t.Fatal("no image command")
 	}
@@ -113,7 +113,7 @@ func TestPrefixImageCommandOverTheUploadLimitIsAFailureLine(t *testing.T) {
 // picture over the upload limit.
 func TestSlashImageResponseOverTheUploadLimitHasNoFile(t *testing.T) {
 	g, _, id := pictureGateway(t, http.StatusOK)
-	cmd, _ := ByName("image")
+	cmd, _ := ByName(shippedCatalog(), "image")
 	ictx := InvokeContext{ChannelID: "c1", GuildID: "g1", Locale: g.locale("g1")}
 	result := func(size int) action.Result {
 		return action.Result{OK: true, Action: "images.generate", Output: map[string]any{"status": "ok", "image_id": id, "bytes": size}}

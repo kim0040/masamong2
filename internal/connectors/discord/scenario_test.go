@@ -52,7 +52,7 @@ func runPrefix(t *testing.T, svc *application.Service, ictx InvokeContext, text 
 		t.Fatalf("%q is not a command", text)
 	}
 	res := svc.Execute(context.Background(), requestFor(cmd, opts, ictx, "dc:test"))
-	r := Render(res, cmd, ictx.Locale)
+	r := Render(shippedCatalog(), res, cmd, ictx.Locale)
 	checkRendered(t, text, r)
 	return res, r
 }
@@ -65,7 +65,7 @@ func press(t *testing.T, svc *application.Service, ictx InvokeContext, customID 
 		t.Fatalf("button %q is not handled", customID)
 	}
 	res := svc.Execute(context.Background(), req)
-	r := Render(res, Command{Action: req.Action}, ictx.Locale)
+	r := Render(shippedCatalog(), res, Command{Action: req.Action}, ictx.Locale)
 	checkRendered(t, customID, r)
 	return res, r
 }
@@ -168,7 +168,7 @@ func TestScenarioReminderThroughDiscord(t *testing.T) {
 		}
 	}
 	lres := svc.Execute(context.Background(), requestFor(list, nil, cheolsu, "dc:list"))
-	lr := Render(lres, list, "ko")
+	lr := Render(shippedCatalog(), lres, list, "ko")
 	checkRendered(t, "/reminders", lr)
 	if !strings.Contains(embedText(lr), "회의") {
 		t.Fatalf("list: %s", embedText(lr))

@@ -53,7 +53,7 @@ func TestVisionNoticeIsInTheFirstMessageOfATrimmedReply(t *testing.T) {
 		paras = append(paras, strings.Repeat("word ", 30)+fmt.Sprint(i))
 	}
 	answer := strings.Join(paras, "\n\n")
-	said, ids, rep := g.sendShaped(context.Background(), g.sess, "g1", "c1", nil, answer, notice, "trim")
+	said, ids, rep := g.sendShaped(context.Background(), g.sess, shapedReply{guildID: "g1", channelID: "c1", text: answer, lead: notice, shape: "trim"})
 	if rep.Sent != rep.Parts || len(ids) == 0 {
 		t.Fatalf("delivery: %+v ids %v", rep, ids)
 	}
@@ -77,7 +77,7 @@ func TestVisionNoticeIsInTheFirstMessageOfATrimmedReply(t *testing.T) {
 func TestVisionNoticeDoesNotTrimAnUnbrokenAnswer(t *testing.T) {
 	g, fake := gatewayWithFakeDiscord(t)
 	answer := strings.Repeat("word ", 200)
-	_, ids, rep := g.sendShaped(context.Background(), g.sess, "g1", "c1", nil, answer, "NOTICE-LINE", "trim")
+	_, ids, rep := g.sendShaped(context.Background(), g.sess, shapedReply{guildID: "g1", channelID: "c1", text: answer, lead: "NOTICE-LINE", shape: "trim"})
 	if rep.Sent != rep.Parts || len(ids) == 0 {
 		t.Fatalf("delivery: %+v", rep)
 	}
@@ -94,7 +94,7 @@ func TestVisionNoticeIsItsOwnFirstBubble(t *testing.T) {
 	bubbleGapMin, bubbleGapMax = time.Millisecond, 2*time.Millisecond
 	t.Cleanup(func() { bubbleGapMin, bubbleGapMax = oldMin, oldMax })
 	g, fake := gatewayWithFakeDiscord(t)
-	_, _, rep := g.sendShaped(context.Background(), g.sess, "g1", "c1", nil, "one line answer", "NOTICE-LINE", "bubbles")
+	_, _, rep := g.sendShaped(context.Background(), g.sess, shapedReply{guildID: "g1", channelID: "c1", text: "one line answer", lead: "NOTICE-LINE", shape: "bubbles"})
 	if rep.Sent != 2 {
 		t.Fatalf("report %+v", rep)
 	}

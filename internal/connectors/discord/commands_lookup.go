@@ -3,6 +3,8 @@ package discord
 import (
 	"strconv"
 	"strings"
+
+	"masamong/internal/i18n"
 )
 
 // Builders of the lookup commands: weather, alerts, quotes, exchange rates, search, ranking and places.
@@ -61,14 +63,14 @@ func buildSearch(o map[string]string, c InvokeContext) (string, map[string]any) 
 
 // buildRanking maps the ranking command's options to its Action input.
 func buildRanking(o map[string]string, c InvokeContext) (string, map[string]any) {
-	return "activity.ranking", map[string]any{"period": rankingPeriod(o["period"]), "scope": "discord:" + c.ChannelID}
+	return "activity.ranking", map[string]any{"period": rankingPeriod(c.words, o["period"]), "scope": "discord:" + c.ChannelID}
 }
 
 // rankingPeriod reads the period people type after !랭킹 (오늘, 이번주, 이번달, 전체 …): the words of every
 // language are discord.command.ranking.period.<period>. Spaces and case do not count; anything else is the
 // default week (the option's description says so).
-func rankingPeriod(v string) string {
-	if p, ok := wordsFor("ranking", "period", "today", "week", "month", "all")[strings.ReplaceAll(strings.ToLower(strings.TrimSpace(v)), " ", "")]; ok {
+func rankingPeriod(cat *i18n.Catalog, v string) string {
+	if p, ok := wordsFor(cat, "ranking", "period", "today", "week", "month", "all")[strings.ReplaceAll(strings.ToLower(strings.TrimSpace(v)), " ", "")]; ok {
 		return p
 	}
 	return "week"

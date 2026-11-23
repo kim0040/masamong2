@@ -8,7 +8,7 @@ import (
 // The slash command's region option is a place: words that are verbs when typed after !내설정 ("초기화",
 // "clear", "timezone …") are not read as a reset or another setting.
 func TestMySettingsSlashRegionIsAPlace(t *testing.T) {
-	cmd, ok := ByName("mysettings")
+	cmd, ok := ByName(shippedCatalog(), "mysettings")
 	if !ok {
 		t.Fatal("mysettings command missing")
 	}
@@ -41,8 +41,8 @@ func TestRankingPeriodWordsFromTheCatalogs(t *testing.T) {
 		"전체": "all", "ALL": "all", "累計": "all", "todo": "all",
 		"": "week", "어제": "week", "yesterday": "week",
 	} {
-		if got := rankingPeriod(v); got != want {
-			t.Errorf("rankingPeriod(%q) = %q, want %q", v, got, want)
+		if got := rankingPeriod(shippedCatalog(), v); got != want {
+			t.Errorf("rankingPeriod(shippedCatalog(), %q) = %q, want %q", v, got, want)
 		}
 	}
 }

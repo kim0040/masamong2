@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
+
+	"masamong/internal/i18n"
 )
 
 // Cards about the bot itself: its status and the command list.
@@ -24,8 +26,8 @@ func renderDoctor(in renderInput, e *discordgo.MessageEmbed) Rendered {
 	for _, k := range keys {
 		m, _ := feats[k].(map[string]any)
 		name := k
-		if messages.Has("feature.name." + k) {
-			name = messages.T(locale, "feature.name."+k)
+		if in.cat.Has("feature.name." + k) {
+			name = in.cat.T(locale, "feature.name."+k)
 		}
 		line := fmt.Sprintf("%s %s", statusIcon(fmt.Sprint(m["status"])), name)
 		if why, _ := m["reason_text"].(string); why != "" && m["status"] != "ready" {
@@ -40,8 +42,8 @@ func renderDoctor(in renderInput, e *discordgo.MessageEmbed) Rendered {
 
 // RenderHelp renders only the command surfaces supplied by the live gateway plus the message menu
 // action that is always registered.
-func RenderHelp(locale string, slash, prefix []string) Rendered {
-	t := func(key string) string { return messages.T(locale, "discord.render.help."+key) }
+func RenderHelp(cat *i18n.Catalog, locale string, slash, prefix []string) Rendered {
+	t := func(key string) string { return cat.T(locale, "discord.render.help."+key) }
 	var lines []string
 	if len(slash) > 0 {
 		lines = append(lines, "**"+t("slash")+"**")
@@ -57,7 +59,7 @@ func RenderHelp(locale string, slash, prefix []string) Rendered {
 	if len(lines) > 0 {
 		lines = append(lines, "")
 	}
-	lines = append(lines, "**"+t("message")+"**", messages.T(locale, "discord.feedback.command"))
+	lines = append(lines, "**"+t("message")+"**", cat.T(locale, "discord.feedback.command"))
 	return Rendered{Embed: &discordgo.MessageEmbed{Title: t("title"), Color: colorNeutral, Description: strings.Join(lines, "\n")}, Ephemeral: true}
 }
 

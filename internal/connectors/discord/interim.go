@@ -167,7 +167,7 @@ func (i *interim) post(variants int, key string) {
 	landed := i.landed
 	i.mu.Unlock()
 
-	text := messages.T(i.locale, fmt.Sprintf("%s.%d", key, 1+i.pick(variants)))
+	text := i.g.catalog().T(i.locale, fmt.Sprintf("%s.%d", key, 1+i.pick(variants)))
 	reg := &i.g.interims
 	token := reg.expect(i.channelID, i.refID(), text) // before the send: the create event can arrive before the REST call returns
 	ctx, cancel := context.WithTimeout(i.base, interimPostTimeout)

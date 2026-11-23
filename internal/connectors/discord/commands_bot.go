@@ -8,14 +8,14 @@ import (
 
 // buildAdmin maps the admin command's options to its Action input.
 func buildAdmin(o map[string]string, c InvokeContext) (string, map[string]any) {
-	verb, rest := splitVerb(o["op"], o["mode"], wordsFor("admin", "verb", "status", "pause", "resume", "respond", "memory", "chime", "news", "block", "unblock"))
+	verb, rest := splitVerb(o["op"], o["mode"], wordsFor(c.words, "admin", "verb", "status", "pause", "resume", "respond", "memory", "chime", "news", "block", "unblock"))
 	if verb == "" {
 		verb = "status"
 	}
 	in := map[string]any{"op": verb}
 	switch verb {
 	case "respond", "memory", "chime", "news":
-		mode := wordsFor("admin", "mode", "always", "mention", "command", "off", "on", "collect", "shadow", "conservative")[strings.ToLower(rest)]
+		mode := wordsFor(c.words, "admin", "mode", "always", "mention", "command", "off", "on", "collect", "shadow", "conservative")[strings.ToLower(rest)]
 		if mode == "" {
 			mode = rest
 		}

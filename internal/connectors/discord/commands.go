@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/bwmarrin/discordgo"
 
@@ -41,16 +42,10 @@ type Command struct {
 	ManagersOnly bool
 }
 
-// messages is the catalog commands and renders read. The gateway points it at the service catalog so
-// operator locale bundles apply.
-var messages = i18n.New()
-
-// SetCatalog replaces the message catalog (the daemon passes the service's).
-func SetCatalog(c *i18n.Catalog) {
-	if c != nil {
-		messages = c
-	}
-}
+// shippedCatalog is the catalog built into the program, with no operator bundles. It is read-only and shared:
+// tooling that has no service (the code map) and gateways built without one read it. A running gateway reads
+// its own service's catalog (Gateway.catalog).
+var shippedCatalog = sync.OnceValue(i18n.New)
 
 // discordLocales maps catalog locales to Discord locale IDs.
 var discordLocales = map[string]discordgo.Locale{
@@ -58,14 +53,14 @@ var discordLocales = map[string]discordgo.Locale{
 }
 
 // localizations is key's text in every non-English loaded locale, keyed by Discord locale.
-func localizations(key string) map[discordgo.Locale]string {
+func localizations(cat *i18n.Catalog, key string) map[discordgo.Locale]string {
 	out := map[discordgo.Locale]string{}
-	for _, loc := range messages.Locales() {
+	for _, loc := range cat.Locales() {
 		dl, ok := discordLocales[loc]
 		if !ok {
 			continue
 		}
-		if v, ok := messages.Lookup(loc, key); ok {
+		if v, ok := cat.Lookup(loc, key); ok {
 			out[dl] = v
 		}
 	}
@@ -87,6 +82,9 @@ type InvokeContext struct {
 	// preferred one. It keeps the region that Locale (the language the answer is written in, possibly a saved
 	// preference) may have lost. Only the fx home currency reads it.
 	Tag string
+	// words is the catalog the command's typed words (verbs, values) are read from: Commands sets it, so a
+	// command always reads the catalog of the surface it came from.
+	words *i18n.Catalog
 }
 
 func option(t discordgo.ApplicationCommandOptionType, name, desc string, required bool) *discordgo.ApplicationCommandOption {
@@ -97,13 +95,13 @@ func hoursChoice(hours int, en string) *discordgo.ApplicationCommandOptionChoice
 	return &discordgo.ApplicationCommandOptionChoice{Name: en, Value: hours}
 }
 
-func aliasesFor(name string) []string {
+func aliasesFor(cat *i18n.Catalog, name string) []string {
 	var out []string
 	seen := map[string]bool{}
-	locs := messages.Locales()
+	locs := cat.Locales()
 	sort.Strings(locs)
 	for _, loc := range locs {
-		v, ok := messages.Lookup(loc, "discord.command."+name+".aliases")
+		v, ok := cat.Lookup(loc, "discord.command."+name+".aliases")
 		if !ok {
 			continue
 		}
@@ -117,10 +115,10 @@ func aliasesFor(name string) []string {
 	return out
 }
 
-func aliasesForLocale(name, locale string) []string {
-	value, ok := messages.Lookup(locale, "discord.command."+name+".aliases")
+func aliasesForLocale(cat *i18n.Catalog, name, locale string) []string {
+	value, ok := cat.Lookup(locale, "discord.command."+name+".aliases")
 	if !ok {
-		value, _ = messages.Lookup("en", "discord.command."+name+".aliases")
+		value, _ = cat.Lookup("en", "discord.command."+name+".aliases")
 	}
 	var out []string
 	for _, alias := range strings.Split(value, ",") {
@@ -133,9 +131,9 @@ func aliasesForLocale(name, locale string) []string {
 
 // commandHints are the commands members can run, for the application's help (manager-only commands and
 // prefix-only extra words are left out).
-func commandHints() []application.CommandHint {
+func commandHints(cat *i18n.Catalog) []application.CommandHint {
 	var out []application.CommandHint
-	for _, c := range Commands() {
+	for _, c := range commandsIn(cat) {
 		if !c.ManagersOnly && !c.PrefixOnly {
 			out = append(out, application.CommandHint{Name: c.Name, Action: c.Action})
 		}
@@ -143,8 +141,22 @@ func commandHints() []application.CommandHint {
 	return out
 }
 
+// Commands is the registered surface read through the built-in catalog (tooling and docs). A gateway reads its
+// service's catalog through commandsIn.
+func Commands() []Command { return commandsIn(shippedCatalog()) }
+
+// commandsIn is the registered surface with its words (aliases, typed values) from cat.
+func commandsIn(cat *i18n.Catalog) []Command { return surface{cat}.Commands() }
+
+// surface is the command table read through one message catalog.
+type surface struct{ cat *i18n.Catalog }
+
 // Commands is the registered surface. Every entry maps to a catalog Action; nothing here owns logic.
-func Commands() []Command {
+// The docs checker (internal/docnames RegistryNames) reads the command names from the literal in this
+// method, and takes the last func or method named Commands in this file: keep the table here, below the
+// Commands function.
+func (s surface) Commands() []Command {
+	cat := s.cat
 	str := discordgo.ApplicationCommandOptionString
 	cmds := []Command{
 		{
@@ -362,7 +374,12 @@ func Commands() []Command {
 		},
 	}
 	for i := range cmds {
-		cmds[i].Aliases = aliasesFor(cmds[i].Name)
+		cmds[i].Aliases = aliasesFor(cat, cmds[i].Name)
+		build := cmds[i].Build
+		cmds[i].Build = func(opts map[string]string, ctx InvokeContext) (string, map[string]any) {
+			ctx.words = cat
+			return build(opts, ctx)
+		}
 	}
 	return cmds
 }
@@ -380,12 +397,12 @@ func choiceOption(name, desc string, required bool, values ...string) *discordgo
 // wordsFor maps the words people may type for a command's fixed values to the values: each value
 // itself plus every locale's comma-separated discord.command.<cmd>.<group>.<value> (e.g. the Korean
 // "동의" for privacy's grant). Words live in the message catalogs, never in code.
-func wordsFor(cmd, group string, values ...string) map[string]string {
+func wordsFor(cat *i18n.Catalog, cmd, group string, values ...string) map[string]string {
 	out := map[string]string{}
 	for _, v := range values {
 		out[v] = v
-		for _, loc := range messages.Locales() {
-			words, ok := messages.Lookup(loc, "discord.command."+cmd+"."+group+"."+v)
+		for _, loc := range cat.Locales() {
+			words, ok := cat.Lookup(loc, "discord.command."+cmd+"."+group+"."+v)
 			if !ok {
 				continue
 			}
@@ -425,33 +442,33 @@ func orDefault(v, d string) string {
 }
 
 // localized fills Discord name/description localizations for a command and its options.
-func localized(c Command) *discordgo.ApplicationCommand {
+func localized(cat *i18n.Catalog, c Command) *discordgo.ApplicationCommand {
 	base := "discord.command." + c.Name
 	ac := &discordgo.ApplicationCommand{Name: c.Name, Description: c.Desc}
 	if c.ManagersOnly {
 		perms := int64(discordgo.PermissionManageGuild)
 		ac.DefaultMemberPermissions = &perms
 	}
-	if l := localizations(base + ".name"); len(l) > 0 {
+	if l := localizations(cat, base+".name"); len(l) > 0 {
 		ac.NameLocalizations = &l
 	}
-	if l := localizations(base + ".description"); len(l) > 0 {
+	if l := localizations(cat, base+".description"); len(l) > 0 {
 		ac.DescriptionLocalizations = &l
 	}
 	for _, o := range c.Options {
 		cp := *o
 		ob := base + ".option." + o.Name
-		if l := localizations(ob + ".name"); len(l) > 0 {
+		if l := localizations(cat, ob+".name"); len(l) > 0 {
 			cp.NameLocalizations = l
 		}
-		if l := localizations(ob + ".description"); len(l) > 0 {
+		if l := localizations(cat, ob+".description"); len(l) > 0 {
 			cp.DescriptionLocalizations = l
 		}
 		if len(o.Choices) > 0 {
 			cp.Choices = nil
 			for _, ch := range o.Choices {
 				cc := *ch
-				if l := localizations(fmt.Sprintf("%s.choice.%s.%v", base, o.Name, ch.Value)); len(l) > 0 {
+				if l := localizations(cat, fmt.Sprintf("%s.choice.%s.%v", base, o.Name, ch.Value)); len(l) > 0 {
 					cc.NameLocalizations = l
 				}
 				cp.Choices = append(cp.Choices, &cc)
@@ -464,20 +481,20 @@ func localized(c Command) *discordgo.ApplicationCommand {
 
 // ApplicationCommands renders the registration payload. Its JSON hash is compared before syncing (15장 §6).
 func ApplicationCommands() []*discordgo.ApplicationCommand {
-	return ApplicationCommandsFor(nil)
+	return applicationCommandsIn(shippedCatalog(), nil)
 }
 
-// ApplicationCommandsFor renders only the commands whose Action allowed accepts (nil = all), so a tool
+// applicationCommandsIn renders only the commands whose Action allowed accepts (nil = all), so a tool
 // switched off for commands is not offered as a slash command.
-func ApplicationCommandsFor(allowed func(action string) bool) []*discordgo.ApplicationCommand {
+func applicationCommandsIn(cat *i18n.Catalog, allowed func(action string) bool) []*discordgo.ApplicationCommand {
 	var out []*discordgo.ApplicationCommand
-	for _, c := range Commands() {
+	for _, c := range commandsIn(cat) {
 		if c.PrefixOnly || (allowed != nil && !allowed(c.Action)) {
 			continue
 		}
-		out = append(out, localized(c))
+		out = append(out, localized(cat, c))
 	}
-	return append(out, rateCommand())
+	return append(out, rateCommand(cat))
 }
 
 // CommandsHash identifies the registration payload so startup only re-syncs when it changed.
@@ -500,16 +517,16 @@ func fnv64(b []byte) uint64 {
 }
 
 // LocalName is the command's name in locale (falls back to the canonical name).
-func LocalName(c Command, locale string) string {
-	if v, ok := messages.Lookup(locale, "discord.command."+c.Name+".name"); ok {
+func LocalName(cat *i18n.Catalog, c Command, locale string) string {
+	if v, ok := cat.Lookup(locale, "discord.command."+c.Name+".name"); ok {
 		return v
 	}
 	return c.Name
 }
 
 // LocalDesc is the command's description in locale.
-func LocalDesc(c Command, locale string) string {
-	if v, ok := messages.Lookup(locale, "discord.command."+c.Name+".description"); ok {
+func LocalDesc(cat *i18n.Catalog, c Command, locale string) string {
+	if v, ok := cat.Lookup(locale, "discord.command."+c.Name+".description"); ok {
 		return v
 	}
 	return c.Desc
@@ -522,8 +539,8 @@ func pendingServerAllows(action string) bool {
 }
 
 // ByName / ByAlias resolve a Discord surface to a Command.
-func ByName(name string) (Command, bool) {
-	for _, c := range Commands() {
+func ByName(cat *i18n.Catalog, name string) (Command, bool) {
+	for _, c := range commandsIn(cat) {
 		if c.Name == name {
 			return c, true
 		}
@@ -531,8 +548,8 @@ func ByName(name string) (Command, bool) {
 	return Command{}, false
 }
 
-func ByAlias(alias string) (Command, bool) {
-	return PrefixTable{}.byAlias(alias)
+func ByAlias(cat *i18n.Catalog, alias string) (Command, bool) {
+	return PrefixTable{cat: cat}.byAlias(alias)
 }
 
 // ToolCommand is the connector view of application.ToolCommand (prefix words per tool from config).
@@ -545,15 +562,16 @@ type ToolCommand struct {
 
 // PrefixTable resolves "!word" with config overrides: configured aliases replace the default words of the
 // first built-in command on that Action, and operator tools with aliases become commands whose text fills their
-// first parameter. The zero value uses the defaults only.
+// first parameter. cat is the catalog the default words come from (nil: the built-in one).
 type PrefixTable struct {
+	cat       *i18n.Catalog
 	overrides map[string][]string // action → aliases
 	custom    []ToolCommand
 }
 
 // NewPrefixTable builds the table from the service's tool commands.
-func NewPrefixTable(tc []ToolCommand) PrefixTable {
-	t := PrefixTable{overrides: map[string][]string{}}
+func NewPrefixTable(cat *i18n.Catalog, tc []ToolCommand) PrefixTable {
+	t := PrefixTable{cat: cat, overrides: map[string][]string{}}
 	for _, c := range tc {
 		if c.Custom {
 			t.custom = append(t.custom, c)
@@ -564,12 +582,20 @@ func NewPrefixTable(tc []ToolCommand) PrefixTable {
 	return t
 }
 
+// catalog is the table's catalog; the zero value reads the built-in one.
+func (t PrefixTable) catalog() *i18n.Catalog {
+	if t.cat != nil {
+		return t.cat
+	}
+	return shippedCatalog()
+}
+
 func (t PrefixTable) byAlias(alias string) (Command, bool) {
 	alias = strings.ToLower(strings.TrimSpace(alias))
 	// configured words are the tool's own: they replace the words of the first command on that Action only, so
 	// the other commands on it (!이번달운세 and !별자리 on fortune.query) keep theirs
 	overridden := map[string]bool{}
-	for _, c := range Commands() {
+	for _, c := range commandsIn(t.catalog()) {
 		words := c.Aliases
 		if o, ok := t.overrides[c.Action]; ok && !overridden[c.Action] {
 			words = o
@@ -609,8 +635,8 @@ func customCommand(c ToolCommand) Command {
 
 // ParsePrefix splits "!날씨 서울" into the command and its positional text with default aliases.
 // Returns ok=false when the message does not start with the prefix or the alias is unknown.
-func ParsePrefix(prefix, content string) (Command, map[string]string, bool) {
-	return PrefixTable{}.Parse(prefix, content)
+func ParsePrefix(cat *i18n.Catalog, prefix, content string) (Command, map[string]string, bool) {
+	return PrefixTable{cat: cat}.Parse(prefix, content)
 }
 
 // Parse is ParsePrefix with the table's aliases.
@@ -631,7 +657,7 @@ func (t PrefixTable) Parse(prefix, content string) (Command, map[string]string, 
 	tail = strings.TrimSpace(tail)
 	if len(cmd.Options) > 0 && tail != "" {
 		if cmd.Name == "fx" {
-			fxPrefixOptions(tail, opts)
+			fxPrefixOptions(t.catalog(), tail, opts)
 		} else if cmd.Name == "poll" {
 			q, o, cut := strings.Cut(tail, "|")
 			opts["question"] = strings.TrimSpace(q)
@@ -649,7 +675,7 @@ func (t PrefixTable) Parse(prefix, content string) (Command, map[string]string, 
 // amount; the rest is a currency (a code or a name that may hold spaces), or two of them, the currency and
 // the base to value it in. Words are split into two names only when both resolve, so "미국 달러" stays one
 // name; when nothing resolves they stay one currency, which the action refuses as it would any other.
-func fxPrefixOptions(tail string, opts map[string]string) {
+func fxPrefixOptions(cat *i18n.Catalog, tail string, opts map[string]string) {
 	var words []string
 	for _, w := range strings.Fields(tail) {
 		if _, taken := opts["amount"]; !taken && currency.IsNumber(w) {
@@ -662,7 +688,7 @@ func fxPrefixOptions(tail string, opts map[string]string) {
 		return
 	}
 	opts["currency"] = strings.Join(words, " ")
-	lex := currency.New(messages)
+	lex := currency.New(cat)
 	if _, ok := lex.Resolve(opts["currency"]); ok {
 		return
 	}

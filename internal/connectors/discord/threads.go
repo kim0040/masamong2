@@ -278,7 +278,7 @@ func (g *Gateway) offerThread(ctx context.Context, s *discordgo.Session, m *disc
 		return
 	}
 	if offer.Auto {
-		g.openThread(ctx, s, m.GuildID, m.ChannelID, last, offer.Caller, displayName(m), m.Content, turnID, "")
+		g.openThread(ctx, s, threadOpening{guildID: m.GuildID, channelID: m.ChannelID, messageID: last, callerID: offer.Caller, callerName: displayName(m), topic: m.Content, turnID: turnID})
 		return
 	}
 	// the offer is a line and two buttons on the reply itself: a separate message would clutter the
@@ -315,11 +315,23 @@ func (g *Gateway) dropThreadOffer(turnID, reason string) {
 	}
 }
 
+// threadOpening is what a thread is made from: the bot's reply it opens on and the person it talks with.
+type threadOpening struct {
+	guildID, channelID string
+	messageID          string // the bot's reply the thread starts on
+	callerID           string // the person asked; callerName and topic name the thread
+	callerName         string
+	topic              string
+	turnID             string
+	// joiner, when set, is someone else who pressed the open button: they are in the conversation too.
+	joiner string
+}
+
 // openThread makes a thread on the bot's reply, seeds it and posts the first message with a stop button.
-// joiner, when set, is someone else who pressed the open button: they are in the conversation too.
-func (g *Gateway) openThread(ctx context.Context, s *discordgo.Session, guildID, channelID, messageID, callerID, callerName, topic, turnID, joiner string) bool {
-	name := threadName(callerName, topic)
-	th, err := s.MessageThreadStartComplex(channelID, messageID, &discordgo.ThreadStart{Name: name, AutoArchiveDuration: 1440, Type: discordgo.ChannelTypeGuildPublicThread},
+func (g *Gateway) openThread(ctx context.Context, s *discordgo.Session, o threadOpening) bool {
+	guildID, channelID, callerID, turnID, joiner := o.guildID, o.channelID, o.callerID, o.turnID, o.joiner
+	name := threadName(o.callerName, o.topic)
+	th, err := s.MessageThreadStartComplex(channelID, o.messageID, &discordgo.ThreadStart{Name: name, AutoArchiveDuration: 1440, Type: discordgo.ChannelTypeGuildPublicThread},
 		discordgo.WithContext(ctx))
 	if err != nil {
 		g.log.Warn("discord: thread not created", "err", err)
@@ -452,7 +464,7 @@ func (g *Gateway) handleThreadComponent(s *discordgo.Session, i *discordgo.Inter
 		g.work(func(base context.Context) {
 			wctx, wcancel := context.WithTimeout(base, g.ActionTimeout)
 			defer wcancel()
-			g.openThread(wctx, s, i.GuildID, i.ChannelID, i.Message.ID, caller, name, topic, turnID, joiner)
+			g.openThread(wctx, s, threadOpening{guildID: i.GuildID, channelID: i.ChannelID, messageID: i.Message.ID, callerID: caller, callerName: name, topic: topic, turnID: turnID, joiner: joiner})
 		})
 	case len(parts) == 3 && parts[1] == "stop":
 		// like the stop words: only a person the bot talks with there ends it (and posts its recap)
@@ -480,7 +492,7 @@ func (g *Gateway) refuseBlocked(ctx context.Context, s *discordgo.Session, i *di
 	if !g.svc.BlockedIn(i.GuildID, actor) {
 		return false
 	}
-	text := messages.T(g.svc.LocaleFor(actor, g.locale(i.GuildID)), "access.blocked")
+	text := g.catalog().T(g.svc.LocaleFor(actor, g.locale(i.GuildID)), "access.blocked")
 	_ = s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{Type: discordgo.InteractionResponseChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{Content: text, Flags: discordgo.MessageFlagsEphemeral, AllowedMentions: noMentions}},
 		discordgo.WithContext(ctx))

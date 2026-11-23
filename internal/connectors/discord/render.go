@@ -12,6 +12,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 
 	"masamong/internal/action"
+	"masamong/internal/i18n"
 )
 
 // noMentions is applied to every outbound message: the bot never pings users or roles (07장).
@@ -47,18 +48,18 @@ type Rendered struct {
 // Render turns an Action result into an embed. Every branch says where data came from and whether it is
 // live; fixture or unconfigured outputs are never dressed up as real observations.
 // locale picks the catalog language (discord.render.* keys); unknown locales fall back to English.
-func Render(res action.Result, cmd Command, locale string) Rendered {
-	t := func(key string, args ...any) string { return messages.T(locale, "discord.render."+key, args...) }
+func Render(cat *i18n.Catalog, res action.Result, cmd Command, locale string) Rendered {
+	t := func(key string, args ...any) string { return cat.T(locale, "discord.render."+key, args...) }
 	if !res.OK {
-		e := &discordgo.MessageEmbed{Color: colorError, Title: t("failed_title", "command", LocalName(cmd, locale))}
-		msg := messages.T(locale, "generic.error")
+		e := &discordgo.MessageEmbed{Color: colorError, Title: t("failed_title", "command", LocalName(cat, cmd, locale))}
+		msg := cat.T(locale, "generic.error")
 		if res.Error != nil {
-			if messages.Has(res.Error.MessageKey) {
+			if cat.Has(res.Error.MessageKey) {
 				args, dropped := errorMessageArgs(res.Error.Args)
 				// a sentence whose subject was withheld ("no such pair {pair}") would read as broken
 				// text: the generic line says less but is true
-				if !needsAny(locale, res.Error.MessageKey, dropped) {
-					msg = messages.T(locale, res.Error.MessageKey, args...)
+				if !needsAny(cat, locale, res.Error.MessageKey, dropped) {
+					msg = cat.T(locale, res.Error.MessageKey, args...)
 				}
 			}
 			if res.Error.Retryable {
@@ -74,7 +75,7 @@ func Render(res action.Result, cmd Command, locale string) Rendered {
 	}
 	status, _ := out["status"].(string)
 	live, _ := out["live"].(bool)
-	in := renderInput{out: out, status: status, live: live, cmd: cmd, locale: locale, t: t}
+	in := renderInput{out: out, status: status, live: live, cmd: cmd, locale: locale, cat: cat, t: t}
 	e := &discordgo.MessageEmbed{Color: colorOK}
 	switch res.Action {
 	case "weather.query":
@@ -104,7 +105,7 @@ func Render(res action.Result, cmd Command, locale string) Rendered {
 	case "images.generate":
 		return renderImage(in, e)
 	case "help.version":
-		return RenderHelp(locale, nil, nil)
+		return RenderHelp(cat, locale, nil, nil)
 	default:
 		e.Title = res.Action
 		e.Description = truncate(fmt.Sprint(out), 1000)
@@ -119,6 +120,7 @@ type renderInput struct {
 	live   bool
 	cmd    Command
 	locale string
+	cat    *i18n.Catalog                        // the catalog t and the other texts read
 	t      func(key string, args ...any) string // a discord.render.* text in locale
 }
 
@@ -147,13 +149,13 @@ func errorMessageArgs(args map[string]any) (kept []any, dropped []string) {
 }
 
 // needsAny reports whether the message template uses a placeholder for one of the names.
-func needsAny(locale, key string, names []string) bool {
+func needsAny(cat *i18n.Catalog, locale, key string, names []string) bool {
 	if len(names) == 0 {
 		return false
 	}
-	text, ok := messages.Lookup(locale, key)
+	text, ok := cat.Lookup(locale, key)
 	if !ok {
-		text, _ = messages.Lookup("en", key)
+		text, _ = cat.Lookup("en", key)
 	}
 	for _, name := range names {
 		if strings.Contains(text, "{"+name+"}") {

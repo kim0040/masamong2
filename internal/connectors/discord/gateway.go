@@ -30,6 +30,7 @@ import (
 	"masamong/internal/conversation"
 	"masamong/internal/crash"
 	"masamong/internal/errclass"
+	"masamong/internal/i18n"
 	"masamong/internal/memory/engine"
 	"masamong/internal/providers"
 	"masamong/internal/vision"
@@ -91,6 +92,26 @@ type Gateway struct {
 	merge merger
 	// health is the gateway diagnostic state (health.go)
 	health gatewayHealth
+	// msgs is the message catalog this gateway speaks from (its service's, so operator locale bundles apply).
+	// Start sets it; a gateway built without it reads the service's, or the built-in one (catalog).
+	msgs *i18n.Catalog
+}
+
+// catalog is the message catalog of this gateway. Each gateway has its own, so two gateways in one process
+// never read each other's.
+func (g *Gateway) catalog() *i18n.Catalog {
+	if g.msgs != nil {
+		return g.msgs
+	}
+	return serviceCatalog(g.svc)
+}
+
+// serviceCatalog is the catalog of svc (operator locale bundles included), or the built-in one without a service.
+func serviceCatalog(svc *application.Service) *i18n.Catalog {
+	if svc != nil && svc.I18n != nil {
+		return svc.I18n
+	}
+	return shippedCatalog()
 }
 
 var ErrNoToken = errors.New("discord: token not configured")
@@ -136,7 +157,7 @@ func Start(ctx context.Context, svc *application.Service, cfg config.Discord, lo
 		return nil, err
 	}
 	g := &Gateway{svc: svc, cfg: cfg, log: log, sess: sess, ActionTimeout: 40 * time.Second, ctx: ctx,
-		open: sess.Open, token: cred.Value(), retryWait: waitContext, retryJitter: jittered, notices: map[string]time.Time{}}
+		open: sess.Open, token: cred.Value(), retryWait: waitContext, retryJitter: jittered, notices: map[string]time.Time{}, msgs: svc.I18n}
 	g.workCtx, g.cancelWork = context.WithCancel(context.WithoutCancel(ctx))
 	// Changes deferred by an earlier run (or an older file format) are applied in the background: the
 	// gateway and the console must not wait on a store that may be slow or still failing.
@@ -159,8 +180,7 @@ func Start(ctx context.Context, svc *application.Service, cfg config.Discord, lo
 	sess.State.MaxMessageCount = stateMessages
 	g.registerHandlers(sess)
 	svc.SetDiscord(g)
-	SetCatalog(svc.I18n)
-	svc.SetCommandMenu(commandHints())
+	svc.SetCommandMenu(commandHints(g.catalog()))
 	events, unsubscribe := svc.Subscribe()
 	go func() {
 		defer unsubscribe()
@@ -419,7 +439,7 @@ func (g *Gateway) prefixTable() PrefixTable {
 	for _, c := range g.svc.ToolCommands() {
 		tc = append(tc, ToolCommand{Tool: c.Tool, Aliases: c.Aliases, Custom: c.Custom, FirstParam: c.FirstParam})
 	}
-	return NewPrefixTable(tc)
+	return NewPrefixTable(g.catalog(), tc)
 }
 
 func (g *Gateway) commandToolEnabled(action string) bool {
@@ -446,12 +466,12 @@ func (g *Gateway) mayAdmin(ictx InvokeContext) bool {
 
 func (g *Gateway) renderCommand(res action.Result, cmd Command, locale string, manager bool) Rendered {
 	if !res.OK || res.Action != "help.version" {
-		return Render(res, cmd, locale)
+		return Render(g.catalog(), res, cmd, locale)
 	}
 	var slash, prefixes []string
 	var registeredCommands []*discordgo.ApplicationCommand
 	if g.cfg.RegisterCommands { // slash commands exist only when the bot registers them
-		registeredCommands = ApplicationCommandsFor(g.commandToolEnabled)
+		registeredCommands = applicationCommandsIn(g.catalog(), g.commandToolEnabled)
 	}
 	for _, ac := range registeredCommands {
 		// Discord defaults an omitted type to a chat-input command; localized() relies on that default
@@ -459,29 +479,29 @@ func (g *Gateway) renderCommand(res action.Result, cmd Command, locale string, m
 		if ac.Type != 0 && ac.Type != discordgo.ChatApplicationCommand {
 			continue
 		}
-		registered, ok := ByName(ac.Name)
+		registered, ok := ByName(g.catalog(), ac.Name)
 		if !ok || registered.ManagersOnly && !manager {
 			continue
 		}
 		label := "/" + ac.Name
-		if local := LocalName(registered, locale); local != registered.Name {
+		if local := LocalName(g.catalog(), registered, locale); local != registered.Name {
 			label += " (" + local + ")"
 		}
-		slash = append(slash, label+" — "+LocalDesc(registered, locale))
+		slash = append(slash, label+" — "+LocalDesc(g.catalog(), registered, locale))
 	}
 
 	if !g.cfg.MessageContent || g.cfg.CommandPrefix == "" {
 		// "!" commands are read from message text: without the message-content intent (or a prefix)
 		// they cannot run, so help does not offer them
-		return RenderHelp(locale, slash, nil)
+		return RenderHelp(g.catalog(), locale, slash, nil)
 	}
 	commands := g.prefixTable()
 	aliases := map[string]bool{}
-	for _, c := range Commands() {
+	for _, c := range commandsIn(g.catalog()) {
 		if c.ManagersOnly && !manager || !g.commandToolEnabled(c.Action) {
 			continue
 		}
-		for _, alias := range aliasesForLocale(c.Name, locale) {
+		for _, alias := range aliasesForLocale(g.catalog(), c.Name, locale) {
 			aliases[alias] = true
 		}
 	}
@@ -503,9 +523,9 @@ func (g *Gateway) renderCommand(res action.Result, cmd Command, locale string, m
 			continue
 		}
 		label := g.cfg.CommandPrefix + alias
-		prefixes = append(prefixes, label+" — "+LocalDesc(resolved, locale))
+		prefixes = append(prefixes, label+" — "+LocalDesc(g.catalog(), resolved, locale))
 	}
-	return RenderHelp(locale, slash, prefixes)
+	return RenderHelp(g.catalog(), locale, slash, prefixes)
 }
 
 // redactedError shows the text with the token removed and still unwraps to the original error, so
@@ -747,7 +767,7 @@ func (g *Gateway) syncCommands(ctx context.Context) {
 	}
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	cmds := ApplicationCommandsFor(g.commandToolEnabled)
+	cmds := applicationCommandsIn(g.catalog(), g.commandToolEnabled)
 	h := hashCommands(cmds)
 	if g.lastSync == h {
 		return
@@ -870,7 +890,7 @@ func (g *Gateway) handleCommand(s *discordgo.Session, i *discordgo.InteractionCr
 		g.handleRate(s, i)
 		return
 	}
-	cmd, ok := ByName(data.Name)
+	cmd, ok := ByName(g.catalog(), data.Name)
 	if !ok {
 		return
 	}
@@ -1076,7 +1096,7 @@ func (g *Gateway) handleComponent(s *discordgo.Session, i *discordgo.Interaction
 			return
 		}
 		res := g.svc.Execute(ctx, req)
-		r := Render(res, cmd, ictx.Locale)
+		r := Render(g.catalog(), res, cmd, ictx.Locale)
 		flags := discordgo.MessageFlags(0)
 		if r.Ephemeral || !res.OK || parts[1] == "vote" {
 			flags = discordgo.MessageFlagsEphemeral
@@ -2158,7 +2178,7 @@ func (g *Gateway) sendChatNoticeWith(ctx context.Context, m *discordgo.MessageCr
 	if key == "" || !addressed || ctx.Err() != nil || m == nil || m.Author == nil || !g.claimNotice(m.Author.ID, m.ChannelID) {
 		return
 	}
-	msg := &discordgo.MessageSend{Content: messages.T(g.noticeLocale(m), key), Reference: m.Reference(), AllowedMentions: noMentions}
+	msg := &discordgo.MessageSend{Content: g.catalog().T(g.noticeLocale(m), key), Reference: m.Reference(), AllowedMentions: noMentions}
 	if err := send(ctx, msg); err != nil {
 		g.log.Warn("discord: chat refusal notice failed", "err", err)
 	}
@@ -2421,7 +2441,7 @@ func (g *Gateway) postToolArtifacts(ctx context.Context, s *discordgo.Session, g
 		if t.Tool != "polls.create" || !t.OK || t.Status == "dry_run" {
 			continue
 		}
-		r := Render(action.Result{OK: true, Action: t.Tool, Output: t.Data}, Command{Name: "poll", Action: t.Tool}, g.locale(guildID))
+		r := Render(g.catalog(), action.Result{OK: true, Action: t.Tool, Output: t.Data}, Command{Name: "poll", Action: t.Tool}, g.locale(guildID))
 		if r.Poll == nil {
 			continue
 		}

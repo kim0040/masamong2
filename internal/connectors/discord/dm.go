@@ -70,7 +70,7 @@ func (g *Gateway) sendDMNotice(ctx context.Context, s *discordgo.Session, m *dis
 	if ctx.Err() != nil || !g.svc.ClaimDMNotice(m.Author.ID, kind) {
 		return
 	}
-	msg := &discordgo.MessageSend{Content: messages.T(g.locale(""), key), Reference: m.Reference(), AllowedMentions: noMentions}
+	msg := &discordgo.MessageSend{Content: g.catalog().T(g.locale(""), key), Reference: m.Reference(), AllowedMentions: noMentions}
 	if _, err := s.ChannelMessageSendComplex(m.ChannelID, msg, discordgo.WithContext(ctx)); err != nil {
 		g.log.Warn("discord: DM notice failed", "err", err)
 	}

@@ -94,7 +94,7 @@ func TestSandboxBangAliasesExistOnDiscord(t *testing.T) {
 	}
 	for _, row := range spec.AgentTools {
 		for _, alias := range row.Bang {
-			cmd, ok := ByAlias(alias)
+			cmd, ok := ByAlias(shippedCatalog(), alias)
 			if !ok {
 				t.Fatalf("sandbox alias !%s (%s) has no Discord command", alias, row.ID)
 			}

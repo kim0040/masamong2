@@ -34,7 +34,6 @@ type fxDelivery struct {
 // cases of a table share one service and still get their own gateway, session and recorded calls.
 func fxGatewayWithFakeDiscord(t *testing.T, svc *application.Service) (*Gateway, *fakeDiscord) {
 	t.Helper()
-	SetCatalog(svc.I18n)
 	sess, err := discordgo.New("Bot test")
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +90,7 @@ func (d *fxDelivery) slash(t *testing.T, opts ...*discordgo.ApplicationCommandIn
 func (d *fxDelivery) prefix(t *testing.T, text string) {
 	t.Helper()
 	m := &discordgo.MessageCreate{Message: &discordgo.Message{ID: "m", ChannelID: "c", GuildID: "g", Content: text, Author: &discordgo.User{ID: "u", Username: "tester"}}}
-	cmd, opts, ok := ParsePrefix("!", text)
+	cmd, opts, ok := ParsePrefix(shippedCatalog(), "!", text)
 	if !ok {
 		t.Fatalf("%q did not parse as a command", text)
 	}
@@ -479,7 +478,7 @@ func TestFXPrefixAmountsAreReadInTheLocalesSyntax(t *testing.T) {
 	} {
 		t.Run(tc.locale+" "+tc.text, func(t *testing.T) {
 			d := newFXDelivery(t, svc, nil)
-			cmd, o, ok := ParsePrefix("!", tc.text)
+			cmd, o, ok := ParsePrefix(shippedCatalog(), "!", tc.text)
 			if !ok {
 				t.Fatal("did not parse")
 			}
@@ -489,7 +488,7 @@ func TestFXPrefixAmountsAreReadInTheLocalesSyntax(t *testing.T) {
 			r := d.g.svc.Execute(context.Background(), requestFor(cmd, o, InvokeContext{Locale: tc.locale, Typed: true}, "fx-prefix"))
 			got := ""
 			if r.OK {
-				got = Render(r, cmd, tc.locale).Embed.Description
+				got = Render(shippedCatalog(), r, cmd, tc.locale).Embed.Description
 			} else {
 				got = r.Error.Message
 				if r.Error.MessageKey != "fx.invalid_amount" {

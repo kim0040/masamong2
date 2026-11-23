@@ -9,7 +9,7 @@ import (
 
 // buildNotices maps the notices command's options to its Action input.
 func buildNotices(o map[string]string, c InvokeContext) (string, map[string]any) {
-	verb, rest := splitVerb(o["what"], o["value"], wordsFor("notices", "verb",
+	verb, rest := splitVerb(o["what"], o["value"], wordsFor(c.words, "notices", "verb",
 		"latest", "profile", "status", "time", "pause", "resume", "delete", "mute", "unmute", "register"))
 	return noticeRequest("school", verb, rest)
 }
@@ -30,7 +30,7 @@ func buildNoticesRegister(o map[string]string, c InvokeContext) (string, map[str
 
 // buildTransfer maps the transfer command's options to its Action input.
 func buildTransfer(o map[string]string, c InvokeContext) (string, map[string]any) {
-	verb, rest := splitVerb(o["what"], o["value"], wordsFor("transfer", "verb",
+	verb, rest := splitVerb(o["what"], o["value"], wordsFor(c.words, "transfer", "verb",
 		"recent", "subscribe", "status", "time", "pause", "resume", "delete"))
 	if verb == "" || verb == "recent" {
 		in := map[string]any{}

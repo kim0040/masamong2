@@ -174,9 +174,8 @@ func TestStartWithoutTokenIsNotFatal(t *testing.T) {
 
 func TestCommandNamesAreDiscordSafe(t *testing.T) {
 	svc := svcForTest(t)
-	SetCatalog(svc.I18n)
 	seen := map[string]bool{}
-	for _, c := range ApplicationCommands() {
+	for _, c := range applicationCommandsIn(svc.I18n, nil) {
 		if c.Type == discordgo.MessageApplicationCommand {
 			continue // Apps menu items may have spaces and capitals (format_test checks them)
 		}
@@ -242,21 +241,21 @@ func TestDiscordDeliveryEntrypointsReportAndClassifyFailures(t *testing.T) {
 }
 
 func TestPrefixParsing(t *testing.T) {
-	cmd, opts, ok := ParsePrefix("!", "!날씨 부산")
+	cmd, opts, ok := ParsePrefix(shippedCatalog(), "!", "!날씨 부산")
 	if !ok || cmd.Name != "weather" || opts["region"] != "부산" {
 		t.Fatalf("%v %+v %v", ok, cmd, opts)
 	}
-	cmd, opts, ok = ParsePrefix("!", "!투표 점심? | 김밥, 라면, 돈까스")
+	cmd, opts, ok = ParsePrefix(shippedCatalog(), "!", "!투표 점심? | 김밥, 라면, 돈까스")
 	if !ok || cmd.Name != "poll" || opts["question"] != "점심?" || opts["answers"] != "김밥, 라면, 돈까스" {
 		t.Fatalf("poll %v %+v", ok, opts)
 	}
-	if _, _, ok := ParsePrefix("!", "안녕 !날씨"); ok {
+	if _, _, ok := ParsePrefix(shippedCatalog(), "!", "안녕 !날씨"); ok {
 		t.Fatal("prefix must be at the start")
 	}
-	if _, _, ok := ParsePrefix("!", "!unknowncmd x"); ok {
+	if _, _, ok := ParsePrefix(shippedCatalog(), "!", "!unknowncmd x"); ok {
 		t.Fatal("unknown alias")
 	}
-	if _, _, ok := ParsePrefix("", "!날씨"); ok {
+	if _, _, ok := ParsePrefix(shippedCatalog(), "", "!날씨"); ok {
 		t.Fatal("empty prefix disables the bridge")
 	}
 }
@@ -264,9 +263,9 @@ func TestPrefixParsing(t *testing.T) {
 func TestRenderNeverMentionsAndLabelsFixtures(t *testing.T) {
 	svc := svcForTest(t)
 	withoutWorldWeather(t, svc)
-	cmd, _ := ByName("weather")
+	cmd, _ := ByName(shippedCatalog(), "weather")
 	res := svc.Execute(context.Background(), requestFor(cmd, map[string]string{"region": "서울"}, InvokeContext{Locale: "ko"}, "t"))
-	r := Render(res, cmd, "ko")
+	r := Render(shippedCatalog(), res, cmd, "ko")
 	if r.Embed == nil || !strings.Contains(r.Embed.Description, "인증키") {
 		t.Fatalf("unconfigured weather must say so in Korean: %+v", r.Embed)
 	}
@@ -275,19 +274,19 @@ func TestRenderNeverMentionsAndLabelsFixtures(t *testing.T) {
 	}
 	// Error rendering uses the localized message key, hides operator codes, and keeps retry guidance.
 	fail := action.Result{OK: false, Action: "weather.query", Error: &action.Error{Code: "PROVIDER_UNAVAILABLE", MessageKey: "generic.error", Message: "developer timeout", Retryable: true}}
-	r = Render(fail, cmd, "en")
+	r = Render(shippedCatalog(), fail, cmd, "en")
 	if r.Embed.Footer != nil || !strings.Contains(r.Embed.Description, "An error occurred.") || strings.Contains(r.Embed.Description, "developer timeout") || !strings.Contains(r.Embed.Description, "Try again") || !r.Ephemeral {
 		t.Fatalf("error embed %+v", r.Embed)
 	}
 }
 
 func TestRenderUsesLocalizedErrorKeyInsteadOfRawErrorOrCode(t *testing.T) {
-	cmd, _ := ByName("weather")
+	cmd, _ := ByName(shippedCatalog(), "weather")
 	res := action.Result{OK: false, Action: cmd.Action, Error: &action.Error{
 		Code: "INVALID_INPUT", MessageKey: "privacy.scope_unknown", Message: `C:\private\data\masamong.db: invalid input`,
 		Args: map[string]any{"scope": `C:\private\data\masamong.db`},
 	}}
-	r := Render(res, cmd, "ko")
+	r := Render(shippedCatalog(), res, cmd, "ko")
 	if r.Embed.Footer != nil || strings.Contains(r.Embed.Description, `C:\private\data\masamong.db`) || strings.Contains(r.Embed.Description, "INVALID_INPUT") {
 		t.Fatalf("member-visible error leaked developer details: %+v", r.Embed)
 	}
@@ -441,8 +440,7 @@ func TestChatRefusalNoticesAreLocalizedAndRateLimited(t *testing.T) {
 	}
 	key := "discord.chat.paused"
 	var bodies []string
-	SetCatalog(svc.I18n)
-	want := messages.T(g.locale("g1"), key)
+	want := g.catalog().T(g.locale("g1"), key)
 	send := func(_ context.Context, msg *discordgo.MessageSend) error {
 		bodies = append(bodies, msg.Content)
 		return nil
@@ -484,7 +482,6 @@ func TestFailedTurnsGetAShortNoticeOnlyWhenNothingWasSaid(t *testing.T) {
 		}
 	}
 	svc := svcForTest(t)
-	SetCatalog(svc.I18n)
 	g := &Gateway{svc: svc, log: slog.New(slog.NewTextHandler(io.Discard, nil)), notices: map[string]time.Time{}}
 	var bodies []string
 	send := func(_ context.Context, msg *discordgo.MessageSend) error {
@@ -496,7 +493,7 @@ func TestFailedTurnsGetAShortNoticeOnlyWhenNothingWasSaid(t *testing.T) {
 	g.sendChatNoticeWith(context.Background(), m, chatFailureKey(timeout, false), true, send)
 	other := &discordgo.MessageCreate{Message: &discordgo.Message{ID: "m2", ChannelID: "c2", GuildID: "g1", Author: &discordgo.User{ID: "u2"}}}
 	g.sendChatNoticeWith(context.Background(), other, chatFailureKey(timeout, false), false, send) // not called: nothing
-	if len(bodies) != 1 || bodies[0] != messages.T(g.locale("g1"), "discord.chat.failed") {
+	if len(bodies) != 1 || bodies[0] != g.catalog().T(g.locale("g1"), "discord.chat.failed") {
 		t.Fatalf("notices = %q", bodies)
 	}
 }
@@ -521,7 +518,6 @@ func TestSendReplyStopsAfterContextCancellation(t *testing.T) {
 
 func TestHelpListsOnlyReadyLiveSurfaces(t *testing.T) {
 	svc := svcForTest(t)
-	SetCatalog(svc.I18n)
 	withoutWorldWeather(t, svc)
 	g := &Gateway{svc: svc, cfg: config.Discord{CommandPrefix: "!", MessageContent: true, RegisterCommands: true}}
 	r := g.renderCommand(action.Result{OK: true, Action: "help.version"}, Command{Name: "help", Action: "help.version"}, "ko", false)
@@ -540,13 +536,13 @@ func TestHelpListsOnlyReadyLiveSurfaces(t *testing.T) {
 
 func TestPollFlowThroughRenderedButtons(t *testing.T) {
 	svc := svcForTest(t)
-	cmd, _ := ByName("poll")
+	cmd, _ := ByName(shippedCatalog(), "poll")
 	ictx := InvokeContext{ChannelID: "c1", UserID: "u1", Locale: "ko"}
 	res := svc.Execute(context.Background(), requestFor(cmd, map[string]string{"question": "점심?", "options": "김밥, 라면"}, ictx, "t"))
 	if !res.OK {
 		t.Fatalf("create %+v", res)
 	}
-	r := Render(res, cmd, "ko")
+	r := Render(shippedCatalog(), res, cmd, "ko")
 	if r.Poll == nil || len(r.Poll.Answers) != 2 {
 		t.Fatalf("native poll %+v", r.Poll)
 	}
@@ -567,7 +563,7 @@ func TestPollFlowThroughRenderedButtons(t *testing.T) {
 		t.Fatalf("scope %+v", v)
 	}
 	in, _ = json.Marshal(map[string]any{"id": pollID})
-	rr := Render(svc.Execute(context.Background(), action.Request{Action: "polls.result", Input: in}), Command{Name: "results"}, "ko")
+	rr := Render(shippedCatalog(), svc.Execute(context.Background(), action.Request{Action: "polls.result", Input: in}), Command{Name: "results"}, "ko")
 	if !strings.Contains(rr.Embed.Description, "김밥 — 1") {
 		t.Fatalf("results %s", rr.Embed.Description)
 	}
@@ -578,7 +574,7 @@ func TestDiscordTimestampsUseFieldMarkdown(t *testing.T) {
 		"region": "서울", "temp_c": 12.0, "live": true, "status": "ok",
 		"observed_at": "2026-09-16T07:00:00Z",
 	}}
-	r := Render(res, Command{Name: "weather"}, "ko")
+	r := Render(shippedCatalog(), res, Command{Name: "weather"}, "ko")
 	if r.Embed == nil {
 		t.Fatal("embed")
 	}
@@ -600,7 +596,7 @@ func TestDiscordTimestampsUseFieldMarkdown(t *testing.T) {
 // transaction, instead of failing (or silently overwriting) on another voter's revision.
 func TestSimultaneousButtonVotesAllCount(t *testing.T) {
 	svc := svcForTest(t)
-	cmd, _ := ByName("poll")
+	cmd, _ := ByName(shippedCatalog(), "poll")
 	res := svc.Execute(context.Background(), requestFor(cmd, map[string]string{"question": "점심?", "options": "김밥, 라면"},
 		InvokeContext{ChannelID: "c1", UserID: "u0", Locale: "ko"}, "t"))
 	if !res.OK {

@@ -16,14 +16,14 @@ import (
 func (g *Gateway) sendPrivateCard(ctx context.Context, s *discordgo.Session, m *discordgo.MessageCreate, cmd Command, ictx InvokeContext, msg *discordgo.MessageSend) {
 	msg.Reference = nil // the command's message is in the room, not in the DM
 	msg.Components = dmButtons(msg.Components, m.GuildID)
-	note := messages.T(ictx.Locale, "discord.private.dm_sent")
+	note := g.catalog().T(ictx.Locale, "discord.private.dm_sent")
 	ch, err := s.UserChannelCreate(m.Author.ID, discordgo.WithContext(ctx))
 	if err == nil {
 		_, err = s.ChannelMessageSendComplex(ch.ID, msg, discordgo.WithContext(ctx))
 	}
 	if err != nil {
 		g.log.Warn("discord: private card not sent by DM", "cmd", cmd.Name, "err", dmError(err))
-		note = messages.T(ictx.Locale, "discord.private.dm_closed", "command", "/"+LocalName(cmd, ictx.Locale))
+		note = g.catalog().T(ictx.Locale, "discord.private.dm_closed", "command", "/"+LocalName(g.catalog(), cmd, ictx.Locale))
 	}
 	if ctx.Err() != nil {
 		return

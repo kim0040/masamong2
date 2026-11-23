@@ -97,7 +97,6 @@ func (f *fakeDiscord) find(method, pathSuffix string) (recordedCall, bool) {
 func gatewayWithFakeDiscord(t *testing.T) (*Gateway, *fakeDiscord) {
 	t.Helper()
 	svc := svcForTest(t)
-	SetCatalog(svc.I18n)
 	sess, err := discordgo.New("Bot test")
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +129,7 @@ func TestSlashCommandAnswersAfterItsActionTimedOut(t *testing.T) {
 
 func TestPrefixCommandAnswersAfterItsActionTimedOut(t *testing.T) {
 	g, fake := gatewayWithFakeDiscord(t)
-	cmd, _ := ByName("help")
+	cmd, _ := ByName(shippedCatalog(), "help")
 	m := &discordgo.MessageCreate{Message: &discordgo.Message{ID: "m1", ChannelID: "c1", GuildID: "g1", Author: &discordgo.User{ID: "u1", Username: "u"}}}
 	g.runCommand(g.sess, m, cmd, nil)
 	if _, ok := fake.find(http.MethodPost, "/channels/c1/messages"); !ok {
@@ -333,7 +332,6 @@ func botMessage(id, content string, mentions ...string) *discordgo.MessageCreate
 
 func TestOnlyAddressedTurnsGetRefusalNotices(t *testing.T) {
 	svc := svcForTest(t)
-	SetCatalog(svc.I18n)
 	g := &Gateway{svc: svc, log: slog.New(slog.NewTextHandler(io.Discard, nil)), notices: map[string]time.Time{}}
 	bot := "bot"
 	g.botID.Store(&bot)
@@ -364,7 +362,6 @@ func TestOnlyAddressedTurnsGetRefusalNotices(t *testing.T) {
 
 func TestRefusalNoticesAreCappedPerChannel(t *testing.T) {
 	svc := svcForTest(t)
-	SetCatalog(svc.I18n)
 	g := &Gateway{svc: svc, log: slog.New(slog.NewTextHandler(io.Discard, nil)), notices: map[string]time.Time{}}
 	var sent int
 	send := func(context.Context, *discordgo.MessageSend) error { sent++; return nil }
@@ -406,7 +403,6 @@ func TestRefusalNoticesAreCappedPerChannel(t *testing.T) {
 
 func TestHelpOffersOnlyWhatCanRun(t *testing.T) {
 	svc := svcForTest(t)
-	SetCatalog(svc.I18n)
 	withoutWorldWeather(t, svc)
 	help := func(cfg config.Discord) string {
 		g := &Gateway{svc: svc, cfg: cfg}
@@ -434,10 +430,9 @@ func TestHelpOffersOnlyWhatCanRun(t *testing.T) {
 
 func TestErrorDetailsSurviveWhenTheyAreNotPathsOrSecrets(t *testing.T) {
 	svc := svcForTest(t)
-	SetCatalog(svc.I18n)
-	cmd, _ := ByName("weather")
+	cmd, _ := ByName(svc.I18n, "weather")
 	fail := func(region string) Rendered {
-		return Render(action.Result{OK: false, Action: cmd.Action, Error: &action.Error{Code: "INVALID_INPUT", MessageKey: "weather.place_unknown",
+		return Render(svc.I18n, action.Result{OK: false, Action: cmd.Action, Error: &action.Error{Code: "INVALID_INPUT", MessageKey: "weather.place_unknown",
 			Args: map[string]any{"region": region}}}, cmd, "en")
 	}
 	for _, kept := range []string{"USD/KRW", "서울 강남구", "Sankt Pölten", "A/B"} {
@@ -445,7 +440,7 @@ func TestErrorDetailsSurviveWhenTheyAreNotPathsOrSecrets(t *testing.T) {
 			t.Errorf("%q must survive in %q", kept, d)
 		}
 	}
-	generic := messages.T("en", "generic.error")
+	generic := svc.I18n.T("en", "generic.error")
 	for _, hidden := range []string{`C:\Users\me\masamong.db`, `C:/Users/me/x`, `\\server\share`, "/etc/masamong/config.yaml", "~/.masamong/data",
 		"sk-proj-0123456789abcdefghijklmnopqrstuvwxyz", "my token is abc"} {
 		d := fail(hidden).Embed.Description
@@ -457,12 +452,11 @@ func TestErrorDetailsSurviveWhenTheyAreNotPathsOrSecrets(t *testing.T) {
 
 func TestOnlyAdministratorsSeeTheErrorCode(t *testing.T) {
 	svc := svcForTest(t)
-	SetCatalog(svc.I18n)
 	g := &Gateway{svc: svc}
 	if res := svc.Execute(context.Background(), action.Request{Action: "access.policy", Input: mustJSON(map[string]any{"operators": []string{"1234567890"}})}); !res.OK {
 		t.Fatalf("operators: %+v", res.Error)
 	}
-	cmd, _ := ByName("weather")
+	cmd, _ := ByName(shippedCatalog(), "weather")
 	fail := action.Result{OK: false, Action: cmd.Action, Error: &action.Error{Code: "PROVIDER_UNAVAILABLE", MessageKey: "generic.error"}}
 	if r := g.renderInvoked(fail, cmd, InvokeContext{UserID: "1234567890", GuildID: "g1", Locale: "en"}); r.Embed.Footer == nil || r.Embed.Footer.Text != "PROVIDER_UNAVAILABLE" {
 		t.Fatalf("an operator sees the code: %+v", r.Embed.Footer)
@@ -476,7 +470,6 @@ func TestOnlyAdministratorsSeeTheErrorCode(t *testing.T) {
 // a limit or a reset, in any language.
 func TestRefusalNoticesStayNeutral(t *testing.T) {
 	svc := svcForTest(t)
-	SetCatalog(svc.I18n)
 	banned := map[string][]string{
 		"en":      {"month", "budget", "limit"},
 		"ko":      {"이번 달", "한도", "예산", "횟수"},
@@ -486,7 +479,7 @@ func TestRefusalNoticesStayNeutral(t *testing.T) {
 	}
 	for locale, words := range banned {
 		for _, key := range []string{"discord.chat.paused", "discord.chat.busy", "discord.chat.limited", "discord.chat.budget", "discord.chat.failed"} {
-			text, ok := messages.Lookup(locale, key)
+			text, ok := svc.I18n.Lookup(locale, key)
 			if !ok || text == "" {
 				t.Errorf("%s has no %s", locale, key)
 				continue
