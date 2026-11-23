@@ -148,6 +148,7 @@ var enums = map[string][]string{
 	"memory.episodes":     OnOff,
 	"memory.state":        OnOff,
 	"memory.cards":        OnOff,
+	"memory.people":       OnOff,
 	"memory.warm_query":   OnOff,
 }
 
@@ -174,7 +175,7 @@ func implied() map[string]any {
 		"web_search.fetch_daily_limit": WebSearch{}.FetchDailyPages(),
 		"memory.derived_budget_usd":    "3.00", "memory.day_boundary": "05:00",
 		"memory.capture": true, "memory.embed": true, "memory.retrieve": "auto", "memory.summaries": true,
-		"memory.episodes": "on", "memory.state": "on", "memory.cards": "off", "memory.warm_query": "on", "memory.message_vectors": m.MessageVectorsOn(),
+		"memory.episodes": "on", "memory.state": "on", "memory.cards": "off", "memory.people": "on", "memory.warm_query": "on", "memory.message_vectors": m.MessageVectorsOn(),
 		"guilds.*.channels.*.capture": true, "guilds.*.channels.*.memory_use": "on",
 		"participation.wait_sec": int(p.Wait().Seconds()), "participation.cooldown_sec": int(p.Cooldown().Seconds()),
 		"participation.per_hour": p.Hourly(), "participation.per_day": p.Daily(), "participation.judge_per_hour": p.Judges(),
