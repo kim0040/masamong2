@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 import numpy as np
@@ -334,7 +334,7 @@ def _rerank_document(index: IndexBundle, doc_id: str, doc_format: str, *, limit:
     summary = str((index.summary_by_id.get(doc_id) or {}).get("summary") or "")
     speakers = ", ".join(str(x) for x in (leaf.get("speakers") or [])[:8])
     end_ts = index.leaf_end_ts.get(doc_id)
-    when = datetime.fromtimestamp(end_ts).strftime("%Y-%m-%d %H:%M") if end_ts else ""
+    when = datetime.fromtimestamp(end_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M") if end_ts else ""
     parts: list[str] = []
     if doc_format in {"speaker_body", "full"} and speakers:
         parts.append(f"[Speaker]\n{speakers}")
