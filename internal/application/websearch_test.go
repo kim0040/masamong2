@@ -304,16 +304,33 @@ func TestSearchStopsWithTheTurnAndBlamesNoServiceForOurLimits(t *testing.T) {
 		t.Fatalf("our time limit went into the health of tavily %v / serper %v", e, f)
 	}
 
-	// a service that answers with an error is recorded
+	// a service that answers with an error is recorded — as its class and HTTP status: the service's
+	// own words and the request's address never reach the answer or the health card
 	restore()
-	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(500) }))
+	serviceWords := "service-words-the-key-was-refused"
+	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(500)
+		_, _ = w.Write([]byte(`{"message":"` + serviceWords + `"}`))
+	}))
 	defer broken.Close()
 	pointAt(t, svc, "tavily", broken.URL, "T_KEY", "key-k1")
 	pointAt(t, svc, "serper", next.URL, "S_KEY", "key-k1")
 	if res = run(context.Background()); !res.OK || res.Output["provider"] != "serper" {
 		t.Fatalf("an erroring service hands over: %+v", res)
 	}
-	if lastError("tavily") == nil {
+	passed, _ := json.Marshal(res.Output["passed_over"])
+	for _, leak := range []string{serviceWords, broken.URL} {
+		if strings.Contains(string(passed), leak) {
+			t.Fatalf("a successful fallback carries %q: %s", leak, passed)
+		}
+	}
+	e := lastError("tavily")
+	if e == nil {
 		t.Fatal("the service's own error is not recorded")
+	}
+	for _, leak := range []string{serviceWords, broken.URL} {
+		if strings.Contains(e.(string), leak) {
+			t.Fatalf("the health card carries %q: %v", leak, e)
+		}
 	}
 }

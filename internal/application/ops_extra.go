@@ -54,7 +54,7 @@ func (s *Service) noteProvider(id string, err error) {
 		if errors.Is(err, errQuota) || errors.Is(err, providers.ErrNoCredential) {
 			return // our own limits and missing keys are shown elsewhere
 		}
-		h.LastError, h.LastErrorAt = clip(err.Error(), 300), now.Format(time.RFC3339)
+		h.LastError, h.LastErrorAt = providerErrorSummary(err), now.Format(time.RFC3339)
 		h.Rejected = errors.Is(err, openai.ErrAuth) || errors.Is(err, websearch.ErrAuth)
 		var pe *providers.Error
 		if errors.As(err, &pe) && (pe.Status == 401 || pe.Status == 403) {
