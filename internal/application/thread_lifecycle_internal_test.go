@@ -28,7 +28,7 @@ func TestThreadLifecyclePersistsAcrossTickEviction(t *testing.T) {
 					s.threads.mu.Lock()
 					delete(s.threads.threads, "target")
 					s.threads.mu.Unlock()
-					s.ensureThread("target", true)
+					s.ensureThread("target", anyThreadAge)
 				}
 				h := &s.hooks.threads.beforeArchiveDB
 				if phase == "before-write" {
@@ -65,7 +65,7 @@ func TestThreadLifecyclePersistsAcrossTickEviction(t *testing.T) {
 				if archived && (state != "closed" || reason != "archived" || closed == "") || !archived && (state != "open" || reason != "" || closed != "") {
 					t.Error("tick eviction suppressed the durable lifecycle update")
 				}
-				if !s.recoverThread("target", true) {
+				if !s.recoverThread("target", anyThreadAge) {
 					t.Fatal("updated row could not be recovered")
 				}
 				if view, ok := s.ThreadFor("target", "member"); !ok || view.Open == archived {
@@ -100,7 +100,7 @@ func TestThreadLifecycleInvalidatesAnOlderRead(t *testing.T) {
 	})
 	go func() {
 		defer close(done)
-		s.recoverThread("target", true)
+		s.recoverThread("target", anyThreadAge)
 	}()
 	awaitThreadSignal(t, parked, "open snapshot before archive")
 	s.ThreadArchived("target", true)

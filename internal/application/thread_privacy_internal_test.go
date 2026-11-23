@@ -74,7 +74,7 @@ func TestThreadReadCannotPublishAfterPrivacyChange(t *testing.T) {
 				go func() {
 					defer close(done)
 					if source == "recover" {
-						s.recoverThread("target", true)
+						s.recoverThread("target", anyThreadAge)
 					} else {
 						s.NoteThread("g", "target", "parent", true)
 					}

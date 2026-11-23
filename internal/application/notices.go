@@ -142,13 +142,6 @@ type noticeSub struct {
 	profileExists bool
 }
 
-func noticeScope(kind string) string {
-	if kind == notices.KindTransfer {
-		return privacy.TransferNotice
-	}
-	return privacy.SchoolNotice
-}
-
 func (s *Service) noticeSub(userID, kind string) (noticeSub, bool) {
 	sub := noticeSub{UserID: userID, Kind: kind, consentScope: noticeScope(kind)}
 	db, err := s.adminDB()
@@ -180,13 +173,6 @@ func (s *Service) saveNoticeSub(sub noticeSub) error {
 		ON CONFLICT(user_id, kind) DO UPDATE SET profile=excluded.profile, sources=excluded.sources, delivery_time=excluded.delivery_time,
 		active=excluded.active, updated_at=excluded.updated_at`, sub.UserID, sub.Kind, string(profile), string(sources), sub.DeliveryTime, b2i(sub.Active), now, now)
 	return err
-}
-
-func b2i(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
 }
 
 // ---------------------------------------------------------------------------
@@ -398,26 +384,11 @@ func (s *Service) candidates(c *notices.Catalog, sub noticeSub, includeSent bool
 	if err != nil {
 		return nil
 	}
-	var srcIDs []string
-	if sub.Kind == notices.KindTransfer {
-		srcIDs = sub.Sources
-	} else {
-		for _, src := range c.Sources {
-			if src.Kind == notices.KindSchool && src.School == sub.Profile.School {
-				srcIDs = append(srcIDs, src.ID)
-			}
-		}
-	}
+	srcIDs := noticeSourceIDs(c, sub)
 	if len(srcIDs) == 0 {
 		return nil
 	}
-	since := s.Clock.Now().AddDate(0, 0, -s.toolDefault("notices.subscribe", "first_days", 7)).UTC().Format(time.RFC3339)
-	if sub.LastDelivery != "" && !includeSent {
-		// after the first delivery only what changed since subscribing is new to them
-		if sub.CreatedAt > since {
-			since = sub.CreatedAt
-		}
-	}
+	since := noticesSince(s.Clock.Now(), s.toolDefault("notices.subscribe", "first_days", 7), sub, includeSent)
 	ph := strings.TrimSuffix(strings.Repeat("?,", len(srcIDs)), ",")
 	args := []any{}
 	for _, id := range srcIDs {
@@ -478,11 +449,6 @@ func (s *Service) candidates(c *notices.Catalog, sub noticeSub, includeSent bool
 	return out[:min(len(out), s.toolDefault("notices.subscribe", "max_items", 8))]
 }
 
-var bandIcon = map[string]string{"action": "⏰", "opportunity": "✨", "reference": "📄"}
-
-// noticeBands is the order school notices are grouped in: what to do first, then chances, then the rest.
-var noticeBands = []string{"action", "opportunity", "reference"}
-
 // noticeCard renders ranked notices (docs/plan-discord-experience.md §3.5): school notices grouped by how
 // much they ask of the reader, transfer notices by university, each item a linked title and one line that
 // starts with the deadline when there is one. today (the reader's day) counts the days left; loc words
@@ -497,48 +463,21 @@ func (s *Service) noticeCard(loc, title, kind string, list []rankedNotice, c *no
 	for _, n := range list {
 		universities[n.University] = true
 	}
-	type group struct {
-		heading string
-		items   []rankedNotice
-	}
-	var groups []group
-	if kind == notices.KindTransfer {
-		at := map[string]int{}
-		for _, n := range list {
-			i, ok := at[n.University]
-			if !ok {
-				i = len(groups)
-				at[n.University] = i
-				groups = append(groups, group{})
+	groups := groupNotices(kind, list)
+	for i := range groups {
+		g := &groups[i]
+		name := s.I18n.T(loc, "notices.group.other")
+		icon := "•"
+		switch {
+		case kind == notices.KindTransfer:
+			icon = "🎓"
+			if u := g.items[0].University; u != "" {
+				name = u
 			}
-			groups[i].items = append(groups[i].items, n)
+		case g.band != "":
+			name, icon = s.I18n.T(loc, "notices.band."+g.band), bandIcon[g.band]
 		}
-		for i := range groups {
-			name := groups[i].items[0].University
-			if name == "" {
-				name = s.I18n.T(loc, "notices.group.other")
-			}
-			groups[i].heading = "🎓 " + s.I18n.T(loc, "notices.group.count", "name", name, "n", len(groups[i].items))
-		}
-	} else {
-		for _, band := range append(noticeBands, "") {
-			var g group
-			for _, n := range list {
-				if n.Score.Band == band || band == "" && bandIcon[n.Score.Band] == "" {
-					g.items = append(g.items, n)
-				}
-			}
-			if len(g.items) == 0 {
-				continue
-			}
-			name := s.I18n.T(loc, "notices.group.other")
-			icon := "•"
-			if band != "" {
-				name, icon = s.I18n.T(loc, "notices.band."+band), bandIcon[band]
-			}
-			g.heading = icon + " " + s.I18n.T(loc, "notices.group.count", "name", name, "n", len(g.items))
-			groups = append(groups, g)
-		}
+		g.heading = icon + " " + s.I18n.T(loc, "notices.group.count", "name", name, "n", len(g.items))
 	}
 	var lines []string
 	for _, g := range groups {
@@ -567,7 +506,7 @@ func (s *Service) noticeCard(loc, title, kind string, list []rankedNotice, c *no
 func (s *Service) noticeMeta(loc, kind string, n rankedNotice, c *notices.Catalog, today time.Time, mixed bool) string {
 	var meta []string
 	if d, err := time.Parse("2006-01-02", n.Score.Deadline); err == nil {
-		days := int(d.Sub(time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, time.UTC)).Hours() / 24)
+		days := daysUntil(d, today)
 		left := s.I18n.T(loc, "notices.due_in", "n", days)
 		if days == 0 {
 			left = s.I18n.T(loc, "notices.due_today")
@@ -612,10 +551,6 @@ func (s *Service) shortDateOf(loc, raw string, today time.Time) string {
 	}
 	return s.shortDate(loc, d)
 }
-
-var mdSpecial = strings.NewReplacer("[", "(", "]", ")", "*", "\\*", "_", "\\_", "`", "'")
-
-func mdEscape(s string) string { return mdSpecial.Replace(s) }
 
 // deliverNotices sends each subscriber whose time has come what is new for them (once a day).
 func (s *Service) deliverNotices(ctx context.Context) {
@@ -725,14 +660,7 @@ func (s *Service) deliverNotices(ctx context.Context) {
 			cancel()
 			if err != nil {
 				s.Log.Warn("notices: digest not sent", "kind", sub.Kind, "err", err)
-				state := "unknown"
-				settleDate := true
-				disable := false
-				if errors.Is(err, ErrNotDelivered) {
-					state, settleDate = "failed", false
-				} else if errors.Is(err, ErrDMClosed) {
-					state, disable = "closed", true
-				}
+				state, settleDate, disable := noticeSendFailure(err)
 				_ = db.WithWriter(func(tx *sql.Tx) error {
 					if _, err := tx.Exec(`UPDATE notice_delivery_outcomes SET state=?, updated_at=? WHERE user_id=? AND kind=? AND delivery_date=?`, state, stamp, k.user, k.kind, date); err != nil {
 						return err
@@ -768,33 +696,6 @@ func (s *Service) deliverNotices(ctx context.Context) {
 		}
 		_, _ = db.DB.Exec(`UPDATE notice_subs SET last_delivery=? WHERE user_id=? AND kind=?`, date, k.user, k.kind)
 	}
-}
-
-// noticeSlot keeps an unsettled logical delivery date while a quiet window crosses midnight. Once
-// today's due time has passed, missed older dates are drained oldest first.
-func noticeSlot(now time.Time, at time.Time, last, createdAt string, quietUntil func(time.Time) time.Time) (time.Time, string) {
-	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	todayDue := time.Date(today.Year(), today.Month(), today.Day(), at.Hour(), at.Minute(), 0, 0, now.Location())
-	candidate := time.Time{}
-	if last != "" {
-		if previous, err := time.ParseInLocation("2006-01-02", last, now.Location()); err == nil {
-			candidate = previous.AddDate(0, 0, 1)
-		}
-	} else if now.Before(todayDue) {
-		candidate = today.AddDate(0, 0, -1)
-		previousDue := time.Date(candidate.Year(), candidate.Month(), candidate.Day(), at.Hour(), at.Minute(), 0, 0, now.Location())
-		created, err := time.Parse(time.RFC3339, createdAt)
-		if err != nil || created.After(previousDue) {
-			candidate = time.Time{}
-		}
-	}
-	if !candidate.IsZero() && candidate.Before(today) {
-		due := time.Date(candidate.Year(), candidate.Month(), candidate.Day(), at.Hour(), at.Minute(), 0, 0, now.Location())
-		if !now.Before(quietUntil(due)) {
-			return due, due.Format("2006-01-02")
-		}
-	}
-	return todayDue, today.Format("2006-01-02")
 }
 
 // ---------------------------------------------------------------------------
@@ -894,13 +795,6 @@ func (s *Service) subCard(req action.Request, c *notices.Catalog, sub noticeSub)
 	return card
 }
 
-func orDash(v string) string {
-	if strings.TrimSpace(v) == "" {
-		return "-"
-	}
-	return v
-}
-
 // boardStatusCard is when the person's boards were last read and whether that worked.
 func (s *Service) boardStatusCard(req action.Request, c *notices.Catalog, sub noticeSub) action.Card {
 	card := action.Card{Title: s.msg(req, "notices.status_title"), Tone: "neutral", Ephemeral: true}
@@ -909,9 +803,7 @@ func (s *Service) boardStatusCard(req action.Request, c *notices.Catalog, sub no
 		return card
 	}
 	for _, src := range c.Sources {
-		mine := (sub.Kind == notices.KindSchool && src.Kind == notices.KindSchool && src.School == sub.Profile.School) ||
-			(sub.Kind == notices.KindTransfer && contains(sub.Sources, src.ID))
-		if !mine {
+		if !boardIsMine(sub, src) {
 			continue
 		}
 		name := strings.TrimSpace(src.University + " " + src.Board)
@@ -978,15 +870,6 @@ func (s *Service) noticesConsole(req action.Request, c *notices.Catalog, origin 
 		"last_collect": last, "schools": c.Schools, "topics": c.Vocabulary.Topics})
 }
 
-func firstNonEmpty(v ...string) string {
-	for _, x := range v {
-		if x != "" {
-			return x
-		}
-	}
-	return ""
-}
-
 // noticesSubscribe manages a person's subscription, or (console) collects now / lists subscribers.
 func (s *Service) noticesSubscribe(ctx context.Context, req action.Request) action.Result {
 	in := inputMap(req)
@@ -1043,9 +926,9 @@ func (s *Service) noticesSubscribe(ctx context.Context, req action.Request) acti
 	switch op {
 	case "register", "subscribe":
 		if kind == notices.KindTransfer {
-			ids, unknown := s.pickUniversities(c, strVal(in, "universities", strVal(in, "text", "")))
+			ids, unknown := pickUniversities(c, strVal(in, "universities", strVal(in, "text", "")))
 			if len(unknown) > 0 || len(ids) == 0 {
-				return action.Fail(req, errcode.InvalidInput, "notices.bad_university", s.msg(req, "notices.bad_university", "names", strings.Join(unknown, ", "), "list", s.universityList(c)), nil)
+				return action.Fail(req, errcode.InvalidInput, "notices.bad_university", s.msg(req, "notices.bad_university", "names", strings.Join(unknown, ", "), "list", universityList(c)), nil)
 			}
 			sub.Sources = ids
 		} else {
@@ -1067,7 +950,7 @@ func (s *Service) noticesSubscribe(ctx context.Context, req action.Request) acti
 		}
 		sub, _ = s.noticeSub(userID, kind)
 		// read the new boards soon instead of waiting for the next scheduled run
-		s.ownedGo("notice collection", func(ctx context.Context) { _, _ = s.collectNotices(ctx, s.subSources(c, sub)) })
+		s.ownedGo("notice collection", func(ctx context.Context) { _, _ = s.collectNotices(ctx, subSources(c, sub)) })
 		card := s.subCard(req, c, sub)
 		card.Title, card.Tone = s.msg(req, "notices.saved."+kind), "ok"
 		return action.WithCard(action.OK(req, map[string]any{"status": "saved"}), card)
@@ -1088,7 +971,7 @@ func (s *Service) noticesSubscribe(ctx context.Context, req action.Request) acti
 		}
 		topic, ok := c.TopicID(strVal(in, "topic", strVal(in, "text", "")))
 		if !ok {
-			return action.Fail(req, errcode.InvalidInput, "notices.bad_topic", s.msg(req, "notices.bad_topic", "list", s.topicList(c)), nil)
+			return action.Fail(req, errcode.InvalidInput, "notices.bad_topic", s.msg(req, "notices.bad_topic", "list", topicList(c)), nil)
 		}
 		muted := removeString(sub.Profile.Muted, topic)
 		if op == "mute" {
@@ -1103,79 +986,6 @@ func (s *Service) noticesSubscribe(ctx context.Context, req action.Request) acti
 		return action.WithCard(action.OK(req, map[string]any{"status": "ok"}), s.subCard(req, c, sub))
 	}
 	return action.Fail(req, errcode.InvalidInput, "generic.error", "unknown op", nil)
-}
-
-func removeString(list []string, v string) []string {
-	out := []string{}
-	for _, x := range list {
-		if x != v {
-			out = append(out, x)
-		}
-	}
-	return out
-}
-
-func (s *Service) subSources(c *notices.Catalog, sub noticeSub) []string {
-	if sub.Kind == notices.KindTransfer {
-		return sub.Sources
-	}
-	var ids []string
-	for _, src := range c.Sources {
-		if src.Kind == notices.KindSchool && src.School == sub.Profile.School && !src.Manual {
-			ids = append(ids, src.ID)
-		}
-	}
-	return ids
-}
-
-func squash(v string) string {
-	return strings.ToLower(strings.ReplaceAll(strings.TrimSpace(v), " ", ""))
-}
-
-// pickUniversities matches names ("강원대", "부산대학교", a source id) to transfer boards.
-func (s *Service) pickUniversities(c *notices.Catalog, text string) ([]string, []string) {
-	var ids, unknown []string
-	for _, part := range strings.FieldsFunc(text, func(r rune) bool { return r == ',' || r == '，' || r == '/' || r == ' ' }) {
-		w := squash(part)
-		if w == "" {
-			continue
-		}
-		found := ""
-		for _, src := range c.Sources {
-			if src.Kind != notices.KindTransfer {
-				continue
-			}
-			name := squash(src.University)
-			if w == squash(src.ID) || w == strings.TrimPrefix(src.ID, "transfer_") || name == w || strings.HasPrefix(name, w) || strings.Contains(name, w) && len([]rune(w)) >= 2 {
-				found = src.ID
-				break
-			}
-		}
-		if found == "" {
-			unknown = append(unknown, part)
-		} else if !contains(ids, found) {
-			ids = append(ids, found)
-		}
-	}
-	return ids, unknown
-}
-
-func (s *Service) universityList(c *notices.Catalog) string {
-	var names []string
-	for _, src := range c.Sources {
-		if src.Kind == notices.KindTransfer {
-			names = append(names, src.University)
-		}
-	}
-	return strings.Join(names, ", ")
-}
-
-func (s *Service) topicList(c *notices.Catalog) string {
-	var names []string
-	for _, t := range c.Vocabulary.Topics {
-		names = append(names, t.Label)
-	}
-	return strings.Join(names, ", ")
 }
 
 // parseSchoolProfile reads the fields of a school profile (or "전북대 학부 2학년 소프트웨어공학과" as text).
@@ -1238,7 +1048,7 @@ func (s *Service) parseSchoolProfile(req action.Request, c *notices.Catalog, in 
 			if id, ok := c.TopicID(w); ok && !contains(p.Interests, id) {
 				p.Interests = append(p.Interests, id)
 			} else if !ok {
-				return p, s.msg(req, "notices.bad_topic", "list", s.topicList(c))
+				return p, s.msg(req, "notices.bad_topic", "list", topicList(c))
 			}
 		}
 	}
@@ -1276,7 +1086,7 @@ func (s *Service) splitSchoolText(c *notices.Catalog, text string) map[string]an
 	var rest []string
 	for _, w := range strings.Fields(text) {
 		switch {
-		case out["school"] == nil && s.isSchool(c, w):
+		case out["school"] == nil && isSchool(c, w):
 			out["school"] = w
 		case degrees[squash(w)] != "" && out["degree"] == nil:
 			out["degree"] = w
@@ -1291,17 +1101,6 @@ func (s *Service) splitSchoolText(c *notices.Catalog, text string) map[string]an
 		out["department"] = strings.Join(rest, " ")
 	}
 	return out
-}
-
-func (s *Service) isSchool(c *notices.Catalog, w string) bool {
-	w = squash(w)
-	for _, sc := range c.Schools {
-		n := squash(sc.Name)
-		if w == sc.ID || w == n || strings.HasPrefix(n, w) && len([]rune(w)) >= 2 {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *Service) noticesSubscribeConsole(ctx context.Context, req action.Request, c *notices.Catalog, in map[string]any, op string) action.Result {
@@ -1357,9 +1156,9 @@ func (s *Service) transferRecent(req action.Request) action.Result {
 	var ids []string
 	if names := strings.TrimSpace(strVal(in, "universities", "")); names != "" {
 		var unknown []string
-		ids, unknown = s.pickUniversities(c, names)
+		ids, unknown = pickUniversities(c, names)
 		if len(unknown) > 0 {
-			return action.Fail(req, errcode.InvalidInput, "notices.bad_university", s.msg(req, "notices.bad_university", "names", strings.Join(unknown, ", "), "list", s.universityList(c)), nil)
+			return action.Fail(req, errcode.InvalidInput, "notices.bad_university", s.msg(req, "notices.bad_university", "names", strings.Join(unknown, ", "), "list", universityList(c)), nil)
 		}
 	} else if userID, _, ok := fortuneInvoker(req); ok {
 		if sub, has := s.noticeSub(userID, notices.KindTransfer); has && s.ConsentAllows(userID, privacy.TransferNotice) {
