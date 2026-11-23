@@ -71,7 +71,7 @@ func TestLiveExtractionSavesPeopleInTheEpisodeTransaction(t *testing.T) {
 	}
 
 	rep := svc.RunRoomMemory(context.Background())
-	if rep.Segments != 1 || rep.Episodes != 1 || m.calls("episode") != 1 || rep.PeopleClaims != 4 || rep.PeopleCalls != 0 {
+	if rep.Segments != 1 || rep.Episodes != 1 || m.calls("episode") != 1 || rep.PeopleClaims() != 4 || rep.PeopleCalls() != 0 {
 		t.Fatalf("pass: %+v calls=%d", rep, m.calls("episode"))
 	}
 	prompt := m.last("episode")
@@ -132,7 +132,7 @@ func TestLiveSinceIsWrittenOnce(t *testing.T) {
 	svc, m, eng := roomSvc(t)
 	m.extract = func(string) string { return peopleAnswer(hikePeople) }
 	sayIn(eng, time.Now().Add(-5*time.Hour), hike...)
-	if rep := svc.RunRoomMemory(context.Background()); rep.PeopleClaims == 0 {
+	if rep := svc.RunRoomMemory(context.Background()); rep.PeopleClaims() == 0 {
 		t.Fatalf("first pass: %+v", rep)
 	}
 	first := liveSince(t, svc, "g")
@@ -150,7 +150,7 @@ func TestLiveSinceIsWrittenOnce(t *testing.T) {
 		return `{"episodes":[],"people":[{"about":"p1","kind":"like","topic":"영화","text":"{p1}는 영화를 좋아함","by":["p1"],"ev":["m1"]}]}`
 	}
 	sayIn(eng, time.Now().Add(-90*time.Minute), later...)
-	if rep := svc.RunRoomMemory(context.Background()); rep.PeopleClaims != 1 {
+	if rep := svc.RunRoomMemory(context.Background()); rep.PeopleClaims() != 1 {
 		t.Fatalf("second pass: %+v", rep)
 	}
 	if got := liveSince(t, svc, "g"); got != "2020-01-01T00:00:00Z" {
@@ -173,7 +173,7 @@ func TestLivePeopleFailureKeepsTheEpisode(t *testing.T) {
 			m.extract = func(string) string { return peopleAnswer(people) }
 			sayIn(eng, time.Now().Add(-2*time.Hour), hike...)
 			rep := svc.RunRoomMemory(context.Background())
-			if rep.Episodes != 1 || rep.Failed != 0 || m.calls("episode") != 1 || rep.PeopleClaims != 0 {
+			if rep.Episodes != 1 || rep.Failed != 0 || m.calls("episode") != 1 || rep.PeopleClaims() != 0 {
 				t.Fatalf("pass: %+v calls=%d", rep, m.calls("episode"))
 			}
 			// the only claim is the one derived from the episode's own fact item
@@ -194,7 +194,7 @@ func TestLiveAnswerWithoutPeopleChangesNothing(t *testing.T) {
 	m.extract = func(string) string { return hikeAnswer }
 	sayIn(eng, time.Now().Add(-2*time.Hour), hike...)
 	rep := svc.RunRoomMemory(context.Background())
-	if rep.Episodes != 1 || rep.PeopleClaims != 0 || m.calls("episode") != 1 {
+	if rep.Episodes != 1 || rep.PeopleClaims() != 0 || m.calls("episode") != 1 {
 		t.Fatalf("pass: %+v", rep)
 	}
 }
@@ -270,7 +270,7 @@ func TestLiveSelfStatementOfOneLine(t *testing.T) {
 	say("6201", "나는 매운 음식을 정말 좋아해", base.Add(4*time.Hour), false) // long enough, nobody answered
 
 	rep := svc.RunRoomMemory(context.Background())
-	if rep.PeopleCalls != 1 || m.calls("episode") != 1 || rep.Episodes != 0 || rep.PeopleClaims != 1 {
+	if rep.PeopleCalls() != 1 || m.calls("episode") != 1 || rep.Episodes != 0 || rep.PeopleClaims() != 1 {
 		t.Fatalf("pass: %+v calls=%d", rep, m.calls("episode"))
 	}
 	if p := m.last("episode"); !strings.Contains(p, "나 광양에 살아 요즘") || !strings.Contains(p, "relationship_status") {
@@ -287,7 +287,7 @@ func TestLiveSelfStatementOfOneLine(t *testing.T) {
 		t.Fatal("live_since is written by a self statement too")
 	}
 	// the same segment is not asked again
-	if rep := svc.RunRoomMemory(context.Background()); rep.PeopleCalls != 0 || m.calls("episode") != 1 {
+	if rep := svc.RunRoomMemory(context.Background()); rep.PeopleCalls() != 0 || m.calls("episode") != 1 {
 		t.Fatalf("second pass: %+v", rep)
 	}
 }
@@ -309,7 +309,7 @@ func TestLiveSelfStatementStopsAtTheBudget(t *testing.T) {
 			FromBot: true, ReplyTo: id + "1", At: at.Add(20 * time.Second)})
 	}
 	rep := svc.RunRoomMemory(context.Background())
-	if rep.StoppedBy != "budget" || rep.PeopleCalls == 0 || rep.PeopleCalls >= 3 || m.calls("episode") != rep.PeopleCalls {
+	if rep.StoppedBy != "budget" || rep.PeopleCalls() == 0 || rep.PeopleCalls() >= 3 || m.calls("episode") != rep.PeopleCalls() {
 		t.Fatalf("the budget did not stop the one-line path: %+v calls=%d", rep, m.calls("episode"))
 	}
 }
@@ -359,7 +359,7 @@ func TestLiveStatusTopicSupersedesWhenRead(t *testing.T) {
 	sayIn(e, old.Add(5*time.Hour),
 		said{"8101", "101", "민수", "나 광양으로 이사했어"}, said{"8102", "202", "영희", "정말? 광양이면 멀다"},
 		said{"8103", "101", "민수", "응 광양 생활 시작했어"}, said{"8104", "202", "영희", "축하해 광양 생활"})
-	if rep := s.RunRoomMemory(context.Background()); rep.PeopleClaims != 2 {
+	if rep := s.RunRoomMemory(context.Background()); rep.PeopleClaims() != 2 {
 		t.Fatalf("extraction: %+v", rep)
 	}
 	f := reviewPerson{s, m, e, old}

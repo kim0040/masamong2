@@ -77,9 +77,9 @@ type RoomMemoryReport struct {
 	Failed      int    `json:"failed"`
 	States      int    `json:"states"`
 	StoppedBy   string `json:"stopped_by,omitempty"`
-	// person memory: model calls made for one-line self statements and claims saved (counts only)
-	PeopleCalls  int `json:"people_calls,omitempty"`
-	PeopleClaims int `json:"people_claims,omitempty"`
+	// person memory (counts only; unexported: they feed the pass log and the tests): model calls made for
+	// one-line self statements, and claims saved by live extraction
+	peopleCalls, peopleClaims int
 }
 
 // memRoom is one room room memory is made for.
@@ -119,7 +119,7 @@ func (s *Service) roomMemoryPass(ctx context.Context) {
 		if rep.Segments+rep.States+rep.Expired+rep.Regenerated > 0 || rep.StoppedBy != "" {
 			s.Log.Info("memory: room memory pass", "segments", rep.Segments, "episodes", rep.Episodes, "failed", rep.Failed,
 				"states", rep.States, "expired", rep.Expired, "regenerated", rep.Regenerated, "stopped_by", rep.StoppedBy,
-				"people_calls", rep.PeopleCalls, "people_claims", rep.PeopleClaims)
+				"people_calls", rep.peopleCalls, "people_claims", rep.peopleClaims)
 		}
 	})
 }
@@ -167,7 +167,7 @@ func (s *Service) RunRoomMemory(ctx context.Context) RoomMemoryReport {
 			if s.derivedAllows(spendEpisode) {
 				st, err := s.extractRoom(ctx, db, r, now, passSegments)
 				rep.Segments, rep.Episodes, rep.Failed = rep.Segments+st.segments, rep.Episodes+st.saved, rep.Failed+st.failed
-				rep.PeopleCalls, rep.PeopleClaims = rep.PeopleCalls+st.peopleCalls, rep.PeopleClaims+st.claims
+				rep.peopleCalls, rep.peopleClaims = rep.peopleCalls+st.peopleCalls, rep.peopleClaims+st.claims
 				if stop(err) {
 					return rep
 				}
@@ -189,7 +189,7 @@ func (s *Service) RunRoomMemory(ctx context.Context) RoomMemoryReport {
 	}
 	st, err := s.continueKakaoExtractions(ctx, db, now)
 	rep.Segments, rep.Episodes, rep.Failed = rep.Segments+st.segments, rep.Episodes+st.saved, rep.Failed+st.failed
-	rep.PeopleCalls, rep.PeopleClaims = rep.PeopleCalls+st.peopleCalls, rep.PeopleClaims+st.claims
+	rep.peopleCalls, rep.peopleClaims = rep.peopleCalls+st.peopleCalls, rep.peopleClaims+st.claims
 	stop(err)
 	return rep
 }
