@@ -141,7 +141,7 @@ func TestThreadRecoveryDuringForgetWriterWaitIsCleared(t *testing.T) {
 	go func() { defer close(done); s.forgetThreadOwner("member") }()
 	awaitThreadDBWait(t, s.Store.DB, before)
 	// This read starts after the initial invalidation, while the DB still contains the old owner.
-	if !s.recoverThread("target", false) {
+	if !s.recoverThread("target", recentThreads) {
 		t.Fatal("could not establish the intermediate DB snapshot")
 	}
 	release()

@@ -115,6 +115,39 @@ type threadInfo struct {
 	participants  map[string]bool // the owner and whoever spoke to the bot in it
 }
 
+// threadRowCols are the channel_threads columns a threadRow holds, in the order of threadRow.fields.
+const threadRowCols = `guild_id, parent_id, bot_owned, owner_id, origin_turn, state, last_at`
+
+// threadRow is one thread's stored row (threadRowCols).
+type threadRow struct {
+	guild, parent, owner, origin, state, last string
+	bot                                       int
+}
+
+// fields are the scan targets for threadRowCols.
+func (r *threadRow) fields() []any {
+	return []any{&r.guild, &r.parent, &r.bot, &r.owner, &r.origin, &r.state, &r.last}
+}
+
+// info is the row's in-memory entry, last active at lastAt; the owner counts as a participant.
+func (r threadRow) info(lastAt time.Time) *threadInfo {
+	info := &threadInfo{Guild: r.guild, Parent: r.parent, BotOwned: r.bot == 1, Owner: r.owner, OriginTurn: r.origin, Open: r.state == "open", LastAt: lastAt,
+		humans: map[string]bool{}, participants: map[string]bool{}}
+	if r.owner != "" {
+		info.participants[r.owner], info.humans[r.owner] = true, true
+	}
+	return info
+}
+
+// threadAge is which closed threads a lookup reads back from their rows: recentThreads only those closed
+// within threadKeepClosed (what a restart loads), anyThreadAge older ones too.
+type threadAge bool
+
+const (
+	recentThreads threadAge = false
+	anyThreadAge  threadAge = true
+)
+
 // offerTrack is one caller's conversation in a channel, for the offer score.
 type offerTrack struct {
 	turns         []time.Time
@@ -270,30 +303,25 @@ func (s *Service) threadsLoaded() *threadState {
 		return t
 	}
 	since := s.Clock.Now().UTC().Add(-threadKeepClosed).Format(time.RFC3339)
-	rows, err := db.Reader().Query(`SELECT thread_id, guild_id, parent_id, bot_owned, owner_id, origin_turn, state, last_at FROM channel_threads
+	rows, err := db.Reader().Query(`SELECT thread_id, `+threadRowCols+` FROM channel_threads
 		WHERE `+threadVisibleSQL("channel_threads")+` AND (state='open' OR last_at>=?)`, since)
 	if err != nil {
 		return t
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var id, g, p, owner, origin, state, last string
-		var bot int
-		if rows.Scan(&id, &g, &p, &bot, &owner, &origin, &state, &last) != nil {
+		var id string
+		var row threadRow
+		if rows.Scan(append([]any{&id}, row.fields()...)...) != nil {
 			continue
 		}
-		at, _ := time.Parse(time.RFC3339, last)
-		if state == "open" {
+		at, _ := time.Parse(time.RFC3339, row.last)
+		if row.state == "open" {
 			// activity is kept in memory only: after a restart an open thread is idle from now, not
 			// from its last saved write (else every thread older than the idle time closes at once)
 			at = s.Clock.Now()
 		}
-		info := &threadInfo{Guild: g, Parent: p, BotOwned: bot == 1, Owner: owner, OriginTurn: origin, Open: state == "open", LastAt: at,
-			humans: map[string]bool{}, participants: map[string]bool{}}
-		if owner != "" {
-			info.participants[owner], info.humans[owner] = true, true
-		}
-		threads[id] = info
+		threads[id] = row.info(at)
 	}
 	_ = rows.Close()
 	_, _ = db.DB.Exec(`DELETE FROM thread_participants WHERE thread_id IN (
@@ -407,17 +435,12 @@ func (s *Service) storedThread(threadID string, now time.Time) (*threadInfo, boo
 	if err != nil {
 		return nil, false
 	}
-	var g, p, owner, origin, state string
-	var bot int
-	if db.Reader().QueryRow(`SELECT guild_id, parent_id, bot_owned, owner_id, origin_turn, state FROM channel_threads WHERE thread_id=? AND `+threadVisibleSQL("channel_threads"), threadID).
-		Scan(&g, &p, &bot, &owner, &origin, &state) != nil {
+	var row threadRow
+	if db.Reader().QueryRow(`SELECT `+threadRowCols+` FROM channel_threads WHERE thread_id=? AND `+threadVisibleSQL("channel_threads"), threadID).
+		Scan(row.fields()...) != nil {
 		return nil, false
 	}
-	info := &threadInfo{Guild: g, Parent: p, BotOwned: bot == 1, Owner: owner, OriginTurn: origin, Open: state == "open", LastAt: now,
-		humans: map[string]bool{}, participants: map[string]bool{}}
-	if owner != "" {
-		info.participants[owner], info.humans[owner] = true, true
-	}
+	info := row.info(now)
 	s.loadSingleThreadParticipants(db, threadID, info)
 	return info, true
 }
@@ -467,7 +490,7 @@ func (s *Service) threadParent(channelID string) string {
 	if channelID == "" {
 		return ""
 	}
-	t := s.ensureThread(channelID, false)
+	t := s.ensureThread(channelID, recentThreads)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if info, ok := t.threads[channelID]; ok {
@@ -478,15 +501,15 @@ func (s *Service) threadParent(channelID string) string {
 
 // ensureThread puts a thread that is not in the table (let go of when idle or over the cap, or closed long
 // ago) back from its row, and returns the table. A channel with no row is remembered for a while so the
-// ordinary channels cost no query per message. anyAge also reads back a closed thread older than the keep
-// time (used by tests for old durable rows).
-func (s *Service) ensureThread(channelID string, anyAge bool) *threadState {
+// ordinary channels cost no query per message. anyThreadAge also reads back a closed thread older than the
+// keep time (used by tests for old durable rows).
+func (s *Service) ensureThread(channelID string, age threadAge) *threadState {
 	t := s.threadsLoaded()
 	t.mu.Lock()
 	_, ok := t.threads[channelID]
 	t.mu.Unlock()
 	if !ok {
-		s.recoverThread(channelID, anyAge)
+		s.recoverThread(channelID, age)
 	}
 	return t
 }
@@ -504,11 +527,11 @@ func (t *threadState) clearNotThread(id string) {
 }
 
 // recoverThread reads one thread's row into the table (not a deleted one, and not a closed one past
-// threadKeepClosed unless anyAge: what a restart would not load either). It reports whether the thread is in
-// the table afterwards.
-func (s *Service) recoverThread(threadID string, anyAge bool) bool {
+// threadKeepClosed unless anyThreadAge: what a restart would not load either). It reports whether the thread
+// is in the table afterwards.
+func (s *Service) recoverThread(threadID string, age threadAge) bool {
 	for attempt := 0; attempt < 2; attempt++ {
-		found, retry := s.recoverThreadOnce(threadID, anyAge)
+		found, retry := s.recoverThreadOnce(threadID, age)
 		if found || !retry {
 			return found
 		}
@@ -516,7 +539,7 @@ func (s *Service) recoverThread(threadID string, anyAge bool) bool {
 	return false
 }
 
-func (s *Service) recoverThreadOnce(threadID string, anyAge bool) (bool, bool) {
+func (s *Service) recoverThreadOnce(threadID string, age threadAge) (bool, bool) {
 	t := &s.threads
 	now := s.Clock.Now()
 	cache := t.notThreadCache()
@@ -530,7 +553,7 @@ func (s *Service) recoverThreadOnce(threadID string, anyAge bool) (bool, bool) {
 		t.mu.Unlock()
 		return true, false
 	}
-	if v, _, ok := cache.get(threadID, now); ok && v && !anyAge {
+	if v, _, ok := cache.get(threadID, now); ok && v && age == recentThreads {
 		t.mu.Unlock()
 		return false, false
 	}
@@ -541,10 +564,9 @@ func (s *Service) recoverThreadOnce(threadID string, anyAge bool) (bool, bool) {
 	if err != nil {
 		return false, false
 	}
-	var g, p, owner, origin, state, last string
-	var bot int
-	err = db.Reader().QueryRow(`SELECT guild_id, parent_id, bot_owned, owner_id, origin_turn, state, last_at FROM channel_threads
-		WHERE thread_id=? AND `+threadVisibleSQL("channel_threads"), threadID).Scan(&g, &p, &bot, &owner, &origin, &state, &last)
+	var row threadRow
+	err = db.Reader().QueryRow(`SELECT `+threadRowCols+` FROM channel_threads
+		WHERE thread_id=? AND `+threadVisibleSQL("channel_threads"), threadID).Scan(row.fields()...)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) && !s.threadDeleted(threadID) {
 			t.mu.Lock()
@@ -560,10 +582,10 @@ func (s *Service) recoverThreadOnce(threadID string, anyAge bool) (bool, bool) {
 		}
 		return false, false
 	}
-	at, _ := time.Parse(time.RFC3339, last)
-	if state == "open" {
+	at, _ := time.Parse(time.RFC3339, row.last)
+	if row.state == "open" {
 		at = now // activity is kept in memory only (as threadsLoaded)
-	} else if !anyAge && now.Sub(at) > threadKeepClosed {
+	} else if age == recentThreads && now.Sub(at) > threadKeepClosed {
 		t.mu.Lock()
 		valid := t.validRead(threadID, r, gen)
 		if valid {
@@ -573,11 +595,7 @@ func (s *Service) recoverThreadOnce(threadID string, anyAge bool) (bool, bool) {
 		t.mu.Unlock()
 		return false, retry
 	}
-	info := &threadInfo{Guild: g, Parent: p, BotOwned: bot == 1, Owner: owner, OriginTurn: origin, Open: state == "open", LastAt: at,
-		humans: map[string]bool{}, participants: map[string]bool{}}
-	if owner != "" {
-		info.participants[owner], info.humans[owner] = true, true
-	}
+	info := row.info(at)
 	s.loadSingleThreadParticipants(db, threadID, info)
 	if hook := s.hooks.threads.afterRead.Load(); hook != nil {
 		(*hook)(threadID)
@@ -688,7 +706,7 @@ func (s *Service) threadDeleted(channelID string) bool {
 
 // noteThreadActivity keeps a thread's last activity and who is in it.
 func (s *Service) noteThreadActivity(m ObservedMessage) {
-	t := s.ensureThread(m.ChannelID, false)
+	t := s.ensureThread(m.ChannelID, recentThreads)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	info, ok := t.threads[m.ChannelID]
@@ -712,7 +730,7 @@ type ThreadView struct {
 
 // ThreadFor describes a channel when it is a known thread.
 func (s *Service) ThreadFor(channelID, authorID string) (ThreadView, bool) {
-	t := s.ensureThread(channelID, false)
+	t := s.ensureThread(channelID, recentThreads)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	info, ok := t.threads[channelID]
@@ -733,7 +751,7 @@ func (s *Service) NoteThreadParticipant(channelID, authorID string) {
 	if authorID == "" {
 		return
 	}
-	t := s.ensureThread(channelID, false)
+	t := s.ensureThread(channelID, recentThreads)
 	t.mu.Lock()
 	info := t.threads[channelID]
 	if info == nil || info.participants[authorID] || t.deleted[channelID] {

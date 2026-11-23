@@ -40,7 +40,7 @@ func TestThreadSuccessClearsNegativeCache(t *testing.T) {
 				delete(s.threads.threads, "target")
 				s.threads.mu.Unlock()
 			}
-			if s.recoverThread("target", false) {
+			if s.recoverThread("target", recentThreads) {
 				t.Fatal("expected a miss before recovery or registration")
 			}
 			if _, _, ok := s.threads.notThreadCache().get("target", clk.Now()); !ok {
@@ -48,7 +48,7 @@ func TestThreadSuccessClearsNegativeCache(t *testing.T) {
 			}
 			switch source {
 			case "recovery":
-				if !s.recoverThread("target", true) {
+				if !s.recoverThread("target", anyThreadAge) {
 					t.Fatal("any-age recovery failed")
 				}
 			case "registration":
@@ -85,7 +85,7 @@ func TestThreadSuccessClearsNegativeCache(t *testing.T) {
 
 func TestThreadDeletionIsNotANegativeCacheEntry(t *testing.T) {
 	s, clk := deliveryService(t)
-	if s.recoverThread("target", false) {
+	if s.recoverThread("target", recentThreads) {
 		t.Fatal("expected initial miss")
 	}
 	s.ThreadDeleted("target")
