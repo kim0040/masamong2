@@ -24,7 +24,7 @@ func exampleDay() *fortune.Day {
 func TestFortuneCardShowsComputedValues(t *testing.T) {
 	s := privacyService(t)
 	base := action.Card{Title: "🔮", Text: tagReading, Tone: "fortune"} // the model wrote 82, 파랑, 손목시계, 오후 3시
-	c := s.fortuneCardFor("ko", "today", base, "head", "foot", exampleDay())
+	c := s.fortuneCard(fortuneCardSpec{Loc: "ko", Kind: "today", Head: "head", Footer: "foot", Day: exampleDay()}, base)
 	for _, want := range []string{"**76**/100", "💼 일·학업 65 · 💰 재물 70 · 💞 연애·관계 70 · 🌿 컨디션 62", "🧭 정재일 · 일지와 육합 · 천을귀인", "차분히 준비한 일이"} {
 		if !strings.Contains(c.Text, want) {
 			t.Errorf("text misses %q:\n%s", want, c.Text)
@@ -45,7 +45,7 @@ func TestFortuneCardShowsComputedValues(t *testing.T) {
 		}
 	}
 	// a reading that is not a day's (month, year, a sign) keeps what the model wrote
-	if m := s.fortuneCardFor("ko", "month", base, "head", "foot", exampleDay()); !strings.Contains(m.Text, "**82**/100") || strings.Contains(m.Text, "🧭") {
+	if m := s.fortuneCard(fortuneCardSpec{Loc: "ko", Kind: "month", Head: "head", Footer: "foot", Day: exampleDay()}, base); !strings.Contains(m.Text, "**82**/100") || strings.Contains(m.Text, "🧭") {
 		t.Fatalf("month reading changed: %s", m.Text)
 	}
 }
@@ -53,7 +53,7 @@ func TestFortuneCardShowsComputedValues(t *testing.T) {
 func TestFortuneCardComputedWhenTheModelIgnoredTheFormat(t *testing.T) {
 	s := privacyService(t)
 	base := action.Card{Title: "t", Text: "오늘은 85점! 행운의 색은 파랑.", Tone: "fortune", Footer: "model footer"}
-	c := s.fortuneCardFor("ko", "morning", base, "head", "basis · foot", exampleDay())
+	c := s.fortuneCard(fortuneCardSpec{Loc: "ko", Kind: "morning", Head: "head", Footer: "basis · foot", Day: exampleDay()}, base)
 	if c.Text != base.Text || len(c.Fields) != 2 || !strings.Contains(c.Fields[0].Value, "**76**/100") ||
 		!strings.Contains(c.Fields[0].Value, "🧭 정재일") || !strings.Contains(c.Fields[1].Value, "🎨 차콜") {
 		t.Fatalf("free text keeps its words and gets the computed points: %+v", c)
@@ -64,13 +64,13 @@ func TestFortuneCardComputedWhenTheModelIgnoredTheFormat(t *testing.T) {
 	// keys without a SUMMARY (not a reading): the model's SCORE and LUCKY_* lines go, the rest stays; a
 	// key in Korean ("총점") cannot be told from prose and stays
 	base.Text = "SCORE: 90\nWORK: 집중\n- LUCKY_COLOR: 파랑\n총점: 85"
-	c = s.fortuneCardFor("ko", "today", base, "head", "foot", exampleDay())
+	c = s.fortuneCard(fortuneCardSpec{Loc: "ko", Kind: "today", Head: "head", Footer: "foot", Day: exampleDay()}, base)
 	if strings.Contains(c.Text, "90") || strings.Contains(c.Text, "파랑") || !strings.Contains(c.Text, "WORK: 집중") || !strings.Contains(c.Text, "총점: 85") ||
 		c.Footer != "foot" || !strings.Contains(c.Fields[0].Value, "**76**/100") {
 		t.Fatalf("keys without a summary: %+v", c)
 	}
 	// a month reading in free text is shown as written
-	if m := s.fortuneCardFor("ko", "month", base, "head", "foot", exampleDay()); m.Text != base.Text || m.Footer != base.Footer {
+	if m := s.fortuneCard(fortuneCardSpec{Loc: "ko", Kind: "month", Head: "head", Footer: "foot", Day: exampleDay()}, base); m.Text != base.Text || m.Footer != base.Footer {
 		t.Fatalf("month free text changed: %+v", m)
 	}
 }
@@ -184,7 +184,7 @@ func TestInvalidBirthDateGetsNoFacts(t *testing.T) {
 		}
 		// the card is the model's, as before the rule engine
 		base := action.Card{Title: "t", Text: tagReading, Tone: "fortune"}
-		if card := s.fortuneCardFor("ko", "today", base, "head", "foot", c.day); !strings.Contains(card.Text, "**82**/100") {
+		if card := s.fortuneCard(fortuneCardSpec{Loc: "ko", Kind: "today", Head: "head", Footer: "foot", Day: c.day}, base); !strings.Contains(card.Text, "**82**/100") {
 			t.Fatalf("%q: %s", date, card.Text)
 		}
 	}

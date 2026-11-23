@@ -602,7 +602,7 @@ func (s *Service) fortuneQuery(ctx context.Context, req action.Request) action.R
 		footer := s.msg(req, "fortune.left", "n", left)
 		card.Footer, card.Ephemeral = footer, true
 		head := s.msg(req, "fortune.card.head", "name", name, "date", s.dayLabel(loc, now))
-		card = s.fortuneCardFor(loc, what, card, head, s.fortuneBasis(loc, p, now)+" · "+footer, chart.day)
+		card = s.fortuneCard(fortuneCardSpec{Loc: loc, Kind: what, Head: head, Footer: s.fortuneBasis(loc, p, now) + " · " + footer, Day: chart.day}, card)
 	}
 	out := map[string]any{"status": "ok", "what": what, "text": text, "cost_usd": cost, "left_today": left}
 	if chart.day != nil {
@@ -701,7 +701,7 @@ func (s *Service) zodiac(ctx context.Context, req action.Request, in map[string]
 	case ranking:
 		card = s.rankingCard(loc, card)
 	case private:
-		card = s.fortuneCard(loc, "sign", card, s.dayLabel(loc, now), footer)
+		card = s.fortuneCard(fortuneCardSpec{Loc: loc, Kind: "sign", Head: s.dayLabel(loc, now), Footer: footer}, card)
 	}
 	return action.WithCard(action.OK(req, map[string]any{"status": "ok", "sign": signName, "ranking": ranking, "cached": cached, "text": text}), card)
 }
@@ -1301,7 +1301,7 @@ func (s *Service) morningFor(ctx context.Context, sender DiscordSender, userID s
 	basis := s.fortuneBasis(loc, p, target)
 	card := action.Card{Title: s.I18n.T(loc, "fortune.briefing_title."+when, "date", s.dayLabel(loc, target)), Text: text, Footer: basis, Tone: "fortune",
 		Buttons: []action.CardButton{{ID: "fortune:unsub", Label: s.I18n.T(loc, "fortune.card.unsubscribe"), Style: "secondary"}}}
-	card = s.fortuneCardFor(loc, "morning", card, s.I18n.T(loc, "fortune.card.head", "name", name, "date", s.dayLabel(loc, target)), basis, chart.day)
+	card = s.fortuneCard(fortuneCardSpec{Loc: loc, Kind: "morning", Head: s.I18n.T(loc, "fortune.card.head", "name", name, "date", s.dayLabel(loc, target)), Footer: basis, Day: chart.day}, card)
 	sendCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	err = sender.SendDM(sendCtx, userID, card, "")
 	cancel()

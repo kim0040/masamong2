@@ -374,8 +374,20 @@ func absf(x float64) float64 {
 	return x
 }
 
+// packWindow is how much of the conversation around a matched leaf is packed: the parent messages
+// before and after it, and whether each line carries its speaker/time prefix.
+type packWindow struct {
+	before, after int
+	withPrefix    bool
+}
+
+// packLimits are the character budgets of a packed set: one per document, and one for all of them
+// (<= 0 = no total).
+type packLimits struct{ doc, total int }
+
 // packSegment is evidence_packing.pack_segment_evidence (the fields the retriever uses).
-func packSegment(msgs []corpus.Message, seg leaves.Leaf, before, after int, withPrefix bool, charLimit int, scope packScope, claimed Set) Packed {
+func packSegment(msgs []corpus.Message, seg leaves.Leaf, win packWindow, charLimit int, scope packScope, claimed Set) Packed {
+	before, after, withPrefix := win.before, win.after, win.withPrefix
 	start, end := parentWindow(msgs, seg, before, after)
 	var units []*unit
 	for i := start; i < end; i++ {
@@ -480,7 +492,8 @@ func packSegment(msgs []corpus.Message, seg leaves.Leaf, before, after int, with
 }
 
 // packSet is evidence_packing.pack_evidence_set with dedupe_visible=True.
-func packSet(msgs []corpus.Message, segs []leaves.Leaf, before, after int, withPrefix bool, docLimit, totalLimit int, scope packScope) ([]Packed, []Span, []string) {
+func packSet(msgs []corpus.Message, segs []leaves.Leaf, win packWindow, lim packLimits, scope packScope) ([]Packed, []Span, []string) {
+	docLimit, totalLimit := lim.doc, lim.total
 	claimed := Set{}
 	claimedBy := map[string]string{}
 	var docs []Packed
@@ -494,7 +507,7 @@ func packSet(msgs []corpus.Message, segs []leaves.Leaf, before, after int, withP
 			docs = append(docs, Packed{DocID: seg.DocID, Status: statusOmitted, InsufficientReason: "total_budget"})
 			continue
 		}
-		p := packSegment(msgs, seg, before, after, withPrefix, budget, scope, claimed)
+		p := packSegment(msgs, seg, win, budget, scope, claimed)
 		leftover := totalLimit > 0 && budget < docLimit
 		switch {
 		case leftover && p.Status == statusInsuff && p.UsedChars == 0:

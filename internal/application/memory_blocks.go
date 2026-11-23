@@ -150,6 +150,32 @@ func (p preparePayload) mode() string {
 	return p.Mode
 }
 
+// decodePrepare reads a prepare job's payload; false when it is not one this build can read.
+func decodePrepare(j jobs.Job) (preparePayload, bool) {
+	var p preparePayload
+	return p, json.Unmarshal([]byte(j.Payload), &p) == nil
+}
+
+// resumesBatch reports whether a live preparation of the room must run as its batch instead: a batch
+// already in flight for the room is resumed, never paid again live.
+func resumesBatch(eng *engine.Engine, room, mode string) bool {
+	if mode != prepareLive {
+		return false
+	}
+	_, ok := batchPlanOf(eng, room)
+	return ok
+}
+
+// activePrepareJobFor is the room's prepare job that is still pending, leased or running.
+func (s *Service) activePrepareJobFor(room string) (jobs.Job, bool) {
+	for _, j := range s.latestJobs() {
+		if p, ok := decodePrepare(j); ok && activeJob(j) && p.SourceRoom == room {
+			return j, true
+		}
+	}
+	return jobs.Job{}, false
+}
+
 // batchPlanOf is the room's stored batch plan, if it has one (a waiting or applied, unfinished batch).
 func batchPlanOf(eng *engine.Engine, room string) (engine.BatchPlanInfo, bool) {
 	plans, err := eng.BatchPlans()
@@ -216,7 +242,7 @@ func (s *Service) prepareMemoryBlock(ctx context.Context, req action.Request, in
 	}
 	// a batch already in flight for the room is resumed, never paid again live: the job waits for it
 	resumed := false
-	if _, ok := batchPlanOf(eng, candidate.SourceRoom); ok && mode == prepareLive {
+	if resumesBatch(eng, candidate.SourceRoom, mode) {
 		mode, resumed = prepareBatch, true
 	}
 	if eng.LLM == nil || !eng.LLM.Configured() {
@@ -230,8 +256,7 @@ func (s *Service) prepareMemoryBlock(ctx context.Context, req action.Request, in
 		if err != nil {
 			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
 		}
-		var running preparePayload
-		if json.Unmarshal([]byte(j.Payload), &running) == nil && running.SourceRoom != "" {
+		if running, ok := decodePrepare(j); ok && running.SourceRoom != "" {
 			mode = running.mode() // a job already running keeps its own mode
 		}
 		out := map[string]any{"job": jobJSON(j), "already_running": reused, "source_room": candidate.SourceRoom, "mode": mode, "background": true}
@@ -652,8 +677,7 @@ func (s *Service) startPrepareJob(p preparePayload) (jobs.Job, bool, error) {
 		return jobs.Job{}, false, err
 	}
 	for _, j := range list {
-		var q preparePayload
-		if j.Type == jobPrepare && activeJob(j) && json.Unmarshal([]byte(j.Payload), &q) == nil && q.SourceRoom == p.SourceRoom {
+		if q, ok := decodePrepare(j); ok && j.Type == jobPrepare && activeJob(j) && q.SourceRoom == p.SourceRoom {
 			s.blocksMu.Unlock()
 			return j, true, nil
 		}
@@ -820,10 +844,8 @@ func (s *Service) runPrepareJob(ctx context.Context, j jobs.Job, token string) {
 		return
 	}
 	// a batch for the room already in flight is resumed in batch mode whatever the job asked for
-	if eng, err := s.MemoryEngine(); err == nil && p.mode() == prepareLive {
-		if _, ok := batchPlanOf(eng, p.SourceRoom); ok {
-			p.Mode = prepareBatch
-		}
+	if eng, err := s.MemoryEngine(); err == nil && resumesBatch(eng, p.SourceRoom, p.mode()) {
+		p.Mode = prepareBatch
 	}
 	batch := p.mode() == prepareBatch
 	started := time.Now()
@@ -1084,8 +1106,7 @@ func (s *Service) latestJobs() map[string]jobs.Job {
 		return out
 	}
 	for _, j := range list {
-		var p preparePayload
-		if j.Type == jobPrepare && json.Unmarshal([]byte(j.Payload), &p) == nil {
+		if p, ok := decodePrepare(j); ok && j.Type == jobPrepare {
 			out[p.SourceRoom] = j
 		}
 	}
@@ -1159,11 +1180,8 @@ func (s *Service) updateMemoryBlock(req action.Request, in map[string]any) actio
 		if _, ok := batchPlanOf(eng, b.SourceRoom); !ok {
 			return action.Fail(req, errcode.InvalidInput, "generic.error", "this block has no batch to discard", nil)
 		}
-		for _, j := range s.latestJobs() {
-			var p preparePayload
-			if activeJob(j) && json.Unmarshal([]byte(j.Payload), &p) == nil && p.SourceRoom == b.SourceRoom {
-				return action.Fail(req, errcode.InvalidInput, "generic.error", "a prepare job is running for this block; cancel it first", map[string]any{"job_id": j.ID})
-			}
+		if j, running := s.activePrepareJobFor(b.SourceRoom); running {
+			return action.Fail(req, errcode.InvalidInput, "generic.error", "a prepare job is running for this block; cancel it first", map[string]any{"job_id": j.ID})
 		}
 		dctx, cancel := context.WithTimeout(context.Background(), batchCancelTimeout)
 		err := s.discardBatch(dctx, eng, b.SourceRoom)
@@ -1209,11 +1227,8 @@ func (s *Service) deleteMemoryBlock(req action.Request, in map[string]any) actio
 	if confirm == "" || (confirm != b.Label && confirm != b.SourceRoom) {
 		return action.Fail(req, errcode.InvalidInput, "generic.error", "type the block's name to confirm", map[string]any{"expected": b.Label})
 	}
-	for _, j := range s.latestJobs() {
-		var p preparePayload
-		if activeJob(j) && json.Unmarshal([]byte(j.Payload), &p) == nil && p.SourceRoom == b.SourceRoom {
-			return action.Fail(req, errcode.InvalidInput, "generic.error", "a prepare job is running for this block; cancel it first", map[string]any{"job_id": j.ID})
-		}
+	if j, running := s.activePrepareJobFor(b.SourceRoom); running {
+		return action.Fail(req, errcode.InvalidInput, "generic.error", "a prepare job is running for this block; cancel it first", map[string]any{"job_id": j.ID})
 	}
 	eng, err := s.MemoryEngine()
 	if err != nil {

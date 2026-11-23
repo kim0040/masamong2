@@ -346,7 +346,7 @@ func Transfer(ctx context.Context, src, dst *Store, progress func(table string, 
 					return fmt.Errorf("%s: %w", tc.Table, err)
 				}
 			}
-			n, err := copyTable(ctx, src, dst, tc.Table, cols, tc.Rows, progress)
+			n, err := copyTable(ctx, tableCopy{src: src, dst: dst, table: tc.Table, cols: cols, total: tc.Rows, progress: progress})
 			tc.Copied = n
 			if err != nil {
 				return fmt.Errorf("%s: %w", tc.Table, err)
@@ -377,7 +377,18 @@ func (p TransferPlan) Verified() bool {
 	return true
 }
 
-func copyTable(ctx context.Context, src, dst *Store, table string, cols []column, total int64, progress func(string, int64, int64)) (int64, error) {
+// tableCopy is one table's copy between two stores: the rows to expect (for progress) and the progress
+// callback (nil = none).
+type tableCopy struct {
+	src, dst *Store
+	table    string
+	cols     []column
+	total    int64
+	progress func(table string, done, total int64)
+}
+
+func copyTable(ctx context.Context, c tableCopy) (int64, error) {
+	src, dst, table, cols, total, progress := c.src, c.dst, c.table, c.cols, c.total, c.progress
 	rows, err := src.DB.QueryContext(ctx, "SELECT "+colList(cols)+" FROM "+quoteIdent(table))
 	if err != nil {
 		return 0, err

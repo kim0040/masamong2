@@ -38,7 +38,7 @@ func goldenKorean(t *testing.T) map[string]any {
 					return m.ObservationID != "o05" && m.ObservationID != "o02" && m.ObservationID != "o09"
 				}
 			}
-			p := packSegment(msgs, lv[1], 3, 3, true, limit, scope, nil)
+			p := packSegment(msgs, lv[1], packWindow{before: 3, after: 3, withPrefix: true}, limit, scope, nil)
 			out[fmt.Sprintf("pack_%d_%v", limit, excl)] = map[string]any{"excerpt": p.Excerpt, "status": p.Status, "spans": p.VisibleSpans}
 		}
 	}

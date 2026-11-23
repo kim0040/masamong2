@@ -24,7 +24,7 @@ LUCKY_TIME: 오후 3시`
 func TestFortuneCardLaysOutAReading(t *testing.T) {
 	s := privacyService(t)
 	base := action.Card{Title: "🔮 오늘의 운세", Text: tagReading, Footer: "old", Ephemeral: true, Tone: "fortune"}
-	c := s.fortuneCard("ko", "today", base, "철수님 · 10월 15일 (수)", "일진 을사 · 염소자리 · 오늘 남은 조회 횟수: 2회")
+	c := s.fortuneCard(fortuneCardSpec{Loc: "ko", Kind: "today", Head: "철수님 · 10월 15일 (수)", Footer: "일진 을사 · 염소자리 · 오늘 남은 조회 횟수: 2회"}, base)
 	for _, want := range []string{"철수님 · 10월 15일 (수)", "▰▰▰▰▰▰▰▰▱▱  **82**/100", "차분히 준비한 일이", "💼 **일·학업** 집중이 잘 돼요.", "🌿 **컨디션**"} {
 		if !strings.Contains(c.Text, want) {
 			t.Errorf("text misses %q:\n%s", want, c.Text)
@@ -51,7 +51,7 @@ func TestFortuneCardLaysOutAReading(t *testing.T) {
 	}
 
 	// the longer readings give each area its own field
-	long := s.fortuneCard("ko", "detail", base, "head", "f")
+	long := s.fortuneCard(fortuneCardSpec{Loc: "ko", Kind: "detail", Head: "head", Footer: "f"}, base)
 	if strings.Contains(long.Text, "일·학업") {
 		t.Fatalf("detail areas are fields: %s", long.Text)
 	}
@@ -67,7 +67,7 @@ func TestFortuneCardLaysOutAReading(t *testing.T) {
 func TestFortuneCardKeepsFreeTextAsWritten(t *testing.T) {
 	s := privacyService(t)
 	base := action.Card{Title: "t", Text: "**오늘의 흐름**: 85점\n좋은 날이에요.", Footer: "남은 2회", Tone: "fortune"}
-	if got := s.fortuneCard("ko", "today", base, "head", "new footer"); got.Text != base.Text || got.Footer != "남은 2회" || len(got.Fields) != 0 {
+	if got := s.fortuneCard(fortuneCardSpec{Loc: "ko", Kind: "today", Head: "head", Footer: "new footer"}, base); got.Text != base.Text || got.Footer != "남은 2회" || len(got.Fields) != 0 {
 		t.Fatalf("free text must be shown as before: %+v", got)
 	}
 }
@@ -75,7 +75,7 @@ func TestFortuneCardKeepsFreeTextAsWritten(t *testing.T) {
 func TestFortuneCardLuckyLineWhenLong(t *testing.T) {
 	s := privacyService(t)
 	text := "SUMMARY: s\nLUCKY_COLOR: 파랑\nLUCKY_ITEM: 오래된 가죽 수첩과 만년필 한 자루\nLUCKY_NUMBER: 7"
-	c := s.fortuneCard("ko", "today", action.Card{Text: text}, "", "")
+	c := s.fortuneCard(fortuneCardSpec{Loc: "ko", Kind: "today", Head: "", Footer: ""}, action.Card{Text: text})
 	if len(c.Fields) != 1 || c.Fields[0].Inline || !strings.Contains(c.Fields[0].Value, "🎨 파랑 · 🎁 오래된") {
 		t.Fatalf("a long value puts the lucky points on one line: %+v", c.Fields)
 	}
