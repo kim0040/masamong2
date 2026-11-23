@@ -67,17 +67,17 @@ func (s *Service) statsExport(ctx context.Context, req action.Request) action.Re
 		if bad, ok := err.(statsExportBadInput); ok {
 			return action.Fail(req, errcode.InvalidInput, "generic.error", string(bad), nil)
 		}
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	raw, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.file", err, nil)
 	}
 	var file map[string]any
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	if err := dec.Decode(&file); err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.file", err, nil)
 	}
 	return action.OK(req, map[string]any{"file": file, "bytes": len(raw), "collecting": s.statsOn()})
 }

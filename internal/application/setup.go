@@ -21,16 +21,16 @@ func (s *Service) setup(_ context.Context, req action.Request) action.Result {
 	backend := strVal(in, "backend", strVal(in, "db_backend", ""))
 	dsnRef := strVal(in, "dsn_ref", "")
 	if err := fsutil.PrivateDir(s.DataRoot); err != nil {
-		return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+		return s.failErr(req, "IO", "setup.failed", err, nil)
 	}
 	file, err := storage.LoadSettings(s.DataRoot)
 	if err != nil {
-		return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+		return s.failErr(req, "IO", "setup.failed", err, nil)
 	}
 	if backend != "" {
 		norm, err := storage.NormalizeBackend(backend)
 		if err != nil {
-			return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+			return s.failErr(req, "IO", "error.invalid_input", err, nil)
 		}
 		file.Backend = norm
 	}
@@ -41,13 +41,13 @@ func (s *Service) setup(_ context.Context, req action.Request) action.Result {
 		file.DSNRef = "env:MASAMONG_TIDB_DSN"
 	}
 	if err := storage.SaveSettings(s.DataRoot, file); err != nil {
-		return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+		return s.failErr(req, "IO", "setup.failed", err, nil)
 	}
 	already := false
 	if s.Store == nil {
 		opt, err := storage.OptionsFromEnv(s.DataRoot, storage.Settings{})
 		if err != nil {
-			return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+			return s.failErr(req, "IO", "setup.failed", err, nil)
 		}
 		if opt.Backend == storage.BackendSQLite {
 			if _, err := os.Stat(opt.SQLitePath); err == nil {
@@ -56,11 +56,11 @@ func (s *Service) setup(_ context.Context, req action.Request) action.Result {
 		}
 		store, err := storage.OpenOptions(opt)
 		if err != nil {
-			return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+			return s.failErr(req, "IO", "setup.failed", err, nil)
 		}
 		if err := migrateMemory(store); err != nil {
 			_ = store.Close()
-			return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+			return s.failErr(req, "IO", "setup.failed", err, nil)
 		}
 		s.Store = store
 	} else {
@@ -100,14 +100,14 @@ func (s *Service) setup(_ context.Context, req action.Request) action.Result {
 		}
 		raw, err := config.Marshal(doc)
 		if err != nil {
-			return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+			return s.failErr(req, "IO", "setup.failed", err, nil)
 		}
 		rev := config.Revision{Revision: 1, Status: config.StatusCommitted, ContentHash: config.Hash(raw), Content: raw, BaseRevision: 0}
 		if err := persistRevisionAt(s.Store, rev, s.Clock.Now()); err != nil {
-			return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+			return s.failErr(req, "IO", "setup.failed", err, nil)
 		}
 		if err := atomicWriteFile(s.CfgPath, raw); err != nil {
-			return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+			return s.failErr(req, "IO", "setup.failed", err, nil)
 		}
 		s.setDoc(doc, 1)
 		_ = s.kvSet("runtime:version", Version) // a new instance: its first start is not an upgrade (BackupOnUpgrade)

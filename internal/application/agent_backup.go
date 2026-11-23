@@ -49,7 +49,7 @@ func (s *Service) agent(ctx context.Context, req action.Request) action.Result {
 			}
 		}
 		if err != nil {
-			return action.Fail(req, errcode.PlanRejected, "generic.error", err.Error(), map[string]any{"rejected": true, "before_cost": true, "trace_id": ex.TraceID})
+			return s.failErr(req, errcode.PlanRejected, "agent.plan_rejected", err, map[string]any{"rejected": true, "before_cost": true, "trace_id": ex.TraceID})
 		}
 		return action.OK(req, map[string]any{"result": ex.Result, "nodes": ex.Nodes, "evidence": ex.Evidence, "trace_id": ex.TraceID, "reason": ex.Reason, "live": false, "source": "fixture"})
 	case "trace.show":

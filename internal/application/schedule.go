@@ -185,7 +185,7 @@ func nextBackup(now time.Time, p config.Backup, loc *time.Location) (time.Time, 
 
 func (s *Service) schedulesAction(ctx context.Context, req action.Request) action.Result {
 	if _, err := s.adminDB(); err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	switch req.Action {
 	case "schedules.run":
@@ -432,7 +432,7 @@ func (s *Service) autostartAction(req action.Request) action.Result {
 		}
 		st, err := launcher.SetAutostart(s.DataRoot, boolVal(in, "enabled"))
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), map[string]any{"autostart": st})
+			return s.failErr(req, errcode.IO, "autostart.failed", err, map[string]any{"autostart": st})
 		}
 		return action.OK(req, map[string]any{"autostart": st})
 	}

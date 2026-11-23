@@ -176,12 +176,15 @@ func (s *Service) updateApply(ctx context.Context, req action.Request) action.Re
 	fail := func(code string, msg string, details map[string]any) action.Result {
 		return action.Fail(req, code, "generic.error", msg, details)
 	}
+	failKey := func(code, key string, err error, details map[string]any) action.Result {
+		return s.failErr(req, code, key, err, details)
+	}
 	if !s.Daemon {
 		return fail(errcode.InvalidInput, "the service does not run in this process: update from the console or with install.sh", nil)
 	}
 	unlock, err := lockMaintenance(s.DataRoot, false)
 	if err != nil {
-		return fail(errcode.IO, err.Error(), nil)
+		return failKey(errcode.IO, "update.failed", err, nil)
 	}
 	defer unlock()
 	if !s.runs.updateApply.CompareAndSwap(false, true) {
@@ -199,7 +202,7 @@ func (s *Service) updateApply(ctx context.Context, req action.Request) action.Re
 	dir, _ := updateDir()
 	installLock, err := launcher.AcquireNamedLock(dir, ".masamong-update.lock")
 	if err != nil {
-		return fail(errcode.IO, err.Error(), nil)
+		return failKey(errcode.IO, "update.failed", err, nil)
 	}
 	defer installLock.Release()
 	if _, err := os.Lstat(filepath.Join(dir, updatePending)); !os.IsNotExist(err) {
@@ -207,27 +210,27 @@ func (s *Service) updateApply(ctx context.Context, req action.Request) action.Re
 	}
 	arcPath, err := downloadRelease(ctx, s, st, dir)
 	if err != nil {
-		return fail(errcode.ProviderUnavailable, "download failed, nothing was changed: "+err.Error(), nil)
+		return failKey(errcode.ProviderUnavailable, "update.download_failed", err, nil)
 	}
 	// The archive is only needed until the programs are on disk. Drop it before the
 	// database backup, which needs the free space the download just used.
 	defer os.Remove(arcPath)
 	staged, err := stageBinariesFromArchive(ctx, dir, arcPath, st.Asset.Name, st.Latest)
 	if err != nil {
-		return fail(errcode.IO, "the new version could not be prepared, nothing was changed: "+err.Error(), nil)
+		return failKey(errcode.IO, "update.prepare_failed", err, nil)
 	}
 	_ = os.Remove(arcPath)
 	backup, _, err := s.createBackupLocked(backupPreUpdate)
 	if err != nil {
 		removeStaged(staged)
-		return fail(errcode.IO, "backup failed, nothing was changed: "+err.Error(), nil)
+		return failKey(errcode.IO, "update.backup_failed", err, nil)
 	}
 	s.pruneKindLocked(backupPreUpdate, updateBackupsKept)
 	if err := swapBinariesLocked(dir, staged); err != nil {
 		if _, pending := os.Lstat(filepath.Join(dir, updatePending)); os.IsNotExist(pending) {
 			removeStaged(staged)
 		}
-		return fail(errcode.IO, "installing failed; maintenance recovery may be required: "+err.Error(), map[string]any{"backup": backup})
+		return failKey(errcode.IO, "update.install_failed", err, map[string]any{"backup": backup})
 	}
 	_ = s.kvSet("updates:applied", map[string]any{"from": Version, "to": st.Latest, "at": s.Clock.Now().UTC().Format(time.RFC3339), "backup": backup})
 	s.Log.Info("update installed; restarting", "from", Version, "to", st.Latest, "backup", backup)
