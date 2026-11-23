@@ -234,7 +234,7 @@ func TestOperatorHTTPTool(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"draw": 1150, "data": map[string]any{"numbers": []int{1, 2, 3}, "noise": "x"}, "q": r.URL.Query().Get("q")})
 	}))
 	defer srv.Close()
-	t.Setenv("LOTTO_KEY", "s3cr3t-key")
+	svc.SetEnvForTest(t, "LOTTO_KEY", "s3cr3t-key")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Tools = map[string]tools.Settings{"lotto.latest": {
 			Description: "lottery numbers",
@@ -358,7 +358,7 @@ func chatSvc(t *testing.T, plan string) (*application.Service, *fakeLLM) {
 	svc := setupSvc(t)
 	f := &fakeLLM{plan: plan}
 	srv := f.server(t)
-	t.Setenv("FAKE_OR_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_OR_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["openrouter"] = config.Provider{Kind: config.KindOpenAI, BaseURL: srv.URL, CredentialRef: "env:FAKE_OR_KEY"}
 		d.Providers["openmeteo"] = config.Provider{Kind: config.KindOpenMeteo, Disabled: true} // no weather source: "unconfigured"
@@ -566,7 +566,7 @@ func TestChatFallsBackToTheOtherChatModel(t *testing.T) {
 	}))
 	defer srv.Close()
 	svc := setupSvc(t)
-	t.Setenv("FAKE_OR_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_OR_KEY", "k")
 	models := func(planner, response string) {
 		applyDoc(t, svc, func(d *config.Document) {
 			d.Chat.ToolMode = "planner" // the planner pipeline; the tool loop has its own tests

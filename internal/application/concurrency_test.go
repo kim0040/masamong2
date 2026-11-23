@@ -50,7 +50,7 @@ func slowChatSvc(t *testing.T, delay time.Duration, edit func(d *config.Document
 	svc := setupSvc(t)
 	f := &slowLLM{delay: delay}
 	srv := f.server(t)
-	t.Setenv("FAKE_OR_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_OR_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["openrouter"] = config.Provider{Kind: config.KindOpenAI, BaseURL: srv.URL, CredentialRef: "env:FAKE_OR_KEY"}
 		d.Providers["openmeteo"] = config.Provider{Kind: config.KindOpenMeteo, Disabled: true}
@@ -242,7 +242,7 @@ func TestMemoryEngineSurvivesUnrelatedConfigChanges(t *testing.T) {
 	if again, _ := svc.MemoryEngine(); again != first {
 		t.Fatal("a channel rule change rebuilt the memory engine")
 	}
-	t.Setenv("FAKE_OR_KEY", "rotated")
+	svc.SetEnvForTest(t, "FAKE_OR_KEY", "rotated")
 	if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g", "id": "c", "rules": "길게"}); !r.OK {
 		t.Fatal(r.Error)
 	}
