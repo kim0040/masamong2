@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync, readdirSync } from 'node:fs'
-import { join, relative } from 'node:path'
+import { join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadLib } from './lib-load.mjs'
 
@@ -15,7 +15,7 @@ function sources() {
     for (const e of readdirSync(dir, { withFileTypes: true })) {
       const p = join(dir, e.name)
       if (e.isDirectory()) walk(p)
-      else if (/\.(svelte|ts)$/.test(e.name)) out.push([relative(root, p), readFileSync(p, 'utf8')])
+      else if (/\.(svelte|ts)$/.test(e.name)) out.push([relative(root, p).split(sep).join('/'), readFileSync(p, 'utf8')])
     }
   }
   walk(root)
