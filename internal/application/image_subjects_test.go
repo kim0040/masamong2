@@ -97,8 +97,8 @@ func (f reviewPerson) seed(t *testing.T, n int, c claimSeed) {
 		t.Fatalf("seed %+v: %d %v", c, n, err)
 	}
 	if c.state != "" {
-		if _, err := f.Store.DB.Exec(`UPDATE person_claim SET state=? WHERE id=?`, c.state,
-			store.PersonClaimID("g", claim.SubjectRef, claim.SpeakerRef, claim.Evidence)); err != nil {
+		if _, err := f.Store.DB.Exec(`UPDATE person_claim SET state=? WHERE guild_id='g' AND subject_ref=? AND speaker_ref=? AND text=?`, c.state,
+			claim.SubjectRef, claim.SpeakerRef, claim.Text); err != nil {
 			t.Fatal(err)
 		}
 	}

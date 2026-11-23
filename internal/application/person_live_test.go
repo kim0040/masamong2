@@ -93,7 +93,12 @@ func TestLiveExtractionSavesPeopleInTheEpisodeTransaction(t *testing.T) {
 		{u2, u2, "status", "residence", src, store.LinkSelf, "active", "discord:g:c"},
 		{u2, u2, "trait", "요리", src, store.LinkSelf, "active", "discord:g:c"},
 	}
-	got := peopleRows(t, svc)
+	var got []peopleRow
+	for _, g := range peopleRows(t, svc) {
+		if strings.HasPrefix(g.source, "extract:") { // the episode's own items are derived as well (source episode_item:)
+			got = append(got, g)
+		}
+	}
 	if len(got) != len(want) {
 		t.Fatalf("claims: %+v", got)
 	}
