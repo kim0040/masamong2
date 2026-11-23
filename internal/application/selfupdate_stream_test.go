@@ -128,17 +128,15 @@ func writeSizedArchive(t *testing.T, path, format string, files map[string]int) 
 	}
 }
 
-func withCappedArchiveOpen(t *testing.T, max int) {
-	t.Helper()
-	prev := openUpdateFile
-	openUpdateFile = func(name string) (archiveFile, error) {
+// cappedArchiveOpen opens an archive so that a read asking for more than max bytes fails.
+func cappedArchiveOpen(max int) func(name string) (archiveFile, error) {
+	return func(name string) (archiveFile, error) {
 		f, err := os.Open(name)
 		if err != nil {
 			return nil, err
 		}
 		return &capFile{File: f, max: max}, nil
 	}
-	t.Cleanup(func() { openUpdateFile = prev })
 }
 
 func programFiles(n int) map[string]int {
@@ -154,13 +152,13 @@ func allocOf(fn func()) uint64 {
 	return after.TotalAlloc - before.TotalAlloc
 }
 
-func extractSized(t *testing.T, format string, n int) {
+func extractSized(t *testing.T, format string, n int, open func(name string) (archiveFile, error)) {
 	t.Helper()
 	dir := t.TempDir()
 	name := "rel." + format
 	arc := filepath.Join(dir, name)
 	writeSizedArchive(t, arc, format, programFiles(n))
-	staged, err := extractBinariesTo(dir, arc, name)
+	staged, err := extractBinariesFrom(open, dir, arc, name, updateExtractMax)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,14 +176,14 @@ func extractSized(t *testing.T, format string, n int) {
 func TestUpdateExtractDoesNotBufferTheBinary(t *testing.T) {
 	for _, format := range []string{"tar.gz", "zip"} {
 		t.Run(format, func(t *testing.T) {
-			withCappedArchiveOpen(t, 256<<10)
-			extractSized(t, format, 32<<10) // warm the decoder
+			open := cappedArchiveOpen(256 << 10)
+			extractSized(t, format, 32<<10, open) // warm the decoder
 			var small, large uint64
 			for range 2 {
-				if d := allocOf(func() { extractSized(t, format, 64<<10) }); small == 0 || d < small {
+				if d := allocOf(func() { extractSized(t, format, 64<<10, open) }); small == 0 || d < small {
 					small = d
 				}
-				if d := allocOf(func() { extractSized(t, format, 1<<20) }); large == 0 || d < large {
+				if d := allocOf(func() { extractSized(t, format, 1<<20, open) }); large == 0 || d < large {
 					large = d
 				}
 			}

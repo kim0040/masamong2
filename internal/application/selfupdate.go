@@ -406,7 +406,8 @@ type archiveFile interface {
 	Stat() (os.FileInfo, error)
 }
 
-var openUpdateFile = func(name string) (archiveFile, error) {
+// openUpdateFile opens a release archive; extractBinariesFrom takes another for a test that wraps it.
+func openUpdateFile(name string) (archiveFile, error) {
 	return os.Open(name)
 }
 
@@ -416,8 +417,13 @@ func extractBinariesTo(dir, archivePath, name string) (map[string]string, error)
 }
 
 // extractBinariesLimited is extractBinariesTo with an explicit combined cap.
-func extractBinariesLimited(dir, archivePath, name string, combined int64) (staged map[string]string, err error) {
-	f, err := openUpdateFile(archivePath)
+func extractBinariesLimited(dir, archivePath, name string, combined int64) (map[string]string, error) {
+	return extractBinariesFrom(openUpdateFile, dir, archivePath, name, combined)
+}
+
+// extractBinariesFrom is extractBinariesLimited opening the archive with open.
+func extractBinariesFrom(open func(name string) (archiveFile, error), dir, archivePath, name string, combined int64) (staged map[string]string, err error) {
+	f, err := open(archivePath)
 	if err != nil {
 		return nil, err
 	}
