@@ -46,7 +46,6 @@ func dmGateway(t *testing.T, model bool) (*Gateway, *fakeDiscord) {
 	}
 	svc.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	configureDMTest(t, svc, config.DMSettings{}, true)
-	SetCatalog(svc.I18n)
 	sess, err := discordgo.New("Bot synthetic")
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +218,7 @@ func TestDMGatewayLimitsNoticeOncePerKindAndUnansweredPrefixConversation(t *test
 	g, fake := dmGateway(t, true)
 	configureDMTest(t, g.svc, config.DMSettings{PerUserPerDay: 1, PerDay: 2}, true)
 	// The unconfigured weather tool keeps its result and becomes one DM conversation.
-	cmd, ok := ByName("weather")
+	cmd, ok := ByName(shippedCatalog(), "weather")
 	if !ok {
 		t.Fatal("weather command missing")
 	}
@@ -271,7 +270,7 @@ func TestDMTurnThatFailsSaysSo(t *testing.T) {
 	m := dmMessage("dm-fail", "Synthetic request")
 	sendDM(g, m)
 	posts := dmPosts(fake)
-	want, _ := json.Marshal(messages.T(g.noticeLocale(m), "discord.chat.failed"))
+	want, _ := json.Marshal(g.catalog().T(g.noticeLocale(m), "discord.chat.failed"))
 	if len(posts) != 1 || !strings.Contains(posts[0].body, strings.Trim(string(want), `"`)) {
 		t.Fatalf("a failed turn must say so once: %d posts", len(posts))
 	}
@@ -282,7 +281,7 @@ func TestDMTurnThatFailsSaysSo(t *testing.T) {
 func TestDMReplySplitsIntoBubbles(t *testing.T) {
 	g, fake := dmGateway(t, false)
 	m := dmMessage("dm-bubbles", "Synthetic request")
-	sent, ids, rep := g.sendShaped(context.Background(), g.sess, "", "dm-fixture", m.Reference(), "first line\nsecond line", "", g.svc.ChannelPolicyFor("", "dm-fixture").Conversation.ReplyShape)
+	sent, ids, rep := g.sendShaped(context.Background(), g.sess, shapedReply{channelID: "dm-fixture", ref: m.Reference(), text: "first line\nsecond line", shape: g.svc.ChannelPolicyFor("", "dm-fixture").Conversation.ReplyShape})
 	if rep.Parts != 2 || rep.Sent != 2 || len(ids) != 2 || sent == "" {
 		t.Fatalf("a DM reply must go out as two bubbles: parts %d sent %d", rep.Parts, rep.Sent)
 	}

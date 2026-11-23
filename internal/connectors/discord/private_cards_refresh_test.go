@@ -54,7 +54,7 @@ func TestRefreshedDMForgetButtonKeepsItsServer(t *testing.T) {
 	}
 	card("first", "g1")
 	card("control", "g2")
-	cmd, _ := ByName("forgetme")
+	cmd, _ := ByName(shippedCatalog(), "forgetme")
 	g.runCommand(g.sess, roomMessage("m1", "!"+cmd.Aliases[0]), cmd, nil)
 	g.inflight.Wait()
 	dm, ok := fake.find(http.MethodPost, "/channels/1/messages")

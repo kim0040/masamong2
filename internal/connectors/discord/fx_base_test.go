@@ -175,7 +175,7 @@ func TestFXPrefixWordsThatDoNotSplitFailAsOneCurrency(t *testing.T) {
 	for _, text := range []string{"!환율 달러 foo", "!환율 foo bar", "!환율 foo 달러"} {
 		t.Run(text, func(t *testing.T) {
 			d := newFXDelivery(t, svc, nil)
-			cmd, o, _ := ParsePrefix("!", text)
+			cmd, o, _ := ParsePrefix(shippedCatalog(), "!", text)
 			r := d.g.svc.Execute(t.Context(), requestFor(cmd, o, InvokeContext{Locale: "ko", Typed: true}, "x"))
 			if r.OK || r.Error.MessageKey != "fx.invalid_currency" || d.calls.Load() != 0 {
 				t.Errorf("%q: %+v (provider calls %d)", text, r, d.calls.Load())
@@ -186,7 +186,7 @@ func TestFXPrefixWordsThatDoNotSplitFailAsOneCurrency(t *testing.T) {
 
 // The command's option list: currency, base and amount, all optional; base keeps its pre-통화 name.
 func TestFXCommandOptions(t *testing.T) {
-	cmd, _ := ByName("fx")
+	cmd, _ := ByName(shippedCatalog(), "fx")
 	var names []string
 	for _, o := range cmd.Options {
 		names = append(names, o.Name)
@@ -197,7 +197,7 @@ func TestFXCommandOptions(t *testing.T) {
 	if !slices.Equal(names, []string{"currency", "base", "amount"}) {
 		t.Errorf("options = %v", names)
 	}
-	if got := localizations("discord.command.fx.option.base.name")[discordgo.Korean]; got != "기준통화" {
+	if got := localizations(shippedCatalog(), "discord.command.fx.option.base.name")[discordgo.Korean]; got != "기준통화" {
 		t.Errorf("ko name of base = %q, want the name the option always had", got)
 	}
 }
@@ -245,7 +245,7 @@ func TestFXHomeCurrencyFollowsTheRegion(t *testing.T) {
 			}
 			if tc.home != "KRW" {
 				// the won is a managed currency: every board of a non-Korean home shows its row too
-				won := currency.New(messages).Name(tc.locale, "KRW")
+				won := currency.New(shippedCatalog()).Name(tc.locale, "KRW")
 				if won == "" {
 					won = "KRW"
 				}
@@ -259,7 +259,7 @@ func TestFXHomeCurrencyFollowsTheRegion(t *testing.T) {
 
 // The Discord locale reaches the action as an input of the command, only when there is one.
 func TestFXBuildCarriesTheDiscordLocaleTag(t *testing.T) {
-	cmd, _ := ByName("fx")
+	cmd, _ := ByName(shippedCatalog(), "fx")
 	_, in := cmd.Build(nil, InvokeContext{Locale: "en", Tag: "en-GB"})
 	if in["locale_tag"] != "en-GB" {
 		t.Errorf("input = %v", in)

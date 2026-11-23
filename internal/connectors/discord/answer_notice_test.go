@@ -97,7 +97,6 @@ func answerGateway(t *testing.T, models *answerModels, discord *posting) *Gatewa
 	t.Helper()
 	srv := models.server(t)
 	svc := svcForTest(t)
-	SetCatalog(svc.I18n)
 	if res := svc.Execute(context.Background(), action.Request{Action: "access.policy", Input: mustJSON(map[string]any{"server_approval": false})}); !res.OK {
 		t.Fatal("could not disable server approval for the fixture")
 	}
@@ -139,7 +138,7 @@ func answerMessage(text string) *discordgo.MessageCreate {
 }
 
 func (g *Gateway) noticeText(m *discordgo.MessageCreate) string {
-	return messages.T(g.noticeLocale(m), "discord.chat.failed")
+	return g.catalog().T(g.noticeLocale(m), "discord.chat.failed")
 }
 
 // An answer that was made and could not be posted at all (the first send was refused) gets the short

@@ -20,7 +20,7 @@ import (
 // action's to pick from the request's language (KRW for Korean, USD otherwise), so the language that
 // writes the quotes is the one that picks it. Nothing is checked or rewritten here.
 func TestFXBuildHandsOverWhatWasTyped(t *testing.T) {
-	cmd, _ := ByName("fx")
+	cmd, _ := ByName(shippedCatalog(), "fx")
 	for _, tc := range []struct {
 		locale string
 		typed  bool // the options are words of a message
@@ -85,7 +85,7 @@ func TestFXPrefixParsing(t *testing.T) {
 		{"!환율 달러 foo", "달러 foo", "", ""},
 		{"!환율 foo bar", "foo bar", "", ""},
 	} {
-		cmd, opts, ok := ParsePrefix("!", tc.text)
+		cmd, opts, ok := ParsePrefix(shippedCatalog(), "!", tc.text)
 		if !ok || cmd.Name != "fx" {
 			t.Errorf("%q: not parsed as fx (%v)", tc.text, ok)
 			continue
@@ -101,7 +101,7 @@ func TestFXPrefixParsing(t *testing.T) {
 // once (the benchmark keeps it that way).
 func TestFXPrefixLongUnknownInputStaysOneName(t *testing.T) {
 	tail := strings.Repeat("x ", 999) + "x" // 1,999 characters of unknown words
-	cmd, opts, ok := ParsePrefix("!", "!fx "+tail)
+	cmd, opts, ok := ParsePrefix(shippedCatalog(), "!", "!fx "+tail)
 	if !ok || cmd.Name != "fx" {
 		t.Fatalf("the long input did not parse as fx")
 	}
@@ -115,7 +115,7 @@ func BenchmarkFXPrefixLongUnknownInput(b *testing.B) {
 		b.Run(fmt.Sprint(n), func(b *testing.B) {
 			text := "!fx" + strings.Repeat(" x", n)
 			for b.Loop() {
-				ParsePrefix("!", text)
+				ParsePrefix(shippedCatalog(), "!", text)
 			}
 		})
 	}
@@ -158,7 +158,7 @@ func fxCard(t *testing.T, e *fxEnv, locale string, opts map[string]string) []str
 // fxPrefixCard runs the words of a prefix command ("!환율 달러 유로") the way the gateway does.
 func fxPrefixCard(t *testing.T, e *fxEnv, locale, text string) []string {
 	t.Helper()
-	_, opts, ok := ParsePrefix("!", text)
+	_, opts, ok := ParsePrefix(shippedCatalog(), "!", text)
 	if !ok {
 		t.Fatalf("%q did not parse as a command", text)
 	}
@@ -179,7 +179,7 @@ func fxEmbed(t *testing.T, e *fxEnv, locale string, opts map[string]string, type
 // fxRun runs the command for ictx and returns the card with the action's raw output.
 func fxRun(t *testing.T, e *fxEnv, ictx InvokeContext, opts map[string]string) (*discordgo.MessageEmbed, map[string]any) {
 	t.Helper()
-	cmd, _ := ByName("fx")
+	cmd, _ := ByName(shippedCatalog(), "fx")
 	res := e.g.svc.Execute(context.Background(), requestFor(cmd, opts, ictx, ""))
 	if !res.OK {
 		t.Fatalf("%s %v: %+v", ictx.Locale, opts, res.Error)
@@ -235,7 +235,7 @@ func TestFXRawRatesStayInTheResult(t *testing.T) {
 	defer server.Close()
 	adapter := svc.Registry().FX
 	adapter.OpenBase, adapter.KeyedBase = server.URL, server.URL
-	cmd, _ := ByName("fx")
+	cmd, _ := ByName(shippedCatalog(), "fx")
 	res := svc.Execute(context.Background(), requestFor(cmd, nil, InvokeContext{Locale: "ko", UserID: "tester"}, ""))
 	if !res.OK || res.Output["base"] != "KRW" || res.Output["source"] == nil || res.Output["updated_at"] == nil {
 		t.Fatalf("raw fields changed: %+v", res.Output)
@@ -254,7 +254,7 @@ func TestFXMissingRateIsAnInputError(t *testing.T) {
 	defer server.Close()
 	adapter := svc.Registry().FX
 	adapter.OpenBase, adapter.KeyedBase = server.URL, server.URL
-	cmd, _ := ByName("fx")
+	cmd, _ := ByName(shippedCatalog(), "fx")
 	res := svc.Execute(context.Background(), requestFor(cmd, map[string]string{"currency": "BTN", "base": "KRW"}, InvokeContext{Locale: "ko", UserID: "tester"}, ""))
 	if !application.IsFXInputError(res) || res.Error.MessageKey != "fx.unsupported_currency" {
 		t.Fatalf("got %+v", res)

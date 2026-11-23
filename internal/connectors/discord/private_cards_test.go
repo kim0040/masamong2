@@ -87,7 +87,7 @@ func TestPrivatePrefixCardsGoToDMNotTheRoom(t *testing.T) {
 			}
 			room := postsTo(t, fake, "room")
 			loc := g.svc.LocaleFor("u1", g.locale("g1"))
-			if len(room) != 1 || len(room[0].Embeds) != 0 || room[0].Content != messages.T(loc, "discord.private.dm_sent") {
+			if len(room) != 1 || len(room[0].Embeds) != 0 || room[0].Content != shippedCatalog().T(loc, "discord.private.dm_sent") {
 				t.Fatalf("room posts = %+v, want only the DM line", room)
 			}
 		})
@@ -98,12 +98,12 @@ func TestPrivatePrefixCardsGoToDMNotTheRoom(t *testing.T) {
 func TestPrivatePrefixCardWithClosedDMsNamesTheSlashCommand(t *testing.T) {
 	g, fake := privateCardGateway(t)
 	fake.setResponse("/channels/1/messages", http.StatusForbidden, `{"code":50007,"message":"Cannot send messages to this user"}`)
-	cmd, _ := ByName("reminders")
+	cmd, _ := ByName(shippedCatalog(), "reminders")
 	g.runCommand(g.sess, roomMessage("m1", "!"+cmd.Aliases[0]), cmd, nil)
 	room := postsTo(t, fake, "room")
 	loc := g.svc.LocaleFor("u1", g.locale("g1"))
-	want := messages.T(loc, "discord.private.dm_closed", "command", "/"+LocalName(cmd, loc))
-	if len(room) != 1 || len(room[0].Embeds) != 0 || room[0].Content != want || !strings.Contains(want, "/"+LocalName(cmd, loc)) {
+	want := shippedCatalog().T(loc, "discord.private.dm_closed", "command", "/"+LocalName(shippedCatalog(), cmd, loc))
+	if len(room) != 1 || len(room[0].Embeds) != 0 || room[0].Content != want || !strings.Contains(want, "/"+LocalName(shippedCatalog(), cmd, loc)) {
 		t.Fatalf("room posts = %+v, want %q", room, want)
 	}
 }
@@ -112,7 +112,7 @@ func TestPrivatePrefixCardWithClosedDMsNamesTheSlashCommand(t *testing.T) {
 // typed, as before.
 func TestNonPrivateOrDMCardsStayWhereTyped(t *testing.T) {
 	g, fake := privateCardGateway(t)
-	help, _ := ByName("help")
+	help, _ := ByName(shippedCatalog(), "help")
 	g.runCommand(g.sess, roomMessage("m1", "!help"), help, nil)
 	if room := postsTo(t, fake, "room"); len(room) != 1 || len(room[0].Embeds) == 0 {
 		t.Fatalf("help in a room: %+v", room)
@@ -120,7 +120,7 @@ func TestNonPrivateOrDMCardsStayWhereTyped(t *testing.T) {
 	if _, ok := fake.find(http.MethodPost, "/users/@me/channels"); ok {
 		t.Fatal("a command that is not personal opened a DM")
 	}
-	mine, _ := ByName("mymemory")
+	mine, _ := ByName(shippedCatalog(), "mymemory")
 	dm := &discordgo.MessageCreate{Message: &discordgo.Message{ID: "m2", ChannelID: "dmchan", Content: "!x", Author: &discordgo.User{ID: "u1"}}}
 	g.runCommand(g.sess, dm, mine, nil)
 	g.inflight.Wait()
@@ -183,7 +183,7 @@ func TestPendingServerAnswersOwnMemoryCommands(t *testing.T) {
 		t.Fatal("fixture: g1 is approved")
 	}
 	for _, name := range []string{"mymemory", "forgetme"} {
-		cmd, _ := ByName(name)
+		cmd, _ := ByName(shippedCatalog(), name)
 		g.onMessage(g.sess, roomMessage("p-"+name, "!"+cmd.Aliases[0]))
 	}
 	g.inflight.Wait()
@@ -191,7 +191,7 @@ func TestPendingServerAnswersOwnMemoryCommands(t *testing.T) {
 		t.Fatalf("DM cards in a pending server = %d, want 2: %+v", len(dm), fake.calls)
 	}
 	before := len(postsTo(t, fake, "room"))
-	weather, _ := ByName("weather")
+	weather, _ := ByName(shippedCatalog(), "weather")
 	g.onMessage(g.sess, roomMessage("p-weather", "!"+weather.Aliases[0]))
 	g.inflight.Wait()
 	if after := len(postsTo(t, fake, "room")); after != before {

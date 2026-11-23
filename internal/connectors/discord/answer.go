@@ -100,7 +100,8 @@ func (t *answerTurn) deliver(deliverCtx context.Context, res chat.Result) string
 		return ""
 	}
 	shape := g.svc.ChannelPolicyFor(m.GuildID, m.ChannelID).Conversation.ReplyShape
-	sent, ids, rep := g.sendShapedFor(deliverCtx, s, m.GuildID, m.ChannelID, m.Reference(), res.Answer, t.visionNotice, shape, deepSearched(res.Tools), t.turnDone)
+	sent, ids, rep := g.sendShaped(deliverCtx, s, shapedReply{guildID: m.GuildID, channelID: m.ChannelID, ref: m.Reference(), text: res.Answer,
+		lead: t.visionNotice, shape: shape, deep: deepSearched(res.Tools), turnDone: t.turnDone})
 	g.svc.NoteReplyMessages(res.TurnID, m.GuildID, m.ChannelID, ids, rep.PartEnds...)
 	g.svc.NoteDelivery(res.TurnID, m.GuildID, m.ChannelID, rep)
 	t.delivered = rep.Sent == rep.Parts && rep.Parts > 0

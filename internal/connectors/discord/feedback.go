@@ -7,6 +7,7 @@ import (
 
 	"masamong/internal/application"
 	"masamong/internal/crash"
+	"masamong/internal/i18n"
 )
 
 // Feedback on replies without cluttering the chat (application/feedback.go): the bot adds no
@@ -17,9 +18,9 @@ import (
 // rateCommandName is the message command's base name; Discord shows the localized one.
 const rateCommandName = "Rate this reply"
 
-func rateCommand() *discordgo.ApplicationCommand {
+func rateCommand(cat *i18n.Catalog) *discordgo.ApplicationCommand {
 	return &discordgo.ApplicationCommand{Type: discordgo.MessageApplicationCommand, Name: rateCommandName,
-		NameLocalizations: ptrLocalizations(localizations("discord.feedback.command"))}
+		NameLocalizations: ptrLocalizations(localizations(cat, "discord.feedback.command"))}
 }
 
 func ptrLocalizations(m map[discordgo.Locale]string) *map[discordgo.Locale]string {
@@ -56,12 +57,12 @@ func (g *Gateway) handleRate(s *discordgo.Session, i *discordgo.InteractionCreat
 	target := i.ApplicationCommandData().TargetID
 	data := &discordgo.InteractionResponseData{Flags: discordgo.MessageFlagsEphemeral, AllowedMentions: noMentions}
 	if _, ok := g.svc.ReplyTurn(target); !ok {
-		data.Content = messages.T(loc, "discord.feedback.not_reply")
+		data.Content = g.catalog().T(loc, "discord.feedback.not_reply")
 	} else {
-		data.Content = messages.T(loc, "discord.feedback.ask")
+		data.Content = g.catalog().T(loc, "discord.feedback.ask")
 		data.Components = []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-			discordgo.Button{Style: discordgo.SuccessButton, Label: messages.T(loc, "discord.feedback.good"), Emoji: &discordgo.ComponentEmoji{Name: "👍"}, CustomID: "fb:up:" + target},
-			discordgo.Button{Style: discordgo.DangerButton, Label: messages.T(loc, "discord.feedback.bad"), Emoji: &discordgo.ComponentEmoji{Name: "👎"}, CustomID: "fb:down:" + target},
+			discordgo.Button{Style: discordgo.SuccessButton, Label: g.catalog().T(loc, "discord.feedback.good"), Emoji: &discordgo.ComponentEmoji{Name: "👍"}, CustomID: "fb:up:" + target},
+			discordgo.Button{Style: discordgo.DangerButton, Label: g.catalog().T(loc, "discord.feedback.bad"), Emoji: &discordgo.ComponentEmoji{Name: "👎"}, CustomID: "fb:down:" + target},
 		}}}
 	}
 	ctx, cancel := g.ackContext()
@@ -84,16 +85,16 @@ func (g *Gateway) handleRateComponent(s *discordgo.Session, i *discordgo.Interac
 	switch parts[1] {
 	case "up":
 		g.svc.RateReply(i.GuildID, target, user, true, "")
-		upd.Content = messages.T(loc, "discord.feedback.thanks")
+		upd.Content = g.catalog().T(loc, "discord.feedback.thanks")
 	case "down":
 		g.svc.RateReply(i.GuildID, target, user, false, "")
-		upd.Content = messages.T(loc, "discord.feedback.why")
+		upd.Content = g.catalog().T(loc, "discord.feedback.why")
 		opts := make([]discordgo.SelectMenuOption, 0, len(application.FeedbackReasons))
 		for _, r := range application.FeedbackReasons {
-			opts = append(opts, discordgo.SelectMenuOption{Label: messages.T(loc, "discord.feedback.reason."+r), Value: r})
+			opts = append(opts, discordgo.SelectMenuOption{Label: g.catalog().T(loc, "discord.feedback.reason."+r), Value: r})
 		}
 		upd.Components = []discordgo.MessageComponent{discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-			discordgo.SelectMenu{CustomID: "fb:why:" + target, Placeholder: messages.T(loc, "discord.feedback.why_placeholder"), Options: opts},
+			discordgo.SelectMenu{CustomID: "fb:why:" + target, Placeholder: g.catalog().T(loc, "discord.feedback.why_placeholder"), Options: opts},
 		}}}
 	case "why":
 		reason := ""
@@ -101,7 +102,7 @@ func (g *Gateway) handleRateComponent(s *discordgo.Session, i *discordgo.Interac
 			reason = strings.TrimSpace(v[0])
 		}
 		g.svc.RateReply(i.GuildID, target, user, false, reason)
-		upd.Content = messages.T(loc, "discord.feedback.thanks")
+		upd.Content = g.catalog().T(loc, "discord.feedback.thanks")
 	default:
 		return
 	}

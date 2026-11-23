@@ -30,7 +30,7 @@ func TestBlockedPersonsThreadAndMoreButtonsAreRefused(t *testing.T) {
 			Message: &discordgo.Message{ID: "reply", ChannelID: "room", Content: "an answer"},
 			Data:    discordgo.MessageComponentInteractionData{CustomID: customID, ComponentType: discordgo.ButtonComponent}}}
 	}
-	want := messages.T(g.svc.LocaleFor(blocked, g.locale(guild)), "access.blocked")
+	want := g.catalog().T(g.svc.LocaleFor(blocked, g.locale(guild)), "access.blocked")
 	for _, id := range []string{"thr:open:turn1:" + blocked, "thr:stay:turn1:" + blocked, "thr:stop:thread1", "more:reply", "poll:vote:p1:o1", "poll:result:p1", "poll:close:p1"} {
 		before := len(fake.calls)
 		g.handleComponent(g.sess, press(id))

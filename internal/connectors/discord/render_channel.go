@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
+
+	"masamong/internal/i18n"
 )
 
 // Cards for what happens in a channel: the activity ranking, polls and drawn pictures.
@@ -43,7 +45,7 @@ func renderRanking(in renderInput, e *discordgo.MessageEmbed) Rendered {
 // renderPollCreate renders polls.create.
 func renderPollCreate(in renderInput, e *discordgo.MessageEmbed) Rendered {
 	out, locale, t := in.out, in.locale, in.t
-	p := nativeDiscordPoll(out, locale)
+	p := nativeDiscordPoll(in.cat, out, locale)
 	e.Title = t("poll.posted")
 	e.Description = t("poll.how")
 	if closes, _ := out["closes_at"].(string); closes != "" {
@@ -83,7 +85,7 @@ func renderPollResult(in renderInput, e *discordgo.MessageEmbed) Rendered {
 		}
 		lines = append(lines, fmt.Sprintf("%s — %v", label, toInt(m["votes"])))
 	}
-	lines = append(lines, "", t("poll.voters", "n", out["unique_voters"], "status", pollStatus(fmt.Sprint(out["status"]), locale)))
+	lines = append(lines, "", t("poll.voters", "n", out["unique_voters"], "status", pollStatus(in.cat, fmt.Sprint(out["status"]), locale)))
 	if closes, _ := out["closes_at"].(string); closes != "" {
 		lines = append(lines, t("poll.closes_at", "when", discordTime(closes)))
 	}
@@ -103,14 +105,14 @@ func renderImage(in renderInput, e *discordgo.MessageEmbed) Rendered {
 	return in.embedOnly(e)
 }
 
-func pollStatus(s, locale string) string {
-	if v, ok := messages.Lookup(locale, "discord.render.poll.status."+s); ok {
+func pollStatus(cat *i18n.Catalog, s, locale string) string {
+	if v, ok := cat.Lookup(locale, "discord.render.poll.status."+s); ok {
 		return v
 	}
 	return s
 }
 
-func nativeDiscordPoll(out map[string]any, locale string) *discordgo.Poll {
+func nativeDiscordPoll(cat *i18n.Catalog, out map[string]any, locale string) *discordgo.Poll {
 	q := truncate(fmt.Sprint(out["question"]), 300)
 	hours := toInt(out["duration_hours"])
 	if hours < 1 {
@@ -140,7 +142,7 @@ func nativeDiscordPoll(out map[string]any, locale string) *discordgo.Poll {
 		}
 	}
 	if len(answers) < 2 {
-		yes, no := messages.T(locale, "poll.yes"), messages.T(locale, "poll.no")
+		yes, no := cat.T(locale, "poll.yes"), cat.T(locale, "poll.no")
 		answers = []discordgo.PollAnswer{
 			{Media: &discordgo.PollMedia{Text: yes, Emoji: &discordgo.ComponentEmoji{Name: "👍"}}},
 			{Media: &discordgo.PollMedia{Text: no, Emoji: &discordgo.ComponentEmoji{Name: "👎"}}},

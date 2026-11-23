@@ -2,23 +2,25 @@ package discord
 
 import (
 	"strings"
+
+	"masamong/internal/i18n"
 )
 
 // Builders of a member's own commands: settings, update news, consent, reminders and memory.
 
 // buildMysettings maps the mysettings command's options to its Action input.
 func buildMysettings(o map[string]string, c InvokeContext) (string, map[string]any) {
-	return "preferences.set", settingsInput(o, c.Typed)
+	return "preferences.set", settingsInput(c.words, o, c.Typed)
 }
 
 // settingsInput turns /mysettings options (or "!내설정 지역 서울" words) into preferences.set input.
-func settingsInput(o map[string]string, typed bool) map[string]any {
+func settingsInput(cat *i18n.Catalog, o map[string]string, typed bool) map[string]any {
 	in := map[string]any{}
 	// only typed words ("!내설정 초기화") carry a verb: the slash command's region option is a place, so
 	// region:"초기화" is not a reset of every setting
 	if typed && o["timezone"] == "" && o["quiet"] == "" && o["language"] == "" {
 		// prefix form: everything is in the first option
-		verb, rest := splitVerb(o["region"], "", wordsFor("mysettings", "verb", "region", "timezone", "quiet", "language", "reset"))
+		verb, rest := splitVerb(o["region"], "", wordsFor(cat, "mysettings", "verb", "region", "timezone", "quiet", "language", "reset"))
 		switch verb {
 		case "reset":
 			return map[string]any{"reset": true}
@@ -47,7 +49,7 @@ func settingsInput(o map[string]string, typed bool) map[string]any {
 	}
 	switch v := strings.TrimSpace(o["language"]); {
 	case v == "":
-	case wordsFor("mysettings", "value", "default")[strings.ToLower(v)] == "default":
+	case wordsFor(cat, "mysettings", "value", "default")[strings.ToLower(v)] == "default":
 		in["locale"] = ""
 	default:
 		in["locale"] = v
@@ -57,7 +59,7 @@ func settingsInput(o map[string]string, typed bool) map[string]any {
 
 // buildUpdates maps the updates command's options to its Action input.
 func buildUpdates(o map[string]string, c InvokeContext) (string, map[string]any) {
-	verb, rest := splitVerb(o["what"], o["value"], wordsFor("updates", "verb", "now", "previous", "subscribe", "unsubscribe", "status"))
+	verb, rest := splitVerb(o["what"], o["value"], wordsFor(c.words, "updates", "verb", "now", "previous", "subscribe", "unsubscribe", "status"))
 	return updatesRequest(verb, rest)
 }
 
@@ -88,7 +90,7 @@ func updatesRequest(verb, rest string) (string, map[string]any) {
 
 // buildPrivacy maps the privacy command's options to its Action input.
 func buildPrivacy(o map[string]string, c InvokeContext) (string, map[string]any) {
-	verb, scope := splitVerb(o["action"], o["scope"], wordsFor("privacy", "verb", "status", "grant", "withdraw"))
+	verb, scope := splitVerb(o["action"], o["scope"], wordsFor(c.words, "privacy", "verb", "status", "grant", "withdraw"))
 	in := map[string]any{}
 	if scope != "" {
 		in["scope"] = scope

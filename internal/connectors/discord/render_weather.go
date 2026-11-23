@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
+
+	"masamong/internal/i18n"
 )
 
 // Cards for weather and disaster alerts.
@@ -38,7 +40,7 @@ func renderWeather(in renderInput, e *discordgo.MessageEmbed) Rendered {
 			lines = append(lines, fmt.Sprintf("🍃 %s %.1f m/s", t("weather.wind"), toF(v)))
 		}
 		if p, _ := out["precip"].(string); p != "" && p != "none" && p != "unknown" {
-			lines = append(lines, "☔ "+t("weather.precipitation", "value", precipText(p, locale)))
+			lines = append(lines, "☔ "+t("weather.precipitation", "value", precipText(in.cat, p, locale)))
 		}
 		if fc, ok := out["forecast"].(map[string]any); ok {
 			var f []string
@@ -122,8 +124,8 @@ func renderDisasters(in renderInput, e *discordgo.MessageEmbed) Rendered {
 	return in.embedOnly(e)
 }
 
-func precipText(p, locale string) string {
-	if v, ok := messages.Lookup(locale, "discord.render.precip."+p); ok {
+func precipText(cat *i18n.Catalog, p, locale string) string {
+	if v, ok := cat.Lookup(locale, "discord.render.precip."+p); ok {
 		return v
 	}
 	return p

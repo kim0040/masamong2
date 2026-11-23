@@ -11,6 +11,7 @@ import (
 	"masamong/internal/action"
 	"masamong/internal/application"
 	"masamong/internal/catalog"
+	"masamong/internal/i18n"
 )
 
 type Event struct {
@@ -60,7 +61,7 @@ func (s *Simulator) Handle(ctx context.Context, ev Event, now time.Time, ourLeas
 	}
 	act := ev.Action
 	if act == "" {
-		act = mapLegacy(ev.Command)
+		act = mapLegacy(serviceCatalog(s.Svc), ev.Command)
 	}
 	if _, ok := catalog.Lookup(act); !ok {
 		return SimResult{Acked: true, Error: "unknown_action"}
@@ -85,8 +86,8 @@ func (s *Simulator) IssueButton(actor string, now time.Time, rev int) string {
 	return tok
 }
 
-func mapLegacy(cmd string) string {
-	if c, ok := ByAlias(cmd); ok {
+func mapLegacy(cat *i18n.Catalog, cmd string) string {
+	if c, ok := ByAlias(cat, cmd); ok {
 		return c.Action
 	}
 	return cmd

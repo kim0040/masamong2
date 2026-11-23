@@ -170,7 +170,7 @@ func TestACommandTurnAfterASettledEdit(t *testing.T) {
 	if n := dmCount(t, g, `SELECT COUNT(*) FROM privacy_settled WHERE source_id='dm-secret'`); n != 1 {
 		t.Fatalf("the edit did not settle: %d: this proves nothing", n)
 	}
-	cmd, ok := ByName("weather")
+	cmd, ok := ByName(shippedCatalog(), "weather")
 	if !ok {
 		t.Fatal("weather command missing")
 	}

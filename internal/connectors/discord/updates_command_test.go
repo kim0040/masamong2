@@ -77,9 +77,8 @@ func TestScenarioUpdateNewsCommands(t *testing.T) {
 // The slash command is registered with its localized names, and every choice has a label.
 func TestUpdatesCommandIsRegisteredInEveryLanguage(t *testing.T) {
 	svc := scenarioService(t)
-	SetCatalog(svc.I18n)
 	names := map[string]string{"ko": "업데이트", "ja": "アップデート", "zh-CN": "更新", "es-ES": "novedades"}
-	for _, c := range ApplicationCommands() {
+	for _, c := range applicationCommandsIn(svc.I18n, nil) {
 		if c.Name != "updates" {
 			continue
 		}

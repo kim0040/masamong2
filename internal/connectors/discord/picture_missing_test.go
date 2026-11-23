@@ -15,7 +15,7 @@ import (
 // the image.failed line as a reply, not a card that claims success without a picture.
 func TestPrefixImageCommandWithMissingFileIsAFailureLine(t *testing.T) {
 	g, rec, _ := pictureGateway(t, http.StatusOK)
-	cmd, _ := ByName("image")
+	cmd, _ := ByName(shippedCatalog(), "image")
 	m := &discordgo.MessageCreate{Message: &discordgo.Message{ID: "m1", ChannelID: "c1", GuildID: "g1"}}
 	ictx := InvokeContext{ChannelID: "c1", GuildID: "g1", Locale: g.locale("g1")}
 	res := action.Result{OK: true, Action: "images.generate", Output: map[string]any{"status": "ok", "image_id": "img_ffffffffffffffff", "bytes": 10}}
@@ -34,7 +34,7 @@ func TestPrefixImageCommandWithMissingFileIsAFailureLine(t *testing.T) {
 // missing: no card, no file.
 func TestSlashImageResponseWithMissingFileIsTheFailureText(t *testing.T) {
 	g, _, _ := pictureGateway(t, http.StatusOK)
-	cmd, _ := ByName("image")
+	cmd, _ := ByName(shippedCatalog(), "image")
 	ictx := InvokeContext{ChannelID: "c1", GuildID: "g1", Locale: g.locale("g1")}
 	res := action.Result{OK: true, Action: "images.generate", Output: map[string]any{"status": "ok", "image_id": "img_ffffffffffffffff", "bytes": 10}}
 	edit := g.responseEdit(res, cmd, ictx)

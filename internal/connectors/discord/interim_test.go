@@ -158,10 +158,10 @@ func (r *restLog) shape(interimTexts []string) []string {
 func interimTexts(g *Gateway, m *discordgo.MessageCreate) []string {
 	var out []string
 	for i := 1; i <= interimVariants; i++ {
-		out = append(out, messages.T(g.noticeLocale(m), fmt.Sprintf("discord.chat.interim.%d", i)))
+		out = append(out, g.catalog().T(g.noticeLocale(m), fmt.Sprintf("discord.chat.interim.%d", i)))
 	}
 	for i := 1; i <= interimMoreVariants; i++ {
-		out = append(out, messages.T(g.noticeLocale(m), fmt.Sprintf("discord.chat.interim_more.%d", i)))
+		out = append(out, g.catalog().T(g.noticeLocale(m), fmt.Sprintf("discord.chat.interim_more.%d", i)))
 	}
 	return out
 }
@@ -317,7 +317,7 @@ func TestInterimSlowModeWaitsForTheTimer(t *testing.T) {
 	}
 	clock.fire()
 	texts := interimTexts(g, m)
-	if got := log.shape(texts); !slices.Equal(got, []string{"POST interim"}) || log.list()[0].Content != messages.T(g.noticeLocale(m), "discord.chat.interim.1") {
+	if got := log.shape(texts); !slices.Equal(got, []string{"POST interim"}) || log.list()[0].Content != g.catalog().T(g.noticeLocale(m), "discord.chat.interim.1") {
 		t.Fatalf("the unanswered turn must get a first-round line: %q, text %q", got, log.list()[0].Content)
 	}
 	ip.clear()
@@ -340,7 +340,7 @@ func TestInterimSlowModeWaitsForTheTimer(t *testing.T) {
 	ip3 := makeInterim(g3, &fakeClock{}, context.Background(), m)
 	ip3.show(chat.Progress{Stage: chat.ProgressMore, Round: 2, Searches: 1})
 	ip3.posts.Wait()
-	if len(log3.list()) != 1 || log3.list()[0].Content != messages.T(g3.noticeLocale(m), "discord.chat.interim.1") {
+	if len(log3.list()) != 1 || log3.list()[0].Content != g3.catalog().T(g3.noticeLocale(m), "discord.chat.interim.1") {
 		t.Fatalf("slow mode posted %+v", log3.list())
 	}
 }
@@ -729,7 +729,7 @@ func armInterimBot(g *Gateway) {
 // and not observed, whether it arrives while the call is still out or after the error returns.
 func TestInterimAmbiguousSendIsDeletedWhenTheCreateArrives(t *testing.T) {
 	line := func(g *Gateway, m *discordgo.MessageCreate) string {
-		return messages.T(g.noticeLocale(m), "discord.chat.interim.1")
+		return g.catalog().T(g.noticeLocale(m), "discord.chat.interim.1")
 	}
 	t.Run("create before the error", func(t *testing.T) {
 		g, log, clock := interimFixture(t, "deep")
@@ -834,7 +834,7 @@ func TestBackfillDoesNotCaptureAnInterimLine(t *testing.T) {
 	lineID := discordSnowflake(now.Add(-30 * time.Minute))
 	personID := discordSnowflake(now.Add(-20 * time.Minute))
 	quoteID := discordSnowflake(now.Add(-10 * time.Minute))
-	line := messages.T("ko", "discord.chat.interim.1")
+	line := shippedCatalog().T("ko", "discord.chat.interim.1")
 	eng, err := g.svc.MemoryEngine()
 	if err != nil {
 		t.Fatal(err)
@@ -909,7 +909,7 @@ func TestInterimOrdinaryBotReplyWithTheSameTextIsLeftAlone(t *testing.T) {
 	ip := makeInterim(g, clock, context.Background(), m)
 	ip.show(chat.Progress{Stage: chat.ProgressDeep})
 	ip.posts.Wait()
-	line := messages.T(g.noticeLocale(m), "discord.chat.interim.1")
+	line := g.catalog().T(g.noticeLocale(m), "discord.chat.interim.1")
 	g.onMessage(g.sess, botReplyTo(m.ChannelID, "another-message", "other", line))
 	g.onMessage(g.sess, botCreate(m.ChannelID, "no-reply", line))
 	// neither was registered for a line, so no drop-delete could have been launched for them: the
@@ -953,7 +953,7 @@ func TestInterimServerErrorIsAmbiguous(t *testing.T) {
 			ip := makeInterim(g, clock, context.Background(), m)
 			ip.show(chat.Progress{Stage: chat.ProgressDeep})
 			ip.posts.Wait()
-			g.onMessage(g.sess, botReplyTo(m.ChannelID, m.ID, "made", messages.T(g.noticeLocale(m), "discord.chat.interim.1")))
+			g.onMessage(g.sess, botReplyTo(m.ChannelID, m.ID, "made", g.catalog().T(g.noticeLocale(m), "discord.chat.interim.1")))
 			waitForShape(t, g, log, m, []string{"POST interim", "DELETE made"})
 		})
 	}
@@ -970,7 +970,7 @@ func TestInterimRefusedSendStillDeletesAnEarlyCreate(t *testing.T) {
 	ip := makeInterim(g, clock, context.Background(), m)
 	ip.show(chat.Progress{Stage: chat.ProgressDeep})
 	<-entered
-	g.onMessage(g.sess, botReplyTo(m.ChannelID, m.ID, "early", messages.T(g.noticeLocale(m), "discord.chat.interim.1")))
+	g.onMessage(g.sess, botReplyTo(m.ChannelID, m.ID, "early", g.catalog().T(g.noticeLocale(m), "discord.chat.interim.1")))
 	close(gate)
 	ip.posts.Wait()
 	if got := log.shape(interimTexts(g, m)); !slices.Equal(got, []string{"POST interim", "DELETE early"}) {
@@ -992,7 +992,7 @@ func TestInterimSameTextTurnsDeleteTheirOwnLines(t *testing.T) {
 	ip1.posts.Wait()
 	ip2.show(chat.Progress{Stage: chat.ProgressDeep})
 	ip2.posts.Wait()
-	line := messages.T(g.noticeLocale(m1), "discord.chat.interim.1")
+	line := g.catalog().T(g.noticeLocale(m1), "discord.chat.interim.1")
 	g.onMessage(g.sess, botReplyTo(m1.ChannelID, m2.ID, "second", line))
 	g.onMessage(g.sess, botReplyTo(m1.ChannelID, m1.ID, "first", line))
 	deletes := func() []string {
@@ -1030,7 +1030,7 @@ func TestInterimBadGatewayRetriesShareOneNonce(t *testing.T) {
 			t.Fatalf("a resend lost the nonce: %+v", posts)
 		}
 	}
-	g.onMessage(g.sess, botReplyTo(m.ChannelID, m.ID, "made", messages.T(g.noticeLocale(m), "discord.chat.interim.1")))
+	g.onMessage(g.sess, botReplyTo(m.ChannelID, m.ID, "made", g.catalog().T(g.noticeLocale(m), "discord.chat.interim.1")))
 	testutil.WaitFor(t, 3*time.Second, "the created line to be deleted", func() bool {
 		evs := log.list()
 		return evs[len(evs)-1].Method == http.MethodDelete
