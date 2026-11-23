@@ -172,10 +172,10 @@ func TestUpdateNewsMergesSkippedVersions(t *testing.T) {
 // nothing; the first records the version, the last leaves the high-water mark alone.
 func TestUpdateNewsQuietCases(t *testing.T) {
 	t.Run("no user-facing items", func(t *testing.T) {
-		f := newNewsFixture(t, "v1.2.2")
-		f.svc.SetAnnouncedForTest("v1.2.1")
+		f := newNewsFixture(t, "v1.0.0")
+		f.svc.SetAnnouncedForTest("v0.9.0")
 		f.run(t)
-		if rooms, dms := f.gw.sent(); len(rooms)+len(dms) != 0 || f.svc.AnnouncedForTest() != "v1.2.2" {
+		if rooms, dms := f.gw.sent(); len(rooms)+len(dms) != 0 || f.svc.AnnouncedForTest() != "v1.0.0" {
 			t.Fatalf("%v %v %q", rooms, dms, f.svc.AnnouncedForTest())
 		}
 	})
