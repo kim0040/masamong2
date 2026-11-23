@@ -152,7 +152,7 @@ func TestModelListAndBudgetUseTheReferenceListWhenTheHostHasNoPrices(t *testing.
 	defer ref.Close()
 	svc := setupSvc(t)
 	application.SetReferencePricesForTest(svc, ref.URL)
-	t.Setenv("COMET_KEY", "c")
+	svc.SetEnvForTest(t, "COMET_KEY", "c")
 	out(t, svc, "providers.add", map[string]any{"api": "compatible", "id": "cometapi", "base_url": comet.URL + "/v1"})
 	out(t, svc, "providers.credentials", map[string]any{"id": "cometapi", "credential_ref": "env:COMET_KEY"})
 	var row map[string]any

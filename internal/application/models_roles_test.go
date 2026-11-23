@@ -35,8 +35,8 @@ func listServer(t *testing.T) string {
 }
 
 func listService(t *testing.T) *application.Service {
-	t.Setenv("MASAMONG_OPENROUTER_KEY", "test-key")
 	svc := setupSvc(t)
+	svc.SetEnvForTest(t, "MASAMONG_OPENROUTER_KEY", "test-key")
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{
 		map[string]any{"path": []any{"providers", "openrouter", "api"}, "value": "openrouter"},
 		map[string]any{"path": []any{"providers", "openrouter", "base_url"}, "value": listServer(t)},

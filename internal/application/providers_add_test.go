@@ -41,7 +41,7 @@ func TestAddGeminiAndFillRoles(t *testing.T) {
 	if r := exec(svc, "providers.add", map[string]any{"api": "gemini", "id": "gem", "base_url": srv.URL + "/v1beta/openai"}); !r.OK {
 		t.Fatalf("add at an address: %+v", r)
 	}
-	t.Setenv("GEM_KEY", "g-key")
+	svc.SetEnvForTest(t, "GEM_KEY", "g-key")
 	if r := exec(svc, "providers.credentials", map[string]any{"id": "gem", "credential_ref": "env:GEM_KEY"}); !r.OK {
 		t.Fatalf("key ref: %+v", r)
 	}
@@ -106,8 +106,8 @@ func TestModelsRecommendExplainsWhenNoRuleMatches(t *testing.T) {
 		_, _ = w.Write([]byte(`{"object":"list","data":[]}`))
 	}))
 	defer srv.Close()
-	t.Setenv("MASAMONG_OPENROUTER_KEY", "test-key")
 	svc := setupSvc(t)
+	svc.SetEnvForTest(t, "MASAMONG_OPENROUTER_KEY", "test-key")
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{
 		map[string]any{"path": []any{"providers", "openrouter", "api"}, "value": "openrouter"},
 		map[string]any{"path": []any{"providers", "openrouter", "base_url"}, "value": srv.URL},
@@ -135,8 +135,8 @@ func TestEmbeddingSwitchWaitsForConfirmationWhileIndexed(t *testing.T) {
 	if r := exec(svc, "providers.add", map[string]any{"api": "gemini", "id": "gem", "base_url": srv.URL + "/v1beta/openai"}); !r.OK {
 		t.Fatalf("add: %+v", r)
 	}
-	t.Setenv("GEM_KEY", "g-key")
-	t.Setenv("MASAMONG_OPENROUTER_KEY", "or-key") // the indexed model's provider has its key
+	svc.SetEnvForTest(t, "GEM_KEY", "g-key")
+	svc.SetEnvForTest(t, "MASAMONG_OPENROUTER_KEY", "or-key") // the indexed model's provider has its key
 	out(t, svc, "providers.credentials", map[string]any{"id": "gem", "credential_ref": "env:GEM_KEY"})
 	eng, err := svc.MemoryEngine()
 	if err != nil {
