@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"masamong/internal/action"
@@ -44,8 +43,6 @@ const (
 	eqkShownEvents = 6
 	warningEvery   = 5 * time.Minute
 )
-
-var disasterTicking atomic.Bool
 
 // disasterMem keeps when the watcher last ran in memory. A check that changed nothing writes nothing
 // (each write is a commit and fsync, forever, on an SD card), so the console's "last checked" and the

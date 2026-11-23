@@ -142,12 +142,12 @@ func TestLiveEditRecomputesToBot(t *testing.T) {
 	if l := s.liveLines("g", "c")[0]; l.ToBot || len(l.Mentions) != 0 {
 		t.Fatal("Discord edit kept the old mention")
 	}
-	call := ChatInput{GuildID: "g", ChannelID: "c", MessageID: "request", started: m.At}
+	call := ChatInput{GuildID: "g", ChannelID: "c", MessageID: "request", clockStart: m.At}
 	s.liveToBot(call)
 	if s.liveLines("g", "c")[0].ToBot {
 		t.Fatal("completion of the pre-edit turn re-marked the edited line")
 	}
-	call.started = time.Now()
+	call.clockStart = time.Now()
 	s.liveToBot(call)
 	if !s.liveLines("g", "c")[0].ToBot {
 		t.Fatal("a turn accepting the edited revision could not mark its own call")

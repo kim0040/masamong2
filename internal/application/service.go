@@ -202,6 +202,7 @@ type Service struct {
 	disaster       disasterMem
 	uptimeWritten  time.Time
 	privacyMu      sync.Mutex
+	logsOnce       sync.Once // ring allocates on first use
 	// cfgProblems are settings of the committed configuration that were switched off at load because
 	// this release refuses them (config.ParseCommitted); doctor lists them until the operator fixes them.
 	cfgProblems atomic.Pointer[[]config.Problem]
@@ -213,7 +214,7 @@ type Service struct {
 	toolUses    atomic.Pointer[tools.Usage]   // the tools' usage counter, opened on first use (tools.go)
 	summaryRevs roomRevisions                 // edits and deletions seen per room (summaries.go)
 	lifeReqs    lifecycleQueue                // restart/stop requests for the daemon (admin.go)
-	logs        logRing                       // the console's live log (logring.go)
+	logs        *logRing                      // the console's live log (logring.go), its own allocation so a captured logger keeps only the ring
 	mem         memoryState                   // the memory engine of the live configuration (memory_engine.go)
 	resync      resyncQueue                   // rooms to resync after edits and deletions (revisions.go)
 	runs        runFlags                      // "one at a time" marks of background passes (run_flags.go)
@@ -389,7 +390,9 @@ func (s *Service) Close() error {
 		s.part.chans = nil
 		s.part.mu.Unlock()
 		s.mem.close()
-		s.logs.close()
+		if s.logs != nil {
+			s.logs.close()
+		}
 		s.mu.Lock()
 		for ch := range s.watchers {
 			close(ch)

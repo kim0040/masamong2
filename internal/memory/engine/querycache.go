@@ -26,10 +26,14 @@ type queryCache struct {
 	unsaved map[string]bool         // in vectors, not yet in the database
 }
 
+// errQueryUnfinished is a flight's result until its owner sets another. One sentinel: it is built
+// with the flight only, not on every lookup of a kept or shared vector.
+var errQueryUnfinished = errors.New("memory: query embedding did not finish")
+
 // join returns key's vector when it is kept. Otherwise it returns the embedding under way for key; when
-// there is none it starts one with failed as its result until the caller sets another, and own is true:
-// the caller makes the embedding and calls land when it is done.
-func (c *queryCache) join(key string, failed error) (v []float32, f *queryFlight, own bool) {
+// there is none it starts one with errQueryUnfinished as its result until the caller sets another, and
+// own is true: the caller makes the embedding and calls land when it is done.
+func (c *queryCache) join(key string) (v []float32, f *queryFlight, own bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if v, ok := c.vectors[key]; ok {
@@ -38,7 +42,7 @@ func (c *queryCache) join(key string, failed error) (v []float32, f *queryFlight
 	if f, ok := c.flights[key]; ok {
 		return nil, f, false
 	}
-	f = &queryFlight{done: make(chan struct{}), err: failed}
+	f = &queryFlight{done: make(chan struct{}), err: errQueryUnfinished}
 	if c.flights == nil {
 		c.flights = map[string]*queryFlight{}
 	}
@@ -139,7 +143,7 @@ type queryFlight struct {
 // it would have had alone.
 func (e *Engine) queryVector(ctx context.Context, key, text string) ([]float32, error) {
 	for {
-		v, f, own := e.queries.join(key, errors.New("memory: query embedding did not finish"))
+		v, f, own := e.queries.join(key)
 		if f == nil {
 			return v, nil
 		}

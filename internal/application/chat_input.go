@@ -88,6 +88,10 @@ type ChatInput struct {
 	MaxWait, TurnTimeout time.Duration
 	// started is when ChatTurn began, the zero point of the turn's timings and spans (turn_timing.go).
 	started time.Time
+	// clockStart is the turn's start on the service clock, for the edit-ordering check in liveToBot:
+	// a RevisedAt stamped after it keeps the line unmarked. Timings and spans stay on started's wall
+	// time; the two clocks can disagree.
+	clockStart time.Time
 	// Fragments are the other messages of a burst answered as one turn, and of a call a picture continues: Message
 	// holds their words. MessageID alone would leave those words behind when one of them is deleted or edited.
 	Fragments []string

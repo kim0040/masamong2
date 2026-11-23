@@ -341,9 +341,10 @@ func TestPracticeCloseReleasesWorkersIndexesAndGlobalState(t *testing.T) {
 		s.mem.mu.Lock()
 		engineKept := s.mem.eng != nil
 		s.mem.mu.Unlock()
-		s.logs.mu.Lock()
-		ringOpen := !s.logs.closed
-		s.logs.mu.Unlock()
+		ring := s.ring()
+		ring.mu.Lock()
+		ringOpen := !ring.closed
+		ring.mu.Unlock()
 		if engineKept || ringOpen {
 			t.Fatalf("Close left the memory engine (%v) or the live log (%v) open", engineKept, ringOpen)
 		}

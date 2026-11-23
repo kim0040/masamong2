@@ -65,9 +65,7 @@ func (s *Service) RunScheduler(ctx context.Context) {
 				if s.runs.idleThreads.CompareAndSwap(false, true) {
 					s.ownedGo("idle threads", func(ctx context.Context) { defer s.runs.idleThreads.Store(false); s.closeIdleThreads(ctx) })
 				}
-				if disasterTicking.CompareAndSwap(false, true) {
-					s.ownedGo("disaster alerts", func(ctx context.Context) { defer disasterTicking.Store(false); s.disasterTick(ctx) })
-				}
+				s.startDisasterTick(ctx)
 				if s.runs.noticesTick.CompareAndSwap(false, true) {
 					s.ownedGo("notices", func(ctx context.Context) { defer s.runs.noticesTick.Store(false); s.noticesTick(ctx) })
 				}
@@ -92,6 +90,13 @@ func (s *Service) RunScheduler(ctx context.Context) {
 }
 
 func (s *Service) schedulerTick() { s.schedulerTickContext(context.Background()) }
+
+// startDisasterTick runs one disaster-alert tick while none is under way. The flag is the service's
+// own, like the other passes': a refused worker admission resets it, and another service's tick
+// never holds it.
+func (s *Service) startDisasterTick(parent context.Context) bool {
+	return s.ownedSingleFlight(parent, &s.runs.disasterTick, "disaster alerts", s.disasterTick)
+}
 
 func (s *Service) schedulerTickContext(ctx context.Context) {
 	now := s.Clock.Now()
