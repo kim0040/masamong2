@@ -1843,3 +1843,68 @@ func TestPeopleBackfillPilotAnswerAfterWithdrawal(t *testing.T) {
 		t.Fatal("nothing stored")
 	}
 }
+
+// A window whose lines change between the read that checked its answer and the apply goes back to the
+// queue, whether the changed line is cited or only context, charged once and with no claim from the
+// stale answer.
+func TestPeopleBackfillRequeuesEditBetweenReadAndApply(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	_, run := pbPiloted(t, s, nil)
+	ws, err := store.BackfillWindows(s.Store.Reader(), run.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spend := func() (runUSD, dayUSD float64) {
+		r, _, _ := store.LoadBackfillRun(s.Store.Reader(), run.ID)
+		_ = s.Store.Reader().QueryRow(`SELECT COALESCE(SUM(usd),0) FROM memory_spend WHERE kind=?`, store.SpendPeopleBackfill).Scan(&dayUSD)
+		return r.SpentUSD, dayUSD
+	}
+	for _, tc := range []struct {
+		name string
+		seg  int // a window with a bot line (context only, never evidence) when the change is to it
+		kind string
+	}{{"cited line", 8, corpus.HumanText}, {"context line", 7, corpus.BotRecord}} {
+		var w store.BackfillWindow
+		for _, x := range ws {
+			if slices.Contains(x.Obs, corpus.DiscordLiveObservationID(engine.RoomKey("g1", "c1"), fmt.Sprintf("%d1", 1000+tc.seg))) {
+				w = x
+			}
+		}
+		if w.ID == "" {
+			t.Fatalf("%s: window %d not found", tc.name, tc.seg)
+		}
+		bp, err := s.pbBuildPrompt(s.Store, "g1", w)
+		if err != nil || !bp.ok {
+			t.Fatal(err)
+		}
+		facts, rejected := pbFacts(bp, pbFakeAnswer(string(peoplebackfill.ModelHaiku), bp.user))
+		if len(facts) == 0 {
+			t.Fatalf("%s: no facts", tc.name)
+		}
+		raw, _ := json.Marshal(w.Obs)
+		if _, err := s.Store.DB.Exec(`UPDATE memory_observations SET content='a different line now', edited_at='2099-01-01T00:00:00Z'
+			WHERE observation_id=(SELECT observation_id FROM memory_observations WHERE observation_id IN (SELECT value FROM json_each(?)) AND record_kind=? ORDER BY parsed_time LIMIT 1)`,
+			string(raw), tc.kind); err != nil {
+			t.Fatal(err)
+		}
+		runBefore, dayBefore := spend()
+		if err := s.pbApply(t.Context(), s.Store, run.ID, "g1", w, facts, rejected, bp, bp.readAt, 0.01, 1); err != nil {
+			t.Fatal(err)
+		}
+		got, _, _ := store.LoadBackfillWindow(s.Store.Reader(), run.ID, w.ID)
+		if got.State != store.WindowQueued || got.Claims != 0 {
+			t.Fatalf("%s: window %s with %d claims, want queued", tc.name, got.State, got.Claims)
+		}
+		for _, id := range w.Obs {
+			if n := pbCountClaims(t, s, `evidence LIKE ?`, "%"+id+"%"); n != 0 {
+				t.Fatalf("%s: a claim from the stale answer", tc.name)
+			}
+		}
+		runAfter, dayAfter := spend()
+		if d := runAfter - runBefore; d < 0.0099 || d > 0.0101 || dayAfter-dayBefore < 0.0099 || dayAfter-dayBefore > 0.0101 || got.CostUSD < 0.0099 {
+			t.Fatalf("%s: charged run %v, day %v, window %v; want once", tc.name, d, dayAfter-dayBefore, got.CostUSD)
+		}
+	}
+}

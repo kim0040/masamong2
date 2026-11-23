@@ -1497,7 +1497,7 @@ func (s *Service) pbApplyBatch(ctx context.Context, db *storage.Store, run store
 				err = s.pbRequeue(ctx, db, run.ID, w, spent, calls) // a line changed or went since it was sent
 			default:
 				facts, rejected := pbFacts(bp, o.Chat.Content)
-				err = s.pbApply(ctx, db, run.ID, run.GuildID, w, facts, rejected, bp, spent, calls)
+				err = s.pbApply(ctx, db, run.ID, run.GuildID, w, facts, rejected, bp, w.ReadAt, spent, calls)
 			}
 		}
 		if err != nil {
@@ -1543,7 +1543,7 @@ func (s *Service) pbApplyPilot(ctx context.Context, db *storage.Store, runID str
 				continue
 			}
 			w.Result = nil
-			err = s.pbApply(ctx, db, runID, run.GuildID, w, ans.Facts, ans.Rejected, bp, 0, 0)
+			err = s.pbApply(ctx, db, runID, run.GuildID, w, ans.Facts, ans.Rejected, bp, ans.ReadAt, 0, 0)
 		}
 		if err != nil {
 			return err

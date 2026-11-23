@@ -1095,11 +1095,30 @@ func pbClaims(guild, runID string, facts []episodes.PersonFact, bp pbPrompt) (cl
 }
 
 // pbApply writes one window's claims and settles it, in one transaction: the claims through the write
-// gate, the window's state and counts, and the spend (run and memory_spend).
+// gate, the window's state and counts, and the spend (run and memory_spend). The same transaction checks
+// the whole window again (pbPromptCurrent): a line changed since bp was built (cited or only context),
+// or a person withdrew, sends the window back to the queue instead, charged once. readAt is when the
+// lines were read for the prompt the model answered; an edit after it refuses the claims citing it.
 func (s *Service) pbApply(ctx context.Context, db *storage.Store, runID, guild string, w store.BackfillWindow, facts []episodes.PersonFact, rejected int,
-	bp pbPrompt, spent float64, calls int) error {
+	bp pbPrompt, readAt string, spent float64, calls int) error {
 	now := s.Clock.Now().UTC()
 	return db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+		current, err := s.pbPromptCurrent(tx, guild, bp)
+		if err != nil {
+			return err
+		}
+		if !current {
+			w.State, w.Batch, w.Result = store.WindowQueued, "", nil
+			if w.Attempts >= pbMaxAttempts {
+				w.State = store.WindowFailed
+			}
+			w.CostUSD += spent
+			w.UpdatedAt = now.Format(time.RFC3339)
+			return pbSettleTx(tx, runID, w, spent, calls, now)
+		}
+		if readAt != "" {
+			bp.readAt = readAt
+		}
 		claims, dropped := pbClaims(guild, runID, facts, bp)
 		saved, err := s.savePersonClaims(ctx, tx, claims)
 		if err != nil {
