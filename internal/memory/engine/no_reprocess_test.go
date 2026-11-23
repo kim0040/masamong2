@@ -233,7 +233,7 @@ func TestOpeningAnOlderReleasesStoreReprocessesNothing(t *testing.T) {
 // and a run with a batch in flight goes through a restart and the index passes: no backfill row moves, nothing is
 // sent anywhere, no model is asked anything. (The service's own restart and room-memory pass are checked in the
 // application package: TestPeopleBackfillNotStartedByPasses and TestPeopleBackfillRestartPollsOnly.)
-func TestARestartNeverStartsAPeopleBackfill(t *testing.T) {
+func TestNoReprocessARestartNeverStartsAPeopleBackfill(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "m.db")
 	var requests atomic.Int32
 	open := func() (*storage.Store, *Engine, *fakeProvider) {
