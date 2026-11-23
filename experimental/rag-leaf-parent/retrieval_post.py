@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Any, Iterable, Mapping
 
-from timeparse import normalize_iso
+from timeparse import normalize_iso, parse_epoch
 
 # Hybrid rank-list length defaults (overridable via config / _hybrid_rank args).
 LEXICAL_LIMIT = 200
@@ -234,12 +234,10 @@ def _parse_iso_dt(value: Any) -> tuple[datetime, bool] | None:
 
 
 def _parse_iso_ts(value: Any) -> float | None:
-    """Legacy epoch helper kept for the soft path. Not used for hard bounds (frame-blind)."""
+    """Legacy epoch helper kept for the soft path. Not used for hard bounds (frame-blind).
+    Same read as timeparse.parse_epoch: a naive time is placed in UTC, not this computer's zone."""
 
-    parsed = _parse_iso_dt(value)
-    if parsed is None:
-        return None
-    return parsed[0].timestamp()
+    return parse_epoch(value)
 
 
 def _frame_of(dt: datetime) -> str:
@@ -487,7 +485,9 @@ def time_bounds(
     """
 
     del scale
-    now = datetime.fromtimestamp(float(anchor_ts))
+    # The anchor is epoch seconds, a definite instant: the replay "now" is that instant in UTC (the Go
+    # port turns an epoch into time.Unix(ts, 0).UTC()), never a wall clock in this computer's zone.
+    now = datetime.fromtimestamp(float(anchor_ts), tz=timezone.utc)
     ref = TimeReference(mode="replay", now=now, source="anchor_ts")
     scope = resolve_time_scope({"kind": kind, "from": frm, "to": to}, reference=ref)
     if scope.status == "invalid":

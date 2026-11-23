@@ -26,6 +26,7 @@ import engine as E
 import engine_index as EI
 import engine_retrieve as ER
 from segment import slice_segments_per_room
+from timeparse import parse_iso
 
 ROOM_OLD = "discord:1:100"  # ended ~200 days before ROOM_NEW
 ROOM_NEW = "discord:2:200"
@@ -867,6 +868,53 @@ class EvidenceTimeFrameTests(unittest.TestCase):
             visible = self._visible(host_zone)
             self.assertIn(in_range, visible, host_zone)
             self.assertTrue(all(set(v) <= set(in_range) for v in visible), (host_zone, visible))
+
+
+@unittest.skipUnless(hasattr(time, "tzset"), "switching this process's zone needs time.tzset (POSIX)")
+class LeafTimeZoneTests(unittest.TestCase):
+    """The leaf end ts and the rerank [Time] line are written from the same instants on every
+    computer: a naive (Kakao) end time counts from UTC as the Go port's corpus.Timestamp does
+    (search/index.go leafEndTS), and the [Time] line is the leaf's end in UTC as rerankDocument
+    writes it. The sandbox used to read naive times and render the line in the host zone."""
+
+    @staticmethod
+    def _with_zone(host_zone: str, fn):
+        saved = os.environ.get("TZ")
+        os.environ["TZ"] = host_zone
+        time.tzset()
+        try:
+            return fn()
+        finally:
+            if saved is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = saved
+            time.tzset()
+
+    def test_naive_leaf_end_ts_is_the_utc_epoch_in_every_zone(self) -> None:
+        # leaf of LEAF messages ends on its last message; the kakao room's newest leaf ends 2026-01-11 03:00 naive.
+        want_ts = {
+            23: datetime(2026, 1, 10, 23, 0, tzinfo=timezone.utc).timestamp(),
+            3: datetime(2026, 1, 11, 3, 0, tzinfo=timezone.utc).timestamp(),
+        }
+        got = None
+        for host_zone in ("UTC0", "KST-9", "PST8PDT"):
+            index = self._with_zone(host_zone, lambda: build_index(messages=_kakao_messages()))
+            ts = dict(index.leaf_end_ts)
+            if got is None:
+                got = ts
+            self.assertEqual(ts, got, host_zone)
+            self.assertEqual(sorted(ts.values()), sorted(want_ts.values()), host_zone)
+
+    def test_rerank_time_line_is_utc_in_every_zone(self) -> None:
+        index = build_index()  # aware +00:00 times: the end ts is the same on every host
+        doc_id = index.leaves_by_recency[0]
+        leaf = index.leaf_by_id[doc_id]
+        last = index.messages[int(leaf["end"]) - 1]
+        want = parse_iso(last["parsed_time"]).astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
+        for host_zone in ("UTC0", "KST-9", "PST8PDT"):
+            doc = self._with_zone(host_zone, lambda: E._rerank_document(index, doc_id, "time_body"))
+            self.assertTrue(doc.startswith(f"[Time]\n{want}\n"), (host_zone, doc))
 
 
 class SoftEventRetrievalTests(unittest.TestCase):
