@@ -1034,6 +1034,9 @@ func readForm(req action.Request) bool {
 		return boolVal(in, "dry_run") // a cost estimate; starting the work is the change
 	case "memory.mine.forget":
 		return !has("confirm") // a preview; the confirmation is the change
+	case "memory.people.backfill":
+		mode := strVal(in, "mode", "dry_run") // a cost estimate or a progress read; pilot and run spend
+		return mode == "dry_run" || mode == "status"
 	case "migration.apply", "channels.leave":
 		return !boolVal(in, "confirm")
 	}

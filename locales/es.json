@@ -1392,5 +1392,14 @@
   "updates.announce.dm_footer": "Detalles: `/novedades` · Dejar de recibirlos: `/novedades cancelar`",
   "access.news": "Novedades de versión",
   "discord.command.admin.choice.op.news": "novedades de versión",
-  "discord.command.admin.verb.news": "novedades"
+  "discord.command.admin.verb.news": "novedades",
+  "people_backfill.no_anthropic": "El relleno de memoria de personas solo funciona con un proveedor de la API nativa de Anthropic con clave. Añade uno en Conexiones primero.",
+  "people_backfill.provider_ambiguous": "Hay varios proveedores de Anthropic configurados. Indica cuál usar (provider).",
+  "people_backfill.confirm_needed": "Haz primero una simulación y confirma con su token de plan.",
+  "people_backfill.plan_changed": "Las conversaciones guardadas cambiaron desde la simulación. Revisa la nueva estimación y confirma con su token.",
+  "people_backfill.no_pilot": "Termina una prueba piloto de este plan antes de la ejecución completa.",
+  "people_backfill.over_budget": "La estimación supera el límite de gasto. Sube el límite o reduce las salas o las fechas.",
+  "people_backfill.busy": "Ya hay un relleno de memoria de personas en curso en este servidor.",
+  "people_backfill.no_rooms": "No hay conversaciones guardadas que leer en este rango.",
+  "people_backfill.unavailable": "El relleno de memoria de personas no está disponible aquí: necesita almacenamiento SQLite y un servicio en marcha."
 }
