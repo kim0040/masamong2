@@ -26,6 +26,12 @@ func TestDirectSecretsAreRefusedOnChangeOnly(t *testing.T) {
 		{"authKey header", tool("https://api.example/v1", map[string]string{"authKey": direct}), "headers.authKey"},
 		{"custom token header", tool("https://api.example/v1", map[string]string{"X-Service-Token": direct}), "headers.X-Service-Token"},
 		{"cookie with a second literal", tool("https://api.example/v1", map[string]string{"Cookie": "session={credential}; fallback=" + direct}), "headers.Cookie"},
+		// a literal beside the reference keeps a key in the configuration even without an = segment:
+		// fused to it, after it or before it
+		{"authorization literal fused", tool("https://api.example/v1", map[string]string{"Authorization": "Bearer " + direct + "{credential}"}), "headers.Authorization"},
+		{"authorization literal after", tool("https://api.example/v1", map[string]string{"Authorization": "Bearer {credential} " + direct}), "headers.Authorization"},
+		{"authorization literal before", tool("https://api.example/v1", map[string]string{"Authorization": direct + " {credential}"}), "headers.Authorization"},
+		{"x-api-key fused", tool("https://api.example/v1", map[string]string{"X-API-Key": direct + "{credential}"}), "headers.X-API-Key"},
 		{"query key", tool("https://api.example/v1?q={q}&key="+direct, nil), "the key parameter"},
 		{"query authKey", tool("https://api.example/v1?authKey="+direct, nil), "the authKey parameter"},
 		{"query serviceKey", tool("https://api.example/v1?serviceKey="+direct+"&q={q}", nil), "the serviceKey parameter"},
@@ -51,6 +57,7 @@ func TestDirectSecretsAreRefusedOnChangeOnly(t *testing.T) {
 		tool("https://api.example/v1?q={q}&page=2", map[string]string{"User-Agent": "masamong"}),
 		// a credential behind a scheme word or a cookie's name is the reference alone
 		tool("https://api.example/v1", map[string]string{"Authorization": "Bearer {credential}", "Cookie": "session={credential}"}),
+		tool("https://api.example/v1", map[string]string{"Authorization": "Basic {credential}", "X-Service-Token": "Private-Token {credential}"}),
 	}
 	for i, s := range allowed {
 		if err := Validate("ops.lookup", s); err != nil {
