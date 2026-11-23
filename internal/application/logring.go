@@ -35,7 +35,12 @@ type logRing struct {
 	closed  bool
 }
 
-func (s *Service) ring() *logRing { return &s.logs }
+// ring is the service's live log, allocated once on first use. It is its own allocation, not the
+// address of a field: a logger a handler still holds after Close keeps the ring, not the service.
+func (s *Service) ring() *logRing {
+	s.logsOnce.Do(func() { s.logs = &logRing{} })
+	return s.logs
+}
 
 // close drops the entries and refuses later ones.
 func (r *logRing) close() {
