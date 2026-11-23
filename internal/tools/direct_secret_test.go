@@ -31,6 +31,11 @@ func TestDirectSecretsAreRefusedOnChangeOnly(t *testing.T) {
 		{"authorization literal fused", tool("https://api.example/v1", map[string]string{"Authorization": "Bearer " + direct + "{credential}"}), "headers.Authorization"},
 		{"authorization literal after", tool("https://api.example/v1", map[string]string{"Authorization": "Bearer {credential} " + direct}), "headers.Authorization"},
 		{"authorization literal before", tool("https://api.example/v1", map[string]string{"Authorization": "Bearer " + direct + " {credential}"}), "headers.Authorization"},
+		// a lone word before the reference is the scheme only when it looks like one: short letters,
+		// at most one hyphen, nothing but spaces before the reference
+		{"lone literal before", tool("https://api.example/v1", map[string]string{"Authorization": direct + " {credential}"}), "headers.Authorization"},
+		{"lone literal with digits before", tool("https://api.example/v1", map[string]string{"X-API-Key": "k" + "9f3a2 {credential}"}), "headers.X-API-Key"},
+		{"lone word then separator", tool("https://api.example/v1", map[string]string{"Authorization": "lit; {credential}"}), "headers.Authorization"},
 		{"x-api-key fused", tool("https://api.example/v1", map[string]string{"X-API-Key": direct + "{credential}"}), "headers.X-API-Key"},
 		{"query key", tool("https://api.example/v1?q={q}&key="+direct, nil), "the key parameter"},
 		{"query authKey", tool("https://api.example/v1?authKey="+direct, nil), "the authKey parameter"},

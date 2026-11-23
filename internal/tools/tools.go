@@ -369,7 +369,9 @@ var (
 	// does not know (ApiKey, Key, Client-ID); it only has to be one scheme-shaped word.
 	authSchemes = []string{"basic", "bearer", "bot", "digest", "hoba", "mutual", "negotiate", "oauth",
 		"privatetoken", "scramsha1", "scramsha256", "token", "aws4hmacsha256"}
-	schemeWordRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9._-]*$`)
+	// An unknown scheme word is letters with at most one hyphen and short (ApiKey, Key, Client-ID,
+	// GenieKey). Keys are long or carry digits, so a word that looks like one stays a literal.
+	schemeWordRE = regexp.MustCompile(`^[A-Za-z]{1,16}(-[A-Za-z]{1,16})?$`)
 )
 
 // normalizedSecretName folds a header or query name for comparison: lowercase, - and _ dropped.
@@ -431,7 +433,9 @@ func DirectHeaderValue(value string) bool {
 	}
 	// the word stands free as the scheme only when it is the single word before the reference and a
 	// space sets it off from it (lit{credential} stays a literal)
-	if bare != 1 || len(before) == 0 || !unicode.IsSpace(rune(before[len(before)-1])) || !schemeWordRE.MatchString(scheme) {
+	// and only spaces stand between them (lit; {credential} stays a literal)
+	if bare != 1 || len(before) == 0 || !unicode.IsSpace(rune(before[len(before)-1])) || len(scheme) > 16 ||
+		!schemeWordRE.MatchString(scheme) || !strings.HasSuffix(strings.TrimRightFunc(before, unicode.IsSpace), scheme) {
 		scheme = ""
 	}
 	direct := func(segs []string) bool {
