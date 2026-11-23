@@ -267,6 +267,41 @@ func TestParsePeopleNeverFailsTheEpisodeAnswer(t *testing.T) {
 	}
 }
 
+// An answer cut by the output cap inside the people list that follows a whole episodes list keeps its
+// episodes and says the people were lost; a cut inside the episodes is still no answer, and so is any cut
+// answer of a prompt that asked for no people (Kakao, person memory off).
+func TestParseKeepsEpisodesBeforeACutPeopleList(t *testing.T) {
+	episodes := `{"episodes":[{"op":"create","link_to":null,"kind":"plan","title":"모임","items":[{"kind":"fact","text":"{p1}가 모임을 제안","by":["p1"],"ev":["m1"]}],"status":"open","importance":3}]`
+	p := peoplePrompt(t, nil)
+	for _, tail := range []string{``, `,`, `,"people":`, `,"people":[{"about":"p2","kind":"like","text":"{p2}는 민트`, `,"people":[{"about":"p2"}],"x":`} {
+		res, err := p.Parse("```json\n" + episodes + tail)
+		if err != nil || !res.Clean() || len(res.Ops) != 1 || !res.PeopleLost {
+			t.Errorf("%q: %v %+v", tail, err, res)
+		}
+	}
+	whole := episodes + `,"people":[]}`
+	if res, err := p.Parse(whole); err != nil || res.PeopleLost || len(res.Ops) != 1 {
+		t.Errorf("a whole answer: %v %+v", err, res)
+	}
+	for name, raw := range map[string]string{
+		"cut inside the episodes": episodes[:len(episodes)/2],
+		"people first, cut":       `{"people":[],"episodes":[{"op":"create"`,
+		"no episodes":             `{"people":[{"about":"p2"`,
+	} {
+		if _, err := p.Parse(raw); err != ErrParse {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for name, q := range map[string]Prompt{
+		"kakao":      peoplePrompt(t, func(in *Input) { in.Kakao = true }),
+		"people off": peoplePrompt(t, func(in *Input) { in.NoPeople = true }),
+	} {
+		if _, err := q.Parse(episodes + `,"people":[{"about"`); err != ErrParse {
+			t.Errorf("%s: a cut answer is still no answer: %v", name, err)
+		}
+	}
+}
+
 func TestSubjectsThatAreNotPeopleOfTheServerAreRefused(t *testing.T) {
 	// Kakao and label-only identities, and the bot, are never the subject or the speaker.
 	p := peoplePrompt(t, func(in *Input) {

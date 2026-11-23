@@ -9,3 +9,7 @@ func (r RoomMemoryReport) PeopleClaims() int { return r.peopleClaims }
 // PeopleSkipped is how many people facts of the answers a room-memory pass skipped under the live rules
 // (one speaker's own lines; a self statement names only its subject).
 func (r RoomMemoryReport) PeopleSkipped() int { return r.peopleSkipped }
+
+// PeopleFailed is how many answers of a room-memory pass lost their people list (cut after a whole
+// episodes list): the episodes were kept and the people were not asked for again.
+func (r RoomMemoryReport) PeopleFailed() int { return r.peopleFailed }

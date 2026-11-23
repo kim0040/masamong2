@@ -318,3 +318,67 @@ func TestLiveForgetCoversKnownLiteralNames(t *testing.T) {
 		}
 	})
 }
+
+// The people list follows the episodes under the same output cap. An answer cut inside it keeps its whole
+// episodes: they are saved after one call, the people part is counted as failed, and nothing is asked
+// again. The same holds for a regeneration. A cut inside the episodes is still a bad answer (asked again).
+func TestTruncatedPeopleTailKeepsCompleteEpisode(t *testing.T) {
+	t.Parallel()
+	cutPeople := func(answer string) string {
+		full := strings.Replace(answer, `}]}`, `}],"people":`+hikePeople+`}`, 1)
+		return full[:strings.Index(full, `"people":`)+len(`"people":`)+60] // the cap falls inside the first entry
+	}
+	t.Run("extraction", func(t *testing.T) {
+		t.Parallel()
+		svc, m, eng := roomSvc(t)
+		m.extract = func(string) string { return cutPeople(hikeAnswer) }
+		sayIn(eng, time.Now().Add(-2*time.Hour), hike...)
+		rep := svc.RunRoomMemory(context.Background())
+		if rep.Episodes != 1 || rep.Failed != 0 || m.calls("episode") != 1 || rep.PeopleFailed() != 1 || rep.PeopleClaims() != 0 {
+			t.Fatalf("an answer cut inside its people list: episodes=%d failed=%d calls=%d people failed=%d claims=%d (want 1 0 1 1 0)",
+				rep.Episodes, rep.Failed, m.calls("episode"), rep.PeopleFailed(), rep.PeopleClaims())
+		}
+		if l := episodeList(t, svc); len(l) != 1 || l[0]["items"].(float64) != 3 {
+			t.Fatalf("the whole episode is saved: %+v", l)
+		}
+		if rep := svc.RunRoomMemory(context.Background()); m.calls("episode") != 1 || rep.Segments != 0 {
+			t.Fatalf("the segment is done: a second pass asked again (%d calls, %+v)", m.calls("episode"), rep)
+		}
+	})
+	t.Run("regeneration", func(t *testing.T) {
+		t.Parallel()
+		svc, m, eng := roomSvc(t)
+		m.extract = func(string) string { return hikeAnswer }
+		sayIn(eng, time.Now().Add(-2*time.Hour), hike...)
+		svc.RunRoomMemory(context.Background())
+		old := episodeList(t, svc)[0]["id"].(string)
+		if err := svc.MessagesDeleted("g", "c", []string{"3003"}); err != nil {
+			t.Fatal(err)
+		}
+		drain(t, svc)
+		before := m.calls("episode")
+		m.extract = func(string) string {
+			return cutPeople(`{"episodes":[{"op":"create","kind":"plan","title":"토요일 등산","items":[
+			{"kind":"proposal","text":"{p1}가 토요일 등산 제안","by":["p1"],"ev":["m1"]},
+			{"kind":"fact","text":"{p2}가 김밥 담당","by":["p2"],"ev":["m3"]}],"status":"open"}]}`)
+		}
+		rep := svc.RunRoomMemory(context.Background())
+		if rep.Regenerated != 1 || m.calls("episode") != before+1 || rep.PeopleFailed() != 1 {
+			t.Fatalf("a regeneration cut inside its people list: regenerated=%d calls=%d people failed=%d (want 1 1 1)",
+				rep.Regenerated, m.calls("episode")-before, rep.PeopleFailed())
+		}
+		if l := episodeList(t, svc); len(l) != 1 || l[0]["id"] == old || l[0]["items"].(float64) != 2 {
+			t.Fatalf("the regenerated episode replaces the old one: %+v", l)
+		}
+	})
+	t.Run("cut inside the episodes", func(t *testing.T) {
+		t.Parallel()
+		svc, m, eng := roomSvc(t)
+		m.extract = func(string) string { return hikeAnswer[:len(hikeAnswer)/2] }
+		sayIn(eng, time.Now().Add(-2*time.Hour), hike...)
+		if rep := svc.RunRoomMemory(context.Background()); rep.Episodes != 0 || rep.Failed != 1 || m.calls("episode") != 2 || rep.PeopleFailed() != 0 {
+			t.Fatalf("an answer cut inside its episodes: episodes=%d failed=%d calls=%d people failed=%d (want 0 1 2 0)",
+				rep.Episodes, rep.Failed, m.calls("episode"), rep.PeopleFailed())
+		}
+	})
+}

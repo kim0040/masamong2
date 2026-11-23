@@ -265,6 +265,10 @@ type Item struct {
 type Result struct {
 	Ops      []Op
 	Problems []string
+	// PeopleLost: the answer broke off after a complete episodes list, inside what follows it (the
+	// people list, cut by the output cap). The episodes are read; the people list is lost and is not
+	// asked for again (a people failure never fails or re-asks the episode extraction).
+	PeopleLost bool
 }
 
 // Clean reports whether nothing was rejected.
@@ -301,6 +305,39 @@ func JSONObject(raw string) (string, bool) {
 	return raw[i : j+1], true
 }
 
+// episodesBeforeCut reads the "episodes" value of an answer whose JSON object does not decode as a whole:
+// true when the object's members up to and including "episodes" decode, whatever follows it (cut off by
+// the output cap, or broken).
+func episodesBeforeCut(raw string) ([]rawOp, bool) {
+	i := strings.IndexByte(raw, '{')
+	if i < 0 {
+		return nil, false
+	}
+	dec := json.NewDecoder(strings.NewReader(raw[i:]))
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return nil, false
+	}
+	for dec.More() {
+		t, err := dec.Token()
+		key, ok := t.(string)
+		if err != nil || !ok {
+			return nil, false
+		}
+		if key == "episodes" {
+			var ops *[]rawOp
+			if err := dec.Decode(&ops); err != nil || ops == nil {
+				return nil, false
+			}
+			return *ops, true
+		}
+		var skip json.RawMessage
+		if err := dec.Decode(&skip); err != nil {
+			return nil, false
+		}
+	}
+	return nil, false
+}
+
 var promptToken = regexp.MustCompile(`\{(p\d+)\}`)
 
 // Parse validates an extraction answer against the prompt. It never trusts the model: every item needs
@@ -308,17 +345,19 @@ var promptToken = regexp.MustCompile(`\{(p\d+)\}`)
 // must be an author of its evidence, a decision needs two authors or the person confirming their own,
 // texts must fit, people must be known. Rejected items and operations are listed in Problems.
 func (p Prompt) Parse(raw string) (Result, error) {
-	obj, ok := JSONObject(raw)
-	if !ok {
-		return Result{}, ErrParse
-	}
+	var res Result
 	var doc struct {
 		Episodes *[]rawOp `json:"episodes"`
 	}
-	if err := json.Unmarshal([]byte(obj), &doc); err != nil || doc.Episodes == nil {
-		return Result{}, ErrParse
+	if obj, ok := JSONObject(raw); !ok || json.Unmarshal([]byte(obj), &doc) != nil || doc.Episodes == nil {
+		// a prompt that asks for people: an answer cut inside the people list after a whole episodes
+		// list keeps its episodes
+		ops, whole := episodesBeforeCut(raw)
+		if !whole || p.kakao || p.noPeople {
+			return Result{}, ErrParse
+		}
+		doc.Episodes, res.PeopleLost = &ops, true
 	}
-	var res Result
 	usedLinks := map[string]bool{}
 	for i, ro := range *doc.Episodes {
 		op, problems := p.validateOp(ro, usedLinks)
