@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -507,5 +508,55 @@ func TestLiveSinceSurvivesFirstSaveMarkerFailure(t *testing.T) {
 		t.Errorf("dry run: %+v", r.Error)
 	} else if r.Output["until_from"] != "live_since" || r.Output["until"] != at.Format(time.RFC3339) {
 		t.Errorf("the dry run's range ends at %v (%v), want live_since %s", r.Output["until"], r.Output["until_from"], at.Format(time.RFC3339))
+	}
+}
+
+// A label whose only source is a deleted thread is not used to name anyone in an extraction prompt: a
+// mention of that account is not shown by that name and the name is no alias match, whether the thread
+// was deleted just now or only its tombstone is left (after a restart). A label from an ordinary room of
+// the server is still used (control).
+func TestLivePromptSkipsLabelsOfDeletedThreads(t *testing.T) {
+	t.Parallel()
+	for name, gone := range map[string]func(*testing.T, *application.Service){
+		"deleted now": func(_ *testing.T, svc *application.Service) { svc.ThreadDeleted("t1") },
+		"tombstone only": func(t *testing.T, svc *application.Service) {
+			if _, err := svc.Store.DB.Exec(`INSERT INTO thread_tombstones(thread_id) VALUES('t1')`); err != nil {
+				t.Fatal(err)
+			}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			svc, m, eng := roomSvc(t)
+			svc.NoteThread("g", "t1", "c", false)
+			for i, p := range []struct{ room, id, name string }{{"t1", "707", "다온"}, {"c2", "808", "라온"}} {
+				if ok, err := eng.Capture(engine.LiveMessage{GuildID: "g", ChannelID: p.room, AuthorID: p.id, AuthorName: p.name, MessageID: "s" + p.id,
+					At: time.Now().Add(-6*time.Hour + time.Duration(i)*time.Second), Content: "hello there"}); err != nil || !ok {
+					t.Fatal(ok, err)
+				}
+			}
+			gone(t, svc)
+			m.extract = func(string) string { return `{"episodes":[]}` }
+			sayIn(eng, time.Now().Add(-2*time.Hour),
+				said{"5101", "u1", "철수", "<@707> 이번 주말에 등산 갈래?"}, said{"5102", "u2", "영희", "좋아 다온도 같이 가면 좋겠다"},
+				said{"5103", "u1", "철수", "<@808> 너도 올래? 라온도 부르자"}, said{"5104", "u2", "영희", "그럼 토요일 아침 9시 확정"})
+			svc.RunRoomMemory(context.Background())
+			p := ""
+			for _, c := range m.prompts["episode"] {
+				if strings.Contains(c, "이번 주말에 등산") {
+					p = c
+				}
+			}
+			if p == "" {
+				t.Fatal("the conversation was not asked about")
+			}
+			listed := func(label string) bool { return regexp.MustCompile(`\np\d+: ` + label + `\n`).MatchString(p) }
+			if strings.Contains(p, "다온(p") || listed("다온") {
+				t.Errorf("a label only a deleted thread gave names someone:\n%s", p)
+			}
+			if !strings.Contains(p, "라온(p") || !listed("라온") {
+				t.Errorf("control: a label from an ordinary room is used:\n%s", p)
+			}
+		})
 	}
 }
