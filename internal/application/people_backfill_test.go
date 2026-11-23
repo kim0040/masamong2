@@ -553,7 +553,8 @@ func TestPeopleBackfillNeedsNativeAnthropic(t *testing.T) {
 // Two foreign origins in the Anthropic wire format: neither is eligible, so the refusal is "no native
 // Anthropic", not "name one" (no credential lookup, no request).
 func TestPeopleBackfillRejectsForeignOrigins(t *testing.T) {
-	s := &Service{}
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
 	doc := config.Document{Providers: map[string]config.Provider{
 		"a": {Kind: config.KindOpenAI, API: "anthropic", BaseURL: "https://a.invalid/v1"},
 		"b": {Kind: config.KindOpenAI, API: "anthropic", BaseURL: "https://b.invalid/v1"},
@@ -563,6 +564,9 @@ func TestPeopleBackfillRejectsForeignOrigins(t *testing.T) {
 	}
 	if _, _, err := s.pbAdapter(doc, "a"); !errors.Is(err, errPBNoAnthropic) {
 		t.Fatalf("a named foreign origin; got %v", err)
+	}
+	if h.count() != 0 {
+		t.Fatalf("host called %d times", h.count())
 	}
 }
 
