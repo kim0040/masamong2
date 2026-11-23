@@ -383,6 +383,12 @@ func TestTruncatedPeopleTailKeepsCompleteEpisode(t *testing.T) {
 	})
 }
 
+// botGateway is a connected Discord whose bot has a numeric account, so a stored <@id> mention of it marks
+// a line as said to the bot after a restart too (no reply of the bot needs to be remembered).
+type botGateway struct{ fakeGateway }
+
+func (*botGateway) BotUser() (string, string) { return "999", "마사몽" }
+
 // failAdminWrites makes every write of an admin_state key matching like fail, until the returned function
 // is called.
 func failAdminWrites(t *testing.T, s *application.Service, name, like string) func() {
@@ -400,6 +406,65 @@ func failAdminWrites(t *testing.T, s *application.Service, name, like string) fu
 				t.Fatal(err)
 			}
 		}
+	}
+}
+
+// A one-line statement said to the bot is asked and its claim saved, then the room cursor that records
+// the line cannot be written. After a restart the line comes back unsealed: it is not asked (and paid
+// for) again. Once a cursor is saved its mark goes, and a new line is still asked.
+func TestRestartDoesNotRepurchaseSavedOneLineExtraction(t *testing.T) {
+	t.Parallel()
+	svc, m, eng := roomSvc(t)
+	svc.SetDiscord(&botGateway{})
+	m.extract = func(prompt string) string {
+		if strings.Contains(prompt, "고양이") {
+			return `{"people":[{"about":"p1","kind":"like","topic":"고양이","text":"{p1}는 고양이를 키움","by":["p1"],"ev":["m1"]}]}`
+		}
+		return `{"people":[{"about":"p1","kind":"status","topic":"residence","text":"{p1}는 광양에 산다","by":["p1"],"ev":["m1"]}]}`
+	}
+	base := time.Now().Add(-8 * time.Hour)
+	say := func(id, text string, at time.Time) {
+		t.Helper()
+		if ok, err := eng.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", MessageID: id, AuthorID: "u1", AuthorName: "철수", Content: text, At: at}); err != nil || !ok {
+			t.Fatal(id, ok, err)
+		}
+	}
+	count := func(s *application.Service, q string) int {
+		t.Helper()
+		var n int
+		if err := s.Store.DB.QueryRow(q).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	say("6001", "<@999> 나 광양에 살아 요즘", base)
+	heal := failAdminWrites(t, svc, "r7_cursor", "episodes:cursor:%")
+	if rep := svc.RunRoomMemory(context.Background()); rep.PeopleCalls() != 1 || rep.PeopleClaims() != 1 || m.calls("episode") != 1 {
+		t.Fatalf("first pass: %+v calls=%d", rep, m.calls("episode"))
+	}
+	if n := count(svc, `SELECT COUNT(*) FROM admin_state WHERE k LIKE 'episodes:cursor:%'`); n != 0 {
+		t.Fatalf("the fault did not hold: %d cursor row(s)", n)
+	}
+	heal()
+	svc = restartServiceForTest(t, svc)
+	svc.SetDiscord(&botGateway{})
+	var err error
+	if eng, err = svc.MemoryEngine(); err != nil {
+		t.Fatal(err)
+	}
+	if rep := svc.RunRoomMemory(context.Background()); rep.PeopleCalls() != 0 || m.calls("episode") != 1 {
+		t.Fatalf("after the restart the saved line was paid for again: %+v calls=%d", rep, m.calls("episode"))
+	}
+	if n := count(svc, `SELECT COUNT(*) FROM person_claim`); n != 1 {
+		t.Fatalf("claims: %d", n)
+	}
+	if n := count(svc, `SELECT COUNT(*) FROM admin_state WHERE k LIKE 'people:live_asked:%' AND v NOT IN ('[]','null')`); n != 0 {
+		t.Errorf("the saved cursor covers the line, its mark stays: %d", n)
+	}
+	// control: a new line said to the bot is asked
+	say("6002", "<@999> 나는 요즘 고양이를 키우고 있어", base.Add(3*time.Hour))
+	if rep := svc.RunRoomMemory(context.Background()); rep.PeopleCalls() != 1 || m.calls("episode") != 2 || rep.PeopleClaims() != 1 {
+		t.Fatalf("a new line: %+v calls=%d", rep, m.calls("episode"))
 	}
 }
 

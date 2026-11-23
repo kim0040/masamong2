@@ -27,6 +27,10 @@ import (
 // livePeoplePrefix is the source of a live claim: extract:<first observation of the segment>.
 const livePeoplePrefix = "extract:"
 
+// liveAskedPrefix + room is the one-line statements of a room whose people request was paid for and whose
+// result is saved, until the room's saved cursor covers them (liveAsked).
+const liveAskedPrefix = "people:live_asked:"
+
 // liveClaims turns a segment's validated people facts into claims for the write gate and counts the facts
 // it skips. A fact is one speaker's statement or nothing: its "by" is one person and every line it cites
 // was written by that person (a bot line, or a line of another author, is never evidence). A fact the
@@ -252,9 +256,9 @@ func (s *Service) kvCacheWrites(ws []kvWrite) {
 // livePeopleMarksTx writes, in the transaction that saves a segment's claims, what must commit with them
 // or not at all. The first live claims of a server record live_since, the time live extraction first saved
 // a person claim: a value once written is never overwritten (the backfill's default range stays where it
-// first ended), and the writer transaction makes "once" hold for rooms saving together. It returns the
-// values written, for the cache.
-func (s *Service) livePeopleMarksTx(tx *sql.Tx, backend string, r memRoom, saved int) ([]kvWrite, error) {
+// first ended), and the writer transaction makes "once" hold for rooms saving together. A one-line
+// statement (asked) is marked asked (liveAsked). It returns the values written, for the cache.
+func (s *Service) livePeopleMarksTx(tx *sql.Tx, backend string, r memRoom, lines []roomLine, saved int, asked string) ([]kvWrite, error) {
 	var out []kvWrite
 	now := s.Clock.Now().UTC()
 	if saved > 0 {
@@ -270,6 +274,28 @@ func (s *Service) livePeopleMarksTx(tx *sql.Tx, backend string, r memRoom, saved
 			return nil, err
 		}
 	}
+	if asked != "" {
+		i := slices.IndexFunc(lines, func(l roomLine) bool { return l.ID == asked })
+		if i < 0 {
+			return out, nil
+		}
+		var marks []liveAsk
+		var raw string
+		switch err := tx.QueryRow(`SELECT v FROM admin_state WHERE k=?`, liveAskedPrefix+r.room).Scan(&raw); {
+		case errors.Is(err, sql.ErrNoRows):
+		case err != nil:
+			return nil, err
+		default:
+			_ = json.Unmarshal([]byte(raw), &marks) // unreadable: the marks start over
+		}
+		if !slices.ContainsFunc(marks, func(m liveAsk) bool { return m.ID == asked }) {
+			w, err := kvWriteTx(tx, backend, liveAskedPrefix+r.room, append(marks, liveAsk{ID: asked, At: lines[i].parsed}), now)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, w)
+		}
+	}
 	return out, nil
 }
 
@@ -283,6 +309,61 @@ func kvWriteTx(tx *sql.Tx, backend, key string, v any, now time.Time) (kvWrite, 
 		return kvWrite{}, err
 	}
 	return kvWrite{key, string(raw)}, nil
+}
+
+// liveAsk is a one-line statement whose people request was paid for and saved: its observation and the
+// time it was written (roomLine.parsed, the cursor's unit).
+type liveAsk struct {
+	ID string `json:"id"`
+	At string `json:"at"`
+}
+
+// liveAsked reports whether the people request of a one-line statement was already paid for and its
+// result saved. The room cursor that records its segment is written after that, apart: when that write
+// fails and the process restarts, the line comes back unsealed and is not asked (and paid for) again.
+func (s *Service) liveAsked(room, id string) (bool, error) {
+	var marks []liveAsk
+	if _, err := s.kvGet(liveAskedPrefix+room, &marks); err != nil {
+		var syntax *json.SyntaxError
+		var kind *json.UnmarshalTypeError
+		if errors.As(err, &syntax) || errors.As(err, &kind) {
+			return false, nil // unreadable marks are none
+		}
+		return false, err
+	}
+	return slices.ContainsFunc(marks, func(m liveAsk) bool { return m.ID == id }), nil
+}
+
+// markLiveAsked marks a one-line statement asked when its answer saved nothing (no transaction did it).
+func (s *Service) markLiveAsked(r memRoom, l roomLine) error {
+	return kvUpdate(s, liveAskedPrefix+r.room, func(marks []liveAsk) []liveAsk {
+		if slices.ContainsFunc(marks, func(m liveAsk) bool { return m.ID == l.ID }) {
+			return marks
+		}
+		return append(marks, liveAsk{ID: l.ID, At: l.parsed})
+	})
+}
+
+// pruneLiveAsked forgets, once a room's cursor is saved, the asked marks it covers: a line whose segment
+// it records as sealed, or one before where it reads from.
+func (s *Service) pruneLiveAsked(room string, cur episodeCursor) {
+	var marks []liveAsk
+	if ok, err := s.kvGet(liveAskedPrefix+room, &marks); err != nil || !ok || len(marks) == 0 {
+		return
+	}
+	sealed := map[string]bool{}
+	for _, x := range cur.Sealed {
+		for _, id := range x.IDs {
+			sealed[id] = true
+		}
+	}
+	covered := func(m liveAsk) bool { return sealed[m.ID] || cur.BlockStart != "" && m.At < cur.BlockStart }
+	if !slices.ContainsFunc(marks, covered) {
+		return
+	}
+	if err := kvUpdate(s, liveAskedPrefix+room, func(marks []liveAsk) []liveAsk { return slices.DeleteFunc(marks, covered) }); err != nil {
+		s.Log.Warn("memory: one-line asked marks not pruned", "err", err)
+	}
 }
 
 // savePeopleTx saves a segment's claims through the write gate inside the caller's transaction and
@@ -338,6 +419,11 @@ func (s *Service) extractSelfStatement(ctx context.Context, db *storage.Store, r
 	if !s.selfStatement(r, lines, bots, botRef) {
 		return ps, nil
 	}
+	// a line paid for and saved before is not asked again, even when the room cursor could not record it
+	one := lines[slices.IndexFunc(lines, func(l roomLine) bool { return !l.Bot })]
+	if asked, err := s.liveAsked(r.room, one.ID); err != nil || asked {
+		return ps, err
+	}
 	// what is no longer current is never sent (the gate's check after the answer could not undo that):
 	// when the line is dropped there is nothing to ask
 	lines, err = s.sendableLines(db, r, lines)
@@ -370,9 +456,14 @@ func (s *Service) extractSelfStatement(ctx context.Context, db *storage.Store, r
 	claims, skipped := liveClaims(r, liveSource(lines), readAt, facts, lines, s.liveNames(p, in))
 	ps.skipped = skipped
 	if len(claims) == 0 {
+		// paid for, nothing to save: marked on its own, so a restart before the cursor is saved does not
+		// ask again
+		if err := s.markLiveAsked(r, one); err != nil {
+			s.Log.Warn("memory: a one-line people request was not marked asked", "err", err)
+		}
 		return ps, nil
 	}
-	ps.claims, err = s.savePeopleOnly(ctx, db, r, lines, claims)
+	ps.claims, err = s.savePeopleOnly(ctx, db, r, lines, claims, one.ID)
 	return ps, err
 }
 
@@ -434,8 +525,9 @@ func (s *Service) sendableLines(db *storage.Store, r memRoom, lines []roomLine) 
 }
 
 // savePeopleOnly saves claims of a segment that made no episode: the same transaction rule as
-// saveEpisodeOps (a line that changed meanwhile refuses everything), without any episode op.
-func (s *Service) savePeopleOnly(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, claims []store.PersonClaim) (int, error) {
-	_, people, err := s.saveEpisodeOps(ctx, db, r, lines, nil, "", claims)
+// saveEpisodeOps (a line that changed meanwhile refuses everything), without any episode op, and marks
+// the one-line statement asked in that transaction.
+func (s *Service) savePeopleOnly(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, claims []store.PersonClaim, asked string) (int, error) {
+	_, people, err := s.saveEpisodeOps(ctx, db, r, lines, nil, "", claims, asked)
 	return people, err
 }

@@ -579,6 +579,8 @@ func (s *Service) extractRoom(ctx context.Context, db *storage.Store, r memRoom,
 	}
 	if err := s.kvSet(cursorKey(r.room), cur); err != nil {
 		s.Log.Warn("memory: room memory cursor not saved", "err", err)
+	} else {
+		s.pruneLiveAsked(r.room, cur)
 	}
 	return st, stopErr
 }
@@ -798,7 +800,7 @@ func (s *Service) extractSegment(ctx context.Context, db *storage.Store, r memRo
 	if len(res.Ops) == 0 && len(claims) == 0 {
 		return 0, ps, nil
 	}
-	changed, saved, err := s.saveEpisodeOps(ctx, db, r, lines, res.Ops, "", claims)
+	changed, saved, err := s.saveEpisodeOps(ctx, db, r, lines, res.Ops, "", claims, "")
 	ps.claims = saved
 	return changed, ps, err
 }
@@ -808,8 +810,10 @@ func (s *Service) extractSegment(ctx context.Context, db *storage.Store, r memRo
 // the episode a regeneration replaces (deleted in the same transaction). claims are the person claims of
 // the same answer: they go through the write gate in the same transaction (a claim the gate refuses is
 // skipped, never the answer), after the items they may upgrade; the first live claims of a server write
-// its live_since in the same transaction. It returns the episodes changed and the claims written.
-func (s *Service) saveEpisodeOps(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, ops []episodes.Op, supersedes string, claims []store.PersonClaim) (int, int, error) {
+// its live_since in the same transaction. asked names a one-line statement whose people request this
+// saves: it is marked asked in the same transaction (liveAsked). It returns the episodes changed and the
+// claims written.
+func (s *Service) saveEpisodeOps(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, ops []episodes.Op, supersedes string, claims []store.PersonClaim, asked string) (int, int, error) {
 	byID := map[string]roomLine{}
 	var segment []string
 	for _, l := range lines {
@@ -900,7 +904,7 @@ func (s *Service) saveEpisodeOps(ctx context.Context, db *storage.Store, r memRo
 		if err != nil {
 			return err
 		}
-		marks, err = s.livePeopleMarksTx(tx, db.Backend, r, people)
+		marks, err = s.livePeopleMarksTx(tx, db.Backend, r, lines, people, asked)
 		return err
 	})
 	if err == nil {
@@ -1236,7 +1240,7 @@ func (s *Service) regenerateEpisodes(ctx context.Context, db *storage.Store, now
 		}
 		claims, dropped := liveClaims(j.r, liveSource(lines), readAt, facts, lines, s.liveNames(p, in))
 		ps.skipped += dropped
-		_, _, err = s.saveEpisodeOps(ctx, db, j.r, lines, res.Ops, j.id, claims)
+		_, _, err = s.saveEpisodeOps(ctx, db, j.r, lines, res.Ops, j.id, claims, "")
 		if errors.Is(err, errEvidenceDeleted) {
 			continue
 		}
