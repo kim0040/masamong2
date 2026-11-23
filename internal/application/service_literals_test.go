@@ -161,8 +161,9 @@ func TestServiceLiteralListHasReasons(t *testing.T) {
 		}
 		total += s.n
 	}
-	// 3 production sites, 1 in the tray tests, 30 in this package's tests (E7 review F4)
-	if total != 34 {
-		t.Errorf("the list holds %d sites; the count at the start of E7 was 34", total)
+	// 3 production sites, 1 in the tray tests, 35 in this package's tests (E7 review F4: 30 at the
+	// start of E7, then 5 in the log-ring and practice registry tests of the final review round)
+	if total != 39 {
+		t.Errorf("the list holds %d sites; the pinned count is 39: change it here with the reason", total)
 	}
 }
