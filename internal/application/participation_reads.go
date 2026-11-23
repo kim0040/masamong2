@@ -10,7 +10,12 @@ import (
 
 // What the participation decisions ask the store is read before s.part.mu is taken, and only memory is
 // read and written under it, so a slow store holds up no channel's decisions (fix plan R03, code standard
-// R20).
+// R20). What reading under the lock gave is kept: reads are made again when what they depend on changed
+// before the lock was taken (lockCandidate).
+
+// partRereads bounds how often a decision reads again because the configuration changed before it took the
+// lock; one that keeps changing gets the last read.
+const partRereads = 3
 
 // lockPartChannel takes s.part.mu and returns key's entry; the caller unlocks. An entry whose mute was not
 // read yet reads it from the decision log before the lock is taken, so a slow store holds up no other
@@ -78,4 +83,28 @@ func (s *Service) observeReads(m ObservedMessage) observeRead {
 		r.filter = "opted_out"
 	}
 	return r
+}
+
+// candidateRead is what considerCandidate asks the store when a candidate's wait ends.
+type candidateRead struct {
+	gone       bool   // the person or the channel no longer allows it (partAllowed)
+	collectWhy string // why collect mode records nothing for it now (collectSkip)
+	mode       string // the channel's participation mode
+}
+
+// lockCandidate reads what considerCandidate asks the store, all of which may have changed during the wait,
+// then takes s.part.mu and returns the candidate's entry; the caller unlocks. The reads are made again when
+// the configuration changed before the lock was taken, so the mode is the one current under the lock while
+// its thread lookup no longer waits under it (Sol review of E8, finding 7).
+func (s *Service) lockCandidate(cand *partCandidate) (*partChannel, candidateRead) {
+	for try := 1; ; try++ {
+		cfg := s.cfg.Load()
+		rd := candidateRead{gone: !s.partAllowed(cand), collectWhy: s.collectSkip(cand.guild, cand.channel, cand.msg.author),
+			mode: s.participationModeOf(cand.guild, cand.channel)}
+		c := s.lockPartChannel(cand.key)
+		if try == partRereads || s.cfg.Load() == cfg {
+			return c, rd
+		}
+		s.part.mu.Unlock()
+	}
 }
