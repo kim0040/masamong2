@@ -112,7 +112,8 @@ type pbWindow struct {
 	Obs     []string
 	First   time.Time
 	Last    time.Time
-	Skipped bool
+	Skipped bool // never sent: too thin, or covered
+	Covered bool // an earlier run of the server completed it with every line it has now
 }
 
 // pbPlan is a plan built from the stored observations.
@@ -122,7 +123,8 @@ type pbPlan struct {
 	Rooms       int // rooms with at least one window
 	Lines       int // observations read
 	MergedLines int
-	Skipped     int
+	Skipped     int // windows too thin to send
+	Covered     int // windows an earlier run completed (pbMarkCovered)
 	Token       string
 }
 
@@ -379,9 +381,45 @@ func (s *Service) pbBuildPlan(ctx context.Context, db *storage.Store, p pbParams
 			plan.Rooms++
 		}
 	}
+	if err := pbMarkCovered(db, &plan); err != nil {
+		return plan, err
+	}
 	plan.Token = pbToken(p, plan.Windows)
 	plan.Params.Token = plan.Token
 	return plan, nil
+}
+
+// pbMarkCovered marks the plan's windows that an earlier run of the server completed (applied or
+// refused), when that window held every line the plan's window holds now: they are never sent again, by
+// a pilot or a batch, whatever plan they come back in. A window with a line it did not have (a message
+// captured late) is new history and is sent.
+func pbMarkCovered(db *storage.Store, plan *pbPlan) error {
+	ids := make([]string, 0, len(plan.Windows))
+	for _, w := range plan.Windows {
+		if !w.Skipped {
+			ids = append(ids, w.ID)
+		}
+	}
+	done, err := store.BackfillCompleted(db.Reader(), plan.Params.Guild, ids)
+	if err != nil {
+		return err
+	}
+	for i := range plan.Windows {
+		w := &plan.Windows[i]
+		had, ok := done[w.ID]
+		if !ok || w.Skipped {
+			continue
+		}
+		covered := true
+		for _, id := range w.Obs {
+			covered = covered && slices.Contains(had, id)
+		}
+		if covered {
+			w.Skipped, w.Covered = true, true
+			plan.Covered++
+		}
+	}
+	return nil
 }
 
 // pbToken is the plan's fingerprint: its parameters and its windows with the lines each holds. Any
@@ -558,7 +596,7 @@ func (s *Service) pbDryRunOutput(plan pbPlan, spent float64) map[string]any {
 	return map[string]any{
 		"mode": "dry_run", "guild_id": plan.Params.Guild, "rooms": plan.Rooms, "rooms_asked": len(plan.Params.Rooms),
 		"since": plan.Params.Since, "until": plan.Params.Until, "until_from": plan.Params.UntilFrom,
-		"windows": len(plan.Windows), "sent_windows": len(sendable), "skipped_windows": plan.Skipped, "pilot_windows": len(pilot),
+		"windows": len(plan.Windows), "sent_windows": len(sendable), "skipped_windows": plan.Skipped, "covered_windows": plan.Covered, "pilot_windows": len(pilot),
 		"lines": plan.Lines, "merged_lines": plan.MergedLines,
 		"tokens":     map[string]int{"input": tin, "output": tout},
 		"cost_usd":   cost,

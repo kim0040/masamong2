@@ -2016,3 +2016,66 @@ func TestPeopleBackfillUnknownSubmissionKeepsReservation(t *testing.T) {
 		t.Fatalf("the cap's total %v leaves out the released batch", spent)
 	}
 }
+
+// A completed plan is not bought again: the same range planned again has every window covered, so a pilot
+// has nothing to send and nothing reaches the host. A later range that overlaps it sends only the new
+// windows.
+func TestPeopleBackfillCompletedPlanDoesNotResend(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	first := map[string]any{"until": "2026-09-10T00:00:00Z"}
+	token, run := pbPiloted(t, s, first)
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+		t.Fatal(res.Error)
+	}
+	pbWait(t, s, "run", pbState(store.BackfillDone))
+	requests := h.count()
+	spent, _ := store.BackfillGuildSpent(s.Store.Reader(), "g1")
+	// the same range again
+	dry := pbDry(t, s, map[string]any{"until": "2026-09-10T00:00:00Z"})
+	if dry["covered_windows"].(float64) != 70 || dry["sent_windows"].(float64) != 0 || dry["token"] == token {
+		t.Fatalf("the same range planned again: %v covered, %v to send", dry["covered_windows"], dry["sent_windows"])
+	}
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": dry["token"], "guild_id": "g1"}); res.OK {
+		t.Fatal("a pilot of a completed plan started")
+	}
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": dry["token"]}); res.OK {
+		t.Fatal("a run of a completed plan started")
+	}
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); res.OK {
+		t.Fatal("the completed run started again")
+	}
+	after, _ := store.BackfillGuildSpent(s.Store.Reader(), "g1")
+	if h.count() != requests || after != spent {
+		t.Fatalf("a completed plan cost %d requests and %v", h.count()-requests, after-spent)
+	}
+	// a later range overlapping it: only the new history goes out
+	for k := range 3 {
+		pbSegment(t, s, 80+k, [3]string{"101", "Mina", fmt.Sprintf("I really like newtopic%d today", k)}, [3]string{"102", "Joon", "I really like newer things too"})
+	}
+	dry = pbDry(t, s, map[string]any{"until": "2026-09-20T00:00:00Z"})
+	if dry["covered_windows"].(float64) != 70 || dry["sent_windows"].(float64) != 3 {
+		t.Fatalf("an overlapping range: %v covered, %v to send", dry["covered_windows"], dry["sent_windows"])
+	}
+	h.mu.Lock()
+	before := len(h.chats)
+	h.mu.Unlock()
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": dry["token"], "guild_id": "g1"}); !res.OK {
+		t.Fatal(res.Error)
+	}
+	pbWait(t, s, "overlap pilot", func(r store.BackfillRun) bool { return r.ID != run.ID && r.State == store.BackfillPiloted })
+	h.mu.Lock()
+	sent := slices.Clone(h.chats[before:])
+	h.mu.Unlock()
+	if len(sent) != 2*3 {
+		t.Fatalf("the overlapping pilot sent %d calls, want the 3 new windows on both models", len(sent))
+	}
+	for _, c := range sent {
+		var all []string
+		pbStrings(c, "", &all)
+		if text := strings.Join(all, "\n"); !strings.Contains(text, "newtopic") {
+			t.Fatalf("a covered window went out again:\n%s", text)
+		}
+	}
+}

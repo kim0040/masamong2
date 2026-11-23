@@ -340,7 +340,8 @@ func (s *Service) pbStartPilot(ctx context.Context, req action.Request, db *stor
 		}
 	}
 	if len(pilot) == 0 {
-		return action.Fail(req, errcode.InvalidInput, "people_backfill.no_rooms", s.msg(req, "people_backfill.no_rooms"), map[string]any{"windows": len(plan.Windows)})
+		return action.Fail(req, errcode.InvalidInput, "people_backfill.no_rooms", s.msg(req, "people_backfill.no_rooms"),
+			map[string]any{"windows": len(plan.Windows), "covered_windows": plan.Covered})
 	}
 	low, high := 0.0, 0.0
 	for _, m := range pbPilotModels {

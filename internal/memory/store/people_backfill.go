@@ -349,6 +349,34 @@ func BackfillAnswered(q backfillQuerier, guild string) ([]BackfillWindow, error)
 	return out, rows.Err()
 }
 
+// BackfillCompleted maps each of ids that a run of the server completed (applied or refused) to the
+// observations that window held then.
+func BackfillCompleted(q backfillQuerier, guild string, ids []string) (map[string][]string, error) {
+	out := map[string][]string{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	raw, _ := json.Marshal(ids)
+	rows, err := q.Query(`SELECT id, obs FROM people_backfill_window WHERE id IN (SELECT value FROM json_each(?)) AND state IN (?,?)
+		AND run_id IN (SELECT id FROM people_backfill_run WHERE guild_id=?)`, string(raw), WindowApplied, WindowRefused, guild)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, obs string
+		if err := rows.Scan(&id, &obs); err != nil {
+			return nil, err
+		}
+		var list []string
+		if err := json.Unmarshal([]byte(obs), &list); err != nil {
+			return nil, err
+		}
+		out[id] = append(out[id], list...)
+	}
+	return out, rows.Err()
+}
+
 // BackfillQueue is the first limit queued windows of a run, in plan order (a run never reads its whole
 // queue at once).
 func BackfillQueue(q backfillQuerier, runID string, limit int) ([]BackfillWindow, error) {
