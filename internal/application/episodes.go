@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"masamong/internal/crash"
+	"masamong/internal/errclass"
 	"masamong/internal/lang"
 	"masamong/internal/memory/corpus"
 	"masamong/internal/memory/engine"
@@ -806,8 +808,11 @@ func (s *Service) extractSegment(ctx context.Context, db *storage.Store, r memRo
 	if len(res.Ops) == 0 && len(claims) == 0 {
 		return 0, ps, nil
 	}
-	changed, saved, err := s.saveEpisodeOps(ctx, db, r, lines, res.Ops, "", claims, "")
+	changed, saved, lost, err := s.saveEpisodeOps(ctx, db, r, lines, res.Ops, "", claims, "")
 	ps.claims = saved
+	if lost {
+		ps.failed++
+	}
 	return changed, ps, err
 }
 
@@ -819,7 +824,31 @@ func (s *Service) extractSegment(ctx context.Context, db *storage.Store, r memRo
 // its live_since in the same transaction. asked names a one-line statement whose people request this
 // saves: it is marked asked in the same transaction (liveAsked). It returns the episodes changed and the
 // claims written.
-func (s *Service) saveEpisodeOps(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, ops []episodes.Op, supersedes string, claims []store.PersonClaim, asked string) (int, int, error) {
+//
+// The people part (claims, live_since, the asked mark) never costs the episode or a second purchase: when
+// the transaction holding it fails, it is tried once more without it (the episodes only), then the asked
+// mark on its own (a failure there is only logged), and peopleFailed reports the people part as lost. The
+// segment is then sealed as usual and never asked again; the claims and live_since stay paired (neither).
+func (s *Service) saveEpisodeOps(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, ops []episodes.Op, supersedes string, claims []store.PersonClaim, asked string) (changed, people int, peopleFailed bool, err error) {
+	changed, people, err = s.saveEpisodeOpsOnce(ctx, db, r, lines, ops, supersedes, claims, asked)
+	if err == nil || (len(claims) == 0 && asked == "") || errors.Is(err, errEvidenceDeleted) || ctx.Err() != nil {
+		return changed, people, false, err
+	}
+	s.Log.Warn("memory: the people part of a save failed; saved without it", "claims", len(claims), "class", string(errclass.Of(err)))
+	changed, _, err = s.saveEpisodeOpsOnce(ctx, db, r, lines, ops, supersedes, nil, "")
+	if err != nil {
+		return changed, 0, false, err
+	}
+	if i := slices.IndexFunc(lines, func(l roomLine) bool { return l.ID == asked }); asked != "" && i >= 0 {
+		if err := s.markLiveAsked(r, lines[i]); err != nil {
+			s.Log.Warn("memory: a one-line people request was not marked asked", "class", string(errclass.Of(err)))
+		}
+	}
+	return changed, 0, true, nil
+}
+
+// saveEpisodeOpsOnce is one transaction of saveEpisodeOps.
+func (s *Service) saveEpisodeOpsOnce(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, ops []episodes.Op, supersedes string, claims []store.PersonClaim, asked string) (int, int, error) {
 	byID := map[string]roomLine{}
 	var segment []string
 	for _, l := range lines {
@@ -1246,7 +1275,10 @@ func (s *Service) regenerateEpisodes(ctx context.Context, db *storage.Store, now
 		}
 		claims, dropped := liveClaims(j.r, liveSource(lines), readAt, facts, lines, s.liveNames(p, in))
 		ps.skipped += dropped
-		_, _, err = s.saveEpisodeOps(ctx, db, j.r, lines, res.Ops, j.id, claims, "")
+		_, _, lost, err := s.saveEpisodeOps(ctx, db, j.r, lines, res.Ops, j.id, claims, "")
+		if lost {
+			ps.failed++
+		}
 		if errors.Is(err, errEvidenceDeleted) {
 			continue
 		}

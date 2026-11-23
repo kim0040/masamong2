@@ -471,24 +471,26 @@ func TestRestartDoesNotRepurchaseSavedOneLineExtraction(t *testing.T) {
 	}
 }
 
-// live_since is written in the transaction of the first live claims: when its write fails, neither the
-// claims nor the marker are kept (the segment is asked again later); once it can be written, both are, and
-// the backfill's default range ends at that first successful save.
+// live_since is written in the transaction of the first live claims: when its write fails, the save is
+// tried again without the people part, so the ordinary episode is kept (and not bought again) while the
+// claims and the marker stay paired: neither is written, and the people part counts as failed. Once the
+// marker can be written, the next conversation's claims are saved with it, and the backfill's default
+// range ends at that first successful save.
 func TestLiveSinceSurvivesFirstSaveMarkerFailure(t *testing.T) {
 	t.Parallel()
 	svc, m, eng := roomSvc(t)
 	m.extract = func(string) string { return peopleAnswer(hikePeople) }
 	sayIn(eng, time.Now().Add(-5*time.Hour), hike...)
-	claims := func() int {
+	claims := func() int { // the live claims (an item of the kept episode still gives its derived claim)
 		t.Helper()
 		var n int
-		if err := svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM person_claim`).Scan(&n); err != nil {
+		if err := svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM person_claim WHERE source LIKE 'extract:%'`).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n
 	}
 	heal := failAdminWrites(t, svc, "r8_live_since", "people:live_since:%")
-	svc.RunRoomMemory(context.Background())
+	rep := svc.RunRoomMemory(context.Background())
 	var rows int
 	if err := svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM admin_state WHERE k='people:live_since:g'`).Scan(&rows); err != nil {
 		t.Fatal(err)
@@ -496,10 +498,25 @@ func TestLiveSinceSurvivesFirstSaveMarkerFailure(t *testing.T) {
 	if n := claims(); n != 0 || rows != 0 {
 		t.Fatalf("a failed live_since write: %d claim(s), %d marker row(s) (want both or neither)", n, rows)
 	}
+	if n := len(episodeList(t, svc)); n != 1 || rep.Episodes != 1 || rep.PeopleFailed() != 1 {
+		t.Fatalf("the ordinary episode went with the failed people part: %d episode(s), %+v", n, rep)
+	}
 	heal()
+	if rep := svc.RunRoomMemory(context.Background()); m.calls("episode") != 1 || rep.Segments != 0 {
+		t.Fatalf("the saved episode was bought again: %+v calls=%d", rep, m.calls("episode"))
+	}
+	if n := len(episodeList(t, svc)); n != 1 {
+		t.Fatalf("episodes after the second pass: %d", n)
+	}
+	// the next conversation saves its claims with the marker
 	before := time.Now().UTC().Add(-time.Second)
-	if rep := svc.RunRoomMemory(context.Background()); rep.PeopleClaims() == 0 || claims() == 0 {
-		t.Fatalf("second pass: %+v", rep)
+	next := make([]said, len(hike))
+	for i, l := range hike {
+		next[i] = said{"4" + l.id[1:], l.user, l.name, l.text}
+	}
+	sayIn(eng, time.Now().Add(-2*time.Hour), next...)
+	if rep := svc.RunRoomMemory(context.Background()); rep.PeopleClaims() == 0 || claims() == 0 || m.calls("episode") != 2 {
+		t.Fatalf("a later conversation: %+v calls=%d", rep, m.calls("episode"))
 	}
 	at, err := time.Parse(time.RFC3339, liveSince(t, svc, "g"))
 	if err != nil || at.Before(before) || at.After(time.Now().UTC().Add(time.Second)) {
@@ -510,6 +527,40 @@ func TestLiveSinceSurvivesFirstSaveMarkerFailure(t *testing.T) {
 		t.Errorf("dry run: %+v", r.Error)
 	} else if r.Output["until_from"] != "live_since" || r.Output["until"] != at.Format(time.RFC3339) {
 		t.Errorf("the dry run's range ends at %v (%v), want live_since %s", r.Output["until"], r.Output["until_from"], at.Format(time.RFC3339))
+	}
+}
+
+// A one-line statement made to the bot whose asked mark cannot be written: the save is tried again
+// without the people part, the people part counts as failed, and the line is still sealed by the room
+// cursor. After the fault is gone and the service restarts, the line is not bought again: one paid
+// request across both passes. The claims of that request are not kept (the people part of a failed save
+// is lost, never half written).
+func TestAskedMarkFailureDoesNotRepurchaseOneLine(t *testing.T) {
+	t.Parallel()
+	svc, m, eng := roomSvc(t)
+	svc.SetDiscord(&botGateway{})
+	m.extract = func(string) string {
+		return `{"people":[{"about":"p1","kind":"status","topic":"residence","text":"{p1}는 광양에 산다","by":["p1"],"ev":["m1"]}]}`
+	}
+	liveStarted(t, svc)
+	if ok, err := eng.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", MessageID: "6701", AuthorID: "u1", AuthorName: "철수",
+		Content: "<@999> 나 광양에 살아 요즘", At: time.Now().Add(-8 * time.Hour)}); err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	heal := failAdminWrites(t, svc, "r9_asked", "people:live_asked:%")
+	rep := svc.RunRoomMemory(context.Background())
+	if rep.PeopleCalls() != 1 || m.calls("episode") != 1 || rep.PeopleFailed() != 1 || rep.StoppedBy != "" {
+		t.Fatalf("first pass: %+v calls=%d", rep, m.calls("episode"))
+	}
+	var claims int
+	if err := svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM person_claim`).Scan(&claims); err != nil || claims != 0 {
+		t.Fatalf("the people part was half written: %d claim(s) %v", claims, err)
+	}
+	heal()
+	svc = restartServiceForTest(t, svc)
+	svc.SetDiscord(&botGateway{})
+	if rep := svc.RunRoomMemory(context.Background()); rep.PeopleCalls() != 0 || m.calls("episode") != 1 {
+		t.Fatalf("after the fault and a restart the line was paid for again: %+v calls=%d", rep, m.calls("episode"))
 	}
 }
 

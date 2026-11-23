@@ -525,7 +525,11 @@ func (s *Service) extractSelfStatement(ctx context.Context, db *storage.Store, r
 		}
 		return ps, nil
 	}
-	ps.claims, err = s.savePeopleOnly(ctx, db, r, lines, claims, one.ID)
+	var lost bool
+	ps.claims, lost, err = s.savePeopleOnly(ctx, db, r, lines, claims, one.ID)
+	if lost {
+		ps.failed++ // the line is still sealed and marked asked when it can be: never bought again
+	}
 	return ps, err
 }
 
@@ -588,8 +592,9 @@ func (s *Service) sendableLines(db *storage.Store, r memRoom, lines []roomLine) 
 
 // savePeopleOnly saves claims of a segment that made no episode: the same transaction rule as
 // saveEpisodeOps (a line that changed meanwhile refuses everything), without any episode op, and marks
-// the one-line statement asked in that transaction.
-func (s *Service) savePeopleOnly(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, claims []store.PersonClaim, asked string) (int, error) {
-	_, people, err := s.saveEpisodeOps(ctx, db, r, lines, nil, "", claims, asked)
-	return people, err
+// the one-line statement asked in that transaction. lost reports a people part that could not be written
+// (saveEpisodeOps): the segment is then done all the same.
+func (s *Service) savePeopleOnly(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, claims []store.PersonClaim, asked string) (int, bool, error) {
+	_, people, lost, err := s.saveEpisodeOps(ctx, db, r, lines, nil, "", claims, asked)
+	return people, lost, err
 }
