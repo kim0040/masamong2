@@ -40,8 +40,7 @@ func TestUpdateCheckSaysWhenANewerReleaseIsOut(t *testing.T) {
 		_, _ = w.Write([]byte(`{"tag_name":"v0.3.0","html_url":"https://github.com/kim0040/masamong2/releases/tag/v0.3.0","published_at":"2026-10-01T00:00:00Z"}`))
 	}))
 	defer srv.Close()
-	defer application.SetVersionForTest("0.2.0")()
-	svc := setupSvc(t)
+	svc := setupSvcVersion(t, "0.2.0")
 	application.UseUpdateAPIForTest(svc, srv.URL+"/%s")
 	o := out(t, svc, "updates.check", nil)
 	if o["newer"] != true || o["state"].(map[string]any)["latest"] != "0.3.0" || ua.Load() != "masamong/0.2.0" {

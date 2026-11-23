@@ -242,19 +242,19 @@ func (s *Service) samplePracticeLogs() {
 
 // practiceUptime is the practice instance's sample uptime history: a month of running with one
 // restart, one crash that the supervisor recovered, and one planned stop.
-func practiceUptime(now time.Time) ([]uptimeEvent, time.Time) {
+func practiceUptime(now time.Time, version string) ([]uptimeEvent, time.Time) {
 	day := 24 * time.Hour
 	base := now.Truncate(time.Minute)
 	at := func(d time.Duration) string { return base.Add(-d).UTC().Format(time.RFC3339) }
 	last := base.Add(-(6*day - 9*time.Hour))
 	return []uptimeEvent{
-		{At: at(40 * day), Kind: "start", Version: Version},
-		{At: at(21*day - 3*time.Hour), Kind: "restart", Version: Version, Reason: "config"},
-		{At: at(21*day - 3*time.Hour - 5*time.Second), Kind: "start", Version: Version},
+		{At: at(40 * day), Kind: "start", Version: version},
+		{At: at(21*day - 3*time.Hour), Kind: "restart", Version: version, Reason: "config"},
+		{At: at(21*day - 3*time.Hour - 5*time.Second), Kind: "start", Version: version},
 		{At: at(12*day - 14*time.Hour), Kind: "crash", Reason: "signal: killed"},
-		{At: at(12*day - 14*time.Hour - 2*time.Second), Kind: "start", Version: Version},
-		{At: at(6*day - 2*time.Hour), Kind: "stop", Version: Version},
-		{At: last.UTC().Format(time.RFC3339), Kind: "start", Version: Version},
+		{At: at(12*day - 14*time.Hour - 2*time.Second), Kind: "start", Version: version},
+		{At: at(6*day - 2*time.Hour), Kind: "stop", Version: version},
+		{At: last.UTC().Format(time.RFC3339), Kind: "start", Version: version},
 	}, last
 }
 

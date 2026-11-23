@@ -124,8 +124,18 @@ func releaseVersion(v string) bool {
 // resolved on every platform, so an install reached through a link (/usr/local/bin/masamongd ->
 // /opt/masamong/masamongd) would otherwise look for its program-update journal in the wrong folder.
 // Every place that reads or writes that journal or the old/new program copies uses this one answer.
-func InstallDir() (string, error) {
-	self, err := selfExecutable()
+func InstallDir() (string, error) { return installDirOf(selfExecutable) }
+
+// installDir is InstallDir for this service: the running programs' path is the one a test gave it, if any.
+func (s *Service) installDir() (string, error) {
+	if f := s.hooks.executable.Load(); f != nil {
+		return installDirOf(*f)
+	}
+	return InstallDir()
+}
+
+func installDirOf(executable func() (string, error)) (string, error) {
+	self, err := executable()
 	if err != nil {
 		return "", err
 	}
@@ -136,11 +146,11 @@ func InstallDir() (string, error) {
 }
 
 // updateDir is the folder of the running programs when it can take an update, or why it cannot.
-func updateDir() (string, string) {
-	if devBuild(Version) || !releaseVersion(Version) {
+func (s *Service) updateDir() (string, string) {
+	if devBuild(s.version()) || !releaseVersion(s.version()) {
 		return "", "source_build"
 	}
-	dir, err := InstallDir()
+	dir, err := s.installDir()
 	if err != nil {
 		return "", "unknown_location"
 	}
@@ -163,12 +173,12 @@ func (s *Service) updateBlocked(st updateState) string {
 	switch {
 	case s.practice:
 		return "practice"
-	case st.Status != "ok" || !newerVersion(st.Latest, Version):
+	case st.Status != "ok" || !newerVersion(st.Latest, s.version()):
 		return "no_update"
 	case st.Asset == nil || st.SumsURL == "":
 		return "no_asset"
 	}
-	_, why := updateDir()
+	_, why := s.updateDir()
 	return why
 }
 
@@ -199,7 +209,7 @@ func (s *Service) updateApply(ctx context.Context, req action.Request) action.Re
 	if strVal(inputMap(req), "confirm", "") != st.Latest {
 		return fail(errcode.InvalidInput, "confirm must repeat the version to install", map[string]any{"version": st.Latest})
 	}
-	dir, _ := updateDir()
+	dir, _ := s.updateDir()
 	installLock, err := launcher.AcquireNamedLock(dir, ".masamong-update.lock")
 	if err != nil {
 		return failKey(errcode.IO, "update.failed", err, nil)
@@ -235,10 +245,10 @@ func (s *Service) updateApply(ctx context.Context, req action.Request) action.Re
 		}
 		return failKey(errcode.IO, "update.install_failed", err, map[string]any{"backup": backup})
 	}
-	_ = s.kvSet("updates:applied", map[string]any{"from": Version, "to": st.Latest, "at": s.Clock.Now().UTC().Format(time.RFC3339), "backup": backup})
-	s.Log.Info("update installed; restarting", "from", Version, "to", st.Latest, "backup", backup)
+	_ = s.kvSet("updates:applied", map[string]any{"from": s.version(), "to": st.Latest, "at": s.Clock.Now().UTC().Format(time.RFC3339), "backup": backup})
+	s.Log.Info("update installed; restarting", "from", s.version(), "to", st.Latest, "backup", backup)
 	s.requestLifecycle(lifecycleRestart)
-	return action.OK(req, map[string]any{"installed": st.Latest, "from": Version, "backup": backup, "restarting": true, "message": s.msg(req, "updates.installed", "version", st.Latest)})
+	return action.OK(req, map[string]any{"installed": st.Latest, "from": s.version(), "backup": backup, "restarting": true, "message": s.msg(req, "updates.installed", "version", st.Latest)})
 }
 
 // errUpdateChecksum marks a download whose digest is not the published one, or that has no published digest:
@@ -262,7 +272,7 @@ func downloadRelease(ctx context.Context, s *Service, st updateState, dir string
 		}
 	}
 	client := providers.NewDownloadClient(10*time.Minute, s.Log, s.redirectHost())
-	client.UserAgent = "masamong/" + Version
+	client.UserAgent = "masamong/" + s.version()
 	client.MaxRetries = 1
 	client.MaxBody = updateSumsMax
 	sums, err := client.Get(ctx, st.SumsURL, map[string]string{"Accept": "application/octet-stream"})

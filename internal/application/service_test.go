@@ -25,20 +25,26 @@ func setupSvc(t *testing.T) *application.Service {
 // afterwards races them).
 func setupSvcLog(t *testing.T, logger func(*application.Service) *slog.Logger) *application.Service {
 	t.Helper()
-	return setupSvcWith(t, logger, nil)
+	return setupSvcWith(t, logger, application.OpenOptionsForTest{})
 }
 
 // setupSvcEnv is setupSvc for a service that has the variables of env from the start: the providers
 // it is set up with are built with their keys.
 func setupSvcEnv(t *testing.T, env map[string]string) *application.Service {
 	t.Helper()
-	return setupSvcWith(t, nil, env)
+	return setupSvcWith(t, nil, application.OpenOptionsForTest{Env: env})
 }
 
-func setupSvcWith(t *testing.T, logger func(*application.Service) *slog.Logger, env map[string]string) *application.Service {
+// setupSvcVersion is setupSvc for a service that runs as version from the start (what setup records).
+func setupSvcVersion(t *testing.T, version string) *application.Service {
+	t.Helper()
+	return setupSvcWith(t, nil, application.OpenOptionsForTest{Version: version})
+}
+
+func setupSvcWith(t *testing.T, logger func(*application.Service) *slog.Logger, o application.OpenOptionsForTest) *application.Service {
 	t.Helper()
 	dir := t.TempDir()
-	svc, err := application.OpenWithEnvForTest(t, dir, env)
+	svc, err := application.OpenWithOptionsForTest(t, dir, o)
 	if err != nil {
 		t.Fatal(err)
 	}

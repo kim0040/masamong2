@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"masamong/internal/action"
-	"masamong/internal/application"
 )
 
 func strList(t *testing.T, v any) []string {
@@ -30,8 +29,7 @@ func strList(t *testing.T, v any) []string {
 // one on request, the one before it with previous. A Discord caller sees only what chat members can
 // feel; the console and the CLI see the operator part too (unless they ask for one audience).
 func TestUpdatesNotesFollowTheRunningVersionAndTheAudience(t *testing.T) {
-	defer application.UseVersionForTest("v1.5.1")()
-	svc := setupSvc(t)
+	svc := setupSvcVersion(t, "v1.5.1")
 	serveAnyServer(t, svc)
 	member := &action.Invoker{Via: "command", GuildID: "g", ChannelID: "c", UserID: "u1"}
 
@@ -87,8 +85,7 @@ func TestUpdatesNotesFollowTheRunningVersionAndTheAudience(t *testing.T) {
 // The language follows the caller's locale (their saved one first); a language the note lacks falls
 // back to English.
 func TestUpdatesNotesSpeakTheCallersLanguage(t *testing.T) {
-	defer application.UseVersionForTest("v1.4.0")()
-	svc := setupSvc(t)
+	svc := setupSvcVersion(t, "v1.4.0")
 	serveAnyServer(t, svc)
 	u := &action.Invoker{Via: "command", GuildID: "g", ChannelID: "c", UserID: "u1"}
 	ko := svc.Execute(t.Context(), action.Request{Action: "updates.notes", Locale: "ko-KR", Invoker: u})
@@ -119,14 +116,14 @@ func TestUpdatesNotesForBuilds(t *testing.T) {
 		{"v1.4.2", true, "v1.4.0"},
 		{"v2.0.0", true, "v1.5.1"},
 	} {
-		restore := application.UseVersionForTest(c.version)
+		restore := svc.SetVersionForTest(c.version)
 		o := out(t, svc, "updates.notes", nil)
 		restore()
 		if o["found"] != c.found || (c.found && o["version"] != c.shows) {
 			t.Errorf("%s: %v", c.version, o)
 		}
 	}
-	defer application.UseVersionForTest("v1.4.2")()
+	defer svc.SetVersionForTest("v1.4.2")()
 	if o := out(t, svc, "updates.notes", nil); o["is_running"] != false {
 		t.Errorf("a version without notes of its own does not claim to be the running one: %v", o)
 	}

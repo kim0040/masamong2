@@ -71,7 +71,7 @@ func (s *Service) announceUpdates(ctx context.Context) {
 	if s.Store == nil || s.practice {
 		return
 	}
-	cur, ok := newsReleaseTag(Version)
+	cur, ok := newsReleaseTag(s.version())
 	if !ok {
 		return
 	}

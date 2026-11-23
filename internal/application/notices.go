@@ -251,7 +251,7 @@ func (s *Service) collectNotices(ctx context.Context, only []string) (CollectRep
 		}
 	}
 	f := &notices.Fetcher{
-		UserAgent:    s.toolString("notices.status", "user_agent", "Mozilla/5.0 (compatible; masamong/"+Version+"; +public-notices)"),
+		UserAgent:    s.toolString("notices.status", "user_agent", "Mozilla/5.0 (compatible; masamong/"+s.version()+"; +public-notices)"),
 		MaxRequests:  s.toolDefault("notices.status", "max_requests", 200),
 		HostInterval: time.Duration(s.toolDefault("notices.status", "host_interval_ms", 1000)) * time.Millisecond,
 		AllowPrivate: s.noticeFetchPrivate,

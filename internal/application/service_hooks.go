@@ -52,6 +52,10 @@ type serviceHooks struct {
 	redirectHost atomic.Pointer[func(host string) bool]
 	// oldEditsAtOnce settles old edits at the first idle pass instead of oldEditsDelay after the start.
 	oldEditsAtOnce bool
+	// version replaces the running version (Version, service.go); a test may change it while the service runs.
+	version atomic.Pointer[string]
+	// executable replaces the running program's path (selfExecutable, selfupdate.go).
+	executable atomic.Pointer[func() (string, error)]
 	// statsMetrics are metrics a test declared for this service only (name → *statsMetric, stats_registry.go).
 	statsMetrics sync.Map
 	// credentials stand in for the process environment's variables (credential below).
@@ -78,6 +82,14 @@ func (c *credentialStandIns) resolve(ref string) (providers.Credential, error) {
 		return cred, err
 	}
 	return providers.Resolve(ref)
+}
+
+// version is the running version: the build's, or the one a test gave this service.
+func (s *Service) version() string {
+	if v := s.hooks.version.Load(); v != nil {
+		return *v
+	}
+	return Version
 }
 
 // durationOr is d, or def when d is zero (an interval a test did not shrink).

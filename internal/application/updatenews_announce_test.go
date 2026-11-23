@@ -61,8 +61,7 @@ type newsFixture struct {
 
 func newNewsFixture(t *testing.T, running string) *newsFixture {
 	t.Helper()
-	t.Cleanup(application.UseVersionForTest(running))
-	svc := setupSvc(t)
+	svc := setupSvcVersion(t, running)
 	application.UseNewsLimitsForTest(svc, 0, 40)
 	serveAnyServer(t, svc)
 	for _, ch := range []map[string]any{

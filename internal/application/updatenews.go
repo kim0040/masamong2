@@ -56,14 +56,14 @@ func newsReleaseTag(v string) (string, bool) {
 
 // runningNote is the note of the running version. A build made after a tag shows the last note up to
 // that tag; a local build has none.
-func runningNote() (relnotes.Note, bool) {
-	if devBuild(Version) {
+func (s *Service) runningNote() (relnotes.Note, bool) {
+	if devBuild(s.version()) {
 		return relnotes.Note{}, false
 	}
-	if n, ok := relnotes.For(Version); ok {
+	if n, ok := relnotes.For(s.version()); ok {
 		return n, true
 	}
-	if all := relnotes.Between("", Version); len(all) > 0 {
+	if all := relnotes.Between("", s.version()); len(all) > 0 {
 		return all[len(all)-1], true
 	}
 	return relnotes.Note{}, false
@@ -99,7 +99,7 @@ func (s *Service) updatesNotes(req action.Request) action.Result {
 	if req.Locale == "" {
 		lang = relnotes.Lang(s.Doc().I18n.DefaultLocale)
 	}
-	out := map[string]any{"running": Version, "audience": string(aud), "language": lang, "found": false}
+	out := map[string]any{"running": s.version(), "audience": string(aud), "language": lang, "found": false}
 	var note relnotes.Note
 	var ok bool
 	switch want := strings.TrimSpace(strVal(in, "version", "")); {
@@ -108,7 +108,7 @@ func (s *Service) updatesNotes(req action.Request) action.Result {
 			return action.Fail(req, errcode.InvalidInput, "updates.news.unknown", s.msg(req, "updates.news.unknown"), nil)
 		}
 	default:
-		note, ok = runningNote()
+		note, ok = s.runningNote()
 	}
 	if ok && boolVal(in, "previous") {
 		note, ok = noteBefore(note, aud)
@@ -133,7 +133,7 @@ func (s *Service) updatesNotes(req action.Request) action.Result {
 	if hasPrev {
 		out["previous"] = prev.Version
 	}
-	if running, isRelease := newsReleaseTag(Version); isRelease {
+	if running, isRelease := newsReleaseTag(s.version()); isRelease {
 		out["is_running"] = note.Version == running
 	}
 	card.Title = s.msg(req, "updates.news.version_title", "version", note.Version)

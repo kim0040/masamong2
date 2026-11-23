@@ -36,13 +36,21 @@ func (c *credentialStandIns) setForTest(t testing.TB, name, value string) {
 	c.refs.Store("env:"+name, "file:"+path)
 }
 
-// OpenWithEnvForTest is Open for a service that has the variables of env from the start (SetEnvForTest
-// before the first configuration is built).
-func OpenWithEnvForTest(t testing.TB, dir string, env map[string]string) (*Service, error) {
+// OpenOptionsForTest are what a test gives a service before it starts.
+type OpenOptionsForTest struct {
+	Env     map[string]string // variables (SetEnvForTest): the first configuration is built with them
+	Version string            // the running version ("" = the build's)
+}
+
+// OpenWithOptionsForTest is Open for a service that has o from the start.
+func OpenWithOptionsForTest(t testing.TB, dir string, o OpenOptionsForTest) (*Service, error) {
 	t.Helper()
 	return openService(dir, nil, false, nil, func(h *serviceHooks) {
-		for name, value := range env {
+		for name, value := range o.Env {
 			h.credentials.setForTest(t, name, value)
+		}
+		if o.Version != "" {
+			h.version.Store(&o.Version)
 		}
 	})
 }
@@ -53,9 +61,10 @@ func (s *Service) CredentialForTest(ref string) (providers.Credential, error) {
 }
 
 // ReopenForTest opens prev's data root again the way a restart would: the environment's variables that
-// SetEnvForTest gave prev are still there.
+// SetEnvForTest gave prev are still there, and so is the running version.
 func ReopenForTest(prev *Service, clk clock.Clock, webBuild bool) (*Service, error) {
 	return openService(prev.DataRoot, clk, webBuild, nil, func(h *serviceHooks) {
+		h.version.Store(prev.hooks.version.Load())
 		prev.hooks.credentials.refs.Range(func(k, v any) bool {
 			h.credentials.refs.Store(k, v)
 			return true
@@ -271,8 +280,7 @@ func SaveOfferForTest(s *Service, guildID, channelID, text string) (string, erro
 func (s *Service) AlertTickForTest(ctx context.Context) { s.alertTick(ctx) }
 func (s *Service) NoteStartForTest()                    { s.noteUptime("start", "") }
 
-// UseUpdateAPIForTest points s's release check at url (with %s for the repository). The running
-// version is a process value: SetVersionForTest.
+// UseUpdateAPIForTest points s's release check at url (with %s for the repository).
 func UseUpdateAPIForTest(s *Service, url string) {
 	s.hooks.updateAPI.Store(&url)
 }
@@ -280,23 +288,23 @@ func UseUpdateAPIForTest(s *Service, url string) {
 // NewerVersionForTest exposes the version comparison.
 func NewerVersionForTest(latest, current string) bool { return newerVersion(latest, current) }
 
-// UseSelfUpdateForTest points s's release downloads at a local server and the running programs (a
-// process value) at dir.
+// UseSelfUpdateForTest points s's release downloads at a local server and its running programs at dir.
 func UseSelfUpdateForTest(s *Service, downloadPrefix, dir string) (restore func()) {
-	oldSelf := selfExecutable
+	oldExe := s.hooks.executable.Load()
 	s.hooks.downloads.Store(&downloadPrefix)
-	selfExecutable = func() (string, error) { return filepath.Join(dir, exeName("masamongd")), nil }
-	return func() { selfExecutable = oldSelf }
+	exe := func() (string, error) { return filepath.Join(dir, exeName("masamongd")), nil }
+	s.hooks.executable.Store(&exe)
+	return func() { s.hooks.executable.Store(oldExe) }
 }
 
 // UpdateAssetNameForTest is this computer's release archive name.
 func UpdateAssetNameForTest() string { return updateAssetName() }
 
-// SetVersionForTest changes the running version.
-func SetVersionForTest(v string) (restore func()) {
-	old := Version
-	Version = v
-	return func() { Version = old }
+// SetVersionForTest changes the running version of s; it returns the restore.
+func (s *Service) SetVersionForTest(v string) (restore func()) {
+	old := s.hooks.version.Load()
+	s.hooks.version.Store(&v)
+	return func() { s.hooks.version.Store(old) }
 }
 
 // ForgetThreadsForTest empties the in-memory thread list, as a restart or the closed-thread sweep does.
@@ -451,13 +459,6 @@ func (s *Service) changeSearchLimits(change func(*searchLimits)) func() {
 	change(l)
 	s.hooks.search.Store(l)
 	return func() { s.hooks.search.Store(old) }
-}
-
-// UseVersionForTest sets the running version for a test (the update-news notes follow it).
-func UseVersionForTest(version string) (restore func()) {
-	old := Version
-	Version = version
-	return func() { Version = old }
 }
 
 // AnnounceUpdatesForTest runs one pass of the update-news announcement.

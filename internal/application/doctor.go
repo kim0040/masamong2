@@ -126,7 +126,7 @@ func (r *doctorRun) report() map[string]any {
 		"instance":        s.Doc().Instance.ID,
 		"profile":         s.Doc().Limits.Profile,
 		"revision":        s.Revision(),
-		"version":         Version,
+		"version":         s.version(),
 		"storage":         info,
 		"storage_backend": info["backend"],
 		"features":        r.features,

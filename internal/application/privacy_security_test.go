@@ -33,7 +33,7 @@ func privacyService(t *testing.T) *Service { return privacyServiceEnv(t, nil) }
 // privacyServiceEnv is privacyService for a service that has the variables of env from the start.
 func privacyServiceEnv(t *testing.T, env map[string]string) *Service {
 	t.Helper()
-	s, err := OpenWithEnvForTest(t, t.TempDir(), env)
+	s, err := OpenWithOptionsForTest(t, t.TempDir(), OpenOptionsForTest{Env: env})
 	if err != nil {
 		t.Fatal(err)
 	}

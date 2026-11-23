@@ -693,7 +693,7 @@ func (s *Service) execute(ctx context.Context, req action.Request) action.Result
 // tool that cannot answer yet (no key, no model) is left out of both lists, so "what can you do?"
 // never promises a quote the bot has no service for.
 func (s *Service) help(req action.Request) action.Result {
-	out := map[string]any{"version": Version, "name": "masamong", "web_build": s.WebBuild}
+	out := map[string]any{"version": s.version(), "name": "masamong", "web_build": s.WebBuild}
 	p := lang.For(req.Locale, s.Doc().I18n.DefaultLocale)
 	var chatTools, commands []any
 	ready, byCommand, memo := map[string]bool{}, map[string]bool{}, map[string]string{}

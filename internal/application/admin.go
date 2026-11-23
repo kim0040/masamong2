@@ -536,7 +536,7 @@ func (s *Service) runtimePause(req action.Request) action.Result {
 		s.emit("runtime", "pause", map[string]any{"all": st.All})
 	}
 	return action.OK(req, map[string]any{"pause": st, "started_at": startedAt.UTC().Format(time.RFC3339),
-		"uptime_sec": int(time.Since(startedAt).Seconds()), "version": Version, "revision": s.Revision(),
+		"uptime_sec": int(time.Since(startedAt).Seconds()), "version": s.version(), "revision": s.Revision(),
 		"restart_pending": s.restartPending()})
 }
 
@@ -1470,7 +1470,7 @@ func (s *Service) dashboardOverview(ctx context.Context, req action.Request) act
 		monthView["reset"] = spendResetInfo(reset)
 	}
 	return action.OK(req, map[string]any{
-		"instance": s.Doc().Instance.ID, "version": Version, "revision": s.Revision(),
+		"instance": s.Doc().Instance.ID, "version": s.version(), "revision": s.Revision(),
 		"uptime_sec": int(time.Since(startedAt).Seconds()), "pause": pause,
 		"status": map[string]any{
 			"daemon":  map[string]any{"status": "ready"},

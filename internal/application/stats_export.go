@@ -447,7 +447,7 @@ func (s *Service) statsExportInstall(ctx context.Context, reset bool) (statsExpo
 			return statsExportInstall{}, err
 		}
 	}
-	return statsExportInstall{ID: st.ID, Version: Version, OS: runtime.GOOS, Arch: runtime.GOARCH,
+	return statsExportInstall{ID: st.ID, Version: s.version(), OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Tier: hostprofile.Current().Tier, FirstSeen: st.FirstSeen}, nil
 }
 

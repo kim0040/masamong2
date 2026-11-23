@@ -417,7 +417,7 @@ func (s *Service) createBackupLockedContext(ctx context.Context, kind string) (s
 		"name": name, "kind": kind, "instance": s.Doc().Instance.ID, "schema": 1, "config_revision": revision,
 		"config_sha256": hex.EncodeToString(cfgSum[:]), "db_sha256": dbSum, "db_file": dbFile,
 		"backend": s.Store.Backend, "secrets_included": secretsIncluded, "restore_scope": "database_config",
-		"created_at": s.Clock.Now().UTC().Format(time.RFC3339), "version": Version,
+		"created_at": s.Clock.Now().UTC().Format(time.RFC3339), "version": s.version(),
 	}
 	b, _ := json.MarshalIndent(manifest, "", "  ")
 	if err := fsutil.WriteDurable(filepath.Join(target, "manifest.json"), b, 0o600); err != nil {
