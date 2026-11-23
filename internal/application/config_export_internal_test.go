@@ -164,6 +164,11 @@ func TestBackupSecretsIncludedScansEveryStoredRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	u := url.URL{Scheme: "file", Path: filepath.ToSlash(filepath.Join(target, "masamong.db")), RawQuery: "mode=ro&immutable=1"}
+	if !strings.HasPrefix(u.Path, "/") {
+		// a Windows drive path ("C:/...") as file:///C:/..., the form backup.go opens snapshots with;
+		// without the slash "C:" would be read as the URI's host
+		u.Path = "/" + u.Path
+	}
 	db, err := sql.Open("sqlite", u.String())
 	if err != nil {
 		t.Fatal(err)
