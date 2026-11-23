@@ -8,6 +8,7 @@ import (
 
 	"masamong/internal/action"
 	"masamong/internal/errclass"
+	"masamong/internal/testutil"
 )
 
 // heldLogGateway's channel posts wait until their context ends (or a safety bound), and say when the
@@ -74,7 +75,7 @@ func TestServerLogGoesOnAfterAPanickingPost(t *testing.T) {
 	gw := &onceFailingLogGateway{logGateway: logGateway{fakeGateway: base.fakeGateway}}
 	svc.SetDiscord(gw)
 	svc.LogProblem("g", "9000001", "reply_failed", "", errclass.Timeout)
-	waitFor(t, "the first post attempt", func() bool { return gw.tried.Load() == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the first post attempt", func() bool { return gw.tried.Load() == 1 })
 	svc.LogProblem("g", "9000003", "reply_failed", "", errclass.Timeout)
 	gw.posted(t, "9000002", 1)
 }

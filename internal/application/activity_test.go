@@ -8,6 +8,7 @@ import (
 	"masamong/internal/action"
 	"masamong/internal/application"
 	"masamong/internal/clock"
+	"masamong/internal/testutil"
 )
 
 // /랭킹 counts each person's messages per channel (never the text): the bot's own messages and people
@@ -84,7 +85,7 @@ func TestActivityRankingShowsLastNameAndLeavesOutWithdrawn(t *testing.T) {
 	}
 	_ = asUser(svc, "1002", "privacy.consent", map[string]any{"scope": "memory", "decision": "withdraw"})
 	svc.MemoryAllowed("warm") // load the opt-out cache before the ranking reads
-	waitFor(t, "the withdrawn person's rows to go", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "the withdrawn person's rows to go", func() bool {
 		var n int
 		return svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM activity_counts WHERE user_id='1002'`).Scan(&n) == nil && n == 0
 	})

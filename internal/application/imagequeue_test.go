@@ -19,6 +19,7 @@ import (
 	"masamong/internal/chat"
 	"masamong/internal/config"
 	"masamong/internal/observability"
+	"masamong/internal/testutil"
 	"masamong/internal/tools"
 )
 
@@ -76,13 +77,14 @@ type postedLine struct{ channel, replyTo, text string }
 
 // pictureGateway is a connected Discord that records what the bot posts on its own.
 type pictureGateway struct {
-	mu       sync.Mutex
-	guilds   []application.GuildInfo
-	pictures []postedPicture
-	lines    []postedLine
-	perms    int64 // what Permissions answers; attach_files by default
-	down     bool  // a reconnect: not connected, and no servers listed
-	picErr   error // what PostPicture answers instead of posting
+	mu         sync.Mutex
+	guilds     []application.GuildInfo
+	pictures   []postedPicture
+	lines      []postedLine
+	perms      int64        // what Permissions answers; attach_files by default
+	down       bool         // a reconnect: not connected, and no servers listed
+	downChecks atomic.Int32 // Connected() polls while down: the worker is waiting out the reconnect
+	picErr     error        // what PostPicture answers instead of posting
 }
 
 const attachFiles = int64(1<<10 | 1<<11 | 1<<14 | 1<<15)
@@ -90,6 +92,9 @@ const attachFiles = int64(1<<10 | 1<<11 | 1<<14 | 1<<15)
 func (g *pictureGateway) Connected() bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
+	if g.down {
+		g.downChecks.Add(1)
+	}
 	return !g.down
 }
 func (g *pictureGateway) BotUser() (string, string)                 { return "bot", "masamong" }
@@ -137,28 +142,14 @@ func (g *pictureGateway) counts() (pictures, lines int) {
 	return len(g.pictures), len(g.lines)
 }
 
-func waitFor(t *testing.T, what string, ok func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for !ok() {
-		if time.Now().After(deadline) {
-			t.Fatalf("timed out waiting for %s", what)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-}
-
 // idle waits until the picture queue has nothing waiting and nothing being drawn.
 func idle(t *testing.T, svc *application.Service) {
 	t.Helper()
-	waitFor(t, "the picture queue to go idle", func() bool {
+	testutil.WaitFor(t, 5*time.Second, "the picture queue to go idle", func() bool {
 		waiting, running := application.ImageQueueStateForTest(svc)
 		return waiting == 0 && !running
 	})
 }
-
-// settle gives work that must NOT happen a moment to (wrongly) start.
-func settle() { time.Sleep(150 * time.Millisecond) }
 
 func imageChatSvc(t *testing.T) (*application.Service, *gatedImages, *pictureGateway) {
 	t.Helper()
@@ -198,12 +189,12 @@ func TestChatPictureIsQueuedAtOnceAndPostedLaterAsAReply(t *testing.T) {
 	if res.Data["card"] != nil {
 		t.Fatal("a queued picture has no card to post after the reply")
 	}
-	waitFor(t, "the draw to start", func() bool { return img.calls.Load() == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the draw to start", func() bool { return img.calls.Load() == 1 })
 	if p, l := gw.counts(); p != 0 || l != 0 {
 		t.Fatalf("posted before the picture was done: %d pictures, %d lines", p, l)
 	}
 	img.open()
-	waitFor(t, "the picture post", func() bool { p, _ := gw.counts(); return p == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the picture post", func() bool { p, _ := gw.counts(); return p == 1 })
 	gw.mu.Lock()
 	post := gw.pictures[0]
 	gw.mu.Unlock()
@@ -239,7 +230,7 @@ func TestPictureQueueCapsPerPersonAndInTotal(t *testing.T) {
 	if r := drawFor(svc, "u1", "m1", "a cat"); r.Status != "queued" {
 		t.Fatalf("u1: %+v", r)
 	}
-	waitFor(t, "the first draw to start", func() bool { return img.calls.Load() == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the first draw to start", func() bool { return img.calls.Load() == 1 })
 	// the same person while theirs is being drawn: one at a time
 	mine := drawFor(svc, "u1", "m1b", "a dog")
 	if mine.OK || !strings.Contains(mine.Error, "drawing one right now") {
@@ -272,7 +263,7 @@ func TestFailedPictureSaysSoInTheChannel(t *testing.T) {
 	if r := drawFor(svc, "u1", "m1", "a cat"); r.Status != "queued" {
 		t.Fatalf("%+v", r)
 	}
-	waitFor(t, "the failure line", func() bool { _, l := gw.counts(); return l == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the failure line", func() bool { _, l := gw.counts(); return l == 1 })
 	gw.mu.Lock()
 	line, pictures := gw.lines[0], len(gw.pictures)
 	gw.mu.Unlock()
@@ -284,7 +275,7 @@ func TestFailedPictureSaysSoInTheChannel(t *testing.T) {
 func TestQueuedPicturesAreDroppedAtShutdownWithoutPosting(t *testing.T) {
 	svc, img, gw := imageChatSvc(t)
 	drawFor(svc, "u1", "m1", "a cat")
-	waitFor(t, "the first draw to start", func() bool { return img.calls.Load() == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the first draw to start", func() bool { return img.calls.Load() == 1 })
 	if r := drawFor(svc, "u2", "m2", "a dog"); r.Status != "queued" {
 		t.Fatalf("u2: %+v", r)
 	}
@@ -295,7 +286,6 @@ func TestQueuedPicturesAreDroppedAtShutdownWithoutPosting(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("shutdown waits for the queue")
 	}
-	settle()
 	if p, l := gw.counts(); p != 0 || l != 0 {
 		t.Fatalf("posted at shutdown: %d pictures, %d lines", p, l)
 	}
@@ -319,7 +309,7 @@ func TestAsyncOffKeepsThePictureSynchronous(t *testing.T) {
 	if !res.OK || res.Data["status"] != "ok" || res.Data["image_id"] == "" || res.Data["card"] == nil {
 		t.Fatalf("async off must draw before answering: %+v", res)
 	}
-	settle()
+	idle(t, svc)
 	if p, l := gw.counts(); p != 0 || l != 0 {
 		t.Fatalf("the sync picture is posted by the reply path, not the queue: %d, %d", p, l)
 	}
@@ -341,7 +331,7 @@ func TestPictureRequestsOutsideChatStaySynchronous(t *testing.T) {
 	if r := exec(svc, "images.generate", map[string]any{"prompt": "a bird"}); !r.OK || r.Output["status"] != "ok" {
 		t.Fatalf("console: %+v", r)
 	}
-	settle()
+	idle(t, svc)
 	if p, _ := gw.counts(); p != 0 {
 		t.Fatalf("%d pictures went through the queue", p)
 	}
@@ -371,13 +361,13 @@ func TestPictureJobsAreDroppedSilentlyForPolicyReasons(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			svc, img, gw := imageChatSvc(t)
 			drawFor(svc, "u1", "m1", "a cat")
-			waitFor(t, "the first draw to start", func() bool { return img.calls.Load() == 1 })
+			testutil.WaitFor(t, 5*time.Second, "the first draw to start", func() bool { return img.calls.Load() == 1 })
 			if r := drawFor(svc, "u2", "m2", "a dog"); r.Status != "queued" {
 				t.Fatalf("u2: %+v", r)
 			}
 			c.apply(t, svc)
 			img.open()
-			waitFor(t, "the drops", func() bool { return application.ImageDropsForTest(svc) >= c.drops })
+			testutil.WaitFor(t, 5*time.Second, "the drops", func() bool { return application.ImageDropsForTest(svc) >= c.drops })
 			idle(t, svc)
 			if got := application.ImageDropsForTest(svc); got != c.drops {
 				t.Fatalf("dropped %d jobs, want %d", got, c.drops)
@@ -419,7 +409,7 @@ func TestPictureForAPersonWhoWithdrewMemoryConsentIsPosted(t *testing.T) {
 		if r := drawFor(svc, "u9", "m9", "a cat"); r.Status != "queued" {
 			t.Fatalf("%+v", r)
 		}
-		waitFor(t, "the picture post", func() bool { return posted(gw, "m9") })
+		testutil.WaitFor(t, 5*time.Second, "the picture post", func() bool { return posted(gw, "m9") })
 		idle(t, svc)
 		if application.ImageDropsForTest(svc) != 0 {
 			t.Fatal("the job was dropped")
@@ -428,13 +418,13 @@ func TestPictureForAPersonWhoWithdrewMemoryConsentIsPosted(t *testing.T) {
 	t.Run("while queued", func(t *testing.T) {
 		svc, img, gw := imageChatSvc(t)
 		drawFor(svc, "u1", "m1", "a cat")
-		waitFor(t, "the first draw to start", func() bool { return img.calls.Load() == 1 })
+		testutil.WaitFor(t, 5*time.Second, "the first draw to start", func() bool { return img.calls.Load() == 1 })
 		if r := drawFor(svc, "u2", "m2", "a dog"); r.Status != "queued" {
 			t.Fatalf("u2: %+v", r)
 		}
 		withdraw(t, svc, "u2")
 		img.open()
-		waitFor(t, "both picture posts", func() bool { return posted(gw, "m1") && posted(gw, "m2") })
+		testutil.WaitFor(t, 5*time.Second, "both picture posts", func() bool { return posted(gw, "m1") && posted(gw, "m2") })
 		idle(t, svc)
 		if application.ImageDropsForTest(svc) != 0 || img.calls.Load() != 2 {
 			t.Fatalf("drops=%d provider calls=%d", application.ImageDropsForTest(svc), img.calls.Load())
@@ -449,15 +439,18 @@ func TestPictureWaitsOutAReconnectBeforePosting(t *testing.T) {
 	if r := drawFor(svc, "u1", "m1", "a cat"); r.Status != "queued" {
 		t.Fatalf("%+v", r)
 	}
-	waitFor(t, "the draw to start", func() bool { return img.calls.Load() == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the draw to start", func() bool { return img.calls.Load() == 1 })
 	gw.setDown(true)
 	img.open()
-	time.Sleep(400 * time.Millisecond) // the picture is done and waiting for the gateway
+	// the picture is done and waiting for the gateway: the worker is polling the readiness check
+	testutil.WaitFor(t, 5*time.Second, "the paid picture to wait out the reconnect", func() bool {
+		return gw.downChecks.Load() >= 2
+	})
 	if p, l := gw.counts(); p != 0 || l != 0 || application.ImageDropsForTest(svc) != 0 {
 		t.Fatalf("while the gateway is down nothing is posted or dropped: %d, %d, %d drops", p, l, application.ImageDropsForTest(svc))
 	}
 	gw.setDown(false)
-	waitFor(t, "the picture post", func() bool { p, _ := gw.counts(); return p == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the picture post", func() bool { p, _ := gw.counts(); return p == 1 })
 	if application.ImageDropsForTest(svc) != 0 {
 		t.Fatal("the job was dropped")
 	}
@@ -469,7 +462,7 @@ func TestPictureThatCannotStartForADisconnectedGatewaySaysFailed(t *testing.T) {
 	svc, img, gw := imageChatSvc(t)
 	application.SetImageConnectWaitForTest(svc, 150*time.Millisecond, 10*time.Millisecond)
 	drawFor(svc, "u1", "m1", "a cat")
-	waitFor(t, "the first draw to start", func() bool { return img.calls.Load() == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the first draw to start", func() bool { return img.calls.Load() == 1 })
 	if r := drawFor(svc, "u2", "m2", "a dog"); r.Status != "queued" {
 		t.Fatalf("%+v", r)
 	}
@@ -554,7 +547,7 @@ func TestPictureOverDiscordsUploadLimitSaysFailedInsteadOfPosting(t *testing.T) 
 func TestDeletedRequestCancelsItsPicture(t *testing.T) {
 	svc, img, gw := imageChatSvc(t)
 	drawFor(svc, "u1", "m1", "a cat")
-	waitFor(t, "the first draw to start", func() bool { return img.calls.Load() == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the first draw to start", func() bool { return img.calls.Load() == 1 })
 	drawFor(svc, "u2", "m2", "a dog")
 	svc.CancelPictureJobs("other-channel", []string{"m2"}) // another channel's message with the same ID is not it
 	if waiting, _ := application.ImageQueueStateForTest(svc); waiting != 1 {
@@ -586,7 +579,7 @@ func TestDeletedRequestCancelsItsPicture(t *testing.T) {
 func TestRepeatedRequestReportsItsPlaceInTheLine(t *testing.T) {
 	svc, img, _ := imageChatSvc(t)
 	drawFor(svc, "u1", "m1", "a cat")
-	waitFor(t, "the first draw to start", func() bool { return img.calls.Load() == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the first draw to start", func() bool { return img.calls.Load() == 1 })
 	drawFor(svc, "u2", "m2", "a dog")
 	again1 := drawFor(svc, "u1", "m3", "A cat.")
 	again2 := drawFor(svc, "u2", "m4", "a dog")
@@ -622,7 +615,7 @@ func TestQueueAnswersDoNotCountAgainstTheDailyLimit(t *testing.T) {
 	if r := drawFor(svc, "u1", "m1", "a cat"); r.Status != "queued" {
 		t.Fatalf("%+v", r)
 	}
-	waitFor(t, "the draw to start", func() bool { return img.calls.Load() == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the draw to start", func() bool { return img.calls.Load() == 1 })
 	for i := 0; i < 3; i++ { // repeats, and another request while theirs is running
 		if r := drawFor(svc, "u1", "m2", "a cat"); r.Status != "already_queued" {
 			t.Fatalf("repeat %d counted against the limit: %+v", i, r)
@@ -643,7 +636,7 @@ func TestQueueAnswersDoNotCountAgainstTheDailyLimit(t *testing.T) {
 func TestClosedServiceDoesNotDrawSynchronously(t *testing.T) {
 	svc, img, gw := imageChatSvc(t)
 	drawFor(svc, "u1", "m1", "a cat") // starts the worker
-	waitFor(t, "the draw to start", func() bool { return img.calls.Load() == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the draw to start", func() bool { return img.calls.Load() == 1 })
 	_ = svc.Close()
 	r := drawFor(svc, "u2", "m2", "a dog")
 	if r.OK || img.calls.Load() != 1 {
@@ -662,8 +655,8 @@ func TestBackgroundPictureIsRecordedUnderItsTurn(t *testing.T) {
 	if r := run(ctx, "images.generate", map[string]any{"prompt": "a cat"}); r.Status != "queued" {
 		t.Fatalf("%+v", r)
 	}
-	waitFor(t, "the picture post", func() bool { p, _ := gw.counts(); return p == 1 })
-	waitFor(t, "the ledger rows", func() bool { return len(application.ToolCallStatusesForTest(svc, "turn-img-1")) >= 2 })
+	testutil.WaitFor(t, 5*time.Second, "the picture post", func() bool { p, _ := gw.counts(); return p == 1 })
+	testutil.WaitFor(t, 5*time.Second, "the ledger rows", func() bool { return len(application.ToolCallStatusesForTest(svc, "turn-img-1")) >= 2 })
 	got := application.ToolCallStatusesForTest(svc, "turn-img-1")
 	if len(got) != 2 || got[0] != "images.generate:queued" || got[1] != "images.generate:ok" {
 		t.Fatalf("ledger rows of the turn: %v", got)

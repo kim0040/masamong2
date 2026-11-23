@@ -8,6 +8,7 @@ import (
 
 	"masamong/internal/action"
 	"masamong/internal/config"
+	"masamong/internal/testutil"
 )
 
 // committedWithProviderURL stores a committed revision holding a provider address as an earlier
@@ -84,7 +85,7 @@ func TestNewConfigChangesStillRefuseThoseAddresses(t *testing.T) {
 		doc := s.Doc()
 		doc.Providers = map[string]config.Provider{"p2": {Kind: config.KindOpenAI, BaseURL: tc.url}}
 		raw, _ := config.Marshal(doc)
-		r := s.Execute(context.Background(), action.Request{Action: "config.apply", Input: mustJSON(map[string]any{"yaml": string(raw), "base_revision": s.Revision()})})
+		r := s.Execute(context.Background(), action.Request{Action: "config.apply", Input: testutil.MustJSON(t, map[string]any{"yaml": string(raw), "base_revision": s.Revision()})})
 		if r.OK || !strings.Contains(r.Error.Message, tc.reason) || strings.Contains(r.Error.Message, "must use https") {
 			t.Fatalf("%s: %+v", tc.url, r.Error)
 		}
@@ -103,7 +104,7 @@ func TestDisabledProviderWithRefusedAddressDoesNotBlockOtherChanges(t *testing.T
 	doc := s.Doc() // the provider is switched off in memory
 	raw, _ := config.Marshal(doc)
 	apply := func(yaml []byte) action.Result {
-		return s.Execute(context.Background(), action.Request{Action: "config.apply", Input: mustJSON(map[string]any{"yaml": string(yaml), "base_revision": s.Revision()})})
+		return s.Execute(context.Background(), action.Request{Action: "config.apply", Input: testutil.MustJSON(t, map[string]any{"yaml": string(yaml), "base_revision": s.Revision()})})
 	}
 	if r := apply(raw); !r.OK {
 		t.Fatalf("an unrelated change must apply: %+v", r.Error)
@@ -116,9 +117,4 @@ func TestDisabledProviderWithRefusedAddressDoesNotBlockOtherChanges(t *testing.T
 	if r := apply(raw); r.OK || !strings.Contains(r.Error.Message, "user name or password") {
 		t.Fatalf("enabling it again must fail with the reason: %+v", r)
 	}
-}
-
-func mustJSON(v any) []byte {
-	b, _ := json.Marshal(v)
-	return b
 }

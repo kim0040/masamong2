@@ -41,23 +41,27 @@ func noModelSvc(t *testing.T, instanceMode, channelMode string) (*application.Se
 
 func TestParticipationCollectRecordsWithoutAModelCall(t *testing.T) {
 	svc, calls := noModelSvc(t, "shadow", "collect")
+	finishWait, drain := application.ManualParticipationForTest(svc)
 	if r := exec(svc, "participation.mode", map[string]any{"guild_id": "g", "channel_id": "c"}); r.Output["effective"] != "collect" {
 		t.Fatalf("effective mode: %+v", r.Output)
 	}
 	say(svc, "m1", "u1", "누가 텐트 챙기기로 했지?")
+	if !finishWait("g", "c") {
+		t.Fatal("candidate missing")
+	}
 	log := partLog(t, svc, 1)
 	if log[0]["state"] != "collected" || log[0]["mode"] != "collect" || log[0]["reason"] != "unanswered" || log[0]["kind"] == "" {
 		t.Fatalf("collected row: %+v", log[0])
 	}
 	// a moment people handled meanwhile is kept with what they did
-	application.SetParticipationWait(svc, 300*time.Millisecond)
 	say(svc, "m2", "u1", "누가 보드게임 가져오기로 했지?")
 	say(svc, "m3", "u2", "내가 가져갈게")
+	drain() // the queued cancellation write
 	log = partLog(t, svc, 2)
 	if log[0]["state"] != "cancelled" || log[0]["reason"] != "people_answered" || log[0]["mode"] != "collect" {
 		t.Fatalf("handled row: %+v", log[0])
 	}
-	time.Sleep(400 * time.Millisecond)
+	drain() // every message's queued work has run: the handled moment cannot also be collected
 	if n := len(partLog(t, svc, 2)); n != 2 {
 		t.Fatalf("a handled moment must not also be collected: %d rows", n)
 	}
@@ -103,7 +107,7 @@ func TestParticipationCollectNotesBotMentioned(t *testing.T) {
 				t.Fatalf("mention row: %+v", log[0])
 			}
 		} else {
-			time.Sleep(100 * time.Millisecond)
+			// the turn's refusal is the end of it: in shadow a name-mention is decided inside ChatTurn
 			r := exec(svc, "participation.mode", map[string]any{"guild_id": "g", "channel_id": "c"})
 			if raw, _ := json.Marshal(r.Output["log"]); string(raw) != "[]" {
 				t.Fatalf("shadow must not collect mentions: %s", raw)

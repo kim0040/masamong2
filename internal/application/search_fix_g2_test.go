@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -19,6 +18,7 @@ import (
 	"masamong/internal/action"
 	"masamong/internal/application"
 	"masamong/internal/chat"
+	"masamong/internal/testutil"
 )
 
 // searchWith runs search.web as a chat turn would, with a live Guard in the context.
@@ -40,8 +40,6 @@ func monthSpend(t *testing.T, svc *application.Service) float64 {
 	}
 	return total
 }
-
-func near(a, b float64) bool { return math.Abs(a-b) < 1e-9 }
 
 // recorder serves a search answer for every request and records the bodies / queries it was sent.
 type recorder struct {
@@ -99,13 +97,13 @@ func TestSearchWithoutReportedCostIsRecordedAtListPrice(t *testing.T) {
 	if !res.OK || res.Output["provider"] != "linkup" {
 		t.Fatalf("%+v", res)
 	}
-	if !near(g.PaidTotal(), 0.055) {
+	if !testutil.Near(g.PaidTotal(), 0.055, 1e-9) {
 		t.Fatalf("paid %v, want Linkup deep's 0.055", g.PaidTotal())
 	}
-	if _, usd, _ := g.Totals(); !near(usd, 0.055) {
+	if _, usd, _ := g.Totals(); !testutil.Near(usd, 0.055, 1e-9) {
 		t.Fatalf("the guard's spent %v", usd)
 	}
-	if got := monthSpend(t, svc); !near(got, 0.055) {
+	if got := monthSpend(t, svc); !testutil.Near(got, 0.055, 1e-9) {
 		t.Fatalf("month spend %v", got)
 	}
 
@@ -123,7 +121,7 @@ func TestSearchWithoutReportedCostIsRecordedAtListPrice(t *testing.T) {
 	if !res.OK || res.Output["provider"] != "serper" {
 		t.Fatalf("%+v", res.Output)
 	}
-	if want := 0.0055 + 0.001; !near(g.PaidTotal(), want) || !near(monthSpend(t, svc), want) {
+	if want := 0.0055 + 0.001; !testutil.Near(g.PaidTotal(), want, 1e-9) || !testutil.Near(monthSpend(t, svc), want, 1e-9) {
 		t.Fatalf("paid %v, month %v, want %v (Linkup standard answered empty, then Serper)", g.PaidTotal(), monthSpend(t, svc), want)
 	}
 
@@ -163,7 +161,7 @@ func TestRewordedQueriesAreRequestsInQuotaAndFee(t *testing.T) {
 	if used := svc.Registry().Quota.Snapshot()["tavily"]; used != 3 {
 		t.Fatalf("quota units %d, want the 3 requests sent", used)
 	}
-	if want := 3 * 0.016; !near(g.PaidTotal(), want) {
+	if want := 3 * 0.016; !testutil.Near(g.PaidTotal(), want, 1e-9) {
 		t.Fatalf("paid %v, want %v (three advanced searches)", g.PaidTotal(), want)
 	}
 	items := res.Output["results"].([]any)
@@ -185,7 +183,7 @@ func TestRewordedQueriesAreRequestsInQuotaAndFee(t *testing.T) {
 	if got := tav.seen(); !slices.Equal(got, []string{"캠핑 장비", "캠핑 텐트"}) {
 		t.Fatalf("two units: the main query and the first reworded one: %v", got)
 	}
-	if want := 2 * 0.016; !near(g.PaidTotal(), want) || svc.Registry().Quota.Snapshot()["tavily"] != 2 {
+	if want := 2 * 0.016; !testutil.Near(g.PaidTotal(), want, 1e-9) || svc.Registry().Quota.Snapshot()["tavily"] != 2 {
 		t.Fatalf("paid %v, quota %d", g.PaidTotal(), svc.Registry().Quota.Snapshot()["tavily"])
 	}
 	// the day's units are used up: the next search is the daily limit, not an unmetered request
@@ -438,7 +436,7 @@ func TestSearchRequestIsSentOnceAndALostAnswerIsCharged(t *testing.T) {
 	if hung.hits.Load() != 1 {
 		t.Fatalf("the timed-out request was sent %d times", hung.hits.Load())
 	}
-	if !near(g.PaidTotal(), 0.0055) || !near(monthSpend(t, svc), 0.0055) {
+	if !testutil.Near(g.PaidTotal(), 0.0055, 1e-9) || !testutil.Near(monthSpend(t, svc), 0.0055, 1e-9) {
 		t.Fatalf("paid %v, month %v: a request whose answer was lost counts at Linkup's list price", g.PaidTotal(), monthSpend(t, svc))
 	}
 
@@ -475,7 +473,7 @@ func TestSearchRequestIsSentOnceAndALostAnswerIsCharged(t *testing.T) {
 	if res := searchWith(svc, g, map[string]any{"query": "캠핑"}); !res.OK || res.Output["provider"] != "tinyfish" {
 		t.Fatalf("%+v", res.Output)
 	}
-	if !near(g.PaidTotal(), 0.0055) || !near(monthSpend(t, svc), 0.0055) {
+	if !testutil.Near(g.PaidTotal(), 0.0055, 1e-9) || !testutil.Near(monthSpend(t, svc), 0.0055, 1e-9) {
 		t.Fatalf("paid %v, month %v: an unreadable answer counts at Linkup's list price", g.PaidTotal(), monthSpend(t, svc))
 	}
 }

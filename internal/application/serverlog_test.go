@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"masamong/internal/application"
 	"masamong/internal/config"
 	"masamong/internal/errclass"
+	"masamong/internal/testutil"
 )
 
 // logGateway is a server with a #logs and a #general channel that records the cards posted.
@@ -39,19 +41,17 @@ func (g *logGateway) PostChannel(_ context.Context, channelID, _, _ string, card
 // posted waits for n cards in channel (the server log posts in the background).
 func (g *logGateway) posted(t *testing.T, channel string, n int) []action.Card {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for {
+	var got []action.Card
+	testutil.WaitFor(t, 3*time.Second, fmt.Sprintf("%d cards in %s", n, channel), func() bool {
 		g.mu.Lock()
-		got := append([]action.Card(nil), g.cards[channel]...)
-		g.mu.Unlock()
-		if len(got) >= n || time.Now().After(deadline) {
-			if len(got) != n {
-				t.Fatalf("%s: %d cards, want %d: %+v", channel, len(got), n, got)
-			}
-			return got
-		}
-		time.Sleep(10 * time.Millisecond)
+		defer g.mu.Unlock()
+		got = append([]action.Card(nil), g.cards[channel]...)
+		return len(got) >= n
+	})
+	if len(got) != n {
+		t.Fatalf("%s: %d cards, want %d: %+v", channel, len(got), n, got)
 	}
+	return got
 }
 
 func logSvc(t *testing.T) (*application.Service, *logGateway) {
@@ -106,7 +106,6 @@ func TestServerLogPostsDeletesWithTheirText(t *testing.T) {
 	svc.LogDeletes("g", "9000001", []application.DeletedMessage{{ID: msgID(written, 2), AuthorID: "222", AuthorBot: true}})
 	svc.LogDeletes("g", "9000002", []application.DeletedMessage{{ID: msgID(written, 3), AuthorID: "111"}})
 	svc.LogDeletes("", "dm", []application.DeletedMessage{{ID: msgID(written, 4), AuthorID: "111"}})
-	settle()
 	gw.posted(t, "9000002", 1)
 
 	// many at once are one entry, with the authors named once and the unknown ones counted
@@ -167,7 +166,6 @@ func TestServerLogFollowsItsSettings(t *testing.T) {
 
 	setLog(t, svc, config.GuildLog{Channel: "off"})
 	svc.LogDeletes("g", "9000001", []application.DeletedMessage{{ID: "7004", AuthorID: "111"}})
-	settle()
 	gw.posted(t, "9000001", 1)
 	gw.posted(t, "9000002", 1)
 
@@ -209,6 +207,5 @@ func TestServerLogTestAndListView(t *testing.T) {
 	if r := exec(svc, "serverlog.test", map[string]any{"guild_id": "g"}); r.OK || r.Error.Args["reason"] != "off" {
 		t.Fatalf("unset: %+v", r)
 	}
-	settle()
 	gw.posted(t, "9000002", 1)
 }

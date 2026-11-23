@@ -12,6 +12,7 @@ import (
 	"masamong/internal/hostprofile"
 	"masamong/internal/memory/store"
 	"masamong/internal/storage"
+	"masamong/internal/testutil"
 )
 
 // smallHostSvc is a service on the small host profile: two reader connections. A pass that keeps a reader
@@ -166,7 +167,7 @@ func TestConsentChecksDoNotHoldAReaderWhileTheWriterIsBusy(t *testing.T) {
 		}
 		done := make(chan result, 1)
 		go func() { l, err := s.styleLines(db, "g", "c"); done <- result{l, err} }()
-		waitFor(t, "the consent check to wait for the writer", func() bool { return db.DB.Stats().WaitCount > waits })
+		testutil.WaitFor(t, 15*time.Second, "the consent check to wait for the writer", func() bool { return db.DB.Stats().WaitCount > waits })
 		if n := db.Reader().Stats().InUse; n != 0 {
 			t.Fatalf("%d reader connection(s) held while waiting for the writer", n)
 		}
