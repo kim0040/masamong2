@@ -642,15 +642,6 @@ func candTimes(w reminders.When) []time.Time {
 	return out
 }
 
-// stillCurrent is the final check: nothing was said in the channel since the candidate, nobody called the bot
-// since (a call counts as said before its mute restore, and sets the after-call pause after it), and the
-// channel's entry is the one the candidate was made in (a dropped and made-again entry counts versions anew).
-func (s *Service) stillCurrent(cand *partCandidate) bool {
-	c := s.lockPartChannel(cand.key)
-	defer s.part.mu.Unlock()
-	return c.gen == cand.gen && c.version == cand.version && c.lastCall.Equal(cand.lastCall)
-}
-
 func (s *Service) noteSpoken(cand *partCandidate) {
 	c := s.lockPartChannel(cand.key)
 	defer s.part.mu.Unlock()
