@@ -114,3 +114,4 @@ export { default as ArrowRightLeft } from '@lucide/svelte/icons/arrow-right-left
 export { default as CloudSun } from '@lucide/svelte/icons/cloud-sun'
 export { default as Rows3 } from '@lucide/svelte/icons/rows-3'
 export { default as Shuffle } from '@lucide/svelte/icons/shuffle'
+export { default as UserRoundSearch } from '@lucide/svelte/icons/user-round-search'

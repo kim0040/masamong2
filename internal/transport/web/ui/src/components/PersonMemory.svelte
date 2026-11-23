@@ -6,7 +6,7 @@
   import { resource } from '../lib/resource.svelte'
   import { datetime, num } from '../lib/format'
   import { toast } from '../lib/toast.svelte'
-  import { splitMine, forgetTotal } from '../lib/personmemory'
+  import { splitMine, forgetTotal, personTotal, memberServers, pickServer, claimSummary, sortClaims, isDirect, type Claim } from '../lib/personmemory'
   import Field from './Field.svelte'
   import Select from './Select.svelte'
   import Button from './Button.svelte'
@@ -15,21 +15,19 @@
   import LoadState from './LoadState.svelte'
   import * as I from '../lib/icons'
 
-  // What the bot keeps about one person in one server (memory.mine.show), and forgetting it: a preview
-  // first, then a confirmation with the preview's token (memory.mine.forget). Each server keeps its own,
-  // so the operator picks the server. The person is named by the dialog this sits in; the ID is not shown.
+  // What the bot keeps about one person in one server (memory.mine.show), hiding one statement
+  // (memory.person.hide) and forgetting it all: a preview first, then a confirmation with the preview's
+  // token (memory.mine.forget). Each server keeps its own, so the operator picks the server, among the ones
+  // the person is in. The person is named by the dialog this sits in; the ID is not shown.
   let { userId, preferredGuild = '' }: { userId: string; preferredGuild?: string } = $props()
 
   // Exact membership is filtered before the per-server list cap.
   type Group = { guild_id: string; name: string; people: { user_id: string; last_seen: string }[] }
   const membership = resource<{ servers: Group[] }>('people.servers', () => ({ user_id: userId }), { live: ['config', 'audit', 'memory', 'discord'] })
-  const servers = $derived((membership.data?.servers ?? []).flatMap((g) => {
-    const person = g.people.find((p) => p.user_id === userId)
-    return person ? [{ value: g.guild_id, label: g.name || g.guild_id, last: person.last_seen }] : []
-  }).sort((a, b) => b.last.localeCompare(a.last)))
+  const servers = $derived(memberServers(membership.data?.servers, userId))
   let guild = $state('')
   $effect(() => {
-    if (!servers.some((s) => s.value === guild)) guild = servers.find((s) => s.value === preferredGuild)?.value ?? servers[0]?.value ?? ''
+    guild = pickServer(servers, guild, preferredGuild)
   })
 
   let view = $state<{ loading: boolean; error: string; data: any } | null>(null)
@@ -49,13 +47,36 @@
   })
 
   const parts = $derived(splitMine(view?.data?.items))
-  const card = $derived((view?.data?.person_card ?? []) as string[])
+  const claims = $derived(sortClaims((view?.data?.person ?? []) as Claim[]))
+  const sum = $derived(claimSummary(claims))
   const episodes = $derived<number>(view?.data?.episodes ?? 0)
-  const empty = $derived(!!view?.data && parts.told.length + parts.other.length + card.length + episodes === 0)
-  const kindLabel = (k: string) => (has(`rm.item.${k}`) ? t(`rm.item.${k}`) : k)
+  const empty = $derived(!!view?.data && parts.told.length + parts.other.length + claims.length + episodes === 0)
+  const itemKind = (k: string) => (has(`rm.item.${k}`) ? t(`rm.item.${k}`) : k)
+  const claimKind = (k: string) => (has(`pm.kind.${k}`) ? t(`pm.kind.${k}`) : k)
+  function source(c: Claim): string {
+    const name = c.said_by?.[0] ?? ''
+    if (c.origin === 'said') return name ? t('pm.src.said', { name }) : t('pm.src.said_unknown')
+    if (c.origin === 'told') return name ? t('pm.src.told', { name }) : t('pm.src.told_unknown')
+    return c.origin === 'explicit' ? t('pm.src.explicit') : t('pm.src.self')
+  }
+
+  // hiding one statement: it stays out of every answer and is not made again from the same lines
+  let hideFor = $state<Claim | null>(null)
+  let hideOpen = $state(false)
+  function askHide(c: Claim) {
+    hideFor = c
+    hideOpen = true
+  }
+  async function hide() {
+    if (!hideFor) return
+    const r = await call('memory.person.hide', { guild_id: guild, user_id: userId, claim_id: hideFor.id })
+    if (!r.ok) toast('error', t('common.failed'), r.error?.message)
+    else toast('ok', t('pm.hid'))
+    await load()
+  }
 
   // forgetting: the preview opens the confirmation, the token it returns confirms exactly that
-  let plan = $state<{ items: number; episodes: number; cards: number; token: string } | null>(null)
+  let plan = $state<{ items: number; episodes: number; cards: number; person_items?: number; token: string } | null>(null)
   let confirmOpen = $state(false)
   let previewing = $state(false)
   async function preview() {
@@ -92,31 +113,56 @@
       {:else if view.error}
         <div role="alert" class="callout danger"><span class="ic"><I.CircleAlert size={16} aria-hidden="true" /></span><span>{view.error}</span><Button size="sm" variant="ghost" onclick={() => load()}>{t('common.retry')}</Button></div>
       {:else if empty}
-        <p class="small muted">{t('pm.empty')}</p>
+        <div class="empty small muted">
+          <p>{t('pm.empty')}</p>
+          <ul>
+            <li>{t('pm.empty_off')}</li>
+            <li>{t('pm.empty_quiet')}</li>
+          </ul>
+        </div>
       {:else}
-        {#if parts.told.length}
-          <section aria-labelledby="pm-told">
-            <h4 id="pm-told" class="sub">{t('pm.told')}</h4>
-            <ul class="list">
-              {#each parts.told as it (it.id)}<li><span class="break">{it.text}</span> <span class="xs muted">{datetime(it.created_at)}</span></li>{/each}
-            </ul>
-          </section>
-        {/if}
-        {#if card.length}
-          <section aria-labelledby="pm-card">
-            <h4 id="pm-card" class="sub">{t('pm.card')}</h4>
-            <ul class="list">{#each card as c}<li class="break">{c}</li>{/each}</ul>
-          </section>
-        {/if}
-        {#if parts.other.length}
-          <section aria-labelledby="pm-items">
-            <h4 id="pm-items" class="sub">{t('pm.items')}</h4>
-            <ul class="list">
-              {#each parts.other as it (it.id)}
-                <li><span class="chip">{kindLabel(it.kind)}</span> <span class="break">{it.text}</span> <span class="xs muted">{datetime(it.created_at)}</span></li>
+        {#if claims.length}
+          <section aria-labelledby="pm-claims">
+            <h4 id="pm-claims" class="sub">{t('pm.claims')}</h4>
+            <p class="small sum">{t('pm.summary', { own: num(sum.own), others: num(sum.others), told: num(sum.told) })} · {t('pm.last', { when: datetime(sum.last) })}</p>
+            <ul class="claims">
+              {#each claims as c (c.id)}
+                <li>
+                  <div class="main">
+                    <span class="chip">{claimKind(c.kind)}</span>
+                    <span class="tier" class:direct={isDirect(c)}>{isDirect(c) ? t('pm.tier.direct') : t('pm.tier.heard')}</span>
+                    {#if c.state === 'pending'}<span class="tier" title={t('pm.pending_hint')}>{t('pm.pending')}</span>{/if}
+                    <span class="break">{c.text}</span>
+                  </div>
+                  <div class="meta xs muted"><span>{source(c)}</span><span>·</span><span>{datetime(c.observed_at)}</span></div>
+                  <Button size="sm" variant="ghost" icon={I.EyeOff} aria-label={t('pm.hide_one', { text: c.text })} onclick={() => askHide(c)}>{t('pm.hide')}</Button>
+                </li>
               {/each}
             </ul>
           </section>
+        {/if}
+        {#if parts.told.length + parts.other.length}
+          <details class="more">
+            <summary class="small">{t('pm.items_more', { n: num(parts.told.length + parts.other.length) })}</summary>
+            {#if parts.told.length}
+              <section aria-labelledby="pm-told">
+                <h4 id="pm-told" class="sub">{t('pm.told')}</h4>
+                <ul class="list">
+                  {#each parts.told as it (it.id)}<li><span class="break">{it.text}</span> <span class="xs muted">{datetime(it.created_at)}</span></li>{/each}
+                </ul>
+              </section>
+            {/if}
+            {#if parts.other.length}
+              <section aria-labelledby="pm-items">
+                <h4 id="pm-items" class="sub">{t('pm.items')}</h4>
+                <ul class="list">
+                  {#each parts.other as it (it.id)}
+                    <li><span class="chip">{itemKind(it.kind)}</span> <span class="break">{it.text}</span> <span class="xs muted">{datetime(it.created_at)}</span></li>
+                  {/each}
+                </ul>
+              </section>
+            {/if}
+          </details>
         {/if}
         <p class="xs muted">{t('pm.episodes', { n: num(episodes) })}</p>
       {/if}
@@ -127,9 +173,15 @@
   {/if}
 </div>
 
+<Confirm bind:open={hideOpen} title={t('pm.hide_title')} body={t('pm.hide_body')} confirmLabel={t('pm.hide')} onconfirm={hide}>
+  {#snippet details()}
+    {#if hideFor}<p class="fp small break">{hideFor.text}</p>{/if}
+  {/snippet}
+</Confirm>
+
 <Confirm bind:open={confirmOpen} danger title={t('pm.forget_title')} body={t('pm.forget_body')} confirmLabel={t('pm.forget_confirm')} onconfirm={forget}>
   {#snippet details()}
-    {#if plan}<p class="fp small">{t('pm.forget_preview', { items: num(plan.items), episodes: num(plan.episodes), cards: num(plan.cards) })}</p>{/if}
+    {#if plan}<p class="fp small">{t('pm.forget_preview', { items: num(plan.items), episodes: num(plan.episodes), cards: num(personTotal(plan)) })}</p>{/if}
   {/snippet}
 </Confirm>
 
@@ -160,6 +212,65 @@
   .list li {
     font-size: var(--text-sm);
     min-width: 0;
+  }
+  .sum {
+    margin: 0 0 var(--s-2);
+    color: var(--text-muted);
+  }
+  .claims {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+  }
+  .claims li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: var(--s-3);
+    align-items: start;
+    padding: var(--s-2) 0;
+    box-shadow: inset 0 -1px 0 var(--border);
+    font-size: var(--text-sm);
+    min-width: 0;
+  }
+  .claims .main {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+  }
+  .claims .meta {
+    grid-column: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .claims li > :global(button) {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+  .tier {
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+  }
+  .tier.direct {
+    color: var(--ok);
+    font-weight: 600;
+  }
+  .more summary {
+    cursor: pointer;
+    color: var(--text-muted);
+    margin-bottom: var(--s-2);
+  }
+  .empty p {
+    margin: 0 0 6px;
+  }
+  .empty ul {
+    margin: 0;
+    padding-left: 1.2em;
+    display: grid;
+    gap: 4px;
   }
   .fp {
     margin: var(--s-3) 0 0;
