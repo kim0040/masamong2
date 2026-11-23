@@ -48,31 +48,54 @@ var openPractices practiceRegistry
 
 type practiceRegistry struct {
 	mu     sync.Mutex
-	byRoot map[string]*Service
+	byRoot map[string][]*Service
 }
 
 func (r *practiceRegistry) add(s *Service) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.byRoot == nil {
-		r.byRoot = map[string]*Service{}
+		r.byRoot = map[string][]*Service{}
 	}
-	r.byRoot[filepath.Clean(s.DataRoot)] = s
+	key := filepath.Clean(s.DataRoot)
+	r.byRoot[key] = append(r.byRoot[key], s)
 }
 
-// remove forgets s, not a newer instance opened on the same folder after a reset.
+// remove forgets only s; other services still open on the same folder stay registered.
 func (r *practiceRegistry) remove(s *Service) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if key := filepath.Clean(s.DataRoot); r.byRoot[key] == s {
+	key := filepath.Clean(s.DataRoot)
+	list := r.byRoot[key]
+	for i, o := range list {
+		if o == s {
+			list = append(list[:i], list[i+1:]...)
+			break
+		}
+	}
+	if len(list) == 0 {
 		delete(r.byRoot, key)
+	} else {
+		r.byRoot[key] = list
 	}
 }
 
+// find returns the newest still-open service of the folder. A service already in Close is skipped
+// so an earlier open one stays reachable while the newer one finishes closing.
 func (r *practiceRegistry) find(root string) *Service {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.byRoot[filepath.Clean(root)]
+	list := r.byRoot[filepath.Clean(root)]
+	for i := len(list) - 1; i >= 0; i-- {
+		s := list[i]
+		s.lifeMu.Lock()
+		closing := s.closing
+		s.lifeMu.Unlock()
+		if !closing {
+			return s
+		}
+	}
+	return nil
 }
 
 // Practice reports whether this service is the practice instance.
@@ -176,7 +199,6 @@ func OpenPractice(ctx context.Context, dataRoot, locale string, log *slog.Logger
 	}
 	s := &Service{DataRoot: root, Clock: clock.Real{}, I18n: i18n.New(), CfgPath: filepath.Join(root, "config.yaml"),
 		WebBuild: true, watchers: map[chan Event]struct{}{}, practice: true, Store: store}
-	openPractices.add(s) // Close removes it
 	// its lines still reach the daemon's log file, tagged, but not the real instance's console log
 	s.Log = s.CaptureLogs(log.With("instance", "practice"))
 	reg := buildRegistry(offlineProviders(config.Default("", root)), s.Log, s.Clock.Now)
@@ -210,6 +232,9 @@ func OpenPractice(ctx context.Context, dataRoot, locale string, log *slog.Logger
 	if err := s.seedPractice(ctx); err != nil {
 		s.Log.Warn("practice seed", "err", err)
 	}
+	// only a fully opened service is published: a privacy change that lands mid-open takes the
+	// direct-DB fallback in applyPracticePrivacy instead of reaching a half-open service
+	openPractices.add(s) // Close removes it
 	return s, nil
 }
 
