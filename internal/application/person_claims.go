@@ -8,11 +8,14 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"masamong/internal/features/privacy"
+	"masamong/internal/lang"
 	"masamong/internal/memory/corpus"
 	"masamong/internal/memory/episodes"
+	"masamong/internal/memory/search"
 	"masamong/internal/memory/store"
 )
 
@@ -34,6 +37,9 @@ func init() {
 //     subject's {@ref} in a text of at most 120 runes, a topic of at most 20, at least one evidence id;
 //   - a direct claim (subject = speaker) names nobody but its subject: one naming another person is what
 //     the speaker said about them, never the speaker's own statement;
+//   - the text writes out no known name of anyone but the subject (knownNames: every label person_alias
+//     holds for the server, old ones included), outside its {@ref} tokens: such a person's forget, which
+//     finds them by reference, would not reach it;
 //   - evidence: every observation is a live human Discord line of this server, current (no pending
 //     deletion or edit: store.ObservationCurrent), written by the speaker, with the text the writer read
 //     (Lines) and not edited after it read it (ReadAt); all of it in one room;
@@ -68,12 +74,13 @@ func (s *Service) savePersonClaims(ctx context.Context, tx *sql.Tx, claims []sto
 	}
 	now := s.Clock.Now().UTC().Format(time.RFC3339)
 	naive := s.naiveZone()
+	names := s.knownNames()
 	saved := 0
 	for _, c := range claims {
 		if err := ctx.Err(); err != nil {
 			return saved, err
 		}
-		ok, err := s.personClaimPasses(tx, &c, memoryOut, profileOut, naive)
+		ok, err := s.personClaimPasses(tx, &c, memoryOut, profileOut, naive, names)
 		if err != nil {
 			return saved, err
 		}
@@ -103,8 +110,9 @@ func withdrawnRefsTx(tx *sql.Tx, scope string) (map[string]bool, error) {
 }
 
 // personClaimPasses applies the gate to one claim and fills its computed fields (id, normalized topic,
-// observed_at, room, state). False means skip it.
-func (s *Service) personClaimPasses(tx *sql.Tx, c *store.PersonClaim, memoryOut, profileOut map[string]bool, naive *time.Location) (bool, error) {
+// observed_at, room, state). False means skip it. names are the server's known names (knownNames, one
+// per write call).
+func (s *Service) personClaimPasses(tx *sql.Tx, c *store.PersonClaim, memoryOut, profileOut map[string]bool, naive *time.Location, names *knownNames) (bool, error) {
 	c.Text = strings.Join(strings.Fields(c.Text), " ")
 	c.Topic = store.PersonTopic(c.Topic)
 	c.Evidence = uniqueStrings(c.Evidence)
@@ -129,6 +137,11 @@ func (s *Service) personClaimPasses(tx *sql.Tx, c *store.PersonClaim, memoryOut,
 		// a statement of one's own names only its subject: "{p1}가 전하길 {p2}는 …" filed under its speaker
 		// is hearsay about p2, and as a direct claim it would be read server-wide as p1's own words
 		return false, nil
+	}
+	if other, err := names.namesOther(tx, c.GuildID, c.SubjectRef, c.Text); err != nil || other {
+		// a known name of someone else written out (not as a token): that person's forget would not reach
+		// it, whoever wrote it (a renamed account's old label included)
+		return false, err
 	}
 	people := uniqueStrings(append([]string{c.SubjectRef, c.SpeakerRef}, named...))
 	for _, ref := range people {
@@ -428,4 +441,96 @@ func deleteClaimsWhere(tx *sql.Tx, query string, args ...any) (int, error) {
 		}
 	}
 	return len(ids), nil
+}
+
+// knownNames are the names people of servers were seen under, read from person_alias once per server and
+// write call (every label of every room, a renamed account's old labels included): the write gate refuses
+// a claim whose text writes out, outside its {@ref} tokens, the name of anyone but its subject. A name is
+// matched as a chat turn matches it (search.NameMatcher: a whole word, or the word plus a particle or an
+// honorific), case-folded.
+type knownNames struct {
+	matches func(string, string) bool
+	guilds  map[string]*guildNames
+}
+
+type guildNames struct {
+	refs map[string]map[string]bool // folded label → the people seen under it
+}
+
+// knownNames starts the per-call cache of known names.
+func (s *Service) knownNames() *knownNames {
+	doc := s.Doc()
+	return &knownNames{matches: search.NameMatcher(lang.MergeSearch(append(slices.Clone(doc.Memory.Languages), "ko", "ja"), doc.BotNames())),
+		guilds: map[string]*guildNames{}}
+}
+
+// load reads the server's labels once.
+func (k *knownNames) load(tx *sql.Tx, guild string) (*guildNames, error) {
+	if g, ok := k.guilds[guild]; ok {
+		return g, nil
+	}
+	g := &guildNames{refs: map[string]map[string]bool{}}
+	if tableExists(tx, "person_alias") {
+		rows, err := tx.Query(`SELECT DISTINCT person_ref,folded FROM person_alias WHERE guild_id=?`, guild)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var ref, label string
+			if err := rows.Scan(&ref, &label); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if label = strings.TrimSpace(label); label == "" || utf8.RuneCountInString(label) > maxNameRunes {
+				continue // never matched by a chat turn either
+			}
+			if g.refs[label] == nil {
+				g.refs[label] = map[string]bool{}
+			}
+			g.refs[label][ref] = true
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	k.guilds[guild] = g
+	return g, nil
+}
+
+// namesOther reports whether text writes out, outside its {@ref} tokens, a known name of a person other
+// than subject (a name the subject shares with someone else counts: whose it is cannot be told). A nil
+// cache checks nothing.
+func (k *knownNames) namesOther(tx *sql.Tx, guild, subject, text string) (bool, error) {
+	if k == nil || text == "" {
+		return false, nil
+	}
+	g, err := k.load(tx, guild)
+	if err != nil || len(g.refs) == 0 {
+		return false, err
+	}
+	lower := strings.ToLower(text)
+	runes := []rune(lower)
+	offsets := make([]int, 0, len(runes)+1) // byte offset of each rune, and the end
+	for i := range lower {
+		offsets = append(offsets, i)
+	}
+	offsets = append(offsets, len(lower))
+	for i := range runes {
+		if i > 0 && (unicode.IsLetter(runes[i-1]) || unicode.IsDigit(runes[i-1])) {
+			continue // a name starts a word
+		}
+		for j := i + 2; j <= min(len(runes), i+maxNameRunes); j++ {
+			label := lower[offsets[i]:offsets[j]]
+			who := g.refs[label]
+			if len(who) == 0 || (len(who) == 1 && who[subject]) {
+				continue
+			}
+			if literalName(lower, label, offsets[i], k.matches) == offsets[i] {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }

@@ -2557,3 +2557,61 @@ func TestPeopleBackfillRejectsChangedPilotWithSameWindowID(t *testing.T) {
 		})
 	}
 }
+
+// The paid backfill writes through the same gate: a fact that writes out a known name of someone other
+// than its subject is not stored, as hearsay (Mina says Joon practises with Charlie) or as a statement of
+// one's own (Mina says Joon moved). Charlie's forget-all then has nothing to miss. The control: the
+// plain facts of the same run are stored.
+func TestPeopleBackfillRefusesLiteralKnownName(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	pbSegment(t, s, 70, [3]string{"101", "Mina", "Joon practices kn-practice with Charlie every week"},
+		[3]string{"102", "Joon", "yes we do it every single week"}, [3]string{"103", "Charlie", "see you all there next time"})
+	pbSegment(t, s, 71, [3]string{"101", "Mina", "Joon moved to kn-sentinelcity, I heard"}, [3]string{"102", "Joon", "anyway see you tomorrow then"})
+	h.mu.Lock()
+	h.rewrite = func(model, prompt string) (string, string, bool) {
+		switch {
+		case strings.Contains(prompt, "kn-practice"):
+			ev, mina := pbLineOf(prompt, "kn-practice")
+			_, joon := pbLineOf(prompt, "yes we do")
+			raw, _ := json.Marshal(map[string]any{"people": []any{map[string]any{"about": joon, "kind": "other", "topic": "practice",
+				"text": "{" + joon + "} practices kn-practice with Charlie", "by": []string{mina}, "ev": []string{ev}}}})
+			return string(raw), "end_turn", true
+		case strings.Contains(prompt, "kn-sentinelcity"):
+			ev, mina := pbLineOf(prompt, "kn-sentinelcity")
+			raw, _ := json.Marshal(map[string]any{"people": []any{map[string]any{"about": mina, "kind": "other", "topic": "news",
+				"text": "{" + mina + "} says Joon moved to kn-sentinelcity", "by": []string{mina}, "ev": []string{ev}}}})
+			return string(raw), "end_turn", true
+		}
+		return "", "", false
+	}
+	h.mu.Unlock()
+	token, _ := pbPiloted(t, s, nil)
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+		t.Fatal(res.Error)
+	}
+	pbWait(t, s, "run", pbState(store.BackfillDone))
+	if n := pbCountClaims(t, s, `text LIKE '% likes %'`); n == 0 {
+		t.Fatal("control: the run stored no plain fact")
+	}
+	if n := pbCountClaims(t, s, `text LIKE '%kn-practice%'`); n != 0 {
+		t.Errorf("hearsay writing out Charlie's name was stored: %d", n)
+	}
+	if n := pbCountClaims(t, s, `text LIKE '%kn-sentinelcity%'`); n != 0 {
+		t.Errorf("a statement of Mina's own writing out Joon's name was stored: %d", n)
+	}
+	req := func(confirm any) map[string]any {
+		return map[string]any{"guild_id": "g1", "user_id": "103", "scope": "all", "confirm": confirm}
+	}
+	prev, out := pbExec(t, s, "memory.mine.forget", req(""))
+	if !prev.OK {
+		t.Fatalf("preview: %+v", prev.Error)
+	}
+	if done, _ := pbExec(t, s, "memory.mine.forget", req(out["token"])); !done.OK {
+		t.Fatalf("forget: %+v", done.Error)
+	}
+	if n := pbCountClaims(t, s, `text LIKE '%Charlie%'`); n != 0 {
+		t.Errorf("after Charlie's forget-all, %d claim(s) naming him by label remain", n)
+	}
+}

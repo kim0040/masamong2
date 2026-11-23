@@ -676,7 +676,7 @@ func (s *Service) pbPilotStoreTx(tx *sql.Tx, run store.BackfillRun, windowID str
 	}
 	if len(ans.Facts) > 0 {
 		one := map[string]pbAnswer{string(model): ans}
-		if _, err := s.pbGateAnswers(tx, run.GuildID, runID, one, lines); err != nil {
+		if _, err := s.pbGateAnswers(tx, run.GuildID, runID, one, lines, nil); err != nil {
 			return err
 		}
 		ans = one[string(model)]
@@ -702,7 +702,7 @@ func (s *Service) pbPilotStoreTx(tx *sql.Tx, run store.BackfillRun, windowID str
 // said by them or naming them stays, not only the facts about them. The pilot keeps, and its review shows,
 // only facts that pass. lines (may be nil) are the texts the model read.
 func (s *Service) pbFactPasses(tx *sql.Tx, guild, runID string, f episodes.PersonFact, readAt string, lines map[string]string,
-	memoryOut, profileOut map[string]bool) (bool, error) {
+	memoryOut, profileOut map[string]bool, names *knownNames) (bool, error) {
 	if len(f.By) != 1 {
 		return false, nil
 	}
@@ -719,7 +719,7 @@ func (s *Service) pbFactPasses(tx *sql.Tx, guild, runID string, f episodes.Perso
 			c.Lines[id] = lines[id]
 		}
 	}
-	ok, err := s.personClaimPasses(tx, &c, memoryOut, profileOut, s.naiveZone())
+	ok, err := s.personClaimPasses(tx, &c, memoryOut, profileOut, s.naiveZone(), names)
 	if err != nil || !ok {
 		return false, err
 	}
@@ -728,9 +728,13 @@ func (s *Service) pbFactPasses(tx *sql.Tx, guild, runID string, f episodes.Perso
 }
 
 // pbGateAnswers keeps, in place, the facts of a window's answers that pass pbFactPasses; changed reports
-// that one was dropped. With only set, a fact it does not select is kept without a check.
-func (s *Service) pbGateAnswers(tx *sql.Tx, guild, runID string, have map[string]pbAnswer, lines map[string]string,
+// that one was dropped. With only set, a fact it does not select is kept without a check. names may be
+// shared by the calls of one transaction (nil: a new cache).
+func (s *Service) pbGateAnswers(tx *sql.Tx, guild, runID string, have map[string]pbAnswer, lines map[string]string, names *knownNames,
 	only ...func(episodes.PersonFact) bool) (changed bool, err error) {
+	if names == nil {
+		names = s.knownNames()
+	}
 	memoryOut, err := withdrawnRefsTx(tx, privacy.Memory)
 	if err != nil {
 		return false, err
@@ -746,7 +750,7 @@ func (s *Service) pbGateAnswers(tx *sql.Tx, guild, runID string, have map[string
 				kept = append(kept, f)
 				continue
 			}
-			ok, err := s.pbFactPasses(tx, guild, runID, f, ans.ReadAt, lines, memoryOut, profileOut)
+			ok, err := s.pbFactPasses(tx, guild, runID, f, ans.ReadAt, lines, memoryOut, profileOut, names)
 			if err != nil {
 				return false, err
 			}
@@ -829,6 +833,7 @@ func (s *Service) pbRecheckScopedTx(tx *sql.Tx, guild string, obs []string, pers
 	}
 	guilds := map[string]string{}
 	now := s.Clock.Now().UTC().Format(time.RFC3339)
+	names := s.knownNames()
 	for _, w := range ws {
 		g, ok := guilds[w.RunID]
 		if !ok {
@@ -842,7 +847,7 @@ func (s *Service) pbRecheckScopedTx(tx *sql.Tx, guild string, obs []string, pers
 			guilds[w.RunID] = g
 		}
 		have := pbAnswers(w.Result)
-		changed, err := s.pbGateAnswers(tx, g, w.RunID, have, nil, only...)
+		changed, err := s.pbGateAnswers(tx, g, w.RunID, have, nil, names, only...)
 		if err != nil {
 			return err
 		}
@@ -1942,13 +1947,14 @@ func (s *Service) peopleBackfillReview(ctx context.Context, req action.Request, 
 			denied, err = s.deniedPeople(tx, run.GuildID)
 		}
 		topicHidden := s.pbTopicHidden(tx, run.GuildID, denied)
+		names := s.knownNames()
 		kept := cands[:0]
 		for _, c := range cands {
 			if err != nil {
 				break
 			}
 			var ok bool
-			ok, err = s.pbFactPasses(tx, run.GuildID, run.ID, c.f, c.ans.ReadAt, c.bp.text, memoryOut, profileOut)
+			ok, err = s.pbFactPasses(tx, run.GuildID, run.ID, c.f, c.ans.ReadAt, c.bp.text, memoryOut, profileOut, names)
 			if ok && topicHidden(c.f) {
 				ok = false // hearsay on a hidden topic, as a chat turn would leave it out
 			}
