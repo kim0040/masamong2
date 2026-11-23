@@ -11,14 +11,19 @@
 | access | — |
 | action | — |
 | activity | — |
+| agent | — |
+| autostart | — |
+| backfill | — |
 | backup | — |
 | cli | — |
 | common | — |
 | config | — |
+| daemon | — |
 | date | — |
 | disaster | — |
 | discord | — |
 | doctor | — |
+| error | — |
 | feature | — |
 | features | — |
 | finance | — |
@@ -26,11 +31,13 @@
 | fx | en, es, ja, zh-Hans |
 | generic | — |
 | image | — |
+| import | — |
 | imports | — |
 | jobs | — |
 | login | — |
 | maintenance | — |
 | memory | — |
+| migration | — |
 | models | — |
 | notices | — |
 | overview | — |
@@ -50,9 +57,11 @@
 | serverlog | — |
 | setup | — |
 | state | — |
+| stats | — |
 | storage | — |
 | summary | — |
 | tool | — |
+| update | — |
 | updates | — |
 | usage | — |
 | weather | — |
