@@ -2286,3 +2286,130 @@ func TestPeopleBackfillSupersedeKeepsCrashReservation(t *testing.T) {
 		t.Fatalf("the new pilot sent %d calls", sent)
 	}
 }
+
+// pbThreadSeed captures n segments in the thread t1 of server g1: Mina and Joon each say what they like,
+// with a sentinel per segment.
+func pbThreadSeed(t *testing.T, s *Service, n int) {
+	t.Helper()
+	e, err := s.MemoryEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 9, 1, 2, 30, 0, 0, time.UTC)
+	for i := range n {
+		at := base.Add(time.Duration(i) * 3 * time.Hour)
+		for k, m := range []engine.LiveMessage{
+			{MessageID: fmt.Sprintf("8%03d1", i), AuthorID: "101", AuthorName: "Mina", Content: fmt.Sprintf("I really like threadsentinel%da here", i)},
+			{MessageID: fmt.Sprintf("8%03d2", i), AuthorID: "102", AuthorName: "Joon", Content: fmt.Sprintf("I really like threadsentinel%db too", i)},
+		} {
+			m.GuildID, m.ChannelID, m.At = "g1", "t1", at.Add(time.Duration(k)*time.Minute)
+			if ok, err := e.Capture(m); err != nil || !ok {
+				t.Fatal(ok, err)
+			}
+		}
+	}
+}
+
+// pbTombstoneThreadOnBuild writes t1's thread tombstone when the first window of t1 is built while armed
+// is set (between that build and its send), and reports whether it did.
+func pbTombstoneThreadOnBuild(t *testing.T, s *Service, armed *atomic.Bool) *atomic.Bool {
+	t.Helper()
+	var done atomic.Bool
+	var mu sync.Mutex // a send built meanwhile waits here until the tombstone is written
+	pbBuilt = func(windowID string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if !armed.Load() || done.Load() {
+			return
+		}
+		runs, err := store.BackfillRuns(s.Store.Reader(), "g1")
+		if err != nil || len(runs) == 0 {
+			t.Error("no run", err)
+			return
+		}
+		w, _, err := store.LoadBackfillWindow(s.Store.Reader(), runs[0].ID, windowID)
+		if err != nil || w.Room != engine.RoomKey("g1", "t1") {
+			return
+		}
+		if _, err := s.Store.DB.Exec(`INSERT OR IGNORE INTO thread_tombstones(thread_id) VALUES('t1')`); err != nil {
+			t.Error(err)
+		}
+		done.Store(true)
+	}
+	t.Cleanup(func() { pbBuilt = nil })
+	return &done
+}
+
+// Astra High 6, Sol H4: a deleted thread keeps its stored observations (its tombstone is written apart),
+// and nothing of it may leave the process: a thread deleted after a window's build is caught by the
+// check made just before the send, on the pilot's standard calls and in a batch, and the dry run plans no
+// window of a deleted thread. The ordinary channel's lines are the control.
+func TestPeopleBackfillDoesNotSendDeletedThread(t *testing.T) {
+	t.Run("pilot", func(t *testing.T) {
+		h := newPBHost(t)
+		s := pbService(t, h, "anthropic")
+		pbSeed(t, s, 70)
+		pbThreadSeed(t, s, 12)
+		var armed atomic.Bool
+		armed.Store(true)
+		hit := pbTombstoneThreadOnBuild(t, s, &armed)
+		if dry := pbDry(t, s, nil); dry["windows"].(float64) != 82 {
+			t.Fatalf("control: the live thread is planned: %v windows", dry["windows"])
+		}
+		_, run := pbPiloted(t, s, nil)
+		if !hit.Load() {
+			t.Fatal("no window of the thread was built in the pilot")
+		}
+		if sent := h.bodies(); strings.Contains(sent, "threadsentinel") {
+			t.Fatal("a line of a deleted thread left the process")
+		} else if !strings.Contains(sent, "topic3a today") {
+			t.Fatal("control: the channel's lines were not sent")
+		}
+		for _, w := range pbStoredFacts(t, s, run.ID) {
+			if strings.Contains(w.Text, "threadsentinel") {
+				t.Fatalf("a fact of the deleted thread was stored: %+v", w)
+			}
+		}
+		dry := pbDry(t, s, nil)
+		if dry["windows"].(float64) != 70 || dry["sent_windows"].(float64) != 70 {
+			t.Fatalf("the dry run plans the deleted thread: %v windows, %v to send", dry["windows"], dry["sent_windows"])
+		}
+	})
+	t.Run("run", func(t *testing.T) {
+		h := newPBHost(t)
+		s := pbService(t, h, "anthropic")
+		pbSeed(t, s, 70)
+		pbThreadSeed(t, s, 12)
+		var armed atomic.Bool
+		hit := pbTombstoneThreadOnBuild(t, s, &armed)
+		token, _ := pbPiloted(t, s, nil)
+		h.mu.Lock()
+		creates := len(h.creates)
+		h.mu.Unlock()
+		armed.Store(true)
+		if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+			t.Fatal(res.Error)
+		}
+		done := pbWait(t, s, "run", pbState(store.BackfillDone))
+		if !hit.Load() {
+			t.Fatal("no window of the thread was built in the run")
+		}
+		var all []string
+		for _, c := range h.creations()[creates:] {
+			pbStrings(c, "", &all)
+		}
+		batches := strings.Join(all, "\n")
+		if strings.Contains(batches, "threadsentinel") {
+			t.Fatal("a line of a deleted thread went out in a batch")
+		}
+		if !strings.Contains(batches, "a today") {
+			t.Fatal("control: the channel's lines were not sent in a batch")
+		}
+		ws, _ := store.BackfillWindows(s.Store.Reader(), done.ID, false)
+		for _, w := range ws {
+			if w.Room == engine.RoomKey("g1", "t1") && !w.Pilot && w.State != store.WindowSkipped {
+				t.Fatalf("a window of the deleted thread: %+v", w)
+			}
+		}
+	})
+}

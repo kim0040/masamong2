@@ -354,6 +354,11 @@ func (s *Service) pbBuildPlan(ctx context.Context, db *storage.Store, p pbParams
 	until, _ := s.pbTime(p.Until)
 	doc := s.Doc()
 	for _, room := range p.Rooms {
+		if gone, err := s.pbThreadDeleted(db.Reader(), room); err != nil {
+			return plan, err
+		} else if gone {
+			continue // a deleted thread keeps its stored lines until they are redacted; none is planned
+		}
 		r := pbRoomOf(room)
 		pack, _ := s.roomVoice(r)
 		opt := peoplebackfill.Options{PromptHash: pbPromptVersion(pack), MaxLines: pbWindowLines,
@@ -788,6 +793,7 @@ func pbSettle(res *openai.ChatResult, model peoplebackfill.Model, mode peoplebac
 // pbPrompt is a window's person_extract prompt, built from the current lines.
 type pbPrompt struct {
 	p            episodes.Prompt
+	room         string // the window's room: a thread deleted since the build sends nothing
 	system, user string
 	hash         string              // of system and user: an answer applies only to the same prompt
 	text         map[string]string   // human line id → the text the model read
@@ -805,7 +811,7 @@ type pbPrompt struct {
 func (s *Service) pbBuildPrompt(db *storage.Store, guild string, w store.BackfillWindow) (pbPrompt, error) {
 	bp := pbPrompt{text: map[string]string{}, author: map[string]string{}, labels: map[string]string{}, lines: map[string]string{},
 		parts: map[string][]string{}}
-	bp.readAt = s.Clock.Now().UTC().Format(time.RFC3339Nano)
+	bp.readAt, bp.room = s.Clock.Now().UTC().Format(time.RFC3339Nano), w.Room
 	r := pbRoomOf(w.Room)
 	lines, err := s.linesByID(db, w.Obs)
 	if err == nil {
@@ -903,9 +909,10 @@ func (bp pbPrompt) pbPartsOf(id string) []string {
 	return []string{id}
 }
 
-// pbSendable keeps the lines that may be sent to the provider: the stored line is current (not deleted,
-// no deletion or edit pending, its account not tombstoned) and a human author has not withdrawn memory
-// or profile consent, is not blocked, and has no person tombstone. One read transaction.
+// pbSendable keeps the lines that may be sent to the provider: the room is not a deleted thread, the
+// stored line is current (not deleted, no deletion or edit pending, its account not tombstoned) and a
+// human author has not withdrawn memory or profile consent, is not blocked, and has no person tombstone.
+// One read transaction.
 func (s *Service) pbSendable(db *storage.Store, guild string, r memRoom, lines []roomLine) ([]roomLine, error) {
 	if len(lines) == 0 {
 		return nil, nil
@@ -915,6 +922,9 @@ func (s *Service) pbSendable(db *storage.Store, guild string, r memRoom, lines [
 		return nil, err
 	}
 	defer tx.Rollback()
+	if gone, err := s.pbThreadDeleted(tx, r.room); err != nil || gone {
+		return nil, err
+	}
 	denied, err := s.deniedPeople(tx, guild)
 	if err != nil {
 		return nil, err
@@ -944,11 +954,38 @@ func (s *Service) pbSendable(db *storage.Store, guild string, r memRoom, lines [
 	return out, nil
 }
 
+// pbThreadDeleted reports whether a room is a thread that was deleted: its deletion is pending (the
+// tombstone not written yet) or its tombstone (thread_tombstones, or the closed row's reason) is stored.
+// A thread's deletion leaves its observations in place until they are redacted, so the backfill checks
+// the room itself, when it plans, builds and sends. q is the caller's transaction or the reader.
+func (s *Service) pbThreadDeleted(q interface {
+	QueryRow(string, ...any) *sql.Row
+}, room string) (bool, error) {
+	r := pbRoomOf(room)
+	if r.channel == "" {
+		return false, nil
+	}
+	t := &s.threads
+	t.mu.Lock()
+	pending := t.deleted[r.channel]
+	t.mu.Unlock()
+	if pending {
+		return true, nil
+	}
+	var gone bool
+	err := q.QueryRow(`SELECT EXISTS(SELECT 1 FROM thread_tombstones WHERE thread_id=?1)
+		OR EXISTS(SELECT 1 FROM channel_threads WHERE thread_id=?1 AND close_reason='deleted')`, r.channel).Scan(&gone)
+	return gone, err
+}
+
 // pbPromptCurrent checks again, in the caller's transaction and just before a send, everything a prompt
-// carries: every line is still stored with the text it had, current, and no person the prompt shows
-// (author or mentioned) has withdrawn, been blocked or tombstoned since it was built. False means build
-// it again: nothing of it may leave.
+// carries: its room is not a deleted thread, every line is still stored with the text it had, current, and
+// no person the prompt shows (author or mentioned) has withdrawn, been blocked or tombstoned since it was
+// built. False means build it again: nothing of it may leave.
 func (s *Service) pbPromptCurrent(tx *sql.Tx, guild string, bp pbPrompt) (bool, error) {
+	if gone, err := s.pbThreadDeleted(tx, bp.room); err != nil || gone {
+		return false, err
+	}
 	denied, err := s.deniedPeople(tx, guild)
 	if err != nil {
 		return false, err
