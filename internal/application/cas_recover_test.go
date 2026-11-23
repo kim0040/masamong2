@@ -17,7 +17,7 @@ func TestPreparedCrashRecoversOrDiscards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	prep, err := svc.SimulatePreparedCrash(raw, 1)
+	prep, err := svc.SimulatePreparedCrashForTest(raw, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -25,14 +25,14 @@ func TestPreparedCrashRecoversOrDiscards(t *testing.T) {
 		t.Fatalf("%+v", prep)
 	}
 	// File not updated → recover discards prepared and keeps revision 1
-	if err := svc.RecoverAfterCrash(); err != nil {
+	if err := svc.RecoverAfterCrashForTest(); err != nil {
 		t.Fatal(err)
 	}
 	if svc.Revision() != 1 {
 		t.Fatalf("rev %d", svc.Revision())
 	}
 	// Land the file then recover → commit
-	prep2, err := svc.SimulatePreparedCrash(raw, 1)
+	prep2, err := svc.SimulatePreparedCrashForTest(raw, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestPreparedCrashRecoversOrDiscards(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = prep2
-	if err := svc.RecoverAfterCrash(); err != nil {
+	if err := svc.RecoverAfterCrashForTest(); err != nil {
 		t.Fatal(err)
 	}
 	if svc.Revision() != 2 {

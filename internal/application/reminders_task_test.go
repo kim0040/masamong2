@@ -82,7 +82,7 @@ func TestTaskRunsWhenDueAndPostsTheAnswer(t *testing.T) {
 		t.Fatalf("set: %+v", r)
 	}
 	svc.Clock = clock.Fixed{T: time.Date(2026, 10, 16, 9, 0, 20, 0, seoul)}
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.postCount() != 1 || !strings.Contains(gw.posts[0], "c: -# ") || !strings.Contains(gw.posts[0], "캠핑") {
 		t.Fatalf("posted: %+v", gw.posts)
 	}

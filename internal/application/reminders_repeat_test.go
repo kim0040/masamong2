@@ -39,7 +39,7 @@ func (g *hookGateway) SendDM(ctx context.Context, user string, c action.Card, im
 
 func deliverCrashing(svc *application.Service) (crashed bool) {
 	defer func() { crashed = recover() != nil }()
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	return false
 }
 
@@ -110,8 +110,8 @@ func TestRepeatingDailyIsSentOncePerOccurrenceAndStatesTheRepetition(t *testing.
 		t.Fatalf("first occurrence %s", got)
 	}
 	remAt(svc, time.Date(2026, 9, 29, 8, 0, 30, 0, seoul))
-	application.DeliverReminders(svc, context.Background())
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.dmCount() != 1 || remStatus(t, svc, id) != "scheduled" || remDue(t, svc, id) != "2026-09-29T23:00:00Z" {
 		t.Fatalf("after day 1: %d sent, %s, due %s", gw.dmCount(), remStatus(t, svc, id), remDue(t, svc, id))
 	}
@@ -119,7 +119,7 @@ func TestRepeatingDailyIsSentOncePerOccurrenceAndStatesTheRepetition(t *testing.
 		t.Fatalf("the delivery does not say it repeats: %+v", f)
 	}
 	remAt(svc, time.Date(2026, 9, 30, 8, 0, 10, 0, seoul))
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.dmCount() != 2 || remRow(t, svc, id)["occurrences"].(float64) != 2 {
 		t.Fatalf("after day 2: %d sent, %+v", gw.dmCount(), remRow(t, svc, id))
 	}
@@ -144,17 +144,17 @@ func TestRepeatingWeeklyMonthlyAndHoursPickTheirFirstOccurrence(t *testing.T) {
 		t.Fatalf("hours first: %s", got)
 	}
 	remAt(svc, time.Date(2026, 9, 28, 11, 0, 20, 0, seoul))
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if got := remDue(t, svc, hours); got != "2026-09-28T08:00:00Z" {
 		t.Fatalf("hours next: %s", got)
 	}
 	remAt(svc, time.Date(2026, 9, 30, 9, 0, 20, 0, seoul))
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if got := remDue(t, svc, weekly); got != "2026-10-05T00:00:00Z" { // the next Monday
 		t.Fatalf("weekly next: %s", got)
 	}
 	remAt(svc, time.Date(2026, 9, 30, 10, 0, 20, 0, seoul))
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if got := remDue(t, svc, monthly); got != "2026-10-31T01:00:00Z" { // October has 31 days
 		t.Fatalf("monthly next: %s", got)
 	}
@@ -185,12 +185,12 @@ func TestRepeatingDSTKeepsTheWallClock(t *testing.T) {
 		t.Fatalf("before the change: %s", got)
 	}
 	remAt(svc, time.Date(2026, 3, 7, 8, 0, 30, 0, ny))
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if got := remDue(t, svc, id); got != "2026-03-08T12:00:00Z" { // 08:00 EDT, 23 hours later
 		t.Fatalf("across spring forward: %s", got)
 	}
 	remAt(svc, time.Date(2026, 3, 8, 8, 0, 30, 0, ny))
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if got := remDue(t, svc, id); got != "2026-03-09T12:00:00Z" || gw.dmCount() != 2 {
 		t.Fatalf("after: %s, %d sent", got, gw.dmCount())
 	}
@@ -214,19 +214,19 @@ func TestRepeatingSurvivesAStopBetweenLeaseAndSend(t *testing.T) {
 			if remStatus(t, svc, id) != "sending" || remDue(t, svc, id) != "2026-09-29T23:00:00Z" {
 				t.Fatalf("at the stop: %s, due %s", remStatus(t, svc, id), remDue(t, svc, id))
 			}
-			application.RecoverReminders(svc) // the next start
+			application.RecoverRemindersForTest(svc) // the next start
 			row := remRow(t, svc, id)
 			if row["status"] != "scheduled" || !strings.Contains(fmt.Sprint(row["error"]), "interrupted") {
 				t.Fatalf("after the restart: %+v", row)
 			}
 			gw.crashBefore, gw.crashAfter = false, false
 			sentThen := gw.dmCount()
-			application.DeliverReminders(svc, context.Background()) // same minute again: nothing is due
+			application.DeliverRemindersForTest(svc, context.Background()) // same minute again: nothing is due
 			if gw.dmCount() != sentThen {
 				t.Fatalf("the interrupted occurrence was sent again: %d -> %d", sentThen, gw.dmCount())
 			}
 			remAt(svc, time.Date(2026, 9, 30, 8, 0, 20, 0, seoul)) // the series was not lost
-			application.DeliverReminders(svc, context.Background())
+			application.DeliverRemindersForTest(svc, context.Background())
 			if gw.dmCount() != sentThen+1 || remStatus(t, svc, id) != "scheduled" {
 				t.Fatalf("next occurrence: %d sent, %s", gw.dmCount(), remStatus(t, svc, id))
 			}
@@ -241,8 +241,8 @@ func TestRepeatingAfterDowntimeSendsOnlyTheNewestOccurrence(t *testing.T) {
 	id := setSeries(t, svc, "u1", map[string]any{"when": "8am", "what": "pill", "repeat": "daily"})
 	// the daemon was off for four days and starts again at 08:10: one message, for today's 08:00
 	remAt(svc, time.Date(2026, 10, 2, 8, 10, 0, 0, seoul))
-	application.DeliverReminders(svc, context.Background())
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.dmCount() != 1 || !strings.Contains(gw.sent[0].Footer, "Fri 10/2 08:00") {
 		t.Fatalf("catch-up sent %d: %+v", gw.dmCount(), gw.sent)
 	}
@@ -251,12 +251,12 @@ func TestRepeatingAfterDowntimeSendsOnlyTheNewestOccurrence(t *testing.T) {
 	}
 	// off again, back well after the grace window: nothing is sent late, the series goes on tomorrow
 	remAt(svc, time.Date(2026, 10, 6, 11, 0, 0, 0, seoul))
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.dmCount() != 1 || remStatus(t, svc, id) != "scheduled" || remDue(t, svc, id) != "2026-10-06T23:00:00Z" {
 		t.Fatalf("after a long stop: %d sent, %s, due %s", gw.dmCount(), remStatus(t, svc, id), remDue(t, svc, id))
 	}
 	remAt(svc, time.Date(2026, 10, 7, 8, 0, 5, 0, seoul))
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.dmCount() != 2 {
 		t.Fatalf("the series did not go on: %d", gw.dmCount())
 	}
@@ -276,7 +276,7 @@ func TestRepeatingCancelPauseAndResumeApplyToTheSeries(t *testing.T) {
 		t.Fatalf("pause: %+v", r.Output)
 	}
 	remAt(svc, time.Date(2026, 9, 29, 8, 0, 30, 0, seoul))
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.dmCount() != 0 || remStatus(t, svc, id) != "paused" {
 		t.Fatalf("sent while paused: %d, %s", gw.dmCount(), remStatus(t, svc, id))
 	}
@@ -298,7 +298,7 @@ func TestRepeatingCancelPauseAndResumeApplyToTheSeries(t *testing.T) {
 		t.Fatalf("cancel: %+v", r.Output)
 	}
 	remAt(svc, time.Date(2026, 9, 30, 8, 0, 30, 0, seoul))
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.dmCount() != 0 {
 		t.Fatal("a cancelled series was sent")
 	}
@@ -314,13 +314,13 @@ func TestRepeatingCancelPauseAndResumeApplyToTheSeries(t *testing.T) {
 		}
 	}
 	remAt(svc2, time.Date(2026, 9, 29, 8, 0, 30, 0, seoul))
-	application.DeliverReminders(svc2, context.Background())
+	application.DeliverRemindersForTest(svc2, context.Background())
 	gw2.before = nil
 	if remStatus(t, svc2, id2) != "cancelled" || gw2.dmCount() != 1 {
 		t.Fatalf("after a cancel during the send: %s, %d sent", remStatus(t, svc2, id2), gw2.dmCount())
 	}
 	remAt(svc2, time.Date(2026, 9, 30, 8, 0, 30, 0, seoul))
-	application.DeliverReminders(svc2, context.Background())
+	application.DeliverRemindersForTest(svc2, context.Background())
 	if gw2.dmCount() != 1 {
 		t.Fatal("the series went on after it was cancelled")
 	}
@@ -338,7 +338,7 @@ func TestRepeatingEndsWithCountOrUntil(t *testing.T) {
 	for d := 29; d <= 33; d++ { // 29, 30 Sep, 1, 2, 3 Oct
 		day := time.Date(2026, 9, d, 8, 0, 20, 0, seoul)
 		remAt(svc, day)
-		application.DeliverReminders(svc, context.Background())
+		application.DeliverRemindersForTest(svc, context.Background())
 	}
 	byText := map[string]int{}
 	for _, c := range gw.sent {
@@ -402,7 +402,7 @@ func TestRescheduleKeepsTheRepetition(t *testing.T) {
 		t.Fatalf("due after the change: %s", got)
 	}
 	remAt(svc, time.Date(2026, 9, 29, 19, 0, 10, 0, seoul))
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.dmCount() != 1 || remDue(t, svc, id) != "2026-09-30T10:00:00Z" {
 		t.Fatalf("%d sent, due %s", gw.dmCount(), remDue(t, svc, id))
 	}
@@ -495,7 +495,7 @@ func TestVagueReminderCarriesTheCallersRecentLinesAndShowsThemWhenItFires(t *tes
 	}
 	// it fires with the lines under a header
 	remAt(svc, time.Date(2026, 9, 29, 9, 0, 30, 0, seoul))
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.dmCount() != 1 {
 		t.Fatalf("sent %d", gw.dmCount())
 	}
@@ -698,7 +698,7 @@ func TestRepeatingStaleSecondDelivererCannotSendTheSameOccurrenceAgain(t *testin
 	id := setSeries(t, svc, "u1", map[string]any{"when": "8am", "what": "pill", "repeat": "daily"})
 	remAt(svc, time.Date(2026, 9, 29, 8, 0, 30, 0, seoul))
 	stale := application.SnapshotDueForTest(svc) // what the other process read
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	application.DeliverSnapshotForTest(svc, context.Background(), stale)
 	application.DeliverSnapshotForTest(svc, context.Background(), stale)
 	if gw.dmCount() != 1 || remStatus(t, svc, id) != "scheduled" || remDue(t, svc, id) != "2026-09-29T23:00:00Z" {
@@ -734,7 +734,7 @@ func TestRepeatingShowsContextLinesOnlyWithTheFirstOccurrence(t *testing.T) {
 	remConfirmDM(t, svc, id)
 	for d := 29; d <= 30; d++ {
 		remAt(svc, time.Date(2026, 9, d, 8, 0, 20, 0, seoul))
-		application.DeliverReminders(svc, context.Background())
+		application.DeliverRemindersForTest(svc, context.Background())
 	}
 	if gw.dmCount() != 2 || !remHasContext(gw.sent[0]) || remHasContext(gw.sent[1]) {
 		t.Fatalf("context on the occurrences: %d sent, first %v, second %v", gw.dmCount(), remHasContext(gw.sent[0]), remHasContext(gw.sent[1]))
@@ -761,7 +761,7 @@ func TestContextLinesAreNotShownAfterCaptureIsTurnedOff(t *testing.T) {
 		d.Guilds = map[string]config.GuildSettings{"g": {Channels: map[string]config.ChannelPolicy{"c": {Respond: "mention", Capture: false}}}}
 	})
 	remAt(svc, time.Date(2026, 9, 29, 9, 0, 20, 0, seoul))
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.dmCount() != 1 || remHasContext(gw.sent[0]) || application.ReminderContextRowsForTest(svc, id) != 0 {
 		t.Fatalf("context after capture was turned off: %d sent, %d rows", gw.dmCount(), application.ReminderContextRowsForTest(svc, id))
 	}
@@ -777,8 +777,8 @@ func TestRepeatingWithLongGraceSendsTheNewestOccurrence(t *testing.T) {
 	})
 	id := setSeries(t, svc, "u1", map[string]any{"when": "in 1 hour", "what": "water", "repeat": "hours", "every": 1})
 	remAt(svc, time.Date(2026, 9, 28, 13, 20, 0, 0, seoul)) // 11:00, 12:00 and 13:00 are all inside grace
-	application.DeliverReminders(svc, context.Background())
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.dmCount() != 1 || !strings.Contains(gw.sent[0].Footer, "Mon 9/28 13:00") || remDue(t, svc, id) != "2026-09-28T05:00:00Z" {
 		t.Fatalf("%d sent: %+v, due %s", gw.dmCount(), gw.sent, remDue(t, svc, id))
 	}
@@ -805,7 +805,7 @@ func TestRepeatingDerivedWeekdayFollowsThePickedOption(t *testing.T) {
 		seen[first] = true
 		at, _ := time.Parse(time.RFC3339, first)
 		remAt(svc, at.Add(20*time.Second))
-		application.DeliverReminders(svc, context.Background())
+		application.DeliverRemindersForTest(svc, context.Background())
 		if got, want := remDue(t, svc, id), at.AddDate(0, 0, 7).Format(time.RFC3339); got != want {
 			t.Fatalf("option %d: first %s, then %s (want %s)", n, first, got, want)
 		}
@@ -833,13 +833,13 @@ func TestRepeatingFinalOccurrenceRetriesLikeAOneTimeReminder(t *testing.T) {
 	base.failDM = fmt.Errorf("%w: 500", application.ErrNotDelivered)
 	id := setSeries(t, svc, "u1", map[string]any{"when": "8am", "what": "once more", "repeat": "daily", "count": 1})
 	remAt(svc, time.Date(2026, 9, 29, 8, 0, 30, 0, seoul))
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if remStatus(t, svc, id) != "scheduled" {
 		t.Fatalf("the last occurrence was not retried: %s", remStatus(t, svc, id))
 	}
 	base.failDM = nil
 	remAt(svc, time.Date(2026, 9, 29, 8, 5, 0, 0, seoul))
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if base.dmCount() != 1 || remStatus(t, svc, id) != "sent" {
 		t.Fatalf("after the retry: %d sent, %s", base.dmCount(), remStatus(t, svc, id))
 	}
@@ -849,7 +849,7 @@ func TestRepeatingFinalOccurrenceRetriesLikeAOneTimeReminder(t *testing.T) {
 	id2 := setSeries(t, svc2, "u1", map[string]any{"when": "8am", "what": "never", "repeat": "daily", "count": 1})
 	for i := 0; i < 4; i++ {
 		remAt(svc2, time.Date(2026, 9, 29, 8, 0, 30, 0, seoul).Add(time.Duration(i*10)*time.Minute))
-		application.DeliverReminders(svc2, context.Background())
+		application.DeliverRemindersForTest(svc2, context.Background())
 	}
 	if remStatus(t, svc2, id2) != "failed" {
 		t.Fatalf("refused three times: %s", remStatus(t, svc2, id2))
@@ -869,7 +869,7 @@ func TestRepeatingMissedSeriesDropsContextAndPauseCannotStrandTheLastOccurrence(
 		t.Fatal("no lines to drop")
 	}
 	remAt(svc, time.Date(2026, 10, 5, 12, 0, 0, 0, seoul))
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if remStatus(t, svc, id) != "missed" || application.ReminderContextRowsForTest(svc, id) != 0 {
 		t.Fatalf("%s, %d rows", remStatus(t, svc, id), application.ReminderContextRowsForTest(svc, id))
 	}
@@ -882,7 +882,7 @@ func TestRepeatingMissedSeriesDropsContextAndPauseCannotStrandTheLastOccurrence(
 		as(svc2, "reminders.update", map[string]any{"op": "pause", "id": id2}, inChannel("u1"))
 	}
 	remAt(svc2, time.Date(2026, 9, 29, 8, 0, 30, 0, seoul))
-	application.DeliverReminders(svc2, context.Background())
+	application.DeliverRemindersForTest(svc2, context.Background())
 	if remStatus(t, svc2, id2) != "sent" || gw.dmCount() != 1 {
 		t.Fatalf("after pausing the last occurrence: %s, %d sent", remStatus(t, svc2, id2), gw.dmCount())
 	}

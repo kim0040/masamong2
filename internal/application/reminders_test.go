@@ -126,14 +126,14 @@ func TestReminderLifecycle(t *testing.T) {
 		t.Fatalf("confirm: %+v", r)
 	}
 	// nothing is due yet
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.dmCount() != 0 {
 		t.Fatal("sent early")
 	}
 	// the next day at 15:00: sent once, never twice
 	svc.Clock = clock.Fixed{T: time.Date(2026, 9, 29, 15, 0, 30, 0, seoul)}
-	application.DeliverReminders(svc, context.Background())
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.dmCount() != 1 || gw.to[0] != "u1" || gw.sent[0].Text != "call mom" {
 		t.Fatalf("delivered: %+v", gw.sent)
 	}
@@ -234,7 +234,7 @@ func TestReminderAmbiguousTimeAndChannel(t *testing.T) {
 		t.Fatalf("confirm: %+v", r)
 	}
 	svc.Clock = clock.Fixed{T: now.Add(5*time.Hour + 10*time.Second)}
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.postCount() != 1 || !strings.Contains(gw.posts[0], "c: ") || !strings.Contains(gw.posts[0], "회의") {
 		t.Fatalf("channel post: %v", gw.posts)
 	}
@@ -283,9 +283,9 @@ func TestReminderDeliveryOutcomes(t *testing.T) {
 	id := set(svc, "u1", "in 5 minutes stretch")
 	gw.failDM = errors.New("connection reset")
 	svc.Clock = clock.Fixed{T: now.Add(6 * time.Minute)}
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	gw.failDM = nil
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if st := status(svc, id); st != "unknown" || gw.dmCount() != 0 {
 		t.Fatalf("unknown outcome: %s, %d sent", st, gw.dmCount())
 	}
@@ -296,7 +296,7 @@ func TestReminderDeliveryOutcomes(t *testing.T) {
 	gw.failDM = fmt.Errorf("%w: 500", application.ErrNotDelivered)
 	for i := 0; i < 4; i++ {
 		svc.Clock = clock.Fixed{T: now.Add(time.Duration(6+i*10) * time.Minute)}
-		application.DeliverReminders(svc, context.Background())
+		application.DeliverRemindersForTest(svc, context.Background())
 	}
 	if st := status(svc, id); st != "failed" {
 		t.Fatalf("refused three times: %s", st)
@@ -307,7 +307,7 @@ func TestReminderDeliveryOutcomes(t *testing.T) {
 	id = set(svc, "u1", "in 5 minutes stretch")
 	gw.failDM = application.ErrDMClosed
 	svc.Clock = clock.Fixed{T: now.Add(6 * time.Minute)}
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if st := status(svc, id); st != "failed" {
 		t.Fatalf("dm closed: %s", st)
 	}
@@ -316,7 +316,7 @@ func TestReminderDeliveryOutcomes(t *testing.T) {
 	svc, gw = remindSvc(t, now)
 	id = set(svc, "u1", "in 5 minutes stretch")
 	svc.Clock = clock.Fixed{T: now.Add(3 * time.Hour)}
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if st := status(svc, id); st != "missed" || gw.dmCount() != 0 {
 		t.Fatalf("missed: %s", st)
 	}
@@ -328,12 +328,12 @@ func TestReminderDeliveryOutcomes(t *testing.T) {
 	}
 	id = set(svc, "u1", "in 5 minutes stretch")
 	svc.Clock = clock.Fixed{T: now.Add(6 * time.Minute)}
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.dmCount() != 0 || status(svc, id) != "scheduled" {
 		t.Fatal("sent in quiet hours")
 	}
 	svc.Clock = clock.Fixed{T: time.Date(2026, 9, 28, 12, 0, 30, 0, seoul)}
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.dmCount() != 1 {
 		t.Fatal("not sent when quiet hours ended")
 	}
@@ -345,7 +345,7 @@ func TestReminderDeliveryOutcomes(t *testing.T) {
 		t.Fatal(r.Error)
 	}
 	application.MarkReminderSendingForTest(svc, id)
-	application.RecoverReminders(svc)
+	application.RecoverRemindersForTest(svc)
 	if st := status(svc, id); st != "unknown" {
 		t.Fatalf("interrupted: %s", st)
 	}
@@ -369,7 +369,7 @@ func TestReminderCancelRescheduleAndLimits(t *testing.T) {
 		t.Fatalf("cancel: %+v", r)
 	}
 	svc.Clock = clock.Fixed{T: now.Add(34 * time.Hour)}
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.dmCount() != 0 {
 		t.Fatal("a cancelled reminder was sent")
 	}
@@ -458,10 +458,10 @@ func TestRemindersUnderConcurrency(t *testing.T) {
 	var passes sync.WaitGroup
 	for i := 0; i < 4; i++ {
 		passes.Add(1)
-		go func() { defer passes.Done(); application.DeliverReminders(svc, context.Background()) }()
+		go func() { defer passes.Done(); application.DeliverRemindersForTest(svc, context.Background()) }()
 	}
 	passes.Wait()
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	counts := map[string]int{}
 	for _, c := range gw.sent {
 		counts[c.Text]++

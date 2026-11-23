@@ -90,7 +90,7 @@ func noticeCatalog(base, host string) string {
 func collect(t *testing.T, svc *application.Service, only []string) application.CollectReport {
 	t.Helper()
 	for i := 0; i < 100; i++ {
-		rep, err := application.CollectNotices(svc, context.Background(), only)
+		rep, err := application.CollectNoticesForTest(svc, context.Background(), only)
 		if err == nil {
 			return rep
 		}
@@ -109,7 +109,7 @@ func TestNoticesCollectPersonalizeAndDeliver(t *testing.T) {
 	base, host := fakeUniversity(t, &hits)
 	svc := setupSvc(t)
 	serveAnyServer(t, svc)
-	application.AllowLocalNoticeBoards(svc)
+	application.AllowLocalNoticeBoardsForTest(svc)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Tools = map[string]tools.Settings{"notices.status": {Defaults: map[string]any{"host_interval_ms": 1}}}
 	})
@@ -171,8 +171,8 @@ func TestNoticesCollectPersonalizeAndDeliver(t *testing.T) {
 	svc.SetDiscord(gw)
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	svc.Clock = clock.Fixed{T: time.Now().In(seoul).Truncate(24 * time.Hour).Add(30 * time.Hour)} // tomorrow, well after 08:00
-	application.DeliverNotices(svc, context.Background())
-	application.DeliverNotices(svc, context.Background())
+	application.DeliverNoticesForTest(svc, context.Background())
+	application.DeliverNoticesForTest(svc, context.Background())
 	if len(gw.sent) != 1 || !strings.Contains(gw.sent[0].Text, "국가장학금") {
 		t.Fatalf("delivered: %+v", gw.sent)
 	}

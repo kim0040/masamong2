@@ -73,8 +73,8 @@ func dailyDeliveryService(t *testing.T, now time.Time, zone, date, fortuneTime, 
 
 func runDailyDeliveries(svc *application.Service) {
 	ctx := context.Background()
-	application.RunFortuneMorning(svc, ctx)
-	application.DeliverNotices(svc, ctx)
+	application.RunFortuneMorningForTest(svc, ctx)
+	application.DeliverNoticesForTest(svc, ctx)
 }
 
 func TestOvernightQuietHoursDeliverTheOriginalDailySlot(t *testing.T) {

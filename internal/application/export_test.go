@@ -126,8 +126,8 @@ func SetImageConnectWaitForTest(s *Service, wait, poll time.Duration) {
 	s.hooks.imageConnectWait, s.hooks.imageConnectPoll = wait, poll
 }
 
-// RunFortuneMorning runs one pass of the morning briefings (the scheduler runs it every minute).
-func RunFortuneMorning(s *Service, ctx context.Context) { s.runFortuneMorning(ctx) }
+// RunFortuneMorningForTest runs one pass of the morning briefings (the scheduler runs it every minute).
+func RunFortuneMorningForTest(s *Service, ctx context.Context) { s.runFortuneMorning(ctx) }
 
 // SetChatDeadlineForTest shortens how long one model call of a role may take in s; it returns the restore.
 func SetChatDeadlineForTest(s *Service, role string, d time.Duration) func() {
@@ -166,20 +166,20 @@ func SetDiscordAPIForTest(s *Service, base string) { s.discordAPI = base }
 // AllowLocalImagesForTest lets a test serve the pictures of a chat turn from a local server.
 func AllowLocalImagesForTest(s *Service) { s.visionLocal = true }
 
-// AllowLocalNoticeBoards lets a test read boards from a local server.
-func AllowLocalNoticeBoards(s *Service) { s.noticeFetchPrivate = true }
+// AllowLocalNoticeBoardsForTest lets a test read boards from a local server.
+func AllowLocalNoticeBoardsForTest(s *Service) { s.noticeFetchPrivate = true }
 
-// CollectNotices runs one collection of the boards given (all needed ones when empty).
-func CollectNotices(s *Service, ctx context.Context, only []string) (CollectReport, error) {
+// CollectNoticesForTest runs one collection of the boards given (all needed ones when empty).
+func CollectNoticesForTest(s *Service, ctx context.Context, only []string) (CollectReport, error) {
 	return s.collectNotices(ctx, only)
 }
 
-// DeliverNotices runs one pass of the notice deliveries.
-func DeliverNotices(s *Service, ctx context.Context) { s.deliverNotices(ctx) }
+// DeliverNoticesForTest runs one pass of the notice deliveries.
+func DeliverNoticesForTest(s *Service, ctx context.Context) { s.deliverNotices(ctx) }
 
-// DeliverReminders runs one pass of the reminder deliveries; RecoverReminders is the start-up step.
-func DeliverReminders(s *Service, ctx context.Context) { s.deliverReminders(ctx) }
-func RecoverReminders(s *Service)                      { s.recoverReminders() }
+// DeliverRemindersForTest runs one pass of the reminder deliveries; RecoverReminders is the start-up step.
+func DeliverRemindersForTest(s *Service, ctx context.Context) { s.deliverReminders(ctx) }
+func RecoverRemindersForTest(s *Service)                      { s.recoverReminders() }
 
 // SetParticipationWait shortens the quiet wait of participation candidates.
 func SetParticipationWait(s *Service, d time.Duration) {
@@ -508,9 +508,9 @@ func UseNewsLimitsForTest(s *Service, pace time.Duration, perTick int) (restore 
 	return func() { s.hooks.news.Store(old) }
 }
 
-// SimulatePreparedCrash writes a prepared-but-uncommitted revision, the way a crash between
+// SimulatePreparedCrashForTest writes a prepared-but-uncommitted revision, the way a crash between
 // config.BeginApply and the commit leaves the store; only cas_recover_test.go uses it.
-func (s *Service) SimulatePreparedCrash(candidate []byte, base int) (config.Revision, error) {
+func (s *Service) SimulatePreparedCrashForTest(candidate []byte, base int) (config.Revision, error) {
 	st, err := loadCASState(s.Store, s.CfgPath)
 	if err != nil {
 		return config.Revision{}, err
@@ -525,8 +525,8 @@ func (s *Service) SimulatePreparedCrash(candidate []byte, base int) (config.Revi
 	return prep, nil
 }
 
-// RecoverAfterCrash replays the startup recovery path a crashed apply leaves behind.
-func (s *Service) RecoverAfterCrash() error {
+// RecoverAfterCrashForTest replays the startup recovery path a crashed apply leaves behind.
+func (s *Service) RecoverAfterCrashForTest() error {
 	if err := s.reloadConfig(); err != nil {
 		return err
 	}

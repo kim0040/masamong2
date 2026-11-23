@@ -124,7 +124,7 @@ func newBriefingRig(t *testing.T, start time.Time, subTime string, quiet []strin
 
 func (r *briefingRig) runAt(t time.Time) {
 	r.svc.Clock = clock.Fixed{T: t}
-	application.RunFortuneMorning(r.svc, context.Background())
+	application.RunFortuneMorningForTest(r.svc, context.Background())
 }
 
 func wantAll(t *testing.T, what, text string, words ...string) {

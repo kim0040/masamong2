@@ -91,7 +91,7 @@ func TestLiveScheduledTask(t *testing.T) {
 	}
 	svc.Clock = clock.Fixed{T: next}
 	began := time.Now()
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.postCount() != 1 {
 		t.Fatalf("nothing posted at %s", next)
 	}

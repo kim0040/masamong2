@@ -35,7 +35,7 @@ func taskWithSearch(t *testing.T, plan string, services func(svc *application.Se
 		t.Fatalf("set: %+v", r)
 	}
 	svc.Clock = clock.Fixed{T: time.Date(2026, 10, 16, 9, 0, 20, 0, seoul)}
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.postCount() != 1 {
 		t.Fatalf("posted: %+v", gw.posts)
 	}

@@ -154,35 +154,35 @@ func TestMorningBriefingIsWrittenEarlyAndSentOnce(t *testing.T) {
 	at := func(h, m int) { svc.Clock = clock.Fixed{T: time.Date(2026, 9, 29, h, m, 0, 0, seoul)} }
 	ctx := context.Background()
 	at(7, 0) // too early
-	application.RunFortuneMorning(svc, ctx)
+	application.RunFortuneMorningForTest(svc, ctx)
 	before := calls.Load()
 	at(7, 22) // within the lead: written, not yet sent
-	application.RunFortuneMorning(svc, ctx)
+	application.RunFortuneMorningForTest(svc, ctx)
 	if calls.Load() != before+1 || len(gw.sent) != 0 {
 		t.Fatalf("written early: calls %d sent %d", calls.Load()-before, len(gw.sent))
 	}
 	at(7, 30)
-	application.RunFortuneMorning(svc, ctx)
-	application.RunFortuneMorning(svc, ctx)
+	application.RunFortuneMorningForTest(svc, ctx)
+	application.RunFortuneMorningForTest(svc, ctx)
 	if len(gw.sent) != 1 || gw.to[0] != "u1" || calls.Load() != before+1 {
 		t.Fatalf("sent once without writing again: sent %d calls %d", len(gw.sent), calls.Load()-before)
 	}
 	// quiet hours hold the next day's briefing until they end
 	_ = as(svc, "preferences.set", map[string]any{"quiet_start": "06:00", "quiet_end": "09:00"}, dm)
 	svc.Clock = clock.Fixed{T: time.Date(2026, 9, 30, 7, 30, 0, 0, seoul)}
-	application.RunFortuneMorning(svc, ctx)
+	application.RunFortuneMorningForTest(svc, ctx)
 	if len(gw.sent) != 1 {
 		t.Fatal("held by quiet hours")
 	}
 	svc.Clock = clock.Fixed{T: time.Date(2026, 9, 30, 9, 1, 0, 0, seoul)}
-	application.RunFortuneMorning(svc, ctx)
+	application.RunFortuneMorningForTest(svc, ctx)
 	if len(gw.sent) != 2 {
 		t.Fatalf("sent after quiet hours: %d", len(gw.sent))
 	}
 	// withdrawn consent stops delivery
 	_ = as(svc, "privacy.consent", map[string]any{"scope": "fortune", "decision": "withdraw"}, dm)
 	svc.Clock = clock.Fixed{T: time.Date(2026, 10, 1, 7, 31, 0, 0, seoul)}
-	application.RunFortuneMorning(svc, ctx)
+	application.RunFortuneMorningForTest(svc, ctx)
 	if len(gw.sent) != 2 {
 		t.Fatal("no briefing without consent")
 	}
@@ -238,7 +238,7 @@ func TestFortuneTagReadingBecomesACard(t *testing.T) {
 	svc.SetDiscord(gw)
 	due := time.Date(2026, 10, 16, 7, 30, 0, 0, seoul)
 	svc.Clock = clock.Fixed{T: due}
-	application.RunFortuneMorning(svc, context.Background())
+	application.RunFortuneMorningForTest(svc, context.Background())
 	if len(gw.sent) != 1 {
 		t.Fatalf("sent %d", len(gw.sent))
 	}
@@ -371,7 +371,7 @@ func TestBriefingFollowsTheSendTime(t *testing.T) {
 		gw := &dmGateway{}
 		svc.SetDiscord(gw)
 		svc.Clock = clock.Fixed{T: c.due}
-		application.RunFortuneMorning(svc, context.Background())
+		application.RunFortuneMorningForTest(svc, context.Background())
 		srv.Close()
 		if len(gw.sent) != 1 || len(prompts) != 1 {
 			t.Fatalf("%s: sent %d, prompts %d", c.at, len(gw.sent), len(prompts))
