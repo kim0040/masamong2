@@ -226,3 +226,57 @@ func TestOpeningAnOlderReleasesStoreReprocessesNothing(t *testing.T) {
 	}
 	wantSameHistory(t, "the pass after the start", before, snapshotHistory(t, db))
 }
+
+// Person memory (v1.7.0) adds the person_claim and person_memory_suppress tables to an indexed store and
+// writes claims with their evidence index. Neither the new tables nor their rows make a restart or the
+// index pass cut, embed or summarize anything again: no model call, and the leaves, observations and
+// vectors stay as they were. (The room-memory pass itself is checked in the application package:
+// TestPersonMemoryRestartReprocessesNothing.)
+func TestPersonMemoryTablesReprocessNothing(t *testing.T) {
+	e, fp := newEngine(t, true)
+	seed(t, e)
+	ctx := context.Background()
+	if _, err := e.IndexRooms(ctx, IndexOptions{BudgetUSD: 1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	embeds, chats := fp.embedCalls.Load(), fp.chatCalls.Load()
+	if embeds == 0 || chats == 0 {
+		t.Fatalf("nothing was indexed to begin with: embeds=%d chats=%d", embeds, chats)
+	}
+	db := e.Store.DB
+	before := snapshotHistory(t, db)
+	var obs, room string
+	if err := db.DB.QueryRow(`SELECT observation_id, room FROM memory_observations ORDER BY observation_id LIMIT 1`).Scan(&obs, &room); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range store.PersonClaimDDL {
+		if _, err := db.DB.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	ev := `["` + obs + `"]`
+	if _, err := db.DB.Exec(`INSERT INTO person_claim(id,guild_id,subject_ref,speaker_ref,kind,topic,text,evidence,observed_at,room_id,source,link,state,created_at)
+		VALUES('claim-1','1','p-a','p-a','like','food','{@p-a} likes noodles',?,?,?,'explicit','self','active',?)`, ev, "2026-01-01T00:00:00.000000000Z", room, "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB.Exec(`INSERT INTO person_memory_suppress(guild_id,person_ref,role,scope,before_ts,by,created_at) VALUES('1','p-b','subject','all',?,'self',?)`,
+		"2026-01-01T00:00:00.000000000Z", "2026-01-01T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB.Exec(`INSERT INTO evidence_refs(source_id,holder_kind,holder_id) VALUES(?,?,?)`, obs, store.HolderPersonClaim, "claim-1"); err != nil {
+		t.Fatal(err)
+	}
+	wantSameHistory(t, "adding person memory", before, snapshotHistory(t, db))
+	n := successor(e, e.Models)
+	if _, err := n.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := n.IndexRooms(ctx, IndexOptions{BudgetUSD: 1}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Pending != 0 || fp.embedCalls.Load() != embeds || fp.chatCalls.Load() != chats {
+		t.Fatalf("person memory made the index spend again: %+v embeds %d→%d chats %d→%d", rep, embeds, fp.embedCalls.Load(), chats, fp.chatCalls.Load())
+	}
+	wantSameHistory(t, "the index pass with person memory", before, snapshotHistory(t, db))
+}

@@ -73,6 +73,9 @@ func (f reviewPerson) fact(t *testing.T, guild, channel, id, subject, speaker, e
 		id, id, "{@"+store.PersonRef(subject)+"} "+id, string(raw), string(by), f.at.Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := f.DerivePersonItemForTest(t.Context(), id); err != nil { // as insertItems does
+		t.Fatal(err)
+	}
 }
 
 func (f reviewPerson) ask(t *testing.T, text string) string {
@@ -115,7 +118,7 @@ func TestReviewPersonPrivacy(t *testing.T) {
 			if !stale.OK || stale.Output["stale"] != true || stale.Output["applied"] != false {
 				t.Fatalf("oldest item not fingerprinted: %+v", stale)
 			}
-			if r := do(stale.Output["token"]); !r.OK || r.Output["applied"] != true || r.Output["deleted"] != 1001 {
+			if r := do(stale.Output["token"]); !r.OK || r.Output["applied"] != true || r.Output["deleted"] != 1001+stale.Output["person_items"].(int) {
 				t.Fatalf("apply: %+v", r)
 			}
 			if got := block(f.ask(t, "<@101> 어떤 사람이야?"), cardOpen, cardClose); got != "" {
@@ -259,6 +262,11 @@ func TestEpisodePersonBlockScope(t *testing.T) {
 		if id == "old" {
 			oldEvidence = ev
 		}
+		if fact != "" {
+			if _, err := s.DerivePersonItemForTest(t.Context(), id); err != nil { // as insertItems does
+				t.Fatal(err)
+			}
+		}
 	}
 	put("c", "101", "민수", "old", "는 차를 좋아함")
 	put("thread", "202", "영희", "thread-note", "는 바둑을 둠")
@@ -300,10 +308,10 @@ func TestEpisodePersonBlockScope(t *testing.T) {
 			}
 		}
 	}
-	// Cards are off. Only explicit person targets get episode-derived notes,
-	// including an unsolicited turn, and hearsay carries its speaker's name.
+	// Person claims derived from the items: only explicit person targets get
+	// them, including an unsolicited turn, and hearsay ends with its speaker's name.
 	b := get("c", true)
-	check(b, []string{"민수는 차를 좋아함", "[영희] 민수는 바둑을 둠"}, []string{"기타", "비밀"})
+	check(b, []string{"민수는 차를 좋아함", "민수는 바둑을 둠 (영희 말)"}, []string{"기타", "비밀"})
 	t.Log("fixture:\n" + b + cardClose)
 	check(get("other", false), []string{"차를 좋아함", "기타"}, []string{"바둑", "비밀"})
 	check(get("private", false), []string{"비밀", "차를 좋아함"}, []string{"기타", "바둑"})
@@ -320,11 +328,15 @@ func TestEpisodePersonBlockScope(t *testing.T) {
 	}
 	check(get("other", false), []string{"기타"}, []string{"차를 좋아함"})
 	// Older extracts can identify a speaker but leave the subject as plain
-	// text. A statement they made about somebody else is not a self fact.
+	// text. A statement they made about somebody else is not a self fact, and
+	// with no subject token it is about nobody person memory can name.
 	put("c", "101", "민수", "unattributed", "")
 	if _, err := s.Store.DB.Exec(`UPDATE episode_item SET text='지영이가 춤을 배운대' WHERE id='unattributed'`); err != nil {
 		t.Fatal(err)
 	}
-	check(get("c", false), []string{"지영이가 춤을 배운대"}, nil)
+	if n, err := s.DerivePersonItemForTest(t.Context(), "unattributed"); err != nil || n != 0 {
+		t.Fatalf("a statement about nobody gave %d claims: %v", n, err)
+	}
+	check(get("c", false), nil, []string{"지영이가"})
 	check(get("other", false), []string{"기타"}, []string{"지영이가"})
 }

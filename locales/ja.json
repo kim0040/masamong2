@@ -1300,6 +1300,7 @@
   "memory.mine.empty": "このサーバーでは、まだあなたについて何も覚えていません。",
   "memory.mine.footer": "あなたにだけ表示されています。消すには /忘れて を使ってください。サーバー管理者も管理コンソールの記憶画面で確認・削除できます。",
   "memory.mine.card": "あなたについて",
+  "memory.mine.said_by": "{name}さんの話",
   "memory.mine.episodes": "参加した会話",
   "memory.mine.more": "…ほか{n}件",
   "memory.mine.console": "コンソールを開く",

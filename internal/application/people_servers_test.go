@@ -53,10 +53,10 @@ func TestPeopleServersReturnsPerGuildCountsNamesAndCardTotals(t *testing.T) {
 		t.Fatalf("seed users.list row: %v", err)
 	}
 	ref := store.PersonRef("u1")
-	for _, card := range []struct{ id, state string }{{"c1", "active"}, {"c2", "active"}, {"c3", "superseded"}} {
-		if _, err := svc.Store.DB.Exec(`INSERT INTO person_card_item(id,guild_id,person_ref,key,text,evidence,episodes,origin,state,created_at,updated_at)
-			VALUES(?, 'g', ?, ?, 'private card canary', '[]','[]','test',?,?,?)`, card.id, ref, card.id, card.state, "2026-10-13T12:00:00Z", "2026-10-13T12:00:00Z"); err != nil {
-			t.Fatalf("seed card item: %v", err)
+	for _, card := range []struct{ id, state string }{{"c1", "active"}, {"c2", "active"}, {"c3", "hidden"}} {
+		if _, err := svc.Store.DB.Exec(`INSERT INTO person_claim(id,guild_id,subject_ref,speaker_ref,kind,topic,text,evidence,observed_at,room_id,source,link,state,created_at)
+			VALUES(?, 'g', ?, ?, 'other', '', 'private card canary', '["p1"]', ?, 'discord:g:c', 'explicit', 'self', ?, ?)`, card.id, ref, ref, "2026-10-13T12:00:00.000000000Z", card.state, "2026-10-13T12:00:00Z"); err != nil {
+			t.Fatalf("seed person claim: %v", err)
 		}
 	}
 

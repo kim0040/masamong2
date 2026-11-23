@@ -8,16 +8,18 @@ import (
 	"masamong/internal/application"
 )
 
-// The caller's own card goes into the answer prompt only for a whole request
-// about the caller (the last sentence, in any pack), never for a clause inside
-// other words or a request someone else is reported to have made.
+// What others said about the caller goes into the answer prompt only for a
+// whole request about the caller (the last sentence, in any pack), never for a
+// clause inside other words or a request someone else is reported to have made.
+// (The caller's own statements come on every turn; the marker is hearsay.)
 func TestRound3SelfPredicatePrompts(t *testing.T) {
 	t.Parallel()
 	s, m, e := memorySvc(t)
 	f := reviewPerson{s, m, e, time.Now().UTC().Add(-3 * time.Hour)}
 	const marker = "round3-caller-private-fact"
-	ev := f.source(t, "g", "c", "round3-caller-source", "303", "지수", f.at)
-	f.fact(t, "g", "c", marker, "303", "303", ev)
+	f.source(t, "g", "c", "round3-caller-source", "303", "지수", f.at)
+	ev := f.source(t, "g", "c", "round3-friend-source", "202", "영희", f.at)
+	f.fact(t, "g", "c", marker, "303", "202", ev)
 	for _, tc := range []struct {
 		name   string
 		prompt string

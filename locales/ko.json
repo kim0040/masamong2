@@ -1301,6 +1301,7 @@
   "memory.mine.empty": "이 서버에서 아직 너에 대해 기억하는 게 없어.",
   "memory.mine.footer": "나만 보이는 메시지예요. 지우려면 /잊어줘 를 쓰세요. 서버 관리자도 관리 콘솔의 기억 화면에서 보고 지울 수 있어요.",
   "memory.mine.card": "너에 대해",
+  "memory.mine.said_by": "{name}님이 말함",
   "memory.mine.episodes": "참여한 대화",
   "memory.mine.more": "…외 {n}개",
   "memory.mine.console": "콘솔 열기",

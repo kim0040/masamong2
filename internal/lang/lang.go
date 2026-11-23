@@ -328,14 +328,19 @@ type Memory struct {
 	CardBlock     string            `json:"card_block"`     // {header} {cards}
 	KakaoSource   string            `json:"kakao_source"`   // {label}: an episode of a linked KakaoTalk block
 	Statuses      map[string]string `json:"statuses"`       // plan status → words (open, decided, done, expired, dropped)
+
+	// SaidBy ends a person-memory line someone else said about the person ({name}: who said it). Optional:
+	// without it the name is shown in parentheses.
+	SaidBy string `json:"said_by,omitempty"`
+
 	// Explicit memory requests ("remember this", "that's wrong", "forget that", §5.4.5). ExplicitCues are
 	// optional hints: only a message addressed to the bot that contains one is classified (one small
 	// model call), the decision is the classifier's. InstructionCues are words of an instruction to the
 	// bot; a fact containing one is not stored (memory never carries instructions).
 	ExplicitCues    []string `json:"explicit_cues,omitempty"`
 	InstructionCues []string `json:"instruction_cues,omitempty"`
-	// SelfRequests are whole requests about the speaker ("날 기억해?", "who am I"). The speaker's own
-	// person memory goes into a reply only when the message's last sentence is one of them, compared by
+	// SelfRequests are whole requests about the speaker ("날 기억해?", "who am I"). What others said about
+	// the speaker goes into a reply only when the message's last sentence is one of them, compared by
 	// its letters and digits after SelfTrim words and endings ("요", "please") are dropped from both
 	// ends. "{a|b}" lists alternatives; an entry ending in "?" counts only as a question. Every pack's
 	// lists apply, since a request can mix languages. A missing request is better than a false one.

@@ -212,7 +212,7 @@ func TestReviewResolverIntent(t *testing.T) {
 		{"what do I like?", "303", []string{"303"}, nil},
 		{"영희야, 민수는 어떤 사람이야?", "303", []string{"202"}, nil},
 		{"민수는 어떤 사람이야?", "101", []string{"202"}, []string{"영희", "쇼핑"}},
-		{"<@909> <@808> 민수", "101", []string{"909", "808"}, nil},
+		{"<@909> <@808> 민수", "101", []string{"909", "808", "202"}, nil},
 	} {
 		got := s.targetPeople(s.Store, ChatInput{GuildID: "g", ChannelID: "c", Message: tc.msg, SpeakerID: tc.speaker}, tc.plan)
 		var refs []string

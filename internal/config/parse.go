@@ -525,7 +525,7 @@ func (p *parser) memoryFormats() error {
 			return fmt.Errorf("memory.derived_budget_usd must be a USD amount from 0 to 1000")
 		}
 	}
-	for key, v := range map[string]string{"memory.episodes": d.Memory.Episodes, "memory.state": d.Memory.State, "memory.cards": d.Memory.Cards, "memory.warm_query": d.Memory.WarmQuery} {
+	for key, v := range map[string]string{"memory.episodes": d.Memory.Episodes, "memory.state": d.Memory.State, "memory.cards": d.Memory.Cards, "memory.people": d.Memory.People, "memory.warm_query": d.Memory.WarmQuery} {
 		if v != "" && !slices.Contains(OnOff, v) {
 			return fmt.Errorf("%s must be on or off", key)
 		}

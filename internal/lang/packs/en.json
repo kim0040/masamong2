@@ -91,6 +91,7 @@
     "state_block": "<room_state for reference>\n{header}\n{topics}\n</room_state>",
     "card_block": "<person_cards for reference>\n{header}\n{cards}\n</person_cards>",
     "kakao_source": "KakaoTalk room {label}",
+    "said_by": "({name} said)",
     "statuses": {
       "open": "being discussed",
       "decided": "decided",

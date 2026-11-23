@@ -25,6 +25,7 @@ import (
 type turnPerson struct {
 	ref, label string
 	caller     bool
+	link       string // how the turn named them: store.LinkMention, LinkReply, LinkName or LinkSelf
 }
 
 // A request about the caller is a whole sentence from the language packs'
@@ -384,11 +385,11 @@ func (s *Service) resolvePeople(tx *sql.Tx, in ChatInput, rooms map[string]bool)
 	ownOnly := s.guildPrivacy(in.GuildID).OwnCardOnly
 	var out []turnPerson
 	seen := map[string]bool{}
-	add := func(ref string, explicit bool) {
+	add := func(ref string, explicit bool, link string) {
 		if ref == "" || seen[ref] || names.denied[ref] || ref != caller && ownOnly || ref == caller && !explicit || names.label(ref) == "" {
 			return
 		}
-		p := turnPerson{ref, names.current[ref], ref == caller}
+		p := turnPerson{ref, names.current[ref], ref == caller, link}
 		if p.caller {
 			out = append([]turnPerson{p}, out...)
 		} else {
@@ -397,7 +398,7 @@ func (s *Service) resolvePeople(tx *sql.Tx, in ChatInput, rooms map[string]bool)
 		seen[ref] = true
 	}
 	for _, m := range mentionPattern.FindAllStringSubmatch(in.Message, -1) {
-		add(personRef(m[1]), true)
+		add(personRef(m[1]), true, store.LinkMention)
 	}
 	for _, l := range lines {
 		if l.ID == in.MessageID && l.ReplyTo != "" && !l.ReplyToBot {
@@ -409,7 +410,7 @@ func (s *Service) resolvePeople(tx *sql.Tx, in ChatInput, rooms map[string]bool)
 				_ = tx.QueryRow(`SELECT actor_account FROM memory_observations WHERE platform='discord' AND room=?
 					AND native_message_id=? AND deleted_at='' AND record_kind=?`, roomOf(in.GuildID, in.ChannelID), l.ReplyTo, corpus.HumanText).Scan(&account)
 			}
-			add(personRef(account), true)
+			add(personRef(account), true, store.LinkReply)
 			break
 		}
 	}
@@ -420,11 +421,11 @@ func (s *Service) resolvePeople(tx *sql.Tx, in ChatInput, rooms map[string]bool)
 		doc := s.Doc()
 		matches := search.NameMatcher(lang.MergeSearch(append(slices.Clone(doc.Memory.Languages), "ko", "ja"), doc.BotNames()))
 		for _, ref := range names.match(text, matches) {
-			add(ref, false)
+			add(ref, false, store.LinkName)
 		}
 	}
 	if selfIntent(in.Message, botID, s.Doc().BotNames()) {
-		add(caller, true)
+		add(caller, true, store.LinkSelf)
 	}
 	limit := chat.MaxOtherCards
 	if len(out) > 0 && out[0].caller {

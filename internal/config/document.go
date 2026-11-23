@@ -306,15 +306,18 @@ func isSnowflake(s string) bool {
 // point. What always holds whatever they say (servers never share people, deletion and withdrawal
 // reach derived memory, no bodies or IDs in logs) is not an option.
 type GuildPrivacy struct {
-	// OwnCardOnly: a reply uses only the card of the person who called the bot, not those of the
-	// other people in the conversation.
+	// OwnCardOnly: a reply uses only the person memory of the person who called the bot, not that of the
+	// other people the message is about.
 	OwnCardOnly bool `yaml:"own_card_only,omitempty" json:"own_card_only,omitempty"`
-	// NoHearsay: what one person said about another is left out of the room memory a reply sees.
+	// NoHearsay: what one person said about another is left out of the room memory a reply sees (it is
+	// still stored, so turning the option off shows it again), and "remember this" about someone else
+	// is not kept as theirs.
 	NoHearsay bool `yaml:"no_hearsay,omitempty" json:"no_hearsay,omitempty"`
 	// NoSensitive: facts a classifier marks sensitive (health, romance, money, religion, politics…) are
-	// not kept by "remember this" and do not become card items.
+	// not kept by "remember this", and a person statement waits, unread, until the classifier passed it
+	// (statements made before the option, or before an upgrade, wait for an operator).
 	NoSensitive bool `yaml:"no_sensitive,omitempty" json:"no_sensitive,omitempty"`
-	// CardChannelOnly: a card item is used only in the channel (and its threads) its evidence came from.
+	// CardChannelOnly: person memory is used only in the channel (and its threads) its evidence came from.
 	CardChannelOnly bool `yaml:"card_channel_only,omitempty" json:"card_channel_only,omitempty"`
 }
 
@@ -1072,9 +1075,11 @@ type MemoryFlags struct {
 	// gated by derived_budget_usd alone.
 	Episodes string `yaml:"episodes,omitempty" json:"episodes,omitempty"`
 	State    string `yaml:"state,omitempty" json:"state,omitempty"`
-	// Cards switches person cards (L3, §5.4.4): promotion of facts that came up on several days into a
-	// short card per server and person, and reading them into replies. on | off, empty = off.
+	// Cards is the old name of the person memory switch: only its off is still honoured (People).
 	Cards string `yaml:"cards,omitempty" json:"cards,omitempty"`
+	// People switches person memory (v1.7.0): statements about each person of a server, derived from
+	// the room's episodes and read into replies about them. on | off, empty = on.
+	People string `yaml:"people,omitempty" json:"people,omitempty"`
 	// WarmQuery lets a turn embed the calling message before the planner says a memory search is needed,
 	// so the search that follows finds the vector ready. on | off, empty = on. Off sends the message to
 	// the embedding provider only when a search asks for it (see WarmQueryOn).
@@ -1086,7 +1091,7 @@ type MemoryFlags struct {
 	MessageVectors *bool `yaml:"message_vectors,omitempty" json:"message_vectors,omitempty"`
 }
 
-// OnOff are the values of the memory.episodes, memory.state, memory.cards and memory.warm_query switches.
+// OnOff are the values of the memory.episodes, memory.state, memory.cards, memory.people and memory.warm_query switches.
 var OnOff = []string{"on", "off"}
 
 // LeafSplitModes are the values of memory.leaf_split; the first is the default.
@@ -1106,8 +1111,13 @@ func (m MemoryFlags) StateOn() bool { return m.State != "off" }
 // default on; only an explicit false turns it off).
 func (m MemoryFlags) MessageVectorsOn() bool { return m.MessageVectors == nil || *m.MessageVectors }
 
-// CardsOn reports whether person cards are made and read (memory.cards, default off).
+// CardsOn reports whether memory.cards is explicitly on (the old person card switch; person memory
+// itself follows PeopleOn).
 func (m MemoryFlags) CardsOn() bool { return m.Cards == "on" }
+
+// PeopleOn reports whether person memory is derived and read (memory.people, default on). An explicit
+// memory.cards: off, the old name, still turns it off.
+func (m MemoryFlags) PeopleOn() bool { return m.People != "off" && m.Cards != "off" }
 
 // DerivedBudget is the effective monthly budget of the background room memory in USD (0 = off).
 func (m MemoryFlags) DerivedBudget() float64 {

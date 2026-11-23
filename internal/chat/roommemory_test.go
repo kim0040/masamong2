@@ -158,3 +158,39 @@ func TestAnswerWithRoomMemory(t *testing.T) {
 		t.Fatalf("answer prompt:\n%s", user)
 	}
 }
+
+// Person cards get per-person budgets (person-memory contract §2.3.5): the caller 300 runes, one other
+// person 400, two or three others 250 each (900 at most together), and no more than MaxOtherCards others.
+func TestFitCardsPersonBudgets(t *testing.T) {
+	facts := func(n int) []string {
+		var out []string
+		for i := range n {
+			out = append(out, strings.Repeat(string(rune('가'+i)), 45))
+		}
+		return out
+	}
+	widest := func(lines []string) int {
+		w := 0
+		for _, l := range lines {
+			w = max(w, utf8.RuneCountInString(l))
+		}
+		return w
+	}
+	caller := RoomCard{Name: "나", Caller: true, Facts: facts(20)}
+	one := fitCards([]RoomCard{caller, {Name: "민수", Facts: facts(20)}})
+	if len(one) != 2 || utf8.RuneCountInString(one[0]) > CallerCardBudget || utf8.RuneCountInString(one[1]) > OneCardBudget ||
+		utf8.RuneCountInString(one[1]) <= OtherCardBudget {
+		t.Fatalf("caller and one other: %d lines, widths %d %d", len(one), utf8.RuneCountInString(one[0]), utf8.RuneCountInString(one[1]))
+	}
+	four := fitCards([]RoomCard{caller, {Name: "a", Facts: facts(20)}, {Name: "b", Facts: facts(20)}, {Name: "c", Facts: facts(20)}, {Name: "d", Facts: facts(20)}})
+	if len(four) != 1+MaxOtherCards || widest(four[1:]) > OtherCardBudget {
+		t.Fatalf("three others at most, 250 each: %d lines, widest %d", len(four), widest(four[1:]))
+	}
+	total := 0
+	for _, l := range four[1:] {
+		total += utf8.RuneCountInString(l)
+	}
+	if total > OthersCardTotal {
+		t.Fatalf("others together: %d", total)
+	}
+}

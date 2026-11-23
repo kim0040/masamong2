@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,6 +16,7 @@ import (
 	"masamong/internal/chat"
 	"masamong/internal/config"
 	"masamong/internal/memory/engine"
+	"masamong/internal/memory/store"
 )
 
 // turnModel is a fake model for whole chat turns over room memory: it tells the prompts apart (room
@@ -505,8 +507,9 @@ func cardsOn(t *testing.T, svc *application.Service) {
 
 const climbFact = `{"episodes":[{"op":"create","kind":"event","title":"클라이밍","items":[{"kind":"fact","text":"{p1}가 클라이밍을 배우는 중","by":["p1"],"ev":["m1"]}],"status":"done","importance":3}]}`
 
-// A fact the person said about themselves becomes a card item only from two episodes on two days; the
-// card is the server's own and goes with forgetting.
+// Every statement a person makes about themselves is person memory at once (no threshold: one row per
+// statement, near-duplicates grouped when read); it is the server's own and goes with forgetting, and
+// what was forgotten is never derived again.
 func TestPersonCardThresholdIsolationAndForget(t *testing.T) {
 	t.Parallel()
 	svc, m, eng := memorySvc(t)
@@ -514,8 +517,8 @@ func TestPersonCardThresholdIsolationAndForget(t *testing.T) {
 	m.extract = func(string) string { return climbFact }
 	sayIn(eng, time.Now().Add(-23*time.Hour), said{"6001", "u1", "철수", "나 요즘 클라이밍 배우고 있어"}, said{"6101", "u2", "영희", "오 멋지다"})
 	svc.RunRoomMemory(context.Background())
-	if _, cardItems := mine(t, svc, inChannel("u1")); len(cardItems) != 0 {
-		t.Fatalf("one episode is not a card: %v", cardItems)
+	if _, cardItems := mine(t, svc, inChannel("u1")); len(cardItems) != 1 {
+		t.Fatalf("one statement is one item: %v", cardItems)
 	}
 	sayIn(eng, time.Now().Add(-2*time.Hour), said{"6002", "u1", "철수", "클라이밍 배우는 거 재밌더라"}, said{"6102", "u2", "영희", "다음에 같이 가자"})
 	svc.RunRoomMemory(context.Background())
@@ -523,12 +526,12 @@ func TestPersonCardThresholdIsolationAndForget(t *testing.T) {
 		t.Fatalf("episodes: %d", n)
 	}
 	_, cardItems := mine(t, svc, inChannel("u1"))
-	if len(cardItems) != 1 || !strings.Contains(cardItems[0], "클라이밍") {
-		t.Fatalf("two days, two episodes: %v", cardItems)
+	if len(cardItems) != 2 || !strings.Contains(cardItems[0], "클라이밍") {
+		t.Fatalf("two statements: %v", cardItems)
 	}
-	// the card reaches the caller's turn, in this server only
+	// the card reaches the caller's turn, in this server only, the two statements grouped as one line
 	turn(t, svc, "u1", "철수", "나에 대해 뭐 알아?")
-	if b := block(m.last("answer"), cardOpen, cardClose); !strings.Contains(b, "클라이밍") || !strings.Contains(b, readHeader) {
+	if b := block(m.last("answer"), cardOpen, cardClose); strings.Count(b, "클라이밍") != 1 || !strings.Contains(b, readHeader) {
 		t.Fatalf("card block:\n%s", m.last("answer"))
 	}
 	turn(t, svc, "u1", "철수", "나에 대해 뭐 알아?", func(in *application.ChatInput) { in.GuildID, in.ChannelID = "g2", "c2" })
@@ -545,8 +548,9 @@ func TestPersonCardThresholdIsolationAndForget(t *testing.T) {
 		t.Fatal("memory.cards off still shows the card")
 	}
 	// forgetting everything takes the card
+	applyDoc(t, svc, func(d *config.Document) { d.Memory.Cards, d.Memory.Episodes = "", "" })
 	prev := as(svc, "memory.mine.forget", map[string]any{"scope": "all"}, inChannel("u1"))
-	if !prev.OK || prev.Output["cards"] != 1 {
+	if !prev.OK || prev.Output["person_items"] != 2 {
 		t.Fatalf("preview: %+v", prev)
 	}
 	if r := as(svc, "memory.mine.forget", map[string]any{"scope": "all", "confirm": prev.Output["token"]}, inChannel("u1")); !r.OK || r.Output["applied"] != true {
@@ -555,9 +559,30 @@ func TestPersonCardThresholdIsolationAndForget(t *testing.T) {
 	if items, cardItems := mine(t, svc, inChannel("u1")); len(cardItems) != 0 || len(items) != 0 {
 		t.Fatalf("after forgetting: %v %v", items, cardItems)
 	}
+	// the same lines extracted again (a re-extraction, a backfill) give nothing: the forget marker holds
+	if _, err := svc.Store.DB.Exec(`INSERT INTO channel_episode(id,guild_id,channel_id,room,kind,title,status,source,first_seen,last_seen,updated_at)
+		VALUES('again','g','c','discord:g:c','event','again','done','discord',?,?,?)`, time.Now(), time.Now(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	var obs string
+	if err := svc.Store.DB.QueryRow(`SELECT observation_id FROM memory_observations WHERE native_message_id='6001'`).Scan(&obs); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Store.DB.Exec(`INSERT INTO episode_item(id,episode_id,kind,text,evidence,by_refs,created_at) VALUES('again-item','again','fact',?,?,?,?)`,
+		"{@"+store.PersonRef("u1")+"}가 클라이밍을 배우는 중", `["`+obs+`"]`, `["`+store.PersonRef("u1")+`"]`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := svc.DerivePersonItemForTest(context.Background(), "again-item"); err != nil || n != 0 {
+		t.Fatalf("a forgotten statement was derived again: %d %v", n, err)
+	}
+	svc.PeoplePassForTest(context.Background())
+	var rows int
+	if err := svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM person_claim`).Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("person memory after forget and re-derive: %d (%v)", rows, err)
+	}
 }
 
-// A deleted evidence line takes the card item resting on it.
+// A deleted evidence line takes the statement resting on it; the other statement stays.
 func TestPersonCardFollowsEvidence(t *testing.T) {
 	t.Parallel()
 	svc, m, eng := memorySvc(t)
@@ -567,19 +592,23 @@ func TestPersonCardFollowsEvidence(t *testing.T) {
 	svc.RunRoomMemory(context.Background())
 	sayIn(eng, time.Now().Add(-2*time.Hour), said{"6002", "u1", "철수", "클라이밍 배우는 거 재밌더라"}, said{"6102", "u2", "영희", "다음에 같이 가자"})
 	svc.RunRoomMemory(context.Background())
-	if _, c := mine(t, svc, inChannel("u1")); len(c) != 1 {
+	if _, c := mine(t, svc, inChannel("u1")); len(c) != 2 {
 		t.Fatalf("card: %v", c)
 	}
 	if err := svc.MessagesDeleted("g", "c", []string{"6002"}); err != nil {
 		t.Fatal(err)
 	}
 	drain(t, svc)
-	if _, c := mine(t, svc, inChannel("u1")); len(c) != 0 {
-		t.Fatalf("a card outlived its evidence: %v", c)
+	if _, c := mine(t, svc, inChannel("u1")); len(c) != 1 {
+		t.Fatalf("a statement outlived its evidence: %v", c)
+	}
+	var left int
+	if err := svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM person_claim c, json_each(c.evidence) e JOIN memory_observations o ON o.observation_id=e.value WHERE o.native_message_id='6002'`).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("a statement on the deleted line: %d (%v)", left, err)
 	}
 	svc.RunRoomMemory(context.Background())
-	if _, c := mine(t, svc, inChannel("u1")); len(c) != 0 {
-		t.Fatalf("one day left is under the threshold again: %v", c)
+	if _, c := mine(t, svc, inChannel("u1")); len(c) != 1 {
+		t.Fatalf("the other statement after a pass: %v", c)
 	}
 }
 
@@ -631,22 +660,36 @@ func TestSegmentSealedAfterTwoRefusals(t *testing.T) {
 	}
 }
 
-// "Remember this" about someone else is an episode fact said by the speaker: never a card, for anyone.
+// "Remember this" about someone else is an episode fact said by the speaker, never something about the
+// speaker; about the one person the message names it is what the speaker told (a told statement, shown
+// with who said it), and on a no_hearsay server it is not kept as one.
 func TestExplicitFactAboutOthersIsNoCard(t *testing.T) {
 	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	cardsOn(t, svc)
-	sayIn(eng, time.Now().Add(-time.Minute), said{"7001", "u2", "영희", "안녕"}, said{"7002", "u1", "철수", "기억해, 영희 생일은 5월 3일이야"})
+	sayIn(eng, time.Now().Add(-time.Minute), said{"7001", "u2", "영희", "안녕"}, said{"7002", "u1", "철수", "기억해, 영희 생일은 5월 3일이야"},
+		said{"7003", "u1", "철수", "기억해, 영희는 고양이를 키워"})
 	m.explicit = func(string) string {
-		return `{"intent":"remember","about":"other","fact":"영희 생일은 5월 3일","key":"","instruction":false}`
+		return `{"intent":"remember","about":"other","fact":"영희 생일은 5월 3일","key":"birthday","instruction":false}`
 	}
 	turn(t, svc, "u1", "철수", "기억해, 영희 생일은 5월 3일이야", live("7002"))
 	items, card := mine(t, svc, inChannel("u1"))
 	if len(items) != 1 || !strings.Contains(texts(items), "5월 3일") || len(card) != 0 {
 		t.Fatalf("the speaker's episode fact: %v card=%v", items, card)
 	}
-	if _, card := mine(t, svc, inChannel("u2")); len(card) != 0 {
-		t.Fatalf("a card about someone who did not say it: %v", card)
+	r := as(svc, "memory.mine.show", map[string]any{}, inChannel("u2"))
+	person := jsonList(r.Output["person"])
+	if len(person) != 1 || person[0]["origin"] != "told" || !strings.Contains(fmt.Sprint(person[0]["said_by"]), "철수") || !strings.Contains(fmt.Sprint(person[0]["text"]), "5월 3일") {
+		t.Fatalf("the told statement about the person named: %+v", r.Output["person"])
+	}
+	strict(t, svc, config.GuildPrivacy{NoHearsay: true})
+	m.explicit = func(string) string {
+		return `{"intent":"remember","about":"other","fact":"영희는 고양이를 키움","key":"pet","instruction":false}`
+	}
+	turn(t, svc, "u1", "철수", "기억해, 영희는 고양이를 키워", live("7003"))
+	var told int
+	if err := svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM person_claim WHERE source='explicit' AND subject_ref<>speaker_ref`).Scan(&told); err != nil || told != 1 {
+		t.Fatalf("no_hearsay kept a told statement: %d (%v)", told, err)
 	}
 }
 
@@ -812,8 +855,13 @@ func TestExplicitFactDedupKeepsOtherPersonsCard(t *testing.T) {
 	if err := svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM person_card_item WHERE guild_id='g' AND person_ref=? AND state='active'`, personRefs[0]).Scan(&selfRemaining); err != nil {
 		t.Fatal("could not inspect the member's card")
 	}
-	if otherRemaining != 1 || selfRemaining == 0 {
+	if otherRemaining != 1 || selfRemaining != 0 {
 		t.Fatal("hiding one person's duplicate removed another person's card")
+	}
+	// the member's fact is their explicit statement now (person_card_item is no longer written)
+	var explicit int
+	if err := svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM person_claim WHERE subject_ref=? AND speaker_ref=? AND source='explicit' AND state='active'`, personRefs[0], personRefs[0]).Scan(&explicit); err != nil || explicit != 1 {
+		t.Fatalf("the member's explicit statement: %d (%v)", explicit, err)
 	}
 }
 
@@ -865,7 +913,7 @@ func TestPersonCardGoesWithWithdrawal(t *testing.T) {
 	svc.RunRoomMemory(context.Background())
 	sayIn(eng, time.Now().Add(-2*time.Hour), said{"6002", "u1", "철수", "클라이밍 배우는 거 재밌더라"}, said{"6102", "u2", "영희", "다음에 같이 가자"})
 	svc.RunRoomMemory(context.Background())
-	if _, c := mine(t, svc, inChannel("u1")); len(c) != 1 {
+	if _, c := mine(t, svc, inChannel("u1")); len(c) != 2 {
 		t.Fatalf("card: %v", c)
 	}
 	if r := as(svc, "privacy.consent", map[string]any{"scope": "memory", "decision": "withdraw"}, inChannel("u1")); !r.OK {

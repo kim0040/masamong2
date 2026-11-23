@@ -12,7 +12,7 @@ import (
 	"masamong/internal/memory/engine"
 )
 
-// climbCard gives u1 (철수) a card item from two days of saying it in g/c.
+// climbCard gives u1 (철수) two person memory statements from two days of saying it in g/c.
 func climbCard(t *testing.T, svc *application.Service, m *turnModel, eng *engine.Engine) {
 	t.Helper()
 	cardsOn(t, svc)
@@ -75,7 +75,7 @@ func TestProfileWithdrawalDeletesCards(t *testing.T) {
 	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	climbCard(t, svc, m, eng)
-	if _, c := mine(t, svc, inChannel("u1")); len(c) != 1 {
+	if _, c := mine(t, svc, inChannel("u1")); len(c) != 2 {
 		t.Fatalf("card: %v", c)
 	}
 	if r := as(svc, "privacy.consent", map[string]any{"scope": "profile", "decision": "withdraw"}, inChannel("u1")); !r.OK {
@@ -119,8 +119,9 @@ func TestProfileWithdrawalDuringPromotion(t *testing.T) {
 	}
 }
 
-// card_channel_only: an item is used only where all of its evidence was said. The same fact said on two
-// days in #c and once more in #c3 merges evidence from both, so it is not shown in #c3.
+// card_channel_only: a statement is used only in the channel group where it was said. Every statement
+// rests on lines of one room: the same fact said on two days in #c is not shown in #c3 until it is said
+// there too, and then only that statement is.
 func TestCardChannelOnlyNeedsAllEvidenceHere(t *testing.T) {
 	t.Parallel()
 	svc, m, eng := memorySvc(t)
@@ -130,21 +131,30 @@ func TestCardChannelOnlyNeedsAllEvidenceHere(t *testing.T) {
 	if !strings.Contains(m.last("answer"), cardOpen) {
 		t.Fatal("the card is used where all its evidence was said")
 	}
+	applyDoc(t, svc, func(d *config.Document) { d.Memory.Episodes = "off" }) // isolate the person block
+	turn(t, svc, "u1", "철수", "나에 대해 뭐 알아?", func(in *application.ChatInput) { in.ChannelID = "c3" })
+	if strings.Contains(m.last("answer"), cardOpen) {
+		t.Fatal("card_channel_only used a statement said in another channel")
+	}
+	applyDoc(t, svc, func(d *config.Document) { d.Memory.Episodes = "" })
 	at := time.Now().Add(-90 * time.Minute)
 	for i, l := range []said{{"6003", "u1", "철수", "클라이밍 배우는 중인데 손가락 아파"}, {"6103", "u2", "영희", "그래도 계속 해"}} {
 		_, _ = eng.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c3", MessageID: l.id, AuthorID: l.user, AuthorName: l.name,
 			Content: l.text, At: at.Add(time.Duration(i) * 30 * time.Second)})
 	}
 	svc.RunRoomMemory(context.Background())
-	var inC3 int
-	if err := svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM person_card_item p, json_each(p.evidence) e JOIN memory_observations o ON o.observation_id=e.value
-		WHERE p.state='active' AND o.room='discord:g:c3'`).Scan(&inC3); err != nil || inC3 == 0 {
-		t.Fatalf("the card item has no evidence from #c3 (%d, %v)", inC3, err)
+	var inC3, mixed int
+	if err := svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM person_claim WHERE state='active' AND room_id='discord:g:c3'`).Scan(&inC3); err != nil || inC3 != 1 {
+		t.Fatalf("the statement said in #c3 (%d, %v)", inC3, err)
 	}
-	applyDoc(t, svc, func(d *config.Document) { d.Memory.Episodes = "off" }) // isolate the promoted, merged card
+	if err := svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM person_claim p, json_each(p.evidence) e JOIN memory_observations o ON o.observation_id=e.value
+		WHERE o.room<>p.room_id`).Scan(&mixed); err != nil || mixed != 0 {
+		t.Fatalf("a statement rests on lines of another room (%d, %v)", mixed, err)
+	}
+	applyDoc(t, svc, func(d *config.Document) { d.Memory.Episodes = "off" }) // isolate the person block
 	turn(t, svc, "u1", "철수", "나에 대해 뭐 알아?", func(in *application.ChatInput) { in.ChannelID = "c3" })
-	if strings.Contains(m.last("answer"), cardOpen) {
-		t.Fatal("card_channel_only used an item partly said in another channel")
+	if b := block(m.last("answer"), cardOpen, cardClose); strings.Count(b, "클라이밍") != 1 {
+		t.Fatalf("card_channel_only in #c3 shows the #c3 statement only:\n%s", b)
 	}
 }
 
@@ -192,8 +202,9 @@ func TestNoHearsayTitlesAndTopics(t *testing.T) {
 	})
 }
 
-// no_sensitive: a classifier decides which facts may become card items; a sensitive one does not, and a
-// "remember this" the explicit classifier marks sensitive is refused.
+// no_sensitive: a statement is stored pending and read only once the classifier passed it; a sensitive
+// one is deleted, and a "remember this" the explicit classifier marks sensitive is refused. Only live
+// statements are classified (the first pass's walk over what was there before waits for an operator).
 func TestStrictPrivacyNoSensitive(t *testing.T) {
 	t.Parallel()
 	svc, m, eng := memorySvc(t)
@@ -205,6 +216,14 @@ func TestStrictPrivacyNoSensitive(t *testing.T) {
 	}
 	if _, c := mine(t, svc, inChannel("u1")); len(c) != 0 {
 		t.Fatalf("a sensitive fact became a card item: %v", c)
+	}
+	var pending, total int
+	if err := svc.Store.DB.QueryRow(`SELECT COUNT(*) FILTER (WHERE state='pending'), COUNT(*) FROM person_claim`).Scan(&pending, &total); err != nil || pending != 1 || total != 1 {
+		t.Fatalf("the first pass's statement waits, the live sensitive one is gone: %d of %d (%v)", pending, total, err)
+	}
+	turn(t, svc, "u1", "철수", "나에 대해 뭐 알아?")
+	if strings.Contains(m.last("answer"), cardOpen) {
+		t.Fatal("a pending statement was read")
 	}
 	asked := m.calls("sensitive")
 	m.sensitive = func(string) string { return `{"sensitive":[]}` }

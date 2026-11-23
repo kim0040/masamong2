@@ -31,8 +31,10 @@ const (
 	MaxEvidenceLines = 4
 	TopicBudget      = 500
 	CallerCardBudget = 300
-	OtherCardBudget  = 150
-	MaxOtherCards    = 2
+	OneCardBudget    = 400 // the one other person the turn is about
+	OtherCardBudget  = 250 // each of two or three other people
+	OthersCardTotal  = 900 // all other people together
+	MaxOtherCards    = 3
 	evidenceRunes    = 110
 )
 
@@ -187,18 +189,31 @@ func fitTopics(topics []RoomTopic) []string {
 	return lines
 }
 
+// fitCards renders the person cards within their budgets (person-memory contract §2.3.5): the caller's
+// 300 runes; one other person 400, two or three 250 each, and the others at most 900 together.
 func fitCards(cards []RoomCard) []string {
-	var lines []string
 	others := 0
 	for _, c := range cards {
+		if !c.Caller {
+			others++
+		}
+	}
+	others = min(others, MaxOtherCards)
+	var lines []string
+	seen, othersUsed := 0, 0
+	for _, c := range cards {
 		budget := OtherCardBudget
+		if others == 1 {
+			budget = OneCardBudget
+		}
 		if c.Caller {
 			budget = CallerCardBudget
 		} else {
-			if others == MaxOtherCards {
+			if seen == MaxOtherCards {
 				continue
 			}
-			others++
+			seen++
+			budget = min(budget, OthersCardTotal-othersUsed)
 		}
 		line := "- " + c.Name + ":"
 		n := 0
@@ -216,6 +231,9 @@ func fitCards(cards []RoomCard) []string {
 		}
 		if n > 0 {
 			lines = append(lines, line)
+			if !c.Caller {
+				othersUsed += runes(line)
+			}
 		}
 	}
 	return lines

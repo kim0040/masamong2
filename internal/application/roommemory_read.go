@@ -20,7 +20,7 @@ import (
 )
 
 // The read path of room memory (docs/plan-memory-conversation.md §5.4.6, P4-3): what a chat turn is
-// given from the room's episodes (L2), live topics (L1) and person cards (L3). No model is called: the
+// given from the room's episodes (L2), live topics (L1) and person memory (L3, person_claims_read.go). No model is called: the
 // episodes and topics that share words with the caller's conversation (the language pack's tokenizer),
 // and the open plans of the channel's rooms when the conversation is about plans, are read from the
 // database, and every evidence line is read again from the raw messages as they stand now — a deleted,
@@ -41,7 +41,7 @@ func (s *Service) turnRoomMemory(ctx context.Context, in ChatInput, pol config.C
 	if pol.MemoryUse == "off" || in.ChannelID == "" || s.Store == nil {
 		return nil, nil
 	}
-	if !doc.Memory.EpisodesOn() && !doc.Memory.StateOn() && !doc.Memory.CardsOn() {
+	if !doc.Memory.EpisodesOn() && !doc.Memory.StateOn() && !doc.Memory.PeopleOn() {
 		return nil, nil
 	}
 	db, err := s.adminDB()
@@ -86,16 +86,16 @@ func (s *Service) turnRoomMemory(ctx context.Context, in ChatInput, pol config.C
 	if len(rm.Episodes) != 0 || len(rm.Topics) != 0 {
 		base = &rm
 	}
-	if !doc.Memory.EpisodesOn() && !doc.Memory.CardsOn() {
+	if !doc.Memory.EpisodesOn() && !doc.Memory.PeopleOn() {
 		return base, nil
 	}
-	return base, func(_ []string) *chat.RoomMemory {
+	return base, func(targets []string) *chat.RoomMemory {
 		if len(rooms) == 0 {
 			return nil
 		}
 		updated := rm
 		var scope personEpisodeScope
-		updated.Cards, scope = s.turnCards(ctx, db, in, used)
+		updated.Cards, scope = s.turnCards(ctx, db, in, targets, q, voice.Pack, used)
 		if !updated.HasPersonBlock(voice) {
 			return nil // keep the original episodes, topics and prompt bytes
 		}

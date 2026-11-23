@@ -82,6 +82,7 @@ func buildActionTable() map[string]actionHandler {
 	register(plainHandler((*Service).memoryReviewAction), "memory.review", "memory.reviews")
 	register((*Service).roomMemoryAction, "memory.episodes.list", "memory.episodes.show", "memory.episodes.forget", "memory.episodes.extract", "memory.state.show")
 	register((*Service).mineAction, "memory.mine.show", "memory.mine.forget")
+	register((*Service).personAction, "memory.person.hide")
 	register(plainHandler((*Service).peopleAction), "people.list", "people.merge")
 	register(plainHandler((*Service).peopleServers), "people.servers")
 	register((*Service).importsPreview, "imports.preview")

@@ -96,8 +96,8 @@ func withdrawnTx(tx *sql.Tx, scopes ...string) (map[string]bool, error) {
 	return out, rows.Err()
 }
 
-// dropProfile deletes a person's cards everywhere and makes stale every room style version that quotes
-// their lines ("don't analyze me" withdrawn).
+// dropProfile deletes a person's cards and the person memory statements about them everywhere, and
+// makes stale every room style version that quotes their lines ("don't analyze me" withdrawn).
 func (s *Service) dropProfile(ctx context.Context, userID string) error {
 	db, err := s.adminDB()
 	if err != nil || !db.IsSQLite() {
@@ -106,7 +106,10 @@ func (s *Service) dropProfile(ctx context.Context, userID string) error {
 	captured := false
 	if err := db.WithWriterContext(ctx, func(tx *sql.Tx) error {
 		captured = tableExists(tx, "memory_observations")
-		_, err := deleteCardsOf(tx, "", personRef(userID))
+		if _, err := deleteCardsOf(tx, "", personRef(userID)); err != nil {
+			return err
+		}
+		_, err := deleteClaimsOf(tx, "", personRef(userID), false)
 		return err
 	}); err != nil || !captured {
 		return err

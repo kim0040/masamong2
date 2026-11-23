@@ -1299,6 +1299,7 @@
   "memory.mine.empty": "在这个服务器里我还没有记住关于你的任何事。",
   "memory.mine.footer": "只有你能看到。要删除请使用 /忘了我。服务器管理员也可以在管理控制台的记忆页面查看和删除。",
   "memory.mine.card": "关于你",
+  "memory.mine.said_by": "{name}说的",
   "memory.mine.episodes": "你参与的对话",
   "memory.mine.more": "…另外 {n} 条",
   "memory.mine.console": "打开控制台",
