@@ -194,7 +194,7 @@ func (s *Service) updatesSubscribe(req action.Request) action.Result {
 		want := op == "on" || op == "subscribe"
 		if s.updateNewsOn(userID) != want {
 			if err := s.setUpdateNews(userID, want); err != nil {
-				return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+				return s.failErr(req, errcode.IO, "error.storage", err, nil)
 			}
 			changed = true
 		}

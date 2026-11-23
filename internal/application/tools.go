@@ -231,10 +231,15 @@ func (s *Service) runHTTPTool(ctx context.Context, req action.Request, r tools.R
 	resp, err := client.Get(ctx, target, headers)
 	host := hostOnly(h.URL)
 	if err != nil {
-		msg := scrub.text(err.Error())
+		// the person gets the tool's name and the error's class and status, never the service's text or the
+		// request's URL (either can repeat the key back); the scrubbed text goes to the log
 		var pe *providers.Error
 		retry := !(errors.As(err, &pe) && !pe.Retryable())
-		res := action.Fail(req, errcode.ProviderUnavailable, "generic.error", msg, map[string]any{"tool": r.ID, "host": host})
+		args := map[string]any{"tool": r.ID, "host": host}
+		if pe != nil {
+			args["kind"], args["status"] = pe.Kind, pe.Status
+		}
+		res := s.failErr(req, errcode.ProviderUnavailable, "tool.http_failed", errors.New(scrub.text(err.Error())), args, "tool", r.ID)
 		res.Error.Retryable = retry
 		return res
 	}

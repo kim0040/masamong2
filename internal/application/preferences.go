@@ -205,7 +205,7 @@ func (s *Service) preferencesAction(req action.Request) action.Result {
 	if changed {
 		db, err := s.adminDB()
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		p.UpdatedAt = s.Clock.Now().UTC().Format(time.RFC3339)
 		err = db.WithWriter(func(tx *sql.Tx) error {
@@ -220,7 +220,7 @@ func (s *Service) preferencesAction(req action.Request) action.Result {
 			return err
 		})
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 	}
 	unset := s.msg(req, "prefs.unset")
@@ -257,11 +257,11 @@ func checkHHMM(v string) error {
 func (s *Service) preferencesList(req action.Request) action.Result {
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	rows, err := db.DB.Query(`SELECT user_id, locale, timezone, quiet_start, quiet_end, weather_region, update_news, updated_at FROM user_prefs ORDER BY updated_at DESC LIMIT 500`)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	defer rows.Close()
 	list := []UserPrefs{}

@@ -32,7 +32,7 @@ func (s *Service) usagePeriod(req action.Request) action.Result {
 	total := 0.0
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	for scope, into := range map[string]map[string]int{"all": tools, "provider": providers} {
 		rows, err := db.DB.Query(`SELECT tool, SUM(n) FROM tool_usage WHERE scope=? AND subject='' AND day>=? AND day<=? GROUP BY tool`, scope, from, to)

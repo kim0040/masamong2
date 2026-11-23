@@ -32,7 +32,7 @@ type userRow struct {
 func (s *Service) usersList(req action.Request) action.Result {
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	users := map[string]*userRow{}
 	row := func(id, at string) *userRow {

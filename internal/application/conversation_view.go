@@ -26,7 +26,7 @@ func (s *Service) conversationLog(req action.Request) action.Result {
 	}
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	days := min(max(intVal(in, "days", 7), 1), 90)
 	limit := min(max(intVal(in, "limit", 20), 1), 200)
@@ -44,7 +44,7 @@ func (s *Service) conversationLog(req action.Request) action.Result {
 	rows, err := db.DB.Query(`SELECT kind, decision, outcome, COUNT(*) FROM conversation_log WHERE guild_id=? AND channel_id=? AND created_at>=?
 		GROUP BY kind, decision, outcome`, g, c, since)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	for rows.Next() {
 		var kind, decision, outcome string
@@ -59,7 +59,7 @@ func (s *Service) conversationLog(req action.Request) action.Result {
 	rows, err = db.DB.Query(`SELECT id, created_at, kind, decision, mode, score, features, outcome, outcome_at, cost_usd FROM conversation_log
 		WHERE guild_id=? AND channel_id=? AND created_at>=? ORDER BY created_at DESC LIMIT ?`, g, c, since, limit)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	for rows.Next() {
 		var id, at, kind, decision, mode, feats, outcome, outcomeAt string
