@@ -4,12 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode"
 
 	"masamong/internal/chat"
 	"masamong/internal/config"
@@ -687,13 +685,7 @@ func (s *Service) ThreadFor(channelID, authorID string) (ThreadView, bool) {
 	if !ok {
 		return ThreadView{}, false
 	}
-	alone := true
-	for id := range info.humans {
-		if id != authorID {
-			alone = false
-		}
-	}
-	return ThreadView{BotOwned: info.BotOwned, Open: info.Open, Participant: info.participants[authorID], Alone: alone}, true
+	return ThreadView{BotOwned: info.BotOwned, Open: info.Open, Participant: info.participants[authorID], Alone: aloneIn(info.humans, authorID)}, true
 }
 
 // NoteThreadParticipant adds a person who spoke to the bot in a thread.
@@ -744,22 +736,13 @@ func (s *Service) ThreadStopCue(guildID, channelID, authorID, text string) bool 
 	if !ok || !v.BotOwned || !v.Open || !v.Participant {
 		return false
 	}
-	t := strings.ToLower(strings.TrimSpace(text))
-	t = strings.TrimLeft(t, "!/")
-	t = strings.TrimRightFunc(t, func(r rune) bool { return unicode.IsPunct(r) || unicode.IsSpace(r) || unicode.IsSymbol(r) })
+	t := threadStopText(text)
 	if t == "" {
 		return false
 	}
 	pol := s.channelPolicy(guildID, channelID)
 	voice := s.voiceFor(guildID, pol)
-	for _, p := range []*lang.Pack{voice.Pack, lang.For(chat.DetectLanguage(text), voice.Pack.Tag)} {
-		for _, c := range p.Thread.StopCues {
-			if strings.ToLower(c) == t {
-				return true
-			}
-		}
-	}
-	return false
+	return threadStopCueIn(t, voice.Pack, lang.For(chat.DetectLanguage(text), voice.Pack.Tag))
 }
 
 // TurnStopCue reports a whole message that asks the bot to drop the reply it is writing ("그만", "stop"),
@@ -810,28 +793,9 @@ func (s *Service) decideThreadOffer(in ChatInput, pol config.ChannelPolicy, res 
 	t.sweepTracks(now)
 	answer := len([]rune(res.Answer))
 	tr.chars += answer
-	score := 0
-	if recent >= 6 {
-		score += 2
-	}
-	if tr.chars >= 1200 || answer >= 600 {
-		score += 2
-	}
-	if len(res.Tools) >= 3 {
-		score += 2
-	}
-	if n, _ := attribution["excluded"].(int); n >= 4 {
-		score += 2
-	}
-	busy := 0
-	for _, l := range s.liveLines(in.GuildID, in.ChannelID) {
-		if now.Sub(l.At) <= time.Minute {
-			busy++
-		}
-	}
-	if busy >= 10 {
-		score++
-	}
+	excluded, _ := attribution["excluded"].(int)
+	busy := busyLines(s.liveLines(in.GuildID, in.ChannelID), now)
+	score := offerSignals{turns: recent, chars: tr.chars, answer: answer, tools: len(res.Tools), excluded: excluded, busy: busy}.score()
 	ch := in.GuildID + ":" + in.ChannelID
 	// A channel whose last offers were all passed over rests (thread_backoff.go). That reads the log, so it
 	// is read outside the lock, and only for a conversation that would otherwise be offered one.
@@ -842,29 +806,9 @@ func (s *Service) decideThreadOffer(in ChatInput, pol config.ChannelPolicy, res 
 		t.mu.Lock()
 	}
 	kept := t.offersAt[ch] // swept to the last hour
-	decision := ""
-	switch {
-	case score < threadOfferScore:
-	case mode == "off":
-		decision = "would_offer"
-	case tr.offered:
-		decision = "skip_offered"
-	case now.Before(tr.declinedUntil):
-		decision = "skip_declined"
-	case backoff:
-		if !tr.backedOff {
-			decision = "skip_backoff"
-		}
-		tr.backedOff = true
-	case len(kept) >= threadOffersPerHour:
-		decision = "skip_rate"
-	case callers(attribution) >= 2:
-		decision = "skip_group" // several people talk to the bot together: watching is the point
-	case mode == "auto_task" && len(res.Tools) >= 3:
-		decision = "auto"
-	default:
-		decision = "offer"
-	}
+	var decision string
+	decision, tr.backedOff = offerFacts{score: score, mode: mode, offered: tr.offered, declined: now.Before(tr.declinedUntil),
+		backoff: backoff, backedOff: tr.backedOff, offersThisHour: len(kept), callers: callers(attribution), tools: len(res.Tools)}.decide()
 	if decision == "offer" || decision == "auto" {
 		tr.offered, tr.offerTurn = true, in.turnID
 		t.offersAt[ch] = append(kept, now)
@@ -988,14 +932,7 @@ func (s *Service) ThreadOpened(ctx context.Context, guildID, parentID, threadID,
 	}
 	summary := ""
 	if len(seed) > 0 {
-		var lines []conversation.Line
-		for i, turn := range seed {
-			l := conversation.Line{ID: "s" + strconv.Itoa(i), Author: turn.Speaker, Text: turn.Content, At: now}
-			if turn.Role == "assistant" {
-				l.Bot, l.Author = true, voice.BotName
-			}
-			lines = append(lines, l)
-		}
+		lines := threadLines(seed, "s", voice.BotName, now, nil)
 		summary, _ = s.threadSummary(ctx, guildID, pol, voice, lines)
 	}
 	if summary == "" {
@@ -1130,18 +1067,10 @@ func (s *Service) CloseThread(ctx context.Context, threadID, reason string) erro
 					fromParent[p.NativeID] = p.NativeID != ""
 				}
 			}
-			var lines []conversation.Line
-			for i, turn := range turns {
-				// the parent turns seeded at the open are context, not what came out of the thread
-				if turn.NativeID != "" && (c.seeded[turn.NativeID] || fromParent[turn.NativeID]) {
-					continue
-				}
-				l := conversation.Line{ID: "t" + strconv.Itoa(i), Author: turn.Speaker, Text: turn.Content, At: s.Clock.Now()}
-				if turn.Role == "assistant" {
-					l.Bot, l.Author = true, voice.BotName
-				}
-				lines = append(lines, l)
-			}
+			// the parent turns seeded at the open are context, not what came out of the thread
+			lines := threadLines(turns, "t", voice.BotName, s.Clock.Now(), func(turn store.ChatTurn) bool {
+				return turn.NativeID != "" && (c.seeded[turn.NativeID] || fromParent[turn.NativeID])
+			})
 			if len(lines) >= 2 {
 				summary, plan := s.threadSummary(ctx, c.Guild, pol, voice, lines)
 				if summary != "" && (recap == "always" || plan) {
