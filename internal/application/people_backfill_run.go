@@ -136,7 +136,8 @@ const pbBuildTries = 3
 var pbBuilt func(windowID string)
 
 // pbComplete reports an answer the model finished (not cut at its output limit) that holds a JSON object
-// whose "people" value is a list (an empty list is a complete answer).
+// whose "people" value is a list (an empty list is a complete answer; null, a missing value or anything
+// else is not).
 func pbComplete(res openai.ChatResult) bool {
 	if res.FinishReason == "length" {
 		return false
@@ -150,7 +151,7 @@ func pbComplete(res openai.ChatResult) bool {
 		return false
 	}
 	var list []json.RawMessage
-	return json.Unmarshal(doc["people"], &list) == nil && doc["people"] != nil
+	return doc["people"] != nil && json.Unmarshal(doc["people"], &list) == nil && list != nil // "null" leaves list nil
 }
 
 func pbAnswers(raw []byte) map[string]pbAnswer {

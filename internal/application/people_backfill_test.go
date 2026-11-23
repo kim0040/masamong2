@@ -1235,9 +1235,9 @@ func TestPeopleBackfillReservationIsAnUpperBound(t *testing.T) {
 	}
 }
 
-// An answer cut at its output limit, a JSON object that is not the people list, or plain text is a
-// failed window (billed, sent again up to the attempt limit, then failed), never an applied window with
-// nothing to say; a complete empty list is.
+// An answer cut at its output limit, a JSON object that is not the people list, a people value that is
+// not a list (null), or plain text is a failed window (billed, sent again up to the attempt limit, then
+// failed), never an applied window with nothing to say; a complete empty list is.
 func TestPeopleBackfillRejectsIncompleteAnswer(t *testing.T) {
 	h := newPBHost(t)
 	s := pbService(t, h, "anthropic")
@@ -1246,10 +1246,11 @@ func TestPeopleBackfillRejectsIncompleteAnswer(t *testing.T) {
 	pbBatchOnly(t, s, run)
 	full := `{"people":[{"about":"p1","kind":"like","topic":"x","text":"{p1} likes x","by":["p1"],"ev":["m1"]}]}`
 	answers := map[string][2]string{
-		"topic3a today": {full[:len(full)-20], "max_tokens"},
-		"topic4a today": {`{"answer":"nothing here"}`, "end_turn"},
-		"topic8a today": {"I cannot find anything about people.", "end_turn"},
-		"topic9a today": {`{"people":[]}`, "end_turn"},
+		"topic3a today":  {full[:len(full)-20], "max_tokens"},
+		"topic4a today":  {`{"answer":"nothing here"}`, "end_turn"},
+		"topic8a today":  {"I cannot find anything about people.", "end_turn"},
+		"topic9a today":  {`{"people":[]}`, "end_turn"},
+		"topic10a today": {`{"people":null}`, "end_turn"},
 	}
 	h.mu.Lock()
 	h.rewrite = func(_, prompt string) (string, string, bool) {
@@ -1266,7 +1267,7 @@ func TestPeopleBackfillRejectsIncompleteAnswer(t *testing.T) {
 	}
 	done := pbWait(t, s, "run", pbState(store.BackfillDone))
 	ws, _ := store.BackfillWindows(s.Store.Reader(), done.ID, false)
-	for _, i := range []int{3, 4, 8} {
+	for _, i := range []int{3, 4, 8, 10} {
 		if w := ws[i]; w.State != store.WindowFailed || w.Attempts != pbMaxAttempts || w.Claims != 0 || w.CostUSD <= 0 {
 			t.Fatalf("window %d: %+v", i, w)
 		}
@@ -1275,7 +1276,7 @@ func TestPeopleBackfillRejectsIncompleteAnswer(t *testing.T) {
 		t.Fatalf("a complete empty answer: %+v", w)
 	}
 	c, _ := store.CountBackfillWindows(s.Store.Reader(), done.ID)
-	if c.States[store.WindowFailed] != 3 || c.States[store.WindowApplied] != 67 {
+	if c.States[store.WindowFailed] != 4 || c.States[store.WindowApplied] != 66 {
 		t.Fatalf("windows: %+v", c)
 	}
 }
