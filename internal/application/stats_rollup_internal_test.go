@@ -7,6 +7,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -56,13 +57,12 @@ func statsCount(t *testing.T, s *Service, q string, args ...any) int {
 
 func stamp(t time.Time) string { return t.UTC().Format(time.RFC3339) }
 
-var statsTurnSeq int
+var statsTurnSeq atomic.Int64 // turn ids across tests that run in parallel
 
 func statsTurn(t *testing.T, s *Service, at time.Time, outcome string, lab int, latency, hits int, cost float64) {
 	t.Helper()
-	statsTurnSeq++
 	statsMust(t, s, `INSERT INTO turn_log(id, at, day, hour, guild_id, channel_id, outcome, tools, hits, cost_usd, latency_ms, lab, body)
-		VALUES(?,?,?,?, 'g', 'c', ?, '', ?, ?, ?, ?, '{}')`, fmt.Sprintf("st-%d", statsTurnSeq), stamp(at), at.Format("2006-01-02"),
+		VALUES(?,?,?,?, 'g', 'c', ?, '', ?, ?, ?, ?, '{}')`, fmt.Sprintf("st-%d", statsTurnSeq.Add(1)), stamp(at), at.Format("2006-01-02"),
 		at.Hour(), outcome, hits, cost, latency, lab)
 }
 
