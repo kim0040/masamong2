@@ -6,7 +6,7 @@
   import { resource } from '../lib/resource.svelte'
   import { datetime, num, usd, pct } from '../lib/format'
   import { toast } from '../lib/toast.svelte'
-  import { parseBudget, rangeParts, modelKey, modelName, phase, isBusy, progress, nextSteps, type DryRun, type Run, type ModelKey, type Range } from '../lib/peoplebackfill'
+  import { parseBudget, rangeParts, modelKey, modelName, phase, isBusy, progress, nextSteps, serverSpend, planSpend, pendingWarning, pendingClaims, MAX_BUDGET_USD, type DryRun, type Run, type ModelKey, type Range } from '../lib/peoplebackfill'
   import Card from './Card.svelte'
   import Field from './Field.svelte'
   import Input from './Input.svelte'
@@ -92,6 +92,10 @@
   const next = $derived(nextSteps(plan, run, busy))
   const pilotModels = $derived(Object.values(run?.pilot?.models ?? {}))
   const prog = $derived(progress(run))
+  // the cap is one total per server: spent and left are every run's, never the newest run's alone
+  const spend = $derived(serverSpend(run))
+  const planMoney = $derived(planSpend(plan))
+  const pending = $derived(pendingClaims(run))
   const costs = $derived([
     { key: 'haiku' as ModelKey, name: 'Haiku 5.5', range: plan?.cost_usd?.haiku?.batch, within: plan?.within_budget?.haiku },
     { key: 'sonnet' as ModelKey, name: 'Sonnet 5.5', range: plan?.cost_usd?.sonnet?.batch, within: plan?.within_budget?.sonnet },
@@ -160,7 +164,7 @@
         <h3 id="pb-h1" class="h">{t('pb.s1')}</h3>
         <p class="small muted">{t('pb.s1_desc')}</p>
         <div class="budget">
-          <Field id="pb-budget" label={t('pb.budget')} hint={t('pb.budget_hint')} error={cap === null ? t('pb.budget_bad') : undefined}>
+          <Field id="pb-budget" label={t('pb.budget')} hint={t('pb.budget_hint')} error={cap === null ? t('pb.budget_bad', { max: num(MAX_BUDGET_USD) }) : undefined}>
             {#snippet children({ id, describedby, invalid })}<Input {id} aria-describedby={describedby} {invalid} bind:value={budget} inputmode="decimal" autocomplete="off" />{/snippet}
           </Field>
           <Button icon={I.Coins} loading={planBusy} disabled={cap === null || busy} onclick={estimate}>{t('pb.estimate')}</Button>
@@ -169,6 +173,9 @@
         {#if plan}
           {#if plan.provider_ready === false}
             <div role="alert" class="callout warn"><span class="ic"><I.TriangleAlert size={16} aria-hidden="true" /></span><span>{t('pb.no_provider')}</span><Button size="sm" variant="ghost" href="/connections">{t('pb.open_connections')}</Button></div>
+          {/if}
+          {#if pendingWarning(plan)}
+            <div class="callout warn"><span class="ic"><I.TriangleAlert size={16} aria-hidden="true" /></span><span>{t('pb.warn.no_sensitive_pending')}</span></div>
           {/if}
           {#if (plan.windows ?? 0) === 0}
             <p class="small muted">{t('pb.no_windows')}</p>
@@ -179,6 +186,7 @@
               { k: t('pb.k.lines'), v: t('pb.n_lines', { lines: num(plan.lines), merged: num(plan.merged_lines) }) },
               { k: t('pb.k.tokens'), v: t('pb.n_tokens', { input: num(plan.tokens?.input), output: num(plan.tokens?.output) }) },
               { k: t('pb.k.until'), v: datetime(plan.until) },
+              ...(planMoney ? [{ k: t('pb.k.spent'), v: t('pb.spent_left', { spent: usd(planMoney.spent), left: usd(planMoney.left), cap: usd(planMoney.cap) }) }] : []),
             ]} />
             <div class="tbl"><table class="table">
               <caption class="sr-only">{t('pb.costs')}</caption>
@@ -235,7 +243,7 @@
             {:else}
               <Segmented label={t('pb.model')} bind:value={model} size="sm" options={[{ value: 'haiku', label: t('pb.model.haiku') }, { value: 'sonnet', label: t('pb.model.sonnet') }]} />
             {/if}
-            <span class="small muted">{t('pb.cap', { cap: usd(run.budget_usd) })}</span>
+            <span class="small muted">{spend ? t('pb.cap_left', { cap: usd(spend.cap), left: usd(spend.left) }) : t('pb.cap', { cap: usd(run.budget_usd) })}</span>
           </div>
           <div class="row">
             {#if next.run}<Button variant="primary" icon={I.Play} onclick={() => (runOpen = true)}>{t('pb.run')}</Button>{/if}
@@ -253,9 +261,13 @@
               { k: t('pb.w.refused'), v: num(run.windows.refused) },
               { k: t('pb.w.skipped'), v: num(run.windows.skipped) },
               { k: t('pb.w.claims'), v: t('pb.w.claims_v', { claims: num(run.claims), rejected: num(run.rejected) }) },
-              { k: t('pb.w.spent'), v: t('pb.w.spent_v', { spent: usd(run.spent_usd, 4), cap: usd(run.budget_usd) }) },
+              ...(pending ? [{ k: t('pb.w.pending'), v: t('pb.w.pending_v', { n: num(pending) }) }] : []),
+              { k: t('pb.w.spent'), v: spend ? t('pb.w.spent_v', { spent: usd(spend.spent, 4), cap: usd(spend.cap), left: usd(spend.left) }) : '–' },
             ]} />
-            {#if run.budget_usd}<Progress value={run.spent_usd ?? 0} max={run.budget_usd} label={t('pb.spent_bar')} tone={(run.spent_usd ?? 0) >= run.budget_usd ? 'danger' : 'accent'} />{/if}
+            {#if spend}<Progress value={Math.min(spend.spent, spend.cap)} max={spend.cap} label={t('pb.spent_bar')} tone={spend.left <= 0 ? 'danger' : 'accent'} />{/if}
+            {#if pending}
+              <div class="callout warn"><span class="ic"><I.TriangleAlert size={16} aria-hidden="true" /></span><span>{t('pb.pending_note', { n: num(pending) })}</span></div>
+            {/if}
             {#if ph === 'stopped' && stopText(run.stopped_by)}
               <div class="callout warn"><span class="ic"><I.TriangleAlert size={16} aria-hidden="true" /></span><span>{stopText(run.stopped_by)}</span>
                 {#if run.stopped_by === 'submit_unknown'}<Button size="sm" variant="ghost" onclick={() => (requeueOpen = true)}>{t('pb.requeue')}</Button>{/if}</div>

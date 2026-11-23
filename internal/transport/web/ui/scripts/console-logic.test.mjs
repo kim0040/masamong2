@@ -497,6 +497,39 @@ test('people backfill panel: the cap, the run phase and what the operator may pr
   assert.deepEqual(m.groupReview(null), [])
 })
 
+test('people backfill panel: spend is the server total against its cap, and pending claims are shown', async () => {
+  const m = await load('peoplebackfill.ts', [])
+  // a 2.90 dollar run came first; the newest run has spent nothing yet. The cap is one total per server,
+  // so 0.10 is left, not 3.
+  const fresh = { id: 'r2', state: 'piloted', budget_usd: 3, spent_usd: 0, guild_spent_usd: 2.9 }
+  const s = m.serverSpend(fresh)
+  assert.equal(s.spent, 2.9)
+  assert.equal(s.cap, 3)
+  assert.ok(Math.abs(s.left - 0.1) < 1e-9, `left ${s.left}`)
+  // over the cap (an unknown send charged at its maximum): nothing left, never a negative figure
+  assert.deepEqual(m.serverSpend({ ...fresh, guild_spent_usd: 3.2 }), { spent: 3.2, cap: 3, left: 0 })
+  // no server total in the status: no figure, rather than the run's own spend that looks like money left
+  assert.equal(m.serverSpend({ id: 'r', state: 'piloted', budget_usd: 3, spent_usd: 0 }), null)
+  assert.equal(m.serverSpend({ id: 'r', state: 'piloted', guild_spent_usd: 1 }), null)
+  assert.equal(m.serverSpend(null), null)
+
+  // the estimate carries the server's totals already
+  assert.deepEqual(m.planSpend({ budget_usd: 3, spent_usd: 2.9, left_usd: 0.1 }), { spent: 2.9, cap: 3, left: 0.1 })
+  assert.deepEqual(m.planSpend({ budget_usd: 3, spent_usd: 1 }), { spent: 1, cap: 3, left: 2 })
+  assert.equal(m.planSpend({ budget_usd: 3 }), null)
+  assert.equal(m.planSpend(null), null)
+
+  // a server that keeps sensitive topics out: the estimate warns, the status counts what waits
+  assert.equal(m.pendingWarning({ warnings: ['no_sensitive_pending'] }), true)
+  assert.equal(m.pendingWarning({ warnings: [] }), false)
+  assert.equal(m.pendingWarning({}), false)
+  assert.equal(m.pendingWarning(null), false)
+  assert.equal(m.pendingClaims({ id: 'r', state: 'done', claims_pending: 7 }), 7)
+  assert.equal(m.pendingClaims({ id: 'r', state: 'done', claims_pending: 0 }), 0)
+  assert.equal(m.pendingClaims({ id: 'r', state: 'done' }), 0)
+  assert.equal(m.pendingClaims(null), 0)
+})
+
 test('the embedding switch refusal is recognised by its message key, not its English text', async () => {
   const { embedReindexAsk, EMBED_REINDEX_KEY } = await load('embedswitch.ts', [])
   assert.deepEqual(embedReindexAsk({ message_key: EMBED_REINDEX_KEY, args: { reindex: { rooms: 3, leaves: 120, tokens: 9000 } } }), { known: true, rooms: 3, leaves: 120, tokens: 9000 })
