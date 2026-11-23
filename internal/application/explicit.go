@@ -334,12 +334,12 @@ func (s *Service) rememberFact(ctx context.Context, db *storage.Store, in ChatIn
 		key = key[:40]
 	}
 	// "remember this" about someone else is also what the speaker told about them (a told claim), when the
-	// message names exactly one other person. It is stored on a no_hearsay server too: the option hides
-	// hearsay when it is read (contract §2.4), so turning it off later shows it.
+	// message names exactly one other person. It is stored on a no_hearsay or own_card_only server too: the
+	// options hide it when it is read (contract §2.4), so turning them off later shows it.
 	var about turnPerson
 	if !self && s.Doc().Memory.PeopleOn() {
 		var others []turnPerson
-		for _, p := range s.targetPeople(db, in, nil) {
+		for _, p := range s.toldPeople(db, in) {
 			if !p.caller {
 				others = append(others, p)
 			}

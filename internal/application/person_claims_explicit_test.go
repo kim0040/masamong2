@@ -82,6 +82,30 @@ func TestToldStoredUnderNoHearsay(t *testing.T) {
 	}
 }
 
+// Astra 20: on an own_card_only server a told statement is stored too and hidden when read (only the
+// caller's card is shown); turning the option off shows it.
+func TestToldStoredUnderOwnCardOnly(t *testing.T) {
+	t.Parallel()
+	s, m, e := memorySvc(t)
+	strict(t, s, config.GuildPrivacy{OwnCardOnly: true})
+	f := reviewPerson{s, m, e, time.Now().UTC().Add(-time.Hour)}
+	b := store.PersonRef("202")
+	f.source(t, "g", "c", "oc-label", "202", "영희", f.at)
+	f.source(t, "g", "c", "oc-line", "101", "민수", f.at.Add(time.Minute))
+	m.explicitAnswer(`{"intent":"remember","about":"other","fact":"영희는 oc-tea-sentinel을 좋아함","key":"drink","instruction":false}`)
+	turn(t, s, "101", "민수", "기억해, 영희는 oc-tea-sentinel 좋아해", live("oc-line"))
+	if n := personClaimCount(t, s, "source=? AND subject_ref=?", store.SourceExplicit, b); n != 1 {
+		t.Fatalf("a told statement on an own_card_only server is stored: %d", n)
+	}
+	if got := f.askIn(t, "c", "<@202> 어떤 사람이야?"); strings.Contains(got, "oc-tea-sentinel") {
+		t.Errorf("another person's card on an own_card_only server: %q", got)
+	}
+	strict(t, s, config.GuildPrivacy{})
+	if got := f.askIn(t, "c", "<@202> 어떤 사람이야?"); !strings.Contains(got, "oc-tea-sentinel") {
+		t.Errorf("the told statement after own_card_only is off: %q", got)
+	}
+}
+
 // Astra 21: forgetting everything from Discord with nothing stored yet still offers the confirmation and
 // records the cutoff a later backfill checks.
 func TestDiscordForgetAllWritesCutoff(t *testing.T) {
