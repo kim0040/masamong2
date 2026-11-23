@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import time
 import unittest
 from datetime import datetime, timezone
 
@@ -58,6 +60,35 @@ class SitesAgreeTests(unittest.TestCase):
         self.assertEqual(E._source_date("2026-03-05T00:30:00"), "2026-03-05")
         self.assertEqual(E._source_date("garbage"), "")
         self.assertEqual(E._source_date(None), "")
+
+
+@unittest.skipUnless(hasattr(time, "tzset"), "switching this process's zone needs time.tzset (POSIX)")
+class EpochZoneTests(unittest.TestCase):
+    """A naive time becomes an epoch in UTC, whatever zone this computer is in — the Go port's
+    corpus.Timestamp reads it the same way (only same-room differences are ever used, so the constant
+    offset cancels). The sandbox used to read it in the host zone, so a naive (Kakao) leaf's end ts
+    moved with the machine the sandbox ran on."""
+
+    NAIVE = "2026-01-10T20:00:00"
+    WANT = datetime(2026, 1, 10, 20, 0, tzinfo=timezone.utc).timestamp()
+
+    def test_naive_time_is_utc_epoch_in_every_zone(self) -> None:
+        saved = os.environ.get("TZ")
+        try:
+            for host_zone in ("UTC0", "KST-9", "PST8PDT"):
+                os.environ["TZ"] = host_zone
+                time.tzset()
+                self.assertEqual(parse_epoch(self.NAIVE), self.WANT, host_zone)
+                self.assertEqual(E._parse_ts(self.NAIVE), self.WANT, host_zone)
+                self.assertEqual(_parse_iso_ts(self.NAIVE), self.WANT, host_zone)
+                self.assertEqual(_parse_msg_ts({"parsed_time": self.NAIVE}), self.WANT, host_zone)
+                self.assertEqual(_parse_timestamp(self.NAIVE), self.WANT, host_zone)
+        finally:
+            if saved is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = saved
+            time.tzset()
 
 
 if __name__ == "__main__":

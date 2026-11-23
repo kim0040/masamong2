@@ -869,6 +869,42 @@ class EvidenceTimeFrameTests(unittest.TestCase):
             self.assertTrue(all(set(v) <= set(in_range) for v in visible), (host_zone, visible))
 
 
+@unittest.skipUnless(hasattr(time, "tzset"), "switching this process's zone needs time.tzset (POSIX)")
+class LeafTimeZoneTests(unittest.TestCase):
+    """The leaf end ts is the same instant on every computer: a naive (Kakao) end time counts from
+    UTC as the Go port's corpus.Timestamp does (search/index.go leafEndTS). The sandbox used to read
+    naive times in the host zone."""
+
+    @staticmethod
+    def _with_zone(host_zone: str, fn):
+        saved = os.environ.get("TZ")
+        os.environ["TZ"] = host_zone
+        time.tzset()
+        try:
+            return fn()
+        finally:
+            if saved is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = saved
+            time.tzset()
+
+    def test_naive_leaf_end_ts_is_the_utc_epoch_in_every_zone(self) -> None:
+        # leaf of LEAF messages ends on its last message; the kakao room's newest leaf ends 2026-01-11 03:00 naive.
+        want_ts = {
+            23: datetime(2026, 1, 10, 23, 0, tzinfo=timezone.utc).timestamp(),
+            3: datetime(2026, 1, 11, 3, 0, tzinfo=timezone.utc).timestamp(),
+        }
+        got = None
+        for host_zone in ("UTC0", "KST-9", "PST8PDT"):
+            index = self._with_zone(host_zone, lambda: build_index(messages=_kakao_messages()))
+            ts = dict(index.leaf_end_ts)
+            if got is None:
+                got = ts
+            self.assertEqual(ts, got, host_zone)
+            self.assertEqual(sorted(ts.values()), sorted(want_ts.values()), host_zone)
+
+
 class SoftEventRetrievalTests(unittest.TestCase):
     """Soft events are an opt-in candidate view over unchanged leaf evidence."""
 

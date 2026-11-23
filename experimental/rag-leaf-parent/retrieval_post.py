@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone, tzinfo
 from typing import Any, Iterable, Mapping
 
-from timeparse import normalize_iso
+from timeparse import normalize_iso, parse_epoch
 
 # Hybrid rank-list length defaults (overridable via config / _hybrid_rank args).
 LEXICAL_LIMIT = 200
@@ -234,12 +234,10 @@ def _parse_iso_dt(value: Any) -> tuple[datetime, bool] | None:
 
 
 def _parse_iso_ts(value: Any) -> float | None:
-    """Legacy epoch helper kept for the soft path. Not used for hard bounds (frame-blind)."""
+    """Legacy epoch helper kept for the soft path. Not used for hard bounds (frame-blind).
+    Same read as timeparse.parse_epoch: a naive time is placed in UTC, not this computer's zone."""
 
-    parsed = _parse_iso_dt(value)
-    if parsed is None:
-        return None
-    return parsed[0].timestamp()
+    return parse_epoch(value)
 
 
 def _frame_of(dt: datetime) -> str:
