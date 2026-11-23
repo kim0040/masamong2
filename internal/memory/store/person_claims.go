@@ -129,29 +129,55 @@ var PersonClaimDDL = []string{
 	) WITHOUT ROWID`,
 }
 
-// PersonClaimID is the claim's id: hex sha256 of guild \x00 subject \x00 speaker \x00 the sorted evidence
-// ids joined by ",". Every path that writes the same statement gets the same id, so writes are idempotent.
-func PersonClaimID(guild, subject, speaker string, evidence []string) string {
+// PersonClaimID is the claim's id: hex sha256 of guild \x00 subject \x00 speaker \x00 kind \x00 the topic
+// key \x00 the sorted evidence ids joined by ",". Every path that writes the same statement gets the same
+// id, so writes are idempotent; two statements of different kinds or topics cited from one message are
+// two rows.
+func PersonClaimID(guild, subject, speaker, kind, topic string, evidence []string) string {
 	ev := slices.Clone(evidence)
 	slices.Sort(ev)
 	ev = slices.Compact(ev)
-	sum := sha256.Sum256([]byte(guild + "\x00" + subject + "\x00" + speaker + "\x00" + strings.Join(ev, ",")))
+	sum := sha256.Sum256([]byte(guild + "\x00" + subject + "\x00" + speaker + "\x00" + kind + "\x00" + PersonTopic(topic) + "\x00" + strings.Join(ev, ",")))
 	return hex.EncodeToString(sum[:])
 }
 
+// personTopicSynonyms map the accepted names of the single-valued status topics to one key, so a hide,
+// a forget or a supersession by one name covers the others.
+var personTopicSynonyms = map[string]string{
+	"거주지": "residence", "사는 곳": "residence", "사는곳": "residence",
+	"직업": "job", "직장": "job",
+	"학교":    "school",
+	"생일":    "birthday",
+	"연애 상태": "relationship_status", "연애상태": "relationship_status", "relationship status": "relationship_status",
+}
+
 // PersonTopic is the normalized topic key part: NFC, lower case, spaces collapsed, at most
-// PersonTopicRunes runes ("" when nothing is left).
+// PersonTopicRunes runes ("" when nothing is left), with the synonyms of a single-valued status topic
+// written as its one key (직업 → job).
 func PersonTopic(s string) string {
 	s = strings.ToLower(norm.NFC.String(s))
 	s = strings.Join(strings.FieldsFunc(s, unicode.IsSpace), " ")
 	if utf8.RuneCountInString(s) > PersonTopicRunes {
 		s = strings.TrimSpace(string([]rune(s)[:PersonTopicRunes]))
 	}
+	if canon, ok := personTopicSynonyms[s]; ok {
+		return canon
+	}
 	return s
 }
 
 // PersonTopicKey is the suppress and supersession key of a claim: kind:topic.
 func PersonTopicKey(kind, topic string) string { return kind + ":" + PersonTopic(topic) }
+
+// PersonTextKey is the hide and forget key of what a claim says: a hash of its text (NFC, lower case,
+// spaces collapsed, people as their {@ref} tokens). A marker on it keeps the same statement hidden when
+// another writer cites another subset of the lines; the suppress table holds the hash, never the text.
+func PersonTextKey(text string) string {
+	t := strings.ToLower(norm.NFC.String(text))
+	t = strings.Join(strings.FieldsFunc(t, unicode.IsSpace), " ")
+	sum := sha256.Sum256([]byte(t))
+	return hex.EncodeToString(sum[:16])
+}
 
 // DiscordPersonRef reports whether ref is a Discord person reference (not kakao:, label: or empty).
 func DiscordPersonRef(ref string) bool {

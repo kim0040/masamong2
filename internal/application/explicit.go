@@ -832,7 +832,7 @@ func allForgetPlan(tx *sql.Tx, guild, ref string) forgetPlan {
 	}
 	rows, err := tx.Query(`SELECT 'episode',e.id,e.participants FROM channel_episode e WHERE e.guild_id=?1 AND EXISTS(SELECT 1 FROM json_each(e.participants) WHERE value=?2)
 		UNION ALL SELECT 'card',id,json_array(state,text,evidence,updated_at) FROM person_card_item WHERE guild_id=?1 AND person_ref=?2
-		UNION ALL SELECT 'claim',id,state FROM person_claim WHERE guild_id=?1 AND (subject_ref=?2 OR speaker_ref=?2)
+		UNION ALL SELECT 'claim',id,state FROM person_claim WHERE guild_id=?1 AND (subject_ref=?2 OR speaker_ref=?2 OR instr(text,'{@'||?2||'}')>0)
 		UNION ALL SELECT 'explicit',episode_id,key FROM memory_explicit WHERE guild_id=?1 AND person_ref=?2
 		UNION ALL SELECT 'relation',json_array(a_ref,b_ref),json_array(replies,mentions) FROM person_relation WHERE guild_id=?1 AND (a_ref=?2 OR b_ref=?2)
 		UNION ALL SELECT 'state',holder_id,'' FROM evidence_refs WHERE holder_kind=?3 AND source_id=?2 AND instr(holder_id,'state:'||?1||':')=1
@@ -1026,8 +1026,10 @@ func (s *Service) mineAction(ctx context.Context, req action.Request) action.Res
 	}
 	in := inputMap(req)
 	guild, user := strVal(in, "guild_id", ""), strVal(in, "user_id", "")
+	member, channel := false, ""
 	if inv := req.Invoker; inv != nil && inv.UserID != "" && (inv.Via == "command" || inv.Via == "chat" || !s.IsOperator(inv.UserID)) {
 		guild, user = inv.GuildID, inv.UserID // a member only ever sees and forgets their own
+		member, channel = true, inv.ChannelID
 	}
 	if guild == "" || user == "" {
 		return action.Fail(req, errcode.InvalidInput, "memory.mine.server_only", s.msg(req, "memory.mine.server_only"), nil)
@@ -1070,7 +1072,7 @@ func (s *Service) mineAction(ctx context.Context, req action.Request) action.Res
 		var eps int
 		_ = db.Reader().QueryRow(`SELECT COUNT(DISTINCT e.id) FROM channel_episode e, json_each(e.participants) x WHERE e.guild_id=? AND x.value=?`, guild, ref).Scan(&eps)
 		// person memory: names come from each statement's own room
-		person, claims := s.personClaimsView(ctx, db, guild, ref, labelIn)
+		person, claims := s.personClaimsView(ctx, db, guild, ref, channel, !member, labelIn)
 		card := []string{} // the active statements as lines (older clients read person_card)
 		for i, c := range claims {
 			if c.state != store.PersonActive {

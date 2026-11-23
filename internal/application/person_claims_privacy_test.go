@@ -114,7 +114,7 @@ func TestPersonClaimHideAndTopic(t *testing.T) {
 	if got := ask(); !strings.Contains(got, "민수는 국수를 좋아함 (영희 말)") {
 		t.Fatalf("hearsay with its source label: %q", got)
 	}
-	id := store.PersonClaimID("g", a, b, []string{said})
+	id := store.PersonClaimID("g", a, b, "like", "음식", []string{said})
 	if r := as(s, "memory.person.hide", map[string]any{"claim_id": id}, inChannel("202")); r.OK {
 		t.Fatal("a member hid a statement about someone else")
 	}

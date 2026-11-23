@@ -34,11 +34,15 @@ func writeSuppress(tx *sql.Tx, m store.PersonSuppress) error {
 	return err
 }
 
-// claimMarkers are the markers of one hidden or forgotten statement: the claim itself, and for what
-// someone else said with a topic, that topic about the subject (shown again only once the subject says it
-// themselves).
-func claimMarkers(guild, subject, speaker, kind, topic, id, by, at, now string) []store.PersonSuppress {
+// claimMarkers are the markers of one hidden or forgotten statement: the claim itself, what it says (its
+// text key, so the same words from other lines or another writer stay hidden), and for what someone else
+// said with a topic, that topic about the subject (shown again only once the subject says it themselves).
+func claimMarkers(guild, subject, speaker, kind, topic, text, id, by, at, now string) []store.PersonSuppress {
 	out := []store.PersonSuppress{{GuildID: guild, PersonRef: subject, Role: store.SuppressSubject, Scope: "claim:" + id, BeforeTS: at, By: by, CreatedAt: now}}
+	if text != "" {
+		out = append(out, store.PersonSuppress{GuildID: guild, PersonRef: subject, Role: store.SuppressSubject,
+			Scope: "text:" + store.PersonTextKey(text), BeforeTS: at, By: by, CreatedAt: now})
+	}
 	if subject != speaker && store.PersonTopic(topic) != "" {
 		out = append(out, store.PersonSuppress{GuildID: guild, PersonRef: subject, Role: store.SuppressSubject,
 			Scope: "topic:" + store.PersonTopicKey(kind, topic), BeforeTS: at, By: by, CreatedAt: now})
@@ -48,8 +52,8 @@ func claimMarkers(guild, subject, speaker, kind, topic, id, by, at, now string) 
 
 // hideClaimTx hides one claim and writes its markers. False when there is no such claim.
 func (s *Service) hideClaimTx(tx *sql.Tx, id, by string) (bool, error) {
-	var guild, subject, speaker, kind, topic string
-	err := tx.QueryRow(`SELECT guild_id,subject_ref,speaker_ref,kind,topic FROM person_claim WHERE id=?`, id).Scan(&guild, &subject, &speaker, &kind, &topic)
+	var guild, subject, speaker, kind, topic, text string
+	err := tx.QueryRow(`SELECT guild_id,subject_ref,speaker_ref,kind,topic,text FROM person_claim WHERE id=?`, id).Scan(&guild, &subject, &speaker, &kind, &topic, &text)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -60,7 +64,7 @@ func (s *Service) hideClaimTx(tx *sql.Tx, id, by string) (bool, error) {
 		return false, err
 	}
 	now := s.Clock.Now().UTC().Format(time.RFC3339)
-	for _, m := range claimMarkers(guild, subject, speaker, kind, topic, id, by, s.suppressStamp(), now) {
+	for _, m := range claimMarkers(guild, subject, speaker, kind, topic, text, id, by, s.suppressStamp(), now) {
 		if err := writeSuppress(tx, m); err != nil {
 			return false, err
 		}
@@ -69,8 +73,10 @@ func (s *Service) hideClaimTx(tx *sql.Tx, id, by string) (bool, error) {
 }
 
 // itemClaimsTx handles the statements about people that episode items give, when a member said the
-// items are wrong (hide) or forgot them: each gets its claim marker, and its row is hidden or deleted.
-// It returns how many rows changed.
+// items are wrong (hide) or forgot them: each gets its markers, and its row is hidden or deleted. The
+// statements are the ones the items derive, and every other claim resting on the items' lines that is
+// about someone the items name or was asked to be remembered there (a told claim of a "remember that"
+// item names its person only by label). It returns how many rows changed.
 func (s *Service) itemClaimsTx(tx *sql.Tx, items []string, hide bool, by string) (int, error) {
 	if len(items) == 0 || !tableExists(tx, "person_claim") {
 		return 0, nil
@@ -96,22 +102,28 @@ func (s *Service) itemClaimsTx(tx *sql.Tx, items []string, hide bool, by string)
 			return 0, err
 		}
 		for _, c := range derivedClaims(guild, it, authors) {
-			id := store.PersonClaimID(c.GuildID, c.SubjectRef, c.SpeakerRef, c.Evidence)
+			id := store.PersonClaimID(c.GuildID, c.SubjectRef, c.SpeakerRef, c.Kind, c.Topic, uniqueStrings(c.Evidence))
 			ids[id] = true
-			marks = append(marks, claimMarkers(c.GuildID, c.SubjectRef, c.SpeakerRef, c.Kind, c.Topic, id, by, stamp, now)...)
+			marks = append(marks, claimMarkers(c.GuildID, c.SubjectRef, c.SpeakerRef, c.Kind, c.Topic, c.Text, id, by, stamp, now)...)
 		}
-		rows, err := tx.Query(`SELECT id,guild_id,subject_ref,speaker_ref,kind,topic FROM person_claim WHERE source=?`, "episode_item:"+item)
+		lines, _ := json.Marshal(uniqueStrings(it.evidence))
+		named, _ := json.Marshal(uniqueStrings(episodes.TextRefs(it.text)))
+		rows, err := tx.Query(`SELECT id,guild_id,subject_ref,speaker_ref,kind,topic,text FROM person_claim WHERE source=?1
+			UNION SELECT c.id,c.guild_id,c.subject_ref,c.speaker_ref,c.kind,c.topic,c.text FROM evidence_refs r JOIN person_claim c ON c.id=r.holder_id
+			WHERE r.holder_kind=?2 AND r.source_id IN (SELECT value FROM json_each(?3)) AND c.guild_id=?4
+			AND (c.source=?5 OR c.subject_ref IN (SELECT value FROM json_each(?6)))`,
+			"episode_item:"+item, store.HolderPersonClaim, string(lines), guild, store.SourceExplicit, string(named))
 		if err != nil {
 			return 0, err
 		}
 		for rows.Next() {
-			var id, g, subject, speaker, kind, topic string
-			if err := rows.Scan(&id, &g, &subject, &speaker, &kind, &topic); err != nil {
+			var id, g, subject, speaker, kind, topic, text string
+			if err := rows.Scan(&id, &g, &subject, &speaker, &kind, &topic, &text); err != nil {
 				rows.Close()
 				return 0, err
 			}
 			ids[id] = true
-			marks = append(marks, claimMarkers(g, subject, speaker, kind, topic, id, by, stamp, now)...)
+			marks = append(marks, claimMarkers(g, subject, speaker, kind, topic, text, id, by, stamp, now)...)
 		}
 		err = rows.Err()
 		rows.Close()
@@ -146,7 +158,9 @@ func (s *Service) itemClaimsTx(tx *sql.Tx, items []string, hide bool, by string)
 }
 
 // forgetPersonTx is /잊어줘 (all) for person memory: markers on the person as subject and as speaker up
-// to now, then every claim about them or said by them in the server is deleted.
+// to now, then every claim about them, said by them or naming them in its text in the server is deleted.
+// The markers are written even when nothing is stored yet: they are the cutoff a later extraction or
+// backfill checks.
 func (s *Service) forgetPersonTx(tx *sql.Tx, guild, ref, by string) (int, error) {
 	if !tableExists(tx, "person_claim") {
 		return 0, nil
@@ -158,6 +172,71 @@ func (s *Service) forgetPersonTx(tx *sql.Tx, guild, ref, by string) (int, error)
 		}
 	}
 	return deleteClaimsOf(tx, guild, ref, true)
+}
+
+// personStatementSuppressedTx reports whether a forget or hide marker, or a member's correction, covers a
+// statement that is not stored as a claim (a pilot answer of the paid backfill): the checks the write gate
+// makes for markers. c needs GuildID, SubjectRef, SpeakerRef, Kind, Topic, Text and Evidence. ObservedAt
+// may be left empty: it is then the newest evidence time, and when an evidence line is gone or has no
+// time every marker matches (fail closed).
+func (s *Service) personStatementSuppressedTx(tx *sql.Tx, c store.PersonClaim) (bool, error) {
+	if !tableExists(tx, "person_memory_suppress") {
+		return false, nil
+	}
+	c.Evidence = uniqueStrings(c.Evidence)
+	c.Topic = store.PersonTopic(c.Topic)
+	c.Text = strings.Join(strings.Fields(c.Text), " ")
+	c.ID = store.PersonClaimID(c.GuildID, c.SubjectRef, c.SpeakerRef, c.Kind, c.Topic, c.Evidence)
+	if c.ObservedAt == "" {
+		naive := s.naiveZone()
+		var newest time.Time
+		for _, id := range c.Evidence {
+			var parsed string
+			if err := tx.QueryRow(`SELECT parsed_time FROM memory_observations WHERE observation_id=?`, id).Scan(&parsed); err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return false, err
+			}
+			t, ok := s.obsTime(parsed, naive)
+			if !ok {
+				newest = time.Time{}
+				break
+			}
+			if t.After(newest) {
+				newest = t
+			}
+		}
+		if !newest.IsZero() {
+			c.ObservedAt = newest.UTC().Format(store.PersonClaimStamp)
+		}
+	}
+	if hit, err := personSuppressed(tx, c); err != nil || hit {
+		return hit, err
+	}
+	return correctedLines(tx, c.SubjectRef, c.Evidence)
+}
+
+// deleteEpisodeClaimsTx deletes the claims resting on an episode an operator deletes: the ones its items
+// derive, and for a remembered fact ("remember this", an explicit episode) the explicit claims on its
+// message, which follow no item.
+func deleteEpisodeClaimsTx(tx *sql.Tx, episode string) error {
+	if !tableExists(tx, "person_claim") {
+		return nil
+	}
+	if _, err := deleteClaimsWhere(tx, `SELECT c.id FROM episode_item i JOIN person_claim c ON c.source='episode_item:'||i.id WHERE i.episode_id=?`, episode); err != nil {
+		return err
+	}
+	_, err := deleteClaimsWhere(tx, `SELECT c.id FROM person_claim c JOIN channel_episode e ON e.id=? WHERE e.source=? AND c.source=? AND c.guild_id=e.guild_id
+		AND EXISTS(SELECT 1 FROM json_each(c.evidence) a JOIN json_each(e.segment) b ON a.value=b.value)`, episode, explicitSource, store.SourceExplicit)
+	return err
+}
+
+// deleteRoomClaimsTx deletes the claims of a room's memory an operator deletes: the ones derived from its
+// items and the explicit ones said there.
+func deleteRoomClaimsTx(tx *sql.Tx, room string) error {
+	if !tableExists(tx, "person_claim") {
+		return nil
+	}
+	_, err := deleteClaimsWhere(tx, `SELECT id FROM person_claim WHERE room_id=? AND (source=? OR (source>='episode_item:' AND source<'episode_item;'))`, room, store.SourceExplicit)
+	return err
 }
 
 // personAction is memory.person.hide {guild_id, user_id, claim_id}: one claim about the person is hidden
@@ -200,9 +279,10 @@ func (s *Service) personAction(ctx context.Context, req action.Request) action.R
 }
 
 // personClaimsView is the person field of memory.mine.show: the statements about the person the gate
-// lets through (active and pending), with who said each one when it was someone else.
-func (s *Service) personClaimsView(ctx context.Context, db *storage.Store, guild, ref string, labelIn func(room string) func(string) string) ([]map[string]any, []claimRow) {
-	claims, err := s.claimsAbout(ctx, db, guild, ref)
+// lets through (claimsAbout: a member sees the channel's scope, the console every active and pending
+// one), with who said each one when it was someone else.
+func (s *Service) personClaimsView(ctx context.Context, db *storage.Store, guild, ref, channel string, operator bool, labelIn func(room string) func(string) string) ([]map[string]any, []claimRow) {
+	claims, err := s.claimsAbout(ctx, db, guild, ref, channel, operator)
 	if err != nil {
 		return []map[string]any{}, nil
 	}
@@ -230,8 +310,9 @@ func personKindFor(key string) string {
 }
 
 // saveExplicitClaim writes what a member asked to have remembered as a person claim (source explicit),
-// through the write gate: about themselves it upgrades the statement the item gave (same id); about one
-// other person the turn named (about), it is a told claim about that person.
+// through the write gate: about themselves it replaces the statement the item gave (its derived twin, the
+// same words on the same line; writePersonClaim); about one other person the turn named (about), it is a
+// told claim about that person.
 func (s *Service) saveExplicitClaim(tx *sql.Tx, guild, ref string, self bool, about turnPerson, key, text, obs string) error {
 	if !s.Doc().Memory.PeopleOn() || !tableExists(tx, "person_claim") {
 		return nil
