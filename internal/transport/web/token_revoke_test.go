@@ -285,14 +285,16 @@ func TestLeftoverCodeFromBeforeARotationIsRefused(t *testing.T) {
 	}
 }
 
-// Codes and saved sessions written by an older version record no tag. They still work when they are
-// newer than the token file (an update keeps the browser signed in, an older menu bar icon still opens
-// it) and are refused when they are older, since then they may be from before a re-issue.
-func TestUntaggedCodesAndSessionsCountOnlyAfterTheToken(t *testing.T) {
+// Codes and saved sessions written by an older version record no tag. Once a token exists — every
+// token has a tag — an untagged file is treated as made with an unknown token and refused, however
+// new it looks next to the token file: a clock rollback before a re-issue would otherwise make a
+// file from before it look newer than the replacement. One that records the current tag still works.
+func TestUntaggedCodesAndSessionsAreRefusedWithATaggedToken(t *testing.T) {
 	s, _ := testServer(t)
 	root := s.svc.DataRoot
 	now := time.Now()
-	tokenAt := now.Add(-30 * time.Second)
+	// as if a clock rollback left the replacement token's file time far in the past
+	tokenAt := now.Add(-time.Hour)
 	if err := os.Chtimes(TokenPath(root), tokenAt, tokenAt); err != nil {
 		t.Fatal(err)
 	}
@@ -310,18 +312,22 @@ func TestUntaggedCodesAndSessionsCountOnlyAfterTheToken(t *testing.T) {
 		}
 	}
 	before, after := strings.Repeat("a", 36), strings.Repeat("b", 36)
-	untagged(before, now.Add(-time.Minute))
+	untagged(before, now.Add(-30*time.Second))
 	untagged(after, now)
 	if ConsumeOnce(root, before, s.currentTag(), now) {
-		t.Fatal("an untagged code older than the token signed in")
+		t.Fatal("an untagged code signed in")
 	}
-	if !ConsumeOnce(root, after, s.currentTag(), now) {
-		t.Fatal("an untagged code newer than the token was refused")
+	if ConsumeOnce(root, after, s.currentTag(), now) {
+		t.Fatal("an untagged code that looks newer than the token signed in")
+	}
+	if code, err := CreateOnce(root); err != nil || !ConsumeOnce(root, code, s.currentTag(), now) {
+		t.Fatalf("a code made with the current token was refused: %v", err)
 	}
 
 	legacy := map[string]map[string]any{
 		"before": {"CSRF": "c1", "Created": now.Add(-time.Minute), "Expires": now.Add(time.Hour), "Agent": "browser"},
 		"after":  {"CSRF": "c2", "Created": now, "Expires": now.Add(time.Hour), "Agent": "browser"},
+		"tagged": {"CSRF": "c3", "Created": now, "Expires": now.Add(time.Hour), "Agent": "browser", "Tag": s.currentTag()},
 	}
 	raw, _ := json.Marshal(legacy)
 	if err := os.WriteFile(sessionsPath(root), raw, 0o600); err != nil {
@@ -332,7 +338,10 @@ func TestUntaggedCodesAndSessionsCountOnlyAfterTheToken(t *testing.T) {
 	if restarted.cookieSignsIn("before") {
 		t.Fatal("an untagged session older than the token was restored")
 	}
-	if !restarted.cookieSignsIn("after") {
-		t.Fatal("an untagged session newer than the token was not restored")
+	if restarted.cookieSignsIn("after") {
+		t.Fatal("an untagged session that looks newer than the token was restored")
+	}
+	if !restarted.cookieSignsIn("tagged") {
+		t.Fatal("a session made with the current token was refused")
 	}
 }

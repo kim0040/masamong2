@@ -497,8 +497,8 @@ func (st *sessionStore) save(dataRoot string, now time.Time) error {
 }
 
 // load restores the sessions a restart kept, only those made with the token whose tag is tag: a file
-// left by an interrupted re-issue holds sessions of the old token. One saved by an older version, which
-// records no tag, takes this tag when it is newer than the token file (see madeWith).
+// left by an interrupted re-issue holds sessions of the old token, and one saved by an older version
+// records no tag at all — both are refused (see madeWith).
 func (st *sessionStore) load(dataRoot string, now time.Time, tag string) {
 	raw, err := os.ReadFile(sessionsPath(dataRoot))
 	if err != nil {
@@ -512,7 +512,7 @@ func (st *sessionStore) load(dataRoot string, now time.Time, tag string) {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	for id, sess := range saved {
-		if now.Before(sess.Expires) && madeWith(dataRoot, sess.Tag, tag, sess.Created) {
+		if now.Before(sess.Expires) && madeWith(sess.Tag, tag) {
 			sess.Tag = tag
 			st.byID[id] = sess
 		}
