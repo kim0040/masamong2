@@ -3,9 +3,12 @@ package application
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -39,7 +42,11 @@ func TestStagedFileIsHashedAndCopiedFromTheCheckedHandle(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Rename(swapped, spelled); err != nil {
-		t.Fatal(err)
+		// Windows refuses to replace a file another handle holds open (Go opens without
+		// FILE_SHARE_DELETE): the path cannot be swapped at all, and the copy below still checks the handle
+		if runtime.GOOS != "windows" || !errors.Is(err, fs.ErrPermission) {
+			t.Fatal(err)
+		}
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		t.Fatal(err)
