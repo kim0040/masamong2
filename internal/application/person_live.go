@@ -3,6 +3,8 @@ package application
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -179,6 +181,12 @@ func (s *Service) extractSelfStatement(ctx context.Context, db *storage.Store, r
 	if !s.selfStatement(r, lines, bots, botRef) {
 		return ps, nil
 	}
+	// what is no longer current is never sent (the gate's check after the answer could not undo that):
+	// when the line is dropped there is nothing to ask
+	lines, err = s.sendableLines(db, r, lines)
+	if err != nil || !slices.ContainsFunc(lines, func(l roomLine) bool { return !l.Bot }) {
+		return ps, err
+	}
 	msgs := segmentMessages(lines, bots)
 	readAt := s.Clock.Now().UTC().Format(time.RFC3339Nano)
 	in := s.personBuild(db, r, episodes.Input{Lines: msgs, BotName: botName, Now: lines[len(lines)-1].At, Location: s.instanceZone(),
@@ -209,6 +217,63 @@ func (s *Service) extractSelfStatement(ctx context.Context, db *storage.Store, r
 	}
 	ps.claims, err = s.savePeopleOnly(ctx, db, r, lines, claims)
 	return ps, err
+}
+
+// sendableLines are the lines of a segment that may still be sent to a model: a human line is dropped when
+// its observation is gone, deleted or changed, a deletion or edit intent was committed for it
+// (store.ObservationCurrent, which also refuses a blocked account), its author withdrew memory or profile
+// consent or is blocked here (deniedPeople) or has a tombstone of their own (store.SourceBlocked); every
+// line goes when the room is a deleted thread (threadDeleted). Bot lines are kept: segmentMessages keeps
+// only the replies to the lines that remain.
+func (s *Service) sendableLines(db *storage.Store, r memRoom, lines []roomLine) ([]roomLine, error) {
+	if s.threadDeleted(r.channel) {
+		return nil, nil
+	}
+	tx, err := db.Reader().Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	denied, err := s.deniedPeople(tx, r.guild)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]roomLine, 0, len(lines))
+	for _, l := range lines {
+		if l.Bot {
+			out = append(out, l)
+			continue
+		}
+		var content, deleted string
+		err := tx.QueryRow(`SELECT content, deleted_at FROM memory_observations WHERE observation_id=?`, l.ID).Scan(&content, &deleted)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if deleted != "" || strings.TrimSpace(content) != l.Text {
+			continue
+		}
+		if current, err := store.ObservationCurrent(tx, l.ID); err != nil || !current {
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		ref := personRefOf(r, l.Message)
+		if denied[ref] {
+			continue
+		}
+		if blocked, err := store.SourceBlocked(tx, ref); err != nil || blocked {
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		out = append(out, l)
+	}
+	return out, nil
 }
 
 // savePeopleOnly saves claims of a segment that made no episode: the same transaction rule as

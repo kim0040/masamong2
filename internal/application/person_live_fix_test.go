@@ -154,3 +154,88 @@ func oneLine(t *testing.T, svc *application.Service, eng *engine.Engine, id, tex
 	svc.Observe(application.ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: id + "r", AuthorID: "bot", AuthorName: "마사몽", Content: "그렇구나",
 		FromBot: true, ReplyTo: id, At: at.Add(20 * time.Second)})
 }
+
+// Nothing stale goes out: before the one-line people-only request is sent, a line that is no longer
+// current is dropped (a committed deletion or edit intent whose observation is still stored, withdrawn
+// memory or profile consent, a blocked account, a deleted thread), and with no line left no call is
+// made. A current addressed line, in the channel or in a live thread, is still asked about (controls).
+func TestLiveOneLineDoesNotSendTombstonedText(t *testing.T) {
+	t.Parallel()
+	const marker = "r3-stale-marker"
+	now := func() string { return time.Now().UTC().Format(time.RFC3339Nano) }
+	for name, tc := range map[string]struct {
+		channel string
+		stale   func(t *testing.T, svc *application.Service)
+		asked   bool
+	}{
+		"current line": {"c", nil, true},
+		"live thread":  {"t1", nil, true},
+		"message tombstone": {"c", func(t *testing.T, svc *application.Service) {
+			if _, err := svc.Store.DB.Exec(`INSERT INTO privacy_tombstones(kind,source_id,at) SELECT 'message',native_message_id,? FROM memory_observations WHERE instr(content,?)>0`, now(), marker); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		"memory withdrawn": {"c", func(t *testing.T, svc *application.Service) {
+			if _, err := svc.Store.DB.Exec(`INSERT INTO consent_state(user_id,scope,status,updated_at) VALUES('u1','memory','withdrawn',?)`, now()); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		"profile withdrawn": {"c", func(t *testing.T, svc *application.Service) {
+			if _, err := svc.Store.DB.Exec(`INSERT INTO consent_state(user_id,scope,status,updated_at) VALUES('u1','profile','withdrawn',?)`, now()); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		"account tombstone": {"c", func(t *testing.T, svc *application.Service) {
+			if _, err := svc.Store.DB.Exec(`INSERT INTO privacy_tombstones(kind,source_id,at) VALUES('source',?,?)`, store.PersonRef("u1"), now()); err != nil {
+				t.Fatal(err)
+			}
+		}, false},
+		"blocked account": {"c", func(t *testing.T, svc *application.Service) {
+			applyDoc(t, svc, func(d *config.Document) { d.Access.BlockedUsers = []string{"u1"} })
+		}, false},
+		"deleted thread": {"t1", func(t *testing.T, svc *application.Service) { svc.ThreadDeleted("t1") }, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			svc, m, eng := roomSvc(t)
+			m.extract = func(string) string {
+				return `{"people":[{"about":"p1","kind":"status","topic":"residence","text":"{p1}는 광양에 산다","by":["p1"],"ev":["m1"]}]}`
+			}
+			at := time.Now().Add(-8 * time.Hour)
+			if tc.channel != "c" {
+				svc.NoteThread("g", tc.channel, "c", false)
+			}
+			if ok, err := eng.Capture(engine.LiveMessage{GuildID: "g", ChannelID: tc.channel, MessageID: "6301", AuthorID: "u1", AuthorName: "철수",
+				Content: "나 " + marker + " 광양에 살아 요즘", At: at}); err != nil || !ok {
+				t.Fatal(ok, err)
+			}
+			svc.Observe(application.ObservedMessage{GuildID: "g", ChannelID: tc.channel, MessageID: "6301r", AuthorID: "bot", AuthorName: "마사몽",
+				Content: "그렇구나", FromBot: true, ReplyTo: "6301", At: at.Add(20 * time.Second)})
+			if tc.stale != nil {
+				tc.stale(t, svc)
+			}
+			var stored int
+			if err := svc.Store.Reader().QueryRow(`SELECT COUNT(*) FROM memory_observations WHERE deleted_at='' AND instr(content,?)>0`, marker).Scan(&stored); err != nil || stored != 1 {
+				t.Fatalf("the observation is not kept for the check: %d %v", stored, err)
+			}
+			rep := svc.RunRoomMemory(context.Background())
+			sent := 0
+			m.mu.Lock()
+			for _, p := range m.prompts["episode"] {
+				if strings.Contains(p, marker) {
+					sent++
+				}
+			}
+			m.mu.Unlock()
+			if tc.asked {
+				if sent != 1 || rep.PeopleCalls() != 1 || rep.PeopleClaims() != 1 {
+					t.Fatalf("control: the current line was not asked about once: sent=%d %+v", sent, rep)
+				}
+				return
+			}
+			if sent != 0 || rep.PeopleCalls() != 0 || rep.PeopleClaims() != 0 {
+				t.Fatalf("a line that is no longer current was sent: sent=%d calls=%d claims=%d", sent, rep.PeopleCalls(), rep.PeopleClaims())
+			}
+		})
+	}
+}
