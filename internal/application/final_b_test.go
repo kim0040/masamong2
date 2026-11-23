@@ -228,7 +228,7 @@ func TestFinalBBackfillResumesBetweenBatches(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer again.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second) // the work is 701 turns; -race on a loaded host is slow
 	defer cancel()
 	again.kickRedaction()
 	again.DrainRedactions(ctx)

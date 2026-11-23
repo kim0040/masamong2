@@ -171,8 +171,16 @@ func TestConsentChecksDoNotHoldAReaderWhileTheWriterIsBusy(t *testing.T) {
 		done := make(chan result, 1)
 		go func() { l, err := s.styleLines(db, "g", "c"); done <- result{l, err} }()
 		testutil.WaitFor(t, 15*time.Second, "the consent check to wait for the writer", func() bool { return db.DB.Stats().WaitCount > waits })
-		if n := db.Reader().Stats().InUse; n != 0 {
-			t.Fatalf("%d reader connection(s) held while waiting for the writer", n)
+		// a held reader stays held for the whole wait; a background job's short use of the pool (slow under
+		// -race) ends, so the check waits for the pool to be free rather than sampling it once
+		var inUse int
+		for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+			if inUse = db.Reader().Stats().InUse; inUse == 0 {
+				break
+			}
+		}
+		if inUse != 0 {
+			t.Fatalf("%d reader connection(s) held while waiting for the writer", inUse)
 		}
 		release()
 		r := <-done
