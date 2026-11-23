@@ -329,6 +329,26 @@ func BackfillWindows(q backfillQuerier, runID string, pilotOnly bool, states ...
 	return out, rows.Err()
 }
 
+// BackfillAnswered lists the pilot windows holding stored answers of the server's runs (every server's
+// when guild is "").
+func BackfillAnswered(q backfillQuerier, guild string) ([]BackfillWindow, error) {
+	rows, err := q.Query(`SELECT `+backfillWindowCols+` FROM people_backfill_window WHERE run_id IN (SELECT id FROM people_backfill_run WHERE ?='' OR guild_id=?)
+		AND pilot=1 AND result<>'' ORDER BY run_id, seq`, guild, guild)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BackfillWindow
+	for rows.Next() {
+		w, err := scanBackfillWindow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
 // BackfillQueue is the first limit queued windows of a run, in plan order (a run never reads its whole
 // queue at once).
 func BackfillQueue(q backfillQuerier, runID string, limit int) ([]BackfillWindow, error) {

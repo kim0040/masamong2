@@ -1,6 +1,7 @@
 package application
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1681,5 +1682,164 @@ func TestPeopleBackfillPilotDetectsSwappedSubjects(t *testing.T) {
 	worded := []episodes.PersonFact{fact("a", "trait", "green tea"), fact("b", "like", "white rice")}
 	if n := review(agreed, worded); n != 0 {
 		t.Fatalf("other words, same people: %d disagreements", n)
+	}
+}
+
+// pbStoredFacts are the facts of every stored pilot answer of the run.
+func pbStoredFacts(t *testing.T, s *Service, runID string) []episodes.PersonFact {
+	t.Helper()
+	ws, err := store.BackfillWindows(s.Store.Reader(), runID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []episodes.PersonFact
+	for _, w := range ws {
+		for _, a := range pbAnswers(w.Result) {
+			out = append(out, a.Facts...)
+		}
+	}
+	return out
+}
+
+// pbNames reports whether a fact is about, by or names the person.
+func pbNames(f episodes.PersonFact, ref string) bool {
+	return f.About == ref || slices.Contains(f.By, ref) || strings.Contains(f.Text, "{@"+ref+"}")
+}
+
+// pbRecheck writes in one transaction, then calls the pilot purge hook in it.
+func pbRecheck(t *testing.T, s *Service, stmt string, args ...any) {
+	t.Helper()
+	if err := s.Store.WithWriter(func(tx *sql.Tx) error {
+		if _, err := tx.Exec(stmt, args...); err != nil {
+			return err
+		}
+		return s.pbRecheckPilotTx(tx, "g1")
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The pilot review runs every fact through the write gate: after Joon's forget-all marker nothing about or
+// by him is shown, even before the stored copy is purged; the purge hook then takes his facts out of the
+// stored answers.
+func TestPeopleBackfillReviewHonorsForget(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	_, run := pbPiloted(t, s, nil)
+	joon := store.PersonRef("102")
+	review := func() []any {
+		res, out := pbExec(t, s, "memory.people.backfill.review", map[string]any{"guild_id": "g1"})
+		if !res.OK || out["available"] != true {
+			t.Fatalf("review: %+v %v", res.Error, out)
+		}
+		return out["items"].([]any)
+	}
+	shows := func(items []any) bool {
+		for _, it := range items {
+			m := it.(map[string]any)
+			if m["subject"] == "Joon" || slices.Contains(m["speakers"].([]any), any("Joon")) || strings.Contains(m["text"].(string), "Joon") {
+				return true
+			}
+		}
+		return false
+	}
+	if !shows(review()) {
+		t.Fatal("the review set has nothing of Joon to start with")
+	}
+	for _, role := range []string{"subject", "speaker"} {
+		if _, err := s.Store.DB.Exec(`INSERT INTO person_memory_suppress(guild_id,person_ref,role,scope,before_ts,by,created_at) VALUES('g1',?,?,'all','9999-12-31T00:00:00.000000000Z','self','x')`,
+			joon, role); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if shows(review()) {
+		t.Fatal("the review shows statements of a person who forgot them")
+	}
+	pbRecheck(t, s, `SELECT 1`)
+	for _, f := range pbStoredFacts(t, s, run.ID) {
+		if f.About == joon || slices.Contains(f.By, joon) {
+			t.Fatalf("a forgotten statement stays in the stored pilot answers: %+v", f)
+		}
+	}
+	if len(pbStoredFacts(t, s, run.ID)) == 0 {
+		t.Fatal("the purge took everything")
+	}
+}
+
+// The stored pilot copy goes with a deletion, an edit and a withdrawal, through the hook called in the
+// same transaction.
+func TestPeopleBackfillPilotCopyPurged(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	_, run := pbPiloted(t, s, nil)
+	facts := pbStoredFacts(t, s, run.ID)
+	if len(facts) < 3 {
+		t.Fatalf("stored facts: %d", len(facts))
+	}
+	cites := func(id string) bool {
+		for _, f := range pbStoredFacts(t, s, run.ID) {
+			if slices.Contains(f.Ev, id) {
+				return true
+			}
+		}
+		return false
+	}
+	deleted, edited := facts[0].Ev[0], ""
+	for _, f := range facts {
+		if !slices.Contains(f.Ev, deleted) {
+			edited = f.Ev[0]
+			break
+		}
+	}
+	pbRecheck(t, s, `UPDATE memory_observations SET deleted_at='2026-11-01T00:00:00Z', content='' WHERE observation_id=?`, deleted)
+	if cites(deleted) {
+		t.Fatal("a deleted line's facts stay in the pilot answers")
+	}
+	pbRecheck(t, s, `UPDATE memory_observations SET content='something else entirely', edited_at='2099-01-01T00:00:00Z' WHERE observation_id=?`, edited)
+	if cites(edited) {
+		t.Fatal("an edited line's facts stay in the pilot answers")
+	}
+	mina := store.PersonRef("101")
+	pbRecheck(t, s, `INSERT INTO consent_state(user_id,scope,status,updated_at) VALUES('101','memory','withdrawn','2026-11-01T00:00:00Z')`)
+	left := pbStoredFacts(t, s, run.ID)
+	for _, f := range left {
+		if pbNames(f, mina) {
+			t.Fatalf("a withdrawn person's fact stays in the pilot answers: %+v", f)
+		}
+	}
+	if len(left) == 0 {
+		t.Fatal("the purge took everything")
+	}
+}
+
+// An answer that arrives after a withdrawal keeps nothing of the withdrawn person: the stored answer goes
+// through the gate in the transaction that stores it.
+func TestPeopleBackfillPilotAnswerAfterWithdrawal(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	var once sync.Once
+	h.mu.Lock()
+	h.rewrite = func(model, prompt string) (string, string, bool) {
+		once.Do(func() {
+			if _, err := s.Store.DB.Exec(`INSERT INTO consent_state(user_id,scope,status,updated_at) VALUES('101','memory','withdrawn','2026-11-01T00:00:00Z')`); err != nil {
+				t.Error(err)
+			}
+		})
+		return "", "", false // the answer the prompt asked for, Mina's facts included
+	}
+	h.mu.Unlock()
+	_, run := pbPiloted(t, s, nil)
+	mina := store.PersonRef("101")
+	facts := pbStoredFacts(t, s, run.ID)
+	for _, f := range facts {
+		if pbNames(f, mina) {
+			t.Fatalf("an answer stored after the withdrawal kept her fact: %+v", f)
+		}
+	}
+	if len(facts) == 0 {
+		t.Fatal("nothing stored")
 	}
 }
