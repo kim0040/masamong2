@@ -2413,6 +2413,63 @@ func TestPeopleBackfillDoesNotSendDeletedThread(t *testing.T) {
 			}
 		}
 	})
+	// A window of an ordinary room shows a mentioned person's label that only the thread gave. The thread
+	// is deleted between that window's build and its send: the check before the send refuses it, the
+	// window is built again without the label, and its lines still go (Joon's line is the control).
+	t.Run("pilot label", func(t *testing.T) {
+		h := newPBHost(t)
+		s := pbService(t, h, "anthropic")
+		pbSeed(t, s, 70)
+		pbThreadLabelSeed(t, s)
+		var armed atomic.Bool
+		armed.Store(true)
+		hit := pbDeleteThreadOnMention(t, s, &armed)
+		pbPiloted(t, s, nil)
+		if !hit.Load() {
+			t.Fatal("no window that mentions the person was built in the pilot")
+		}
+		sent := h.bodies()
+		if strings.Contains(sent, pbLabelSentinel) {
+			t.Fatal("the label only the deleted thread gave left the process")
+		}
+		if !strings.Contains(sent, "mentionctl") || !strings.Contains(sent, "mentionday") {
+			t.Fatal("control: the lines of the windows that mention the person were not sent")
+		}
+	})
+	t.Run("run label", func(t *testing.T) {
+		h := newPBHost(t)
+		s := pbService(t, h, "anthropic")
+		pbSeed(t, s, 70)
+		pbThreadLabelSeed(t, s)
+		var armed atomic.Bool
+		hit := pbDeleteThreadOnMention(t, s, &armed)
+		token, run := pbPiloted(t, s, nil)
+		if bp := pbMentionWindowPrompt(t, s, run.ID); !strings.Contains(bp.user, pbLabelSentinel) {
+			t.Fatal("control: while the thread lives, a window that mentions the person does not show its label")
+		}
+		h.mu.Lock()
+		creates := len(h.creates)
+		h.mu.Unlock()
+		armed.Store(true)
+		if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+			t.Fatal(res.Error)
+		}
+		pbWait(t, s, "run", pbState(store.BackfillDone))
+		if !hit.Load() {
+			t.Fatal("no window that mentions the person was built in the run")
+		}
+		var all []string
+		for _, c := range h.creations()[creates:] {
+			pbStrings(c, "", &all)
+		}
+		batches := strings.Join(all, "\n")
+		if strings.Contains(batches, pbLabelSentinel) {
+			t.Fatal("the label only the deleted thread gave went out in a batch")
+		}
+		if !strings.Contains(batches, "mentionctl") || !strings.Contains(batches, "mentionday") {
+			t.Fatal("control: the lines of the windows that mention the person were not sent in a batch")
+		}
+	})
 }
 
 // The pilot review follows chat's hidden-topic rule: once hearsay on a topic about a person was hidden,
