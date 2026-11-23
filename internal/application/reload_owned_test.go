@@ -11,6 +11,7 @@ import (
 // deleting the data folder on Windows. The race itself cannot be forced, so this guards the structure:
 // no unowned goroutine may call Reload.
 func TestIndexReloadGoroutinesAreOwnedByTheService(t *testing.T) {
+	t.Parallel()
 	for _, file := range []string{"memory_blocks.go", "memory.go", "revisions.go", "memory_review.go", "channels.go"} {
 		raw, err := os.ReadFile(file)
 		if err != nil {

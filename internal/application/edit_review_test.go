@@ -23,6 +23,7 @@ import (
 // picture list already follows, and the reply on the edited message's new words stays. An edit settled after that
 // mark, or a turn with no mark at all, has no such excuse.
 func TestATurnWithAPictureIsJudgedByTheMarkBeforeItsPictures(t *testing.T) {
+	t.Parallel()
 	svc, _ := visionSvc(t)
 	// bob's turns read alice's message only in a channel that shows them everyone's
 	applyDoc(t, svc, func(d *config.Document) {
@@ -58,6 +59,7 @@ func TestATurnWithAPictureIsJudgedByTheMarkBeforeItsPictures(t *testing.T) {
 // The picture of the edited message itself, described for a model that cannot see: the description's source is
 // judged by the same mark, and the turn still goes when the message does.
 func TestADescribedPictureOfAnEditedMessage(t *testing.T) {
+	t.Parallel()
 	svc, h := visionSvc(t)
 	h.blind.Store(true)
 	url, _ := picture(t)
@@ -91,6 +93,7 @@ func TestADescribedPictureOfAnEditedMessage(t *testing.T) {
 
 // A command's result: the connector takes the mark before the command runs.
 func TestATurnWithAResultIsJudgedByTheMarkBeforeTheCommand(t *testing.T) {
+	t.Parallel()
 	svc, _ := editSvc(t)
 	chainTurn(t, svc, "c", "secret", "alice")
 	before := svc.SettledMark()
@@ -135,6 +138,7 @@ func mergedTurn(t *testing.T, svc *application.Service, channel string) string {
 
 // A burst answered as one turn holds the words of all its messages under the ID of the last one.
 func TestAMergedTurnGoesWithAnyOfItsMessages(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"delete", "edit", "blank"} {
 		t.Run(change, func(t *testing.T) {
 			svc, _ := editSvc(t)
@@ -175,6 +179,7 @@ func TestAMergedTurnGoesWithAnyOfItsMessages(t *testing.T) {
 
 // The last message of the burst: an edit keeps the turn with its new words, which is all that is left of the burst.
 func TestAMergedTurnWithItsLastMessageChanged(t *testing.T) {
+	t.Parallel()
 	svc, _ := editSvc(t)
 	merged := mergedTurn(t, svc, "c")
 	changeSource(t, svc, "edit", "last", "alice")
@@ -193,6 +198,7 @@ func TestAMergedTurnWithItsLastMessageChanged(t *testing.T) {
 
 // Deleted while the turn is under way: the connector read the words before any mark, and nothing excuses them.
 func TestAFragmentChangedDuringTheTurn(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"delete", "edit"} {
 		t.Run(change, func(t *testing.T) {
 			svc, prompts := editSvc(t)
@@ -224,6 +230,7 @@ func TestAFragmentChangedDuringTheTurn(t *testing.T) {
 // A live turn's words came from the connector before its mark, whatever the mark says. An edit settled in between
 // must not excuse them: the turn holds the words the edit replaced.
 func TestALiveTurnOfAnEditedMessageIsNotExcused(t *testing.T) {
+	t.Parallel()
 	svc, _ := editSvc(t)
 	chainTurn(t, svc, "c", "secret", "alice")
 	changeSource(t, svc, "edit", "secret", "alice")
@@ -246,6 +253,7 @@ func TestALiveTurnOfAnEditedMessageIsNotExcused(t *testing.T) {
 // The steps for going back to v1.1.x (docs/MAINTAINING.md section 4) are what a maintainer pastes into a live database.
 // They run as written, take what the old binary cannot reach, and leave the rest.
 func TestTheStepsForGoingBackRunAsWritten(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile("../../docs/MAINTAINING.md")
 	if err != nil {
 		t.Fatal(err)
@@ -295,6 +303,7 @@ func tombstonesOf(t *testing.T, svc *application.Service, id string) int {
 
 // The record of a revision that kept the words goes with the tombstones, once it is older than anything kept.
 func TestRetentionRemovesOldKeptRevisions(t *testing.T) {
+	t.Parallel()
 	svc, _ := editSvc(t)
 	chainTurn(t, svc, "c", "m", "alice")
 	if _, err := svc.Store.DB.Exec(`INSERT INTO message_kept_revisions(native_id,at) VALUES('old','2000-01-01T00:00:00.000000000Z')`); err != nil {
@@ -317,6 +326,7 @@ func TestRetentionRemovesOldKeptRevisions(t *testing.T) {
 // An edit that kept the words leaves no tombstone, and is a revision all the same: an older edit arriving after
 // it (out of order, or replayed after a restart) must not bring back words the newer one took out.
 func TestAnOlderEditDoesNotPassAnEditThatKeptTheWords(t *testing.T) {
+	t.Parallel()
 	content := func(t *testing.T, svc *application.Service, query, id string) string {
 		t.Helper()
 		var words string
@@ -376,6 +386,7 @@ func TestAnOlderEditDoesNotPassAnEditThatKeptTheWords(t *testing.T) {
 
 // The words and the files stayed: what was read is what the message says, nothing built on it changes.
 func TestAnEditKeepingTheWordsChangesNothing(t *testing.T) {
+	t.Parallel()
 	keep := func(t *testing.T, svc *application.Service, id, words string, at time.Time) bool {
 		t.Helper()
 		kept, err := svc.MessageKeptItsWords("g", "c", id, words, at)
@@ -505,6 +516,7 @@ func TestAnEditKeepingTheWordsChangesNothing(t *testing.T) {
 
 // A change that came in and is not in the queue yet has only its event file: these words may be what it replaces.
 func TestAnEditKeepingTheWordsWaitsForAChangeNotYetInTheQueue(t *testing.T) {
+	t.Parallel()
 	svc, _ := editSvc(t)
 	chainTurn(t, svc, "c", "secret", "alice")
 	if _, err := svc.Store.EnqueueEvent("source-change", map[string]any{}); err != nil {
@@ -555,6 +567,7 @@ func recentLineSvc(t *testing.T) (*application.Service, *recordingServer, *recor
 // nobody answered does not take the replies of the room with it. The test logs the size of the chain: the number of
 // replies a deletion of such a line takes.
 func TestARecentLineNotInThePromptIsNotWhatAReplyIsBuiltOn(t *testing.T) {
+	t.Parallel()
 	const depth = 15
 	svc, plan, resp := recentLineSvc(t)
 	const words = "carol talks about her lunch"
@@ -582,6 +595,7 @@ func TestARecentLineNotInThePromptIsNotWhatAReplyIsBuiltOn(t *testing.T) {
 
 // The promise stays for every line the reply did read. Attribution off: the recent lines are in the prompt.
 func TestARecentLineInThePromptIsWhatAReplyIsBuiltOn(t *testing.T) {
+	t.Parallel()
 	const depth = 15
 	svc, _, resp := recentLineSvc(t)
 	applyDoc(t, svc, func(d *config.Document) {
@@ -612,6 +626,7 @@ func TestARecentLineInThePromptIsWhatAReplyIsBuiltOn(t *testing.T) {
 
 // Attribution on and the line in the caller's conversation: it is in the prompt through that conversation.
 func TestALineOfTheCallersConversationIsWhatAReplyIsBuiltOn(t *testing.T) {
+	t.Parallel()
 	svc, _, resp := recentLineSvc(t)
 	const words = "alice said this a moment ago"
 	captureLine(t, svc, "own-line", "alice", words)
@@ -628,6 +643,7 @@ func TestALineOfTheCallersConversationIsWhatAReplyIsBuiltOn(t *testing.T) {
 // Edited, the row of a burst holds the last message's new words alone. Deleting an earlier message of the burst has
 // nothing of it left to take: not the row, not a reply that read only the new words.
 func TestAnEditedMergedRowHasNoOldPieces(t *testing.T) {
+	t.Parallel()
 	setup := func(t *testing.T) (*application.Service, string) {
 		t.Helper()
 		svc, prompts := quietSvc(t)

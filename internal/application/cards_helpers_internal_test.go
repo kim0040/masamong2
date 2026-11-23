@@ -3,6 +3,7 @@ package application
 import "testing"
 
 func TestOverlap(t *testing.T) {
+	t.Parallel()
 	if got := overlap(nil, map[string]bool{"a": true}); got != 0 {
 		t.Fatalf("an empty side scores %f", got)
 	}
@@ -18,6 +19,7 @@ func TestOverlap(t *testing.T) {
 }
 
 func TestRelationKeyOrdersBothDirections(t *testing.T) {
+	t.Parallel()
 	a, b := relationKey("x", "y")
 	if a != "x" || b != "y" {
 		t.Fatalf("(%q, %q)", a, b)
@@ -33,6 +35,7 @@ func TestRelationKeyOrdersBothDirections(t *testing.T) {
 }
 
 func TestRelCursorKey(t *testing.T) {
+	t.Parallel()
 	if got := relCursorKey("g1", "c2"); got != "cards:relations:g1:c2" {
 		t.Fatalf("%q", got)
 	}

@@ -79,6 +79,7 @@ func answerKept(t *testing.T, svc *application.Service, turn string) bool {
 }
 
 func TestAChangedSourceTakesEveryReplyBuiltOnIt(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"delete", "edit", "withdraw"} {
 		for _, retention := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/retention=%v", change, retention), func(t *testing.T) {
@@ -175,6 +176,7 @@ func TestAChangedSourceTakesEveryReplyBuiltOnIt(t *testing.T) {
 // A second redaction of the same source (a crash between the work and removing the job) finds no more
 // and breaks nothing; a later reply stays.
 func TestRepeatedDeletionOfASourceIsHarmless(t *testing.T) {
+	t.Parallel()
 	svc := chainSvc(t)
 	chainTurn(t, svc, "c", "secret", "alice")
 	chainTurn(t, svc, "c", "n1", "bob")
@@ -199,6 +201,7 @@ func TestRepeatedDeletionOfASourceIsHarmless(t *testing.T) {
 // Replies written by an earlier release hold the whole chain as a flat list, and count as having read all of it. The
 // replies written now, on top of them, read only the old reply: they stay.
 func TestRepliesOnTopOfAFlatListStayAfterItsDeletion(t *testing.T) {
+	t.Parallel()
 	svc := chainSvc(t)
 	eng, err := svc.MemoryEngine()
 	if err != nil {
@@ -240,6 +243,7 @@ func TestRepliesOnTopOfAFlatListStayAfterItsDeletion(t *testing.T) {
 // A thread starts with copies of its caller's turns. A copy of a reply that read the message goes with it. A reply in
 // the thread read the copy, not the message, and stays.
 func TestThreadCopiesFollowADeletionInTheParentChain(t *testing.T) {
+	t.Parallel()
 	svc := chainSvc(t)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Guilds = map[string]config.GuildSettings{"g": {Channels: map[string]config.ChannelPolicy{"c": {Respond: "mention", Attribution: "off"}, "thread": {Respond: "mention", Attribution: "off"}}}}
@@ -290,6 +294,7 @@ func chainBody(t *testing.T, svc *application.Service, turn string) []string {
 
 // The source lists hold no repeats (a window of 16 turns used to name every shared ID eight times).
 func TestATurnKeepsEachSourceOnce(t *testing.T) {
+	t.Parallel()
 	svc := chainSvc(t)
 	var last string
 	for i := range 12 {
@@ -311,6 +316,7 @@ func TestATurnKeepsEachSourceOnce(t *testing.T) {
 // A reply made from a memory the bot looked up is built on that memory: deleting the message takes the
 // reply out of the chat context, and every reply after it.
 func TestDeletingARetrievedMessageTakesTheReplyBuiltOnIt(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/embeddings":
@@ -411,6 +417,7 @@ func TestDeletingARetrievedMessageTakesTheReplyBuiltOnIt(t *testing.T) {
 
 // The lists stay the size of what a turn read: a reply names the turns it read, not everything they read.
 func TestSourceListsStopGrowingWithTheConversation(t *testing.T) {
+	t.Parallel()
 	svc := chainSvc(t)
 	var last string
 	sizes := map[int]int{}

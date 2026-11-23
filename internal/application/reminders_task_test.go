@@ -19,6 +19,7 @@ func viaChat(user string) *action.Invoker {
 // "매일 오전 9시에 뉴스 정리해서 알려줘": the run needs a topic, so the loop passes the question to ask.
 // Nothing is saved, no card is posted, and the answer is told to ask instead of claiming it was set.
 func TestTaskMissingDetailIsAskedNotSaved(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	svc, _ := remindSvc(t, time.Date(2026, 10, 15, 20, 0, 0, 0, seoul))
 	r := as(svc, "reminders.propose", map[string]any{"kind": "task", "when": "오전 9시", "repeat": "daily", "what": "뉴스 정리",
@@ -34,6 +35,7 @@ func TestTaskMissingDetailIsAskedNotSaved(t *testing.T) {
 // Once the request is whole the task is set at once, in the channel it was asked in, and the chat answer
 // gets what was set (no card). Saying "뉴스 예약 취소해 줘" finds it by its words and cancels it.
 func TestTaskSetFromChatAndCancelledByWords(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	svc, _ := remindSvc(t, time.Date(2026, 10, 15, 20, 0, 0, 0, seoul))
 	r := as(svc, "reminders.propose", map[string]any{"kind": "task", "when": "오전 9시", "repeat": "daily", "what": "국제 정세 뉴스",
@@ -65,6 +67,7 @@ func TestTaskSetFromChatAndCancelledByWords(t *testing.T) {
 // When due, a task runs as a bot turn over the read-only tools and its answer is posted in the channel
 // under a one-line header; the series goes on to the next morning.
 func TestTaskRunsWhenDueAndPostsTheAnswer(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	now := time.Date(2026, 10, 15, 20, 0, 0, 0, seoul)
 	svc, f := chatSvc(t, `{"memory_requirement":"none","question_kind":"other","tool_plan":[]}`)

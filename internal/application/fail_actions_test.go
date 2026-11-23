@@ -46,6 +46,7 @@ func assertPlainArgs(t *testing.T, s *Service, res action.Result, code, key stri
 
 // A poll the rules refuse says so in plain words; the rule's own sentence is in the log only.
 func TestPollRefusalsAreCatalogSentences(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	var logs bytes.Buffer
 	s.Log = slog.New(slog.NewTextHandler(&logs, nil))
@@ -82,6 +83,7 @@ func TestPollRefusalsAreCatalogSentences(t *testing.T) {
 
 // A document that cannot be attached says why in plain words, not with the path check's sentence.
 func TestAttachmentRefusalIsACatalogSentence(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	var logs bytes.Buffer
 	s.Log = slog.New(slog.NewTextHandler(&logs, nil))
@@ -94,6 +96,7 @@ func TestAttachmentRefusalIsACatalogSentence(t *testing.T) {
 
 // An import that fails on its file answers with one sentence; the size limits keep their own.
 func TestImportFailureIsACatalogSentence(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	var logs bytes.Buffer
 	s.Log = slog.New(slog.NewTextHandler(&logs, nil))
@@ -110,6 +113,7 @@ func TestImportFailureIsACatalogSentence(t *testing.T) {
 
 // A provider's own refusals (our daily limit, a page that is not public) say it in words, not with Go text.
 func TestProviderOwnRefusalsAreCatalogSentences(t *testing.T) {
+	t.Parallel()
 	s := &Service{I18n: i18n.New()}
 	req := action.Request{Action: "web.read", Locale: "en"}
 	res := s.providerResult(req, "tavily", fmt.Errorf("%w: %s %d/%d", errQuota, "tavily", 50, 50))
@@ -120,6 +124,7 @@ func TestProviderOwnRefusalsAreCatalogSentences(t *testing.T) {
 
 // A weather place the grid does not know answers with the place sentence, not the lookup's wording.
 func TestUnknownWeatherPlaceIsACatalogSentence(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	var logs bytes.Buffer
 	s.Log = slog.New(slog.NewTextHandler(&logs, nil))

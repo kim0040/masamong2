@@ -7,6 +7,7 @@ import (
 )
 
 func TestSingleThreadParticipantReadIsBounded(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	s.NoteThread("g", "target", "parent", false)
 	s.NoteThreadParticipant("target", "member")

@@ -33,6 +33,7 @@ func (g *panicLogGateway) PostChannel(context.Context, string, string, string, *
 // The server log's sender belongs to the service: it ends when the service closes, and a post that panics
 // is recovered instead of taking the daemon down.
 func TestServerLogWorkerIsOwnedByTheService(t *testing.T) {
+	t.Parallel()
 	closeWithin := func(t *testing.T, close func() error) {
 		t.Helper()
 		done := make(chan error, 1)

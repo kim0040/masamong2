@@ -90,6 +90,7 @@ func pruneLater(ctx context.Context, s *Service, batch int) error {
 // A reply committing between two batches links to a turn half taken. It refuses itself: nothing could follow the link,
 // and once stored the withdrawal would miss it.
 func TestAReplyCommittingDuringAPassRefusesItself(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	link, read := removedReader(t, s, 2100)
 	initial := refsOf(t, s, link)
@@ -122,6 +123,7 @@ func TestAReplyCommittingDuringAPassRefusesItself(t *testing.T) {
 
 // One that commits before the pass is seen by it: the links stay, and a withdrawal goes through them.
 func TestAReplyCommittedBeforeAPassIsReached(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	link, read := removedReader(t, s, 2100)
 	initial := refsOf(t, s, link)
@@ -144,6 +146,7 @@ func TestAReplyCommittedBeforeAPassIsReached(t *testing.T) {
 // A running reply that read only the removed reply is not refused by a pass that happens to run right after the
 // deletion, and is reached like any other. Past the longest a turn can run the entries go.
 func TestAPassLeavesARunningReplyOnARemovedReply(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	link, read := removedReader(t, s, 0)
 	if _, err := s.runRetention(context.Background()); err != nil {
@@ -163,6 +166,7 @@ func TestAPassLeavesARunningReplyOnARemovedReply(t *testing.T) {
 }
 
 func TestTheHoldIsTheTurnClock(t *testing.T) {
+	t.Parallel()
 	if chatLinkHold <= ChatTurnCeiling {
 		t.Fatalf("a turn can run %v, and its links are held for %v", ChatTurnCeiling, chatLinkHold)
 	}
@@ -192,6 +196,7 @@ func TestTheHoldIsTheTurnClock(t *testing.T) {
 
 // What a pass left must be there for the next one: expiry takes the old tombstones and not a mark, however old.
 func TestExpiryLeavesAMark(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	if _, err := s.MemoryEngine(); err != nil { // its tables
 		t.Fatal(err)

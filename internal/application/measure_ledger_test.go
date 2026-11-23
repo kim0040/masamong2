@@ -62,6 +62,7 @@ func num(v any) float64 { f, _ := v.(float64); return f }
 // rounds are rows of their own, the search row names the service that answered, and the turn record
 // carries the queue wait, the first send, the time after sending and the spans.
 func TestTurnCostEqualsLedgerRowsPlusSearch(t *testing.T) {
+	t.Parallel()
 	const fee = 0.007
 	f := &loopServer{plan: `{"memory_requirement":"none","tool_plan":[]}`, script: []map[string]any{
 		toolCallMsg([2]string{"search__web", `{"query":"오늘 뉴스"}`}),
@@ -150,6 +151,7 @@ func TestTurnCostEqualsLedgerRowsPlusSearch(t *testing.T) {
 // is marked as one, as the planner's and the answer's rows are, so the log's "model failed, its fallback
 // answers" lines can be matched with the ledger.
 func TestToolLoopFallbackIsInTheLedger(t *testing.T) {
+	t.Parallel()
 	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(503)
 		_, _ = w.Write([]byte(`{"error":{"message":"overloaded"}}`))
@@ -186,6 +188,7 @@ func TestToolLoopFallbackIsInTheLedger(t *testing.T) {
 
 // A second turn in the channel waits for the first; the wait is in its record.
 func TestQueueWaitIsRecorded(t *testing.T) {
+	t.Parallel()
 	f := &loopServer{plan: `{"memory_requirement":"none","tool_plan":[]}`}
 	svc := measureSvc(t, f, exaServer(t, 0).URL, nil)
 	var wg sync.WaitGroup
@@ -220,6 +223,7 @@ func TestQueueWaitIsRecorded(t *testing.T) {
 // The alert loop re-reads the dashboard and the doctor for itself: a slow one is info there, and the
 // console's own read stays a warning. The alerts do not depend on the line.
 func TestSlowBackgroundReadIsNotAWarning(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	var mu sync.Mutex
 	svc := setupSvcLog(t, func(*application.Service) *slog.Logger {
@@ -251,6 +255,7 @@ func (w syncWriter) Write(p []byte) (int, error) {
 // ("retagged_after_answer"), so the two rates can be compared. Only the first tag counts, and only within
 // the window.
 func TestRetagAfterAnswerIsRecordedBesideRetagAfterSkip(t *testing.T) {
+	t.Parallel()
 	var plan, resp recordingServer
 	planURL := plan.start(t, func(string) string { return `{"memory_requirement":"none","tool_plan":[]}` })
 	respURL := resp.start(t, func(string) string { return "내일은 맑아. 우산 필요해?" })

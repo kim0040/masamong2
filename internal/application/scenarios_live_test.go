@@ -94,6 +94,7 @@ type scenarioOutcome struct {
 //	  MASAMONG_SCENARIO_FILE=testdata/tools_regression_ko.json MASAMONG_SCENARIO_REPORT=/tmp/loop-ko.json \
 //	  go test ./internal/application -run TestLiveScenarios -v -timeout 30m
 func TestLiveScenarios(t *testing.T) {
+	// sequential: it sets process environment variables
 	dir := os.Getenv("MASAMONG_LIVE_KEYS_DIR")
 	if dir == "" || os.Getenv("CI") != "" {
 		t.Skip("set MASAMONG_LIVE_KEYS_DIR to a folder of key files")
@@ -457,6 +458,7 @@ func checkScenario(o scenarioOutcome, res application.ChatResultForTest, sc live
 // The scenario files are read by a test that only runs with real keys, so a typo in one (an unknown
 // key, a tool that does not exist, a missing sample) is checked here, offline.
 func TestScenarioFilesAreWellFormed(t *testing.T) {
+	t.Parallel()
 	known := map[string]bool{}
 	for _, b := range tools.Builtins() {
 		known[b.ID] = true

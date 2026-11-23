@@ -10,6 +10,7 @@ import (
 // The daemon runs two Services at once (the real one and the console's practice instance). Each hands
 // out its own event IDs, in order, without a data race between them (run with -race).
 func TestEventIDsAreCountedPerService(t *testing.T) {
+	t.Parallel()
 	a := &Service{Clock: clock.Real{}, watchers: map[chan Event]struct{}{}}
 	b := &Service{Clock: clock.Real{}, watchers: map[chan Event]struct{}{}}
 	ca, _ := a.Subscribe()

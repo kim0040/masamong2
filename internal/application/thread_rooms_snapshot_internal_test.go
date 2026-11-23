@@ -9,6 +9,7 @@ import (
 )
 
 func TestThreadRoomsRechecksDeletedSnapshot(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	s.NoteThread("g", "target", "parent", false)
 	var reads atomic.Int32
@@ -28,6 +29,7 @@ func TestThreadRoomsRechecksDeletedSnapshot(t *testing.T) {
 // Another thread's lifecycle changes on every read must not empty the parent's scope: the in-memory
 // table still answers, and still without a thread deleted meanwhile.
 func TestThreadRoomsUnderConstantOtherChanges(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	s.NoteThread("g", "kept", "parent", false)
 	s.NoteThread("g", "gone", "parent", false)

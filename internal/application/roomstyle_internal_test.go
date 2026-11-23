@@ -6,6 +6,7 @@ import (
 )
 
 func TestParseStyleHolder(t *testing.T) {
+	t.Parallel()
 	g, c, v, ok := parseStyleHolder(styleHolder("123", "456", 7))
 	if !ok || g != "123" || c != "456" || v != 7 {
 		t.Fatalf("%q %q %d %v", g, c, v, ok)
@@ -21,6 +22,7 @@ func TestParseStyleHolder(t *testing.T) {
 }
 
 func TestLaughMarkSkipsNonLaughs(t *testing.T) {
+	t.Parallel()
 	for w, want := range map[string]string{"ㅋㅋㅋ": "ㅋㅋ", "ㅎㅎ": "ㅎㅎ", "www": "ww", "ㅇㅇ": "", "ㅠㅠ": "", "ㄷㄷ": "", "ㅋ": ""} {
 		if got := laughMark(w); got != want {
 			t.Errorf("%q: %q", w, got)
@@ -30,6 +32,7 @@ func TestLaughMarkSkipsNonLaughs(t *testing.T) {
 
 // A trait must be words people of the room actually wrote, in short; a topic to avoid is a description.
 func TestParseStyleItemsChecksTheEvidence(t *testing.T) {
+	t.Parallel()
 	byTag := map[string]styleLine{
 		"m1": {account: "a", text: "오늘도 개꿀 ㅋㅋ"},
 		"m2": {account: "b", text: "그거 완전 개꿀이네"},
@@ -53,6 +56,7 @@ func TestParseStyleItemsChecksTheEvidence(t *testing.T) {
 
 // An item about a person that only others said is hearsay; one they said themselves, or about nobody, is not.
 func TestItemHearsay(t *testing.T) {
+	t.Parallel()
 	for text, want := range map[string]bool{"{@p:a}가 이사 감": true, "{@p:b}가 이사 감": false, "다음 주 등산": false} {
 		if got := (itemRow{text: text, by: []string{"p:b"}}).hearsay(); got != want {
 			t.Errorf("%q: %v", text, got)

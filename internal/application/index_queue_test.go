@@ -60,6 +60,7 @@ func (f *flakyEmbedder) server(t *testing.T) *httptest.Server {
 }
 
 func TestMemoryPassMessageVectorWidthRepairQueuesQuietRoom(t *testing.T) {
+	t.Parallel()
 	f := &flakyEmbedder{}
 	srv := f.server(t)
 	svc := embedSvc(t, t.TempDir(), srv.URL)
@@ -173,6 +174,7 @@ func embedded(t *testing.T, svc *application.Service, room string) int {
 // A pass whose embedding calls fail must keep its rooms queued: only embedded leaves are searchable,
 // and a quiet channel would otherwise wait for its next message to be indexed at all.
 func TestIndexPassRequeuesRoomsAfterProviderError(t *testing.T) {
+	t.Parallel()
 	f := &flakyEmbedder{}
 	srv := f.server(t)
 	svc := embedSvc(t, t.TempDir(), srv.URL)
@@ -207,6 +209,7 @@ func TestIndexPassRequeuesRoomsAfterProviderError(t *testing.T) {
 
 // Rooms captured into but not indexed before the process stopped are indexed after a restart.
 func TestIndexQueueSurvivesRestart(t *testing.T) {
+	t.Parallel()
 	f := &flakyEmbedder{}
 	srv := f.server(t)
 	dir := t.TempDir()
@@ -281,6 +284,7 @@ func (f *ledgerSearchProvider) server(t *testing.T) *httptest.Server {
 }
 
 func TestMemorySearchCallLedgerAndIndexJobSummary(t *testing.T) {
+	t.Parallel()
 	f := &ledgerSearchProvider{}
 	srv := f.server(t)
 	svc := embedSvc(t, t.TempDir(), srv.URL)

@@ -6,6 +6,7 @@ import (
 )
 
 func TestThreadNegativeDeletionCheckDoesNotWaitForDB(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	if _, known := s.ThreadFor("ordinary", "member"); known {
 		t.Fatal("ordinary channel is a thread")

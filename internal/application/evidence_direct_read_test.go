@@ -60,6 +60,7 @@ func wantAnswers(t *testing.T, svc *application.Service, turns []string, gone in
 }
 
 func TestAMessageChangeTakesTheRepliesThatReadIt(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"delete", "blank", "edit"} {
 		for _, retention := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/retention=%v", change, retention), func(t *testing.T) {
@@ -104,6 +105,7 @@ func countGone(t *testing.T, svc *application.Service, turns []string) int {
 }
 
 func TestAWithdrawalStillFollowsEveryReply(t *testing.T) {
+	t.Parallel()
 	t.Run("the whole chain", func(t *testing.T) {
 		svc, _, turns := directChain(t)
 		changeSource(t, svc, "withdraw", "m", "alice")
@@ -129,6 +131,7 @@ func TestAWithdrawalStillFollowsEveryReply(t *testing.T) {
 // A withdrawal reaches a reply through its window's links, read or not. Rows without replies between them leave no
 // reply to carry the chain through the prompt's last rows.
 func TestAWithdrawalFollowsTheWindowBeyondThePrompt(t *testing.T) {
+	t.Parallel()
 	svc, prompts := quietSvc(t)
 	if _, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m", Message: chainWords, Speaker: "alice", SpeakerID: "alice"}); err != nil {
 		t.Fatal(err)
@@ -161,6 +164,7 @@ func TestAWithdrawalFollowsTheWindowBeyondThePrompt(t *testing.T) {
 // on top of it all the same, whichever of its two names the reply holds, and after the message was deleted too: the
 // deletion left the reply on top, and the withdrawal finds the message by its row, not by its text.
 func TestAWithdrawalFollowsARoomLineOfThePerson(t *testing.T) {
+	t.Parallel()
 	for _, held := range []string{"observation", "message"} {
 		for _, deletedFirst := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/deleted first=%v", held, deletedFirst), func(t *testing.T) {
@@ -202,6 +206,7 @@ func TestAWithdrawalFollowsARoomLineOfThePerson(t *testing.T) {
 
 // A line read from the room is read, in a channel that shows them.
 func TestALiveLineTakesTheRepliesThatReadIt(t *testing.T) {
+	t.Parallel()
 	svc, prompts := quietSvc(t)
 	eng, err := svc.MemoryEngine()
 	if err != nil {
@@ -227,6 +232,7 @@ func TestALiveLineTakesTheRepliesThatReadIt(t *testing.T) {
 
 // A search result names the message's stored copy, and a reply holding that read it.
 func TestASearchResultTakesTheReplyThatReadIt(t *testing.T) {
+	t.Parallel()
 	svc, _ := quietSvc(t)
 	eng, err := svc.MemoryEngine()
 	if err != nil {
@@ -256,6 +262,7 @@ func TestASearchResultTakesTheReplyThatReadIt(t *testing.T) {
 
 // A turn under way when the change comes is judged the same way.
 func TestAChangeDuringATurnOnTopOfTheReaders(t *testing.T) {
+	t.Parallel()
 	t.Run("it read only replies: stored", func(t *testing.T) {
 		svc, prompts, turns := directChain(t)
 		var res string
@@ -311,6 +318,7 @@ func TestAChangeDuringATurnOnTopOfTheReaders(t *testing.T) {
 
 // A burst's turn holds its pieces' words, so a reply that read the turn read them, though only the turn names them.
 func TestAReplyOnABurstReadItsPieces(t *testing.T) {
+	t.Parallel()
 	svc, prompts := quietSvc(t)
 	answer := func(id, words string, fragments ...string) string {
 		t.Helper()
@@ -337,6 +345,7 @@ func TestAReplyOnABurstReadItsPieces(t *testing.T) {
 
 // The same in a channel that shows each caller their conversation: its lines name the messages their words are.
 func TestAReplyOnABurstInTheCallersConversation(t *testing.T) {
+	t.Parallel()
 	svc := chainSvc(t)
 	answer := func(id, words string, fragments ...string) string {
 		t.Helper()
@@ -357,6 +366,7 @@ func TestAReplyOnABurstInTheCallersConversation(t *testing.T) {
 // An edited message's turn is marked while its job runs, and read again once the edit settles, whatever retention did
 // between the two.
 func TestAnEditedTurnIsReadAfterRetention(t *testing.T) {
+	t.Parallel()
 	svc, _, _ := directChain(t)
 	changeSource(t, svc, "edit", "m", "alice")
 	if _, err := svc.RunRetentionForTest(context.Background()); err != nil {
@@ -394,6 +404,7 @@ func mustEngine(t *testing.T, svc *application.Service) *engine.Engine {
 // A reply's line in a channel that tells conversations apart is named by the reply, not by what it answered, and a
 // reader's sources say so.
 func TestAReplysLineIsNotItsRequest(t *testing.T) {
+	t.Parallel()
 	svc := chainSvc(t)
 	if _, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m", Message: chainWords, Speaker: "alice", SpeakerID: "alice"}); err != nil {
 		t.Fatal(err)
@@ -414,6 +425,7 @@ func TestAReplysLineIsNotItsRequest(t *testing.T) {
 // What a reply is recorded as having read and what its prompts held are the same rows, whichever of them are long or
 // empty: the words are in no prompt and a deletion leaves the reply, or they are in one and it goes.
 func TestEveryPromptStaysInWhatTheReplyRecords(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("long words ", 50)
 	for name, tc := range map[string]struct {
 		rows     int

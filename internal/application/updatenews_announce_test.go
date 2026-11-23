@@ -102,6 +102,7 @@ func (f *newsFixture) run(t *testing.T) { f.svc.AnnounceUpdatesForTest(context.B
 
 // The very first start of an installation only records the running version; nothing is said.
 func TestUpdateNewsFirstStartSendsNothing(t *testing.T) {
+	t.Parallel()
 	f := newNewsFixture(t, "v1.5.1")
 	f.run(t)
 	rooms, dms := f.gw.sent()
@@ -120,6 +121,7 @@ func TestUpdateNewsFirstStartSendsNothing(t *testing.T) {
 // An upgrade tells the rooms that turned news on and the people who subscribed and may be messaged,
 // once. A restart on the same version, and any later pass, say nothing more.
 func TestUpdateNewsUpgradeSendsOnceToWhoAsked(t *testing.T) {
+	t.Parallel()
 	f := newNewsFixture(t, "v1.5.1")
 	f.svc.SetAnnouncedForTest("v1.4.0")
 	f.run(t)
@@ -150,6 +152,7 @@ func TestUpdateNewsUpgradeSendsOnceToWhoAsked(t *testing.T) {
 
 // Several versions skipped between two starts arrive as one card, newest first, user-facing items only.
 func TestUpdateNewsMergesSkippedVersions(t *testing.T) {
+	t.Parallel()
 	f := newNewsFixture(t, "v1.5.1")
 	f.svc.SetAnnouncedForTest("v1.2.2")
 	f.run(t)
@@ -170,6 +173,7 @@ func TestUpdateNewsMergesSkippedVersions(t *testing.T) {
 // A release with nothing for chat members, a rebuild of the same version and an older build say
 // nothing; the first records the version, the last leaves the high-water mark alone.
 func TestUpdateNewsQuietCases(t *testing.T) {
+	t.Parallel()
 	t.Run("no user-facing items", func(t *testing.T) {
 		f := newNewsFixture(t, "v1.0.0")
 		f.svc.SetAnnouncedForTest("v0.9.0")
@@ -215,6 +219,7 @@ func TestUpdateNewsQuietCases(t *testing.T) {
 // dm.allow decides who may be messaged; a subscriber it excludes gets nothing, and neither does anyone
 // when it is off. A person's own language is used for their DM.
 func TestUpdateNewsDMsFollowDMAllowAndLanguage(t *testing.T) {
+	t.Parallel()
 	f := newNewsFixture(t, "v1.5.1")
 	f.svc.SetAnnouncedForTest("v1.4.0")
 	inv := &action.Invoker{Via: "command", GuildID: "g1", ChannelID: "c1", UserID: "u1"}
@@ -241,6 +246,7 @@ func TestUpdateNewsDMsFollowDMAllowAndLanguage(t *testing.T) {
 // A person who unsubscribed before the announcement gets nothing; a DM Discord refuses for good is
 // recorded and never tried again, and does not hold the announcement open.
 func TestUpdateNewsUnsubscribedAndClosedDMs(t *testing.T) {
+	t.Parallel()
 	f := newNewsFixture(t, "v1.5.1")
 	f.svc.SetAnnouncedForTest("v1.4.0")
 	inv := &action.Invoker{Via: "command", GuildID: "g1", ChannelID: "c1", UserID: "u1"}
@@ -269,6 +275,7 @@ func TestUpdateNewsUnsubscribedAndClosedDMs(t *testing.T) {
 // A person in their quiet hours is not messaged then: the announcement waits (and is not recorded as
 // done) until the window ends, then goes out once. The rooms already served are not served again.
 func TestUpdateNewsWaitsOutQuietHours(t *testing.T) {
+	t.Parallel()
 	f := newNewsFixture(t, "v1.5.1")
 	f.svc.SetAnnouncedForTest("v1.4.0")
 	inv := &action.Invoker{Via: "command", GuildID: "g1", ChannelID: "c1", UserID: "u1"}
@@ -296,6 +303,7 @@ func TestUpdateNewsWaitsOutQuietHours(t *testing.T) {
 // A crash between the claim and the send leaves a row: that send is not repeated. A pass stopped by
 // shutdown carries on where it was, without sending twice, and records the version only when done.
 func TestUpdateNewsNeverDoubleSendsAfterACrashOrStop(t *testing.T) {
+	t.Parallel()
 	f := newNewsFixture(t, "v1.5.1")
 	f.svc.SetAnnouncedForTest("v1.4.0")
 	f.svc.ClaimNewsForTest("v1.5.1", "room:g1:c1") // the previous run died after this claim
@@ -333,6 +341,7 @@ func TestUpdateNewsNeverDoubleSendsAfterACrashOrStop(t *testing.T) {
 
 // One pass sends at most its share; the next carries on with the rest and no one gets two.
 func TestUpdateNewsSpreadsSendsOverPasses(t *testing.T) {
+	t.Parallel()
 	f := newNewsFixture(t, "v1.5.1")
 	f.svc.SetAnnouncedForTest("v1.4.0")
 	for i := 0; i < 5; i++ {
@@ -358,6 +367,7 @@ func TestUpdateNewsSpreadsSendsOverPasses(t *testing.T) {
 
 // A paused room gets no card.
 func TestUpdateNewsSkipsPausedRooms(t *testing.T) {
+	t.Parallel()
 	f := newNewsFixture(t, "v1.5.1")
 	f.svc.SetAnnouncedForTest("v1.4.0")
 	if r := exec(f.svc, "runtime.pause", map[string]any{"scope": "channel", "guild_id": "g1", "channel_id": "c1", "paused": true}); !r.OK {

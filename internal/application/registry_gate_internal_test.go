@@ -18,6 +18,7 @@ import (
 // The hosts with tight documented limits get few requests in flight from the process; the shared
 // client (model hosts) is not bounded.
 func TestStrictProvidersAreGated(t *testing.T) {
+	t.Parallel()
 	doc := config.Document{Providers: map[string]config.Provider{"fh": {Kind: config.KindFinnhub}, "kma": {Kind: config.KindKMA}}}
 	r := buildRegistry(doc, nil, time.Now)
 	fh, _ := registryGateState(r.Finnhub.Client)
@@ -55,6 +56,7 @@ func gateResponse() *http.Response {
 }
 
 func TestProviderGateSurvivesRegistryReload(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	doc := s.Doc()
 	doc.Providers = map[string]config.Provider{"fh": {Kind: config.KindFinnhub, BaseURL: "https://reload-gate.test"}}
@@ -95,6 +97,7 @@ func TestProviderGateSurvivesRegistryReload(t *testing.T) {
 }
 
 func TestProviderGateSharedByDuplicateEntries(t *testing.T) {
+	t.Parallel()
 	var creds credentialStandIns
 	creds.setForTest(t, "MASAMONG_P2_DUPLICATE_TEST_KEY", "synthetic-test-credential")
 	doc := config.Document{Providers: map[string]config.Provider{
@@ -155,6 +158,7 @@ func TestProviderGateSharedByDuplicateEntries(t *testing.T) {
 }
 
 func TestProviderGateUsesEffectiveOpenMeteoHost(t *testing.T) {
+	t.Parallel()
 	var creds credentialStandIns
 	creds.setForTest(t, "MASAMONG_P2_METEO_TEST_KEY", "synthetic-test-credential")
 	provider := config.Provider{Kind: config.KindOpenMeteo, CredentialRef: "env:MASAMONG_P2_METEO_TEST_KEY"}

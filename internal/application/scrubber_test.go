@@ -18,6 +18,7 @@ import (
 
 // The patterns are built once per tool call; scrubbing each of thousands of strings must not compile.
 func TestScrubberDoesNotCompilePerString(t *testing.T) {
+	// sequential: it measures the process's allocations
 	sc := newScrubber("synthetic/credential+value")
 	if !sc.active() {
 		t.Fatal("a 26-character credential must be scrubbed")
@@ -33,6 +34,7 @@ func TestScrubberDoesNotCompilePerString(t *testing.T) {
 // A credential shorter than 8 characters would also erase ordinary words, so it cannot be scrubbed
 // from a response: the call is not made, the caller gets a configuration error and the operator a log line.
 func TestShortCredentialIsNotSent(t *testing.T) {
+	t.Parallel()
 	hits := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits++
@@ -62,6 +64,7 @@ func TestShortCredentialIsNotSent(t *testing.T) {
 // An operator tool whose stored configuration has a key written into a header (accepted by an earlier
 // release) still runs, and each call warns the operator without logging the value.
 func TestDirectKeyInAStoredToolWarns(t *testing.T) {
+	t.Parallel()
 	direct := "synthetic" + "-direct-value"
 	hits := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

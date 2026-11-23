@@ -7,6 +7,7 @@ import (
 )
 
 func TestJobsListReleasesSingleSQLiteConnection(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	for _, key := range []string{"first", "second"} {
 		if _, err := svc.Enqueue("synthetic", key, "{}"); err != nil {
@@ -35,6 +36,7 @@ func TestJobsListReleasesSingleSQLiteConnection(t *testing.T) {
 // The console list shows every job that can still change plus the newest 100 finished ones: newer open
 // jobs must not push the finished history out, and old finished ones beyond 100 are cut.
 func TestJobsListLimitsConsoleHistoryWithoutChangingOutputShape(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	for i := 0; i < 120; i++ {
 		if _, err := svc.Enqueue("synthetic", "", "{}"); err != nil {

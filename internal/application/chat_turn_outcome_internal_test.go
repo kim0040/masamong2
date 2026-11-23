@@ -11,6 +11,7 @@ import (
 
 // The turn log's outcome for every way a turn ends; the first match wins, in this order.
 func TestTurnOutcome(t *testing.T) {
+	t.Parallel()
 	answered := chat.Result{Answer: "응"}
 	for _, c := range []struct {
 		err  error

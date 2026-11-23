@@ -66,6 +66,7 @@ func (f *anthropicLoopHost) start(t *testing.T) *httptest.Server {
 // stays on the wire list, and a call to it is answered with a refusal instead; every earlier thinking
 // block goes back unchanged.
 func TestAnthropicToolLoopKeepsToolsAndSystem(t *testing.T) {
+	t.Parallel()
 	f := &anthropicLoopHost{script: []string{`{"region":"부산"}`, `{"region":"서울"}`, `{"region":"대구"}`}}
 	srv := f.start(t)
 	svc := setupSvc(t)
@@ -120,6 +121,7 @@ func TestAnthropicToolLoopKeepsToolsAndSystem(t *testing.T) {
 // B: gemini-embedding-2 joined the MRL catalog after installs had embedded their messages at its full
 // width. Such an install keeps that width (its stored space): no new space, no embedding call.
 func TestMRLCatalogUpgradeKeepsStoredMessageWidth(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	svc.SetEnvForTest(t, "MASAMONG_OPENROUTER_KEY", "synthetic-test-key")
 	applyDoc(t, svc, func(d *config.Document) {
@@ -267,6 +269,7 @@ func (h *capsHost) lookups() []string {
 // level by models.list and providers.list, low and up being budgets of their own; its native effort
 // field list stays empty.
 func TestModelCapsComeFromListsAndTests(t *testing.T) {
+	t.Parallel()
 	h := &capsHost{}
 	srv := h.start(t)
 	svc := setupSvc(t)
@@ -333,6 +336,7 @@ func waitLookups(t *testing.T, h *capsHost, n int) {
 // Effort review round 2, finding 7: providers.test answers before the role models are looked up; the
 // lookup runs in the background and its result reaches the status afterwards.
 func TestProviderTestDoesNotWaitForTheCapsLookup(t *testing.T) {
+	t.Parallel()
 	h := &capsHost{hold: make(chan struct{})}
 	srv := h.start(t)
 	released := false

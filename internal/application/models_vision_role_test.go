@@ -22,6 +22,7 @@ func pictureInput(url, id string) application.ChatInput {
 // With models.vision set, the vision model reads the pictures even when the answer model takes pictures
 // itself: the answer model gets the description as text and no image part.
 func TestVisionRoleReadsPicturesEvenWhenTheAnswerModelCould(t *testing.T) {
+	t.Parallel()
 	svc, h := visionSvc(t) // the answer model takes pictures (not blind)
 	eyes := &visionHosts{}
 	eyesURL := eyes.server(t, true)
@@ -52,6 +53,7 @@ func TestVisionRoleReadsPicturesEvenWhenTheAnswerModelCould(t *testing.T) {
 // A vision model that fails (provider 5xx) or cannot be used (no key) does not cost the picture: the turn
 // goes the way it does without the role, here natively to the answer model.
 func TestVisionRoleFailureFallsBackToTheUnsetPath(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		ref  string
@@ -93,6 +95,7 @@ func TestVisionRoleFailureFallsBackToTheUnsetPath(t *testing.T) {
 
 // ...and when the answer model is blind, the planner describes after a failed vision model.
 func TestVisionRoleFailureThenPlannerDescribes(t *testing.T) {
+	t.Parallel()
 	svc, h := visionSvc(t)
 	h.blind.Store(true)
 	broken := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
@@ -116,6 +119,7 @@ func TestVisionRoleFailureThenPlannerDescribes(t *testing.T) {
 
 // Optional roles can be emptied through the action; the others cannot.
 func TestClearingOptionalModelRoles(t *testing.T) {
+	t.Parallel()
 	svc := listService(t)
 	for _, role := range []string{"vision", "image"} {
 		if r := exec(svc, "models.select", map[string]any{"role": role, "provider": "openrouter", "model": "vendor/eyes-lite"}); !r.OK {
@@ -142,6 +146,7 @@ func TestClearingOptionalModelRoles(t *testing.T) {
 // (CometAPI) is priced from the public reference list, with the source named; a model priced nowhere has
 // no price, and an unknown output price is absent rather than 0.
 func TestModelListAndBudgetUseTheReferenceListWhenTheHostHasNoPrices(t *testing.T) {
+	t.Parallel()
 	comet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek-v4-flash","object":"model"},{"id":"mystery-model-1","object":"model"}],"object":"list"}`))
 	}))
@@ -180,6 +185,7 @@ func TestModelListAndBudgetUseTheReferenceListWhenTheHostHasNoPrices(t *testing.
 
 // A listed price with no output price shows its input price and no output price (never $0).
 func TestModelListUnknownOutputPriceIsAbsent(t *testing.T) {
+	t.Parallel()
 	svc := listService(t)
 	row := modelByID(t, out(t, svc, "models.list", map[string]any{"provider": "openrouter"}), "vendor/prompt-only")
 	if row["in_per_mtok"] == nil || row["price_source"] != "list" {

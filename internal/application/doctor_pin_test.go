@@ -22,6 +22,7 @@ var updateDoctor = flag.Bool("update-doctor", false, "rewrite testdata/doctor_pi
 var machineBound = []string{"go_memory_limit", "host_profile"}
 
 func TestDoctorReportPinned(t *testing.T) {
+	t.Parallel()
 	keys := map[string]string{"MASAMONG_OPENROUTER_KEY": "k", "MASAMONG_TAVILY_KEY": "k", "MASAMONG_FINNHUB_KEY": "k", "MASAMONG_KMA_KEY": "k"}
 	scenarios := []struct {
 		name  string

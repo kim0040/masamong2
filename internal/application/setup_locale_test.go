@@ -32,6 +32,7 @@ func defaultLocale(t *testing.T, svc *application.Service) string {
 
 // A console used in Korean must not create an English bot: new rooms would get the English persona.
 func TestSetupFollowsTheConsoleLanguageAndTheWizardChoice(t *testing.T) {
+	t.Parallel()
 	for locale, want := range map[string]string{"ko": "ko", "ja": "ja", "zh-Hans": "zh-Hans", "en": "en", "": "en", "xx": "en"} {
 		if got := defaultLocale(t, setupIn(t, locale, map[string]any{})); got != want {
 			t.Errorf("console in %q: default_locale %q, want %q", locale, got, want)
@@ -48,6 +49,7 @@ func TestSetupFollowsTheConsoleLanguageAndTheWizardChoice(t *testing.T) {
 // A new instance takes the wizard browser's time zone and reads memory with the bot language's pack;
 // nothing is fixed to Seoul or Korean unless that is what the browser and the choice say.
 func TestSetupTakesTheBrowserTimeZoneAndTheBotLanguagesPack(t *testing.T) {
+	t.Parallel()
 	doc := out(t, setupIn(t, "en", map[string]any{"locale": "en", "timezone": "America/New_York"}), "config.document", nil)["document"].(map[string]any)
 	if tz := doc["i18n"].(map[string]any)["timezone"]; tz != "America/New_York" {
 		t.Errorf("timezone %v", tz)
@@ -66,6 +68,7 @@ func TestSetupTakesTheBrowserTimeZoneAndTheBotLanguagesPack(t *testing.T) {
 // outside it starts with them off (and on UTC when the browser sent no time zone); in Korea, by
 // language or by time zone, they stay on.
 func TestSetupSwitchesTheKoreaOnlyFeaturesOffOutsideKorea(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name, console string
 		in            map[string]any

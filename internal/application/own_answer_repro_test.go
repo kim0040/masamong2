@@ -69,6 +69,7 @@ func newOwnAnswerRoom(t *testing.T) *ownAnswerRoom {
 func (r *ownAnswerRoom) at(d time.Duration) time.Time { return r.t0.Add(d) }
 
 func TestDeferredReplyPublishesAtItsEdit(t *testing.T) {
+	t.Parallel()
 	for _, multi := range []bool{false, true} {
 		t.Run(fmt.Sprintf("multipart=%t", multi), func(t *testing.T) {
 			r := newOwnAnswerRoom(t)
@@ -106,6 +107,7 @@ func TestDeferredReplyPublishesAtItsEdit(t *testing.T) {
 }
 
 func TestInFlightEditAddressAfterRestart(t *testing.T) {
+	t.Parallel()
 	for _, reply := range []bool{false, true} {
 		t.Run(fmt.Sprintf("reply=%t", reply), func(t *testing.T) {
 			r := newOwnAnswerRoom(t)
@@ -139,6 +141,7 @@ func TestInFlightEditAddressAfterRestart(t *testing.T) {
 }
 
 func TestLegacyAliasReplaysBeforeCommit(t *testing.T) {
+	t.Parallel()
 	r := newOwnAnswerRoom(t)
 	r.human("request", "a", "Asker", "LEGACYREQ", r.at(0), true)
 	db := r.svc.Store.DB
@@ -165,6 +168,7 @@ func TestLegacyAliasReplaysBeforeCommit(t *testing.T) {
 }
 
 func TestOlderAnswerThroughPartAliasIsClipped(t *testing.T) {
+	t.Parallel()
 	r := newOwnAnswerRoom(t)
 	_, parts := r.call(ownCall{id: "request", author: "a", name: "Asker", text: "request",
 		at: r.at(0), answeredAt: r.at(time.Second), how: "mention",
@@ -182,6 +186,7 @@ func TestOlderAnswerThroughPartAliasIsClipped(t *testing.T) {
 }
 
 func TestReplyToOlderExchangePreservesNewerTail(t *testing.T) {
+	t.Parallel()
 	r := newOwnAnswerRoom(t)
 	long := strings.Repeat("x", 450)
 	var target string
@@ -201,6 +206,7 @@ func TestReplyToOlderExchangePreservesNewerTail(t *testing.T) {
 }
 
 func TestMorePartsJoinOnlyTheirSurvivingAnswer(t *testing.T) {
+	t.Parallel()
 	for _, deleted := range []bool{false, true} {
 		t.Run(fmt.Sprintf("deleted=%t", deleted), func(t *testing.T) {
 			r := newOwnAnswerRoom(t)
@@ -234,6 +240,7 @@ func TestMorePartsJoinOnlyTheirSurvivingAnswer(t *testing.T) {
 }
 
 func TestReplyToUnthreadedPostKeepsItsTail(t *testing.T) {
+	t.Parallel()
 	r := newOwnAnswerRoom(t)
 	r.svc.Observe(application.ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: "unthreaded",
 		AuthorID: "bot", FromBot: true, At: r.at(0), Content: strings.Repeat("h", 500) + "CURRENTTAIL"})
@@ -245,6 +252,7 @@ func TestReplyToUnthreadedPostKeepsItsTail(t *testing.T) {
 }
 
 func TestReplyDuringContinuationSend(t *testing.T) {
+	t.Parallel()
 	r := newOwnAnswerRoom(t)
 	_, head := r.call(ownCall{id: "request", author: "a", name: "Asker", text: "ORIGIN",
 		at: r.at(0), answeredAt: r.at(time.Second), how: "mention", answer: strings.Repeat("h", 650)})
@@ -287,6 +295,7 @@ func TestReplyDuringContinuationSend(t *testing.T) {
 }
 
 func TestFailedWritesNeverClearDeliveredPosts(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, trigger string
 	}{
@@ -318,6 +327,7 @@ func TestFailedWritesNeverClearDeliveredPosts(t *testing.T) {
 }
 
 func TestPruneFailureStillLinksCommittedReply(t *testing.T) {
+	t.Parallel()
 	r := newOwnAnswerRoom(t)
 	db := r.svc.Store.DB
 	if _, err := db.Exec(`WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<40)
@@ -339,6 +349,7 @@ func TestPruneFailureStillLinksCommittedReply(t *testing.T) {
 }
 
 func TestContinuationStaysWithItsExactDelivery(t *testing.T) {
+	t.Parallel()
 	r := newOwnAnswerRoom(t)
 	c := ownCall{id: "request", author: "a", name: "Asker", text: "ORIGIN",
 		at: r.at(0), answeredAt: r.at(time.Second), how: "mention", answer: strings.Repeat("h", 650)}
@@ -358,6 +369,7 @@ func TestContinuationStaysWithItsExactDelivery(t *testing.T) {
 }
 
 func TestHistoryCutoffBeforeContinuation(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"on", "off"} {
 		t.Run(mode, func(t *testing.T) {
 			r := newOwnAnswerRoom(t)
@@ -383,6 +395,7 @@ func TestHistoryCutoffBeforeContinuation(t *testing.T) {
 }
 
 func TestReviewOwnBurstKeepsFullRequest(t *testing.T) {
+	t.Parallel()
 	for _, restart := range []bool{false, true} {
 		t.Run(fmt.Sprintf("restart=%t", restart), func(t *testing.T) {
 			r := newOwnAnswerRoom(t)
@@ -418,6 +431,7 @@ func TestReviewOwnBurstKeepsFullRequest(t *testing.T) {
 }
 
 func TestReviewOwnCountsExchangesNotBubbles(t *testing.T) {
+	t.Parallel()
 	r := newOwnAnswerRoom(t)
 	r.call(ownCall{id: "good", author: "a", name: "Asker", text: "GOODREQ", at: r.at(0),
 		answeredAt: r.at(time.Second), how: "mention", answer: "GOODANS"})
@@ -435,6 +449,7 @@ func TestReviewOwnCountsExchangesNotBubbles(t *testing.T) {
 }
 
 func TestFailedToolPostIsNotAReplyAlias(t *testing.T) {
+	t.Parallel()
 	r := newOwnAnswerRoom(t)
 	_, parts := r.call(ownCall{id: "failed", author: "a", name: "Asker", text: "FAILREQ", at: r.at(0),
 		answeredAt: r.at(time.Second), how: "mention", answer: "FAILANS-A / FAILANS-B",
@@ -447,6 +462,7 @@ func TestFailedToolPostIsNotAReplyAlias(t *testing.T) {
 }
 
 func TestReviewPostedAliasBeforeTurnLogCommit(t *testing.T) {
+	t.Parallel()
 	r := newOwnAnswerRoom(t)
 	r.t0 = time.Now()
 	// Leave the first turn in exactly the state visible after gate release but before
@@ -477,6 +493,7 @@ func TestReviewPostedAliasBeforeTurnLogCommit(t *testing.T) {
 }
 
 func TestReviewRealQueuedFollowupBeforeCommit(t *testing.T) {
+	t.Parallel()
 	for _, observed := range []bool{true, false} {
 		t.Run(fmt.Sprintf("observed=%t", observed), func(t *testing.T) {
 			r := newOwnAnswerRoom(t)
@@ -696,6 +713,7 @@ var ownTokens = [][2]string{{"req1", "OWNREQ"}, {"ans1", "OWNANS1"}, {"req2", "O
 // message (memory_observations) carries no mark that it was said to the bot. A turn now reads every kept row,
 // and the stored request marks its line as said to the bot (Line.ToBot).
 func TestOwnEarlierExchangeReachesTheNextCall(t *testing.T) {
+	t.Parallel()
 	const all = "req1 ans1 req2 ans2"
 	for _, c := range []struct {
 		name       string
@@ -759,6 +777,7 @@ func TestOwnEarlierExchangeReachesTheNextCall(t *testing.T) {
 // 17 minutes later replied to the bot's answer again (req3) — no name, no mention. The bot's answers are
 // posted as two bubbles; only the first is a Discord reply to the request. The live window is intact.
 func TestReplyToTheBotKeepsTheCallersExchange(t *testing.T) {
+	t.Parallel()
 	const all = "req1 ans1 req2 ans2"
 	for _, c := range []struct {
 		name      string
@@ -805,6 +824,7 @@ func TestReplyToTheBotKeepsTheCallersExchange(t *testing.T) {
 // answer: another person who replies to it gets the answer and the request it answered, also after a restart
 // (the posted messages are tied to their turn in reply_messages).
 func TestReplyToAPostedPartBringsItsAnswer(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name    string
 		part    int
@@ -840,6 +860,7 @@ func TestReplyToAPostedPartBringsItsAnswer(t *testing.T) {
 // (the turn marks it) and the stored message (its stored request marks it). Here the turn's tool failed, so
 // only the request is stored, and the bot's posted reply is not there to link it.
 func TestNameCalledRequestStaysToTheBot(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name    string
 		restart bool
@@ -873,6 +894,7 @@ func TestNameCalledRequestStaysToTheBot(t *testing.T) {
 // the newest three within six hours, the bot's older answers clipped. An older one, another person's exchange
 // and the room's talk stay out.
 func TestOwnExchangesReachPastTheWindow(t *testing.T) {
+	t.Parallel()
 	for _, restart := range []bool{false, true} {
 		t.Run(fmt.Sprintf("restart %v", restart), func(t *testing.T) {
 			r := newOwnAnswerRoom(t)

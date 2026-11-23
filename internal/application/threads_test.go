@@ -13,6 +13,7 @@ import (
 
 // A thread follows its parent channel: the parent's settings, its pause, and its memory.
 func TestThreadFollowsItsParent(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	applyDoc(t, svc, func(d *config.Document) {
 		if d.Guilds == nil {
@@ -45,6 +46,7 @@ func TestThreadFollowsItsParent(t *testing.T) {
 // A long one-on-one conversation gets one thread offer; "keep it here" holds the next one back; a bot
 // thread that settled a plan posts a recap in its parent when it ends.
 func TestThreadOfferAndRecap(t *testing.T) {
+	t.Parallel()
 	var plan, resp recordingServer
 	planURL := plan.start(t, func(p string) string {
 		if strings.Contains(p, "has_plan") {
@@ -138,6 +140,7 @@ func TestThreadOfferAndRecap(t *testing.T) {
 // With conversation.thread: off a conversation that would have been offered a thread gets no offer and
 // no automatic thread, only the record that it would have: the same six turns offer one with offer.
 func TestThreadOffMakesNoOfferButRecordsIt(t *testing.T) {
+	t.Parallel()
 	run := func(mode string) (offered bool, rows []string) {
 		var plan, resp recordingServer
 		planURL := plan.start(t, func(string) string { return `{"memory_requirement":"none","tool_plan":[]}` })
@@ -187,6 +190,7 @@ func TestThreadOffMakesNoOfferButRecordsIt(t *testing.T) {
 // A closed bot thread the in-memory list let go of stays closed when it is seen again: the gateway's
 // NoteThread reads its row back instead of taking it for a new open thread.
 func TestForgottenClosedThreadStaysClosed(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	svc.ThreadOpened(context.Background(), "g", "c", "th", "uc", "")
 	if err := svc.CloseThread(context.Background(), "th", "idle"); err != nil {
@@ -204,6 +208,7 @@ func TestForgottenClosedThreadStaysClosed(t *testing.T) {
 }
 
 func TestBotThreadParticipantsRestoreAfterRestart(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	svc.ThreadOpened(context.Background(), "g", "parent", "thread", "owner", "")
 	svc.NoteThreadParticipant("thread", "member")
@@ -215,6 +220,7 @@ func TestBotThreadParticipantsRestoreAfterRestart(t *testing.T) {
 }
 
 func TestWithdrawnThreadParticipantIsNotRestored(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	svc.ThreadOpened(context.Background(), "g", "parent", "thread", "owner", "")
 	svc.NoteThreadParticipant("thread", "member")
@@ -238,6 +244,7 @@ func TestWithdrawnThreadParticipantIsNotRestored(t *testing.T) {
 }
 
 func TestThreadParticipantAfterWithdrawalStaysInMemoryOnly(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	svc.ThreadOpened(context.Background(), "g", "parent", "thread", "owner", "")
 	if r := exec(svc, "privacy.consent", map[string]any{"user_id": "member", "scope": "memory", "decision": "withdraw"}); !r.OK {
@@ -277,6 +284,7 @@ func containsAll(list []string, want ...string) bool {
 // follows its parent's policy and pause, the parent still searches its room, a thread it still hears
 // from is read back, and an archive or delete event reaches its row.
 func TestEvictedThreadKeepsItsParentRelation(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	applyDoc(t, svc, func(d *config.Document) {
 		if d.Guilds == nil {

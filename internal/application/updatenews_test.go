@@ -29,6 +29,7 @@ func strList(t *testing.T, v any) []string {
 // one on request, the one before it with previous. A Discord caller sees only what chat members can
 // feel; the console and the CLI see the operator part too (unless they ask for one audience).
 func TestUpdatesNotesFollowTheRunningVersionAndTheAudience(t *testing.T) {
+	t.Parallel()
 	svc := setupSvcVersion(t, "v1.5.1")
 	serveAnyServer(t, svc)
 	member := &action.Invoker{Via: "command", GuildID: "g", ChannelID: "c", UserID: "u1"}
@@ -85,6 +86,7 @@ func TestUpdatesNotesFollowTheRunningVersionAndTheAudience(t *testing.T) {
 // The language follows the caller's locale (their saved one first); a language the note lacks falls
 // back to English.
 func TestUpdatesNotesSpeakTheCallersLanguage(t *testing.T) {
+	t.Parallel()
 	svc := setupSvcVersion(t, "v1.4.0")
 	serveAnyServer(t, svc)
 	u := &action.Invoker{Via: "command", GuildID: "g", ChannelID: "c", UserID: "u1"}
@@ -105,6 +107,7 @@ func TestUpdatesNotesSpeakTheCallersLanguage(t *testing.T) {
 // A local build, a build after a tag and a pre-release: a build after a tag shows the last note up to
 // its tag; a local build has none.
 func TestUpdatesNotesForBuilds(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	for _, c := range []struct {
 		version string
@@ -132,6 +135,7 @@ func TestUpdatesNotesForBuilds(t *testing.T) {
 // updates.subscribe is the person's own switch in their settings row: it needs no other setting, it
 // goes away with the row when switched off, and resetting the other settings leaves it alone.
 func TestUpdatesSubscribeIsThePersonsOwn(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	serveAnyServer(t, svc)
 	u := &action.Invoker{Via: "command", GuildID: "g", ChannelID: "c", UserID: "u1"}
@@ -187,6 +191,7 @@ func TestUpdatesSubscribeIsThePersonsOwn(t *testing.T) {
 // A room's news switch starts off, is changed by channels.configure like the other room switches, and
 // a server manager reaches it through the admin command in that room.
 func TestRoomUpdateNewsSwitch(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	serveAnyServer(t, svc)
 	if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g", "id": "c", "respond": "mention"}); !r.OK || r.Output["update_news"] != false {

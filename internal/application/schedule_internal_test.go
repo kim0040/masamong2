@@ -8,6 +8,7 @@ import (
 )
 
 func TestBackupSlots(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	// Wednesday 2026-09-23 10:00 in Seoul
 	now := time.Date(2026, 9, 23, 10, 0, 0, 0, seoul)

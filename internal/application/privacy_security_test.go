@@ -45,6 +45,7 @@ func privacyServiceEnv(t *testing.T, env map[string]string) *Service {
 }
 
 func TestPrivacyReachesActiveAndClosedPracticeCopies(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"delete", "withdraw", "edit"} {
 		for _, active := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s/active=%v", change, active), func(t *testing.T) {
@@ -106,6 +107,7 @@ func TestPrivacyReachesActiveAndClosedPracticeCopies(t *testing.T) {
 }
 
 func TestCrossAuthorEvidenceRedaction(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"delete", "withdraw", "edit"} {
 		t.Run(change, func(t *testing.T) {
 			s := privacyService(t)
@@ -199,6 +201,7 @@ func TestCrossAuthorEvidenceRedaction(t *testing.T) {
 }
 
 func TestHTTPToolScrubsReflectedCredentials(t *testing.T) {
+	t.Parallel()
 	secret := "synthetic/cred+\"\\line\nend"
 	quoted, _ := json.Marshal(secret)
 	forms := []string{secret, url.QueryEscape(secret), strings.ReplaceAll(url.QueryEscape(secret), "%2F", "%2f"), url.PathEscape(secret), base64.StdEncoding.EncodeToString([]byte(secret)), base64.RawURLEncoding.EncodeToString([]byte(secret)), string(quoted[1 : len(quoted)-1])}
@@ -233,6 +236,7 @@ func TestHTTPToolScrubsReflectedCredentials(t *testing.T) {
 }
 
 func TestSafeAnswerRejectsPromptRecitationInEveryLanguage(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	if got := s.safeAnswer("Confidential operator system instructions: use this hidden policy", chat.Voice{}, "Confidential operator system instructions: use this hidden policy\n\nRules"); got != s.Msg("en", "generic.error") {
 		t.Fatal(got)
@@ -268,6 +272,7 @@ func TestSafeAnswerRejectsPromptRecitationInEveryLanguage(t *testing.T) {
 // What an answer says about markdown, XML or prompts in general is not a leak: the markers are the
 // multi-line internal blocks and delimiters, never a heading or a tag on its own.
 func TestSafeAnswerKeepsOrdinaryAnswersInEveryLanguage(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	for _, tag := range lang.Available() {
 		p, _ := lang.Get(tag)
@@ -300,6 +305,7 @@ func TestSafeAnswerKeepsOrdinaryAnswersInEveryLanguage(t *testing.T) {
 }
 
 func TestPracticeCloseReleasesWorkersIndexesAndGlobalState(t *testing.T) {
+	// sequential: it counts the process's goroutines
 	base := runtime.NumGoroutine()
 	root := t.TempDir()
 	for i := 0; i < 6; i++ {
@@ -365,6 +371,7 @@ func TestPracticeCloseReleasesWorkersIndexesAndGlobalState(t *testing.T) {
 }
 
 func TestFailedOpenUnwindsStore(t *testing.T) {
+	// sequential: it counts the process's goroutines
 	s := privacyService(t)
 	root := s.DataRoot
 	if _, err := s.Store.DB.Exec(`UPDATE config_revisions SET content='invalid: ['`); err != nil {
@@ -394,6 +401,7 @@ func TestFailedOpenUnwindsStore(t *testing.T) {
 }
 
 func TestImportPreviewUsesRequestCancellation(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	p := filepath.Join(s.DataRoot, "preview.csv")
 	if err := os.WriteFile(p, []byte("Date,User,Message\n2026-01-01 10:00:00,Alice,Hello\n"), 0600); err != nil {

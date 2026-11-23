@@ -20,6 +20,7 @@ import (
 // The console action for a provider failure shows the error's class and HTTP status, never the
 // service's own words or the address it was sent to: either can repeat the key back.
 func TestProviderResultShowsClassAndStatusOnly(t *testing.T) {
+	t.Parallel()
 	const serviceWords = "service-says the key was refused"
 	refuse := func(status int) (*httptest.Server, error) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -11,6 +11,7 @@ import (
 )
 
 func TestLegacyPostLookupUsesRoomIndex(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	db, err := s.adminDB()
 	if err != nil {
@@ -41,6 +42,7 @@ func TestLegacyPostLookupUsesRoomIndex(t *testing.T) {
 }
 
 func TestLegacyAnswerClockWithoutLivePost(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	db, err := s.adminDB()
 	if err != nil {
@@ -72,6 +74,7 @@ func TestLegacyAnswerClockWithoutLivePost(t *testing.T) {
 }
 
 func TestPostedLookupFailureIsCounted(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	s.noteLive(ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: "unverified", FromBot: true, Content: "post"})
 	eng, err := s.MemoryEngine()
@@ -94,6 +97,7 @@ func TestPostedLookupFailureIsCounted(t *testing.T) {
 }
 
 func TestRegistryGapsLeaveWithLivePosts(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	eng, err := s.MemoryEngine()
 	if err != nil {
@@ -125,6 +129,7 @@ func TestRegistryGapsLeaveWithLivePosts(t *testing.T) {
 }
 
 func TestLiveEditRecomputesToBot(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	m := ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: "request", AuthorID: "person",
 		Content: "addressed", BotCall: "mention", Mentions: []string{"bot"}, At: time.Now()}
@@ -161,6 +166,7 @@ func TestLiveEditRecomputesToBot(t *testing.T) {
 }
 
 func TestTurnSetupFailureDoesNotMarkLiveCall(t *testing.T) {
+	t.Parallel()
 	s, err := Open(t.TempDir(), nil, false)
 	if err != nil {
 		t.Fatal(err)
@@ -177,6 +183,7 @@ func TestTurnSetupFailureDoesNotMarkLiveCall(t *testing.T) {
 }
 
 func TestEditedAddressUsesOnlyCurrentRevision(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	m := ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: "request", AuthorID: "person", Content: "DIRECT", BotCall: "mention"}
 	s.noteLive(m)

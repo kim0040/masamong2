@@ -14,6 +14,7 @@ import (
 // A channel the bot answers in without storing its messages still keeps them as conversation context:
 // deleting or editing the message in Discord reaches that context too.
 func TestUncapturedMessageEditsAndDeletionsReachChatContext(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	url := chatServer(t, `{"memory_requirement":"none","tool_plan":[]}`, "stop", &calls)
 	svc := routedSvc(t, url, url)
@@ -49,6 +50,7 @@ func TestUncapturedMessageEditsAndDeletionsReachChatContext(t *testing.T) {
 // messages from the turn history and the participation log, and drops their reply ratings; other
 // people's stay.
 func TestWithdrawnMemoryConsentClearsContextAndRecords(t *testing.T) {
+	t.Parallel()
 	svc, gw, _ := partSvc(t, "conservative")
 	eng, err := svc.MemoryEngine()
 	if err != nil {

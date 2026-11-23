@@ -11,6 +11,7 @@ import (
 )
 
 func TestVersionsCompare(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		latest, current string
 		newer           bool
@@ -28,6 +29,7 @@ func TestVersionsCompare(t *testing.T) {
 }
 
 func TestUpdateCheckSaysWhenANewerReleaseIsOut(t *testing.T) {
+	t.Parallel()
 	var status atomic.Int32
 	status.Store(200)
 	var ua atomic.Value

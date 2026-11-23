@@ -9,6 +9,7 @@ import (
 // threadRowCols and threadRow.fields name the same columns in the same order, and a row becomes the
 // entry the thread table holds: the owner counts as a person in the thread.
 func TestThreadRowMatchesItsColumns(t *testing.T) {
+	t.Parallel()
 	var r threadRow
 	if cols, fields := strings.Split(threadRowCols, ","), r.fields(); len(cols) != len(fields) {
 		t.Fatalf("%d columns, %d scan targets", len(cols), len(fields))

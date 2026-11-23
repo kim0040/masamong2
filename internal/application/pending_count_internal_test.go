@@ -34,6 +34,7 @@ func countHook(t *testing.T, s *Service) (release chan int, calls *atomic.Int32)
 // A zero gap field follows the host profile: 30s is past a large host's 20s gap and inside
 // medium's one minute, which is what c.gap == 0 has always meant.
 func TestPendingRecountGapUsesTheHostProfile(t *testing.T) {
+	// sequential: it installs the process's host profile
 	s, _ := deliveryService(t)
 	prev := hostprofile.Current()
 	t.Cleanup(func() { hostprofile.Apply(prev) })
@@ -78,6 +79,7 @@ func TestPendingRecountGapUsesTheHostProfile(t *testing.T) {
 // context, the gap follows every count (also a failed or panicked one, also for the doctor), a changed
 // space is counted at once, and a waiter gets the result of the count it waited for.
 func TestPendingCountAdmission(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	c := &s.pendingMsgs
 	c.gap = time.Hour // the reminder never fires during the test

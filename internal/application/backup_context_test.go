@@ -10,6 +10,7 @@ import (
 )
 
 func TestBackupActionHonorsCancellationBeforeCreatingFiles(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

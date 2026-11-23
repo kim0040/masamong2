@@ -25,6 +25,7 @@ func out(t *testing.T, svc *application.Service, act string, in map[string]any) 
 }
 
 func TestConfigPatchEditsByPathWithCAS(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	doc := out(t, svc, "config.document", nil)
 	rev := int(doc["revision"].(float64))
@@ -73,6 +74,7 @@ func TestConfigPatchEditsByPathWithCAS(t *testing.T) {
 }
 
 func TestPauseStopsRepliesAndCommandsButNotTheConsole(t *testing.T) {
+	t.Parallel()
 	svc, _ := chatSvc(t, `{"tool_plan":[]}`)
 	if r := exec(svc, "runtime.pause", map[string]any{"scope": "all"}); !r.OK {
 		t.Fatalf("pause: %+v", r)
@@ -99,6 +101,7 @@ func TestPauseStopsRepliesAndCommandsButNotTheConsole(t *testing.T) {
 }
 
 func TestRuntimeDrainUsesDurableGlobalPause(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	if r := exec(svc, "setup.resume", map[string]any{"instance": "drain-test"}); !r.OK {
 		t.Fatalf("setup: %+v", r)
@@ -114,6 +117,7 @@ func TestRuntimeDrainUsesDurableGlobalPause(t *testing.T) {
 }
 
 func TestTurnLogDashboardAndSeries(t *testing.T) {
+	t.Parallel()
 	svc, _ := chatSvc(t, `{"tool_plan":[]}`)
 	for _, msg := range []string{"안녕", "뭐해"} {
 		if _, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "1", ChannelID: "2", Message: msg, Speaker: "철수"}); err != nil {
@@ -158,6 +162,7 @@ func TestTurnLogDashboardAndSeries(t *testing.T) {
 // The dashboard alerts only what stops the bot: a tool that lacks its optional key (disasters without
 // KMA, stock quotes without Finnhub) is marked on the tools page, not raised as an alert.
 func TestDashboardDoesNotAlertOptionalToolKeys(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	dash := out(t, svc, "dashboard.overview", nil)
 	for _, raw := range dash["attention"].([]any) {
@@ -178,6 +183,7 @@ func TestDashboardDoesNotAlertOptionalToolKeys(t *testing.T) {
 }
 
 func TestPrefsAndLabReviews(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	out(t, svc, "admin.prefs.set", map[string]any{"prefs": map[string]any{"theme": "dark", "lang": "ko"}})
 	out(t, svc, "admin.prefs.set", map[string]any{"prefs": map[string]any{"lang": nil, "density": "compact"}})
@@ -200,6 +206,7 @@ func TestPrefsAndLabReviews(t *testing.T) {
 }
 
 func TestLogsRingRedacts(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	log := svc.CaptureLogs(nil)
 	log.Info("provider call", "token", "sk-live-123", "provider", "openrouter")
@@ -219,6 +226,7 @@ func TestLogsRingRedacts(t *testing.T) {
 }
 
 func TestConsoleReadsAreNotToolUse(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	for i := 0; i < 3; i++ {
 		raw, _ := json.Marshal(map[string]any{})

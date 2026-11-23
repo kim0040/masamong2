@@ -11,6 +11,7 @@ import (
 // logging.level off and errors keep the member's words out of the turn record, the tool loop's
 // arguments included; ops keeps them.
 func TestLoggingLevelDropsToolLoopParams(t *testing.T) {
+	t.Parallel()
 	s := &Service{}
 	body := func(mode string) map[string]any {
 		trace := &chat.LoopTrace{Mode: mode, Rounds: 1, Stop: "answered", Steps: []chat.LoopStep{

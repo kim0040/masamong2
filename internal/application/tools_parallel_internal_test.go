@@ -18,6 +18,7 @@ import (
 )
 
 func TestChatToolLedgerIncludesPanicAndPartialCost(t *testing.T) {
+	t.Parallel()
 	for _, outcome := range []string{"ok", "error", "panic"} {
 		t.Run(outcome, func(t *testing.T) {
 			s, _ := deliveryService(t)
@@ -115,6 +116,7 @@ func (f *quotaLoopModel) ChatTools(context.Context, string, []chat.LoopMsg, []ch
 }
 
 func TestSameToolQuotaWinnerKeepsModelOrder(t *testing.T) {
+	t.Parallel()
 	for _, limit := range []tools.Limits{{PerDay: 1}, {CooldownSec: 60}} {
 		t.Run(fmt.Sprintf("daily=%d", limit.PerDay), func(t *testing.T) {
 			s, _ := deliveryService(t)
@@ -155,6 +157,7 @@ func TestSameToolQuotaWinnerKeepsModelOrder(t *testing.T) {
 }
 
 func TestChatModelsReserveCallsAtStart(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"planner", "loop", "response"} {
 		t.Run(mode, func(t *testing.T) {
 			s, _ := deliveryService(t)

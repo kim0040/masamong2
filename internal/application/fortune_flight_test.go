@@ -24,6 +24,7 @@ func asCtx(ctx context.Context, svc *application.Service, act string, in map[str
 // deadline passes are not held up by it, and a second asker of the same sign waits for that one text
 // instead of paying for another.
 func TestZodiacGenerationDoesNotHoldEveryoneElse(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	var block atomic.Bool
 	started := make(chan struct{}, 1)

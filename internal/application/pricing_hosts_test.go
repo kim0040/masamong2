@@ -16,6 +16,7 @@ import (
 // that unit; a model priced nowhere is an alert, because the budget cannot stop it. Shapes recorded
 // 2026-10-01.
 func TestPricesForHostsWithoutPriceLists(t *testing.T) {
+	t.Parallel()
 	comet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek-v4-flash","object":"model","owned_by":"deepseek","supported_endpoint_types":["openai"]},{"id":"mystery-image-1","object":"model","owned_by":"custom","supported_endpoint_types":["openai"]}],"object":"list"}`))
 	}))
@@ -85,6 +86,7 @@ func TestPricesForHostsWithoutPriceLists(t *testing.T) {
 // A fallback model that is priced nowhere counts as free just like a main model does, so the dashboard
 // names its role; setting the fallback's own price clears the alert.
 func TestUnpricedFallbackModelIsAnAlert(t *testing.T) {
+	t.Parallel()
 	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek-v4-flash","object":"model","owned_by":"deepseek","supported_endpoint_types":["openai"]},{"id":"mystery-chat-1","object":"model","owned_by":"custom","supported_endpoint_types":["openai"]}],"object":"list"}`))
 	}))

@@ -13,6 +13,7 @@ import (
 )
 
 func TestChannelSummaryCachesAndFoldsInNewMessages(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	url := chatServer(t, "## 핵심 3줄\n- 캠핑 간다", "stop", &calls)
 	svc := routedSvc(t, url, url)
@@ -66,6 +67,7 @@ func TestChannelSummaryCachesAndFoldsInNewMessages(t *testing.T) {
 // An edit or deletion before the last message leaves the anchor where it was; the saved summary still
 // goes, so the next one is made from the messages as they now are.
 func TestChannelSummaryDropsWhatAnEditOrDeletionChanged(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	url := chatServer(t, "## 핵심 3줄\n- 금요일 8시 모임", "stop", &calls)
 	svc := routedSvc(t, url, url)

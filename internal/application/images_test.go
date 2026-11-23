@@ -34,6 +34,7 @@ func imageServer(t *testing.T, calls *atomic.Int32) string {
 }
 
 func TestImagesGenerateSavesThePicture(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	url := imageServer(t, &calls)
 	svc := setupSvc(t)

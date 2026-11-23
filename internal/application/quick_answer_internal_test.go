@@ -21,6 +21,7 @@ import (
 // The reference, name-call and follow-up classifiers ask without thinking; every other planner-route
 // call keeps "low".
 func TestQuickAnswerAsksWithoutThinking(t *testing.T) {
+	t.Parallel()
 	s, err := Open(t.TempDir(), nil, false)
 	if err != nil {
 		t.Fatal(err)

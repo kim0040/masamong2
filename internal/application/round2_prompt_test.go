@@ -11,6 +11,7 @@ import (
 // A thread hidden by a deletion whose tombstone write is still pending must not
 // feed the parent's person block (the same boundary as threadRooms/ThreadFor).
 func TestRound2PendingThreadDeletion(t *testing.T) {
+	t.Parallel()
 	s, m, e := memorySvc(t)
 	f := reviewPerson{s, m, e, time.Now().UTC().Add(-3 * time.Hour)}
 	ev := f.source(t, "g", "c", "public-source", "101", "민수", f.at)
@@ -46,6 +47,7 @@ func TestRound2PendingThreadDeletion(t *testing.T) {
 // Only an explicit request about the caller adds their card; a first-person
 // aside next to an unrelated question adds no person block.
 func TestRound2IncidentalSelfRecall(t *testing.T) {
+	t.Parallel()
 	s, m, e := memorySvc(t)
 	f := reviewPerson{s, m, e, time.Now().UTC().Add(-3 * time.Hour)}
 	ev := f.source(t, "g", "c", "caller-source", "303", "지수", f.at)
@@ -65,6 +67,7 @@ func TestRound2IncidentalSelfRecall(t *testing.T) {
 // A profile-withdrawn account is never indexed, yet its captured name still
 // makes the plain name ambiguous: no fact of the other account is sent.
 func TestRound2HiddenCollisionPrompt(t *testing.T) {
+	t.Parallel()
 	s, m, e := memorySvc(t)
 	f := reviewPerson{s, m, e, time.Now().UTC().Add(-3 * time.Hour)}
 	const q = "동명이인은 어떤 사람이야?"

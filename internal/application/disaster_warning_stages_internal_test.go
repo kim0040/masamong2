@@ -11,6 +11,7 @@ import (
 // another level stays, deliveries survive only for rooms still watching and the level in force, and a
 // sea area is left out of the cards unless marine is on.
 func TestWarningDecisionStages(t *testing.T) {
+	t.Parallel()
 	w := func(code, kind, level, cmd, announced string) kma.Warning {
 		return kma.Warning{RegionCode: code, Region: code, Kind: kind, KindName: kind, Level: level, LevelName: level, Command: cmd, Announced: announced, Effective: "202610011200"}
 	}

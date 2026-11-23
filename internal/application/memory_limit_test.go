@@ -10,6 +10,7 @@ import (
 )
 
 func TestDoctorReportsProcessMemoryLimit(t *testing.T) {
+	// sequential: it sets the process's memory limit
 	svc := practiceSvc(t)
 	res := exec(svc, "runtime.doctor", nil)
 	if !res.OK {
@@ -39,6 +40,7 @@ func TestDoctorReportsProcessMemoryLimit(t *testing.T) {
 }
 
 func TestDoctorReportsHostProfile(t *testing.T) {
+	// sequential: it installs the process's host profile
 	prev := hostprofile.Current()
 	t.Cleanup(func() { hostprofile.Apply(prev) })
 	hostprofile.Apply(hostprofile.DetectFrom(8, 8<<30, "large"))

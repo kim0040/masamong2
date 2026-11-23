@@ -9,6 +9,7 @@ import (
 )
 
 func TestPreparedCrashRecoversOrDiscards(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	doc := config.Default("gate", svc.DataRoot)
 	doc.I18n.Timezone = "UTC"

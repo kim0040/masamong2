@@ -91,6 +91,7 @@ func fieldOf(c action.Card, name string) string {
 }
 
 func TestServerLogPostsDeletesWithTheirText(t *testing.T) {
+	t.Parallel()
 	svc, gw := logSvc(t)
 	written := time.Date(2026, 10, 21, 3, 4, 5, 0, time.UTC)
 	svc.LogDeletes("g", "9000001", []application.DeletedMessage{{ID: msgID(written, 1), AuthorID: "111", Text: "내일 3시에 보자", Files: []string{"a.png"}}})
@@ -129,6 +130,7 @@ func TestServerLogPostsDeletesWithTheirText(t *testing.T) {
 }
 
 func TestServerLogFindsTheStoredMessageAndSkipsItsOwnReplies(t *testing.T) {
+	t.Parallel()
 	svc, gw := logSvc(t)
 	if _, err := svc.MemoryEngine(); err != nil {
 		t.Fatal(err)
@@ -152,6 +154,7 @@ func TestServerLogFindsTheStoredMessageAndSkipsItsOwnReplies(t *testing.T) {
 }
 
 func TestServerLogFollowsItsSettings(t *testing.T) {
+	t.Parallel()
 	svc, gw := logSvc(t)
 	f := false
 	setLog(t, svc, config.GuildLog{Channel: config.GuildLogAuto, Deletes: &f})
@@ -177,6 +180,7 @@ func TestServerLogFollowsItsSettings(t *testing.T) {
 }
 
 func TestServerLogPostsAProblemOncePerWhile(t *testing.T) {
+	t.Parallel()
 	svc, gw := logSvc(t)
 	svc.LogProblem("g", "9000001", "tool_failed", "search.web", errclass.RateLimited)
 	svc.LogProblem("g", "9000001", "tool_failed", "search.web", errclass.RateLimited)
@@ -191,6 +195,7 @@ func TestServerLogPostsAProblemOncePerWhile(t *testing.T) {
 }
 
 func TestServerLogTestAndListView(t *testing.T) {
+	t.Parallel()
 	svc, gw := logSvc(t)
 	r := exec(svc, "serverlog.test", map[string]any{"guild_id": "g"})
 	if !r.OK || r.Output["channel_id"] != "9000002" || r.Output["source"] != "auto" {

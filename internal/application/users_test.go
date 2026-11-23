@@ -11,6 +11,7 @@ import (
 )
 
 func TestUsersListGathersOnePersonsData(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	svc := fortuneSvc(t, &calls)
 	dm := person("100001", true)

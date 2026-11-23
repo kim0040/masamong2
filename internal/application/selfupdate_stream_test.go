@@ -49,6 +49,7 @@ func (b *burstReader) Read(p []byte) (int, error) {
 }
 
 func TestUpdateEntryCopyDoesNotBufferTheWholeFile(t *testing.T) {
+	t.Parallel()
 	const size = 1 << 20
 	var buf bytes.Buffer
 	n, err := writeUpdateEntry("masamong", &burstReader{left: size, max: 64 << 10}, uint64(size), &buf, size)
@@ -174,6 +175,7 @@ func extractSized(t *testing.T, format string, n int, open func(name string) (ar
 // Extraction reads the archive in small pieces. A 1 MiB program must not allocate
 // like a 1 MiB program, and no read may ask for the whole file.
 func TestUpdateExtractDoesNotBufferTheBinary(t *testing.T) {
+	// sequential: it measures the process's allocations
 	for _, format := range []string{"tar.gz", "zip"} {
 		t.Run(format, func(t *testing.T) {
 			open := cappedArchiveOpen(256 << 10)
@@ -198,6 +200,7 @@ func TestUpdateExtractDoesNotBufferTheBinary(t *testing.T) {
 // so a declared size over the archive cap must not fail the update. A second
 // copy of a program is skipped the same way, and the first copy is the one staged.
 func TestUpdateExtractSkipsOversizedUnwantedEntries(t *testing.T) {
+	t.Parallel()
 	for _, format := range []string{"tar.gz", "zip"} {
 		t.Run(format, func(t *testing.T) {
 			dir := t.TempDir()
@@ -336,6 +339,7 @@ func patchZipUncompressed(t *testing.T, path, name string, nth int, size uint32)
 }
 
 func TestUpdateExtractFailureRemovesStagedFiles(t *testing.T) {
+	t.Parallel()
 	for _, format := range []string{"tar.gz", "zip"} {
 		t.Run(format, func(t *testing.T) {
 			dir := t.TempDir()
@@ -363,6 +367,7 @@ func TestUpdateExtractFailureRemovesStagedFiles(t *testing.T) {
 }
 
 func TestUpdateDownloadFailureRemovesTheTempFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	body := []byte("archive-bytes")
 	sum := sha256.Sum256(body)
@@ -404,6 +409,7 @@ func TestUpdateDownloadFailureRemovesTheTempFile(t *testing.T) {
 }
 
 func TestUpdateDownloadOverCapAndCancelRemoveTheTempFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(bytes.Repeat([]byte("x"), 64))
@@ -445,6 +451,7 @@ func TestUpdateDownloadOverCapAndCancelRemoveTheTempFile(t *testing.T) {
 }
 
 func TestUpdateDownloadRetriesThenKeepsOneFile(t *testing.T) {
+	t.Parallel()
 	var hits atomic.Int32
 	body := []byte("second-try")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -479,6 +486,7 @@ func sha256Sum(b []byte) []byte {
 }
 
 func TestUpdateArchiveDownloadRefusesTheNetworkWhenOffline(t *testing.T) {
+	t.Parallel()
 	c := providers.NewDownloadClient(time.Second, slog.Default(), func(string) bool { return true })
 	c.MaxRetries = 0
 	_, _, err := streamReleaseAsset(context.Background(), c, "https://example.com/masamong.tar.gz", t.TempDir(), "masamong.tar.gz", 1024)
@@ -490,6 +498,7 @@ func TestUpdateArchiveDownloadRefusesTheNetworkWhenOffline(t *testing.T) {
 // A crash can leave the archive temp file in the install directory. Both cleanups
 // remove .masamong-dl-* and must not touch the installed programs.
 func TestUpdateDownloadLeftoversAreRemoved(t *testing.T) {
+	// sequential: it sets the package's program path
 	dir, _ := updateFixture(t)
 	cli := filepath.Join(dir, exeName("masamong"))
 	daemon := filepath.Join(dir, exeName("masamongd"))

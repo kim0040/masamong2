@@ -7,6 +7,7 @@ import (
 )
 
 func TestQueuedTurnKeepsItsSlotPool(t *testing.T) {
+	t.Parallel()
 	var gate turnGate
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
@@ -53,6 +54,7 @@ func TestQueuedTurnKeepsItsSlotPool(t *testing.T) {
 }
 
 func TestMoreDoesNotWaitForAlreadyAdmittedTurn(t *testing.T) {
+	t.Parallel()
 	var gate turnGate
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()

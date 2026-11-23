@@ -43,6 +43,7 @@ func visionHostWith(t *testing.T, hits *atomic.Int32, handler http.HandlerFunc) 
 }
 
 func TestVisionProviderCoolsDownAfterAnOutage(t *testing.T) {
+	t.Parallel()
 	down := func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		_, _ = w.Write([]byte(`{"error":{"message":"upstream down","type":"server_error"}}`))
@@ -142,6 +143,7 @@ func TestVisionProviderCoolsDownAfterAnOutage(t *testing.T) {
 
 // When the host is back after the window, the vision model describes again and the next turn does not skip it.
 func TestVisionCooldownEndsWhenTheHostRecovers(t *testing.T) {
+	t.Parallel()
 	svc, h := visionSvc(t)
 	clk := &stepClock{t: time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)}
 	svc.Clock = clk
@@ -190,6 +192,7 @@ func TestVisionCooldownEndsWhenTheHostRecovers(t *testing.T) {
 // chatRoutes keeps the vision adapter between turns; a different address, key reference or model builds
 // another one, and so does a config reload.
 func TestVisionAdapterIsKeptBetweenCalls(t *testing.T) {
+	t.Parallel()
 	svc, _ := visionSvc(t)
 	clk := &stepClock{t: time.Now()}
 	svc.Clock = clk
@@ -275,6 +278,7 @@ func TestVisionAdapterIsKeptBetweenCalls(t *testing.T) {
 // An adapter without a key is kept only briefly: a key added under the reference shows up within
 // seconds (at once when it is saved from the console).
 func TestVisionAdapterWithoutAKeyIsKeptBriefly(t *testing.T) {
+	t.Parallel()
 	svc, _ := visionSvc(t)
 	clk := &stepClock{t: time.Now()}
 	svc.Clock = clk
@@ -301,6 +305,7 @@ func TestVisionAdapterWithoutAKeyIsKeptBriefly(t *testing.T) {
 // A key saved under the reference already in the config changes no revision; the provider's adapters
 // are rebuilt anyway, so a connection test right after the save uses the new key.
 func TestKeySavedUnderTheSameReferenceRebuildsTheAdapters(t *testing.T) {
+	t.Parallel()
 	svc, _ := visionSvc(t)
 	svc.SetEnvForTest(t, "MASAMONG_TEST_ROTATED_KEY", "old")
 	applyDoc(t, svc, func(d *config.Document) {

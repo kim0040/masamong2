@@ -22,6 +22,7 @@ func exampleDay() *fortune.Day {
 }
 
 func TestFortuneCardShowsComputedValues(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	base := action.Card{Title: "🔮", Text: tagReading, Tone: "fortune"} // the model wrote 82, 파랑, 손목시계, 오후 3시
 	c := s.fortuneCard(fortuneCardSpec{Loc: "ko", Kind: "today", Head: "head", Footer: "foot", Day: exampleDay()}, base)
@@ -51,6 +52,7 @@ func TestFortuneCardShowsComputedValues(t *testing.T) {
 }
 
 func TestFortuneCardComputedWhenTheModelIgnoredTheFormat(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	base := action.Card{Title: "t", Text: "오늘은 85점! 행운의 색은 파랑.", Tone: "fortune", Footer: "model footer"}
 	c := s.fortuneCard(fortuneCardSpec{Loc: "ko", Kind: "morning", Head: "head", Footer: "basis · foot", Day: exampleDay()}, base)
@@ -76,6 +78,7 @@ func TestFortuneCardComputedWhenTheModelIgnoredTheFormat(t *testing.T) {
 }
 
 func TestFortuneDataCarriesTheComputedFacts(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	at := time.Date(2026, 11, 3, 8, 0, 0, 0, seoul)
@@ -108,6 +111,7 @@ func TestFortuneDataCarriesTheComputedFacts(t *testing.T) {
 }
 
 func TestHourLabel(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	for b, want := range map[int]string{0: "자시(23~01시)", 3: "묘시(05~07시)", 11: "해시(21~23시)"} {
 		if got := s.hourLabel("ko", b); got != want {
@@ -117,6 +121,7 @@ func TestHourLabel(t *testing.T) {
 }
 
 func TestSajuBasisNamesAHarmonyFirst(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	// a day with 형 and 해 on the day branch and a 천간합: the basis names the 합
 	d := fortune.Day{StemGod: 5, StemHap: true, Hits: []fortune.Hit{{Pos: fortune.PosDay, Rel: fortune.RelPunish}, {Pos: fortune.PosDay, Rel: fortune.RelHarm}}}
@@ -139,6 +144,7 @@ func withZone(t *testing.T, s *Service, zone string) {
 }
 
 func TestNatalIgnoresTheDisplayZone(t *testing.T) {
+	t.Parallel()
 	// born 1990-02-04 09:30 in Seoul, 44 minutes before 입춘 (10:14 KST): 기사년 정축월 (lunar-go, at 08:30
 	// Beijing time). Moving one's display zone to New York must not move the birth past 입춘.
 	s := privacyService(t)
@@ -171,6 +177,7 @@ func TestNatalIgnoresTheDisplayZone(t *testing.T) {
 }
 
 func TestInvalidBirthDateGetsNoFacts(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	at := time.Date(2026, 11, 3, 8, 0, 0, 0, time.UTC)
 	for _, date := range []string{"0000-05-15", "1990-02-30", "1899-12-31", ""} {
@@ -191,6 +198,7 @@ func TestInvalidBirthDateGetsNoFacts(t *testing.T) {
 }
 
 func TestTermDateWithoutBirthTime(t *testing.T) {
+	t.Parallel()
 	// 2026-10-08 is 한로 in Seoul: without a birth time the month pillar is not certain; on 입춘
 	// (2026-02-04) the year is not either; a known birth time settles both
 	s := privacyService(t)
@@ -222,6 +230,7 @@ func TestTermDateWithoutBirthTime(t *testing.T) {
 }
 
 func TestBriefingGreetingsArePolite(t *testing.T) {
+	t.Parallel()
 	// the Korean greeting examples stay 해요체, like the default persona (internal/lang voice_test.go)
 	s := privacyService(t)
 	for _, slot := range []string{"morning", "day", "evening", "night"} {

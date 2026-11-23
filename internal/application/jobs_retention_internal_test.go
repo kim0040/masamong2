@@ -9,6 +9,7 @@ import (
 )
 
 func TestRunRetentionPrunesFinishedJobsAndKeepsLatestPreparePerRoom(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	insert := func(id, typ, status, payload, created string) {
 		t.Helper()

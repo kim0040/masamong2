@@ -29,6 +29,7 @@ func (h *channelHistoryGateway) History(_ context.Context, channelID, _ string, 
 // closed long ago, or a private thread the application only knows by its stored parent, with a message
 // stored before the parent was turned off), and not one whose own entry says capture: true. A thread under a channel that stores is still read.
 func TestBackfillSkipsThreadsOfACaptureOffParent(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Memory.Capture = true

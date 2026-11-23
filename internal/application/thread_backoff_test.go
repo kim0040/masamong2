@@ -15,6 +15,7 @@ import (
 // shows in the decision log once per conversation, an opened thread starts it over, and a restart keeps it
 // (the state is read from the log).
 func TestThreadOffersBackOffWhenNobodyTakesThemUp(t *testing.T) {
+	t.Parallel()
 	var plan, resp recordingServer
 	planURL := plan.start(t, func(string) string { return `{"memory_requirement":"none","tool_plan":[]}` })
 	respURL := resp.start(t, func(string) string { return strings.Repeat("길게 설명하는 답이야. ", 30) })
@@ -75,6 +76,7 @@ func TestThreadOffersBackOffWhenNobodyTakesThemUp(t *testing.T) {
 
 // One opened thread starts the count over, and the rest lengthens with every offer passed over.
 func TestOpenedThreadEndsTheBackoffAndRestLengthens(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	t0 := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
 	svc.Clock = clock.Fixed{T: t0}
@@ -100,6 +102,7 @@ func TestOpenedThreadEndsTheBackoffAndRestLengthens(t *testing.T) {
 // Rows written in the same instant are read newest first by their insertion order: an offer made after a
 // thread was opened counts for the rest, one made before it does not.
 func TestThreadBackoffReadsRowsOfOneInstantInTheOrderTheyWereWritten(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	at := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
 	svc.Clock = clock.Fixed{T: at}

@@ -6,6 +6,7 @@ import (
 )
 
 func TestThreadRecoveryRetriesInvalidatedSnapshot(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	s.NoteThread("g", "target", "parent", false)
 	s.threads.mu.Lock()
@@ -28,6 +29,7 @@ func TestThreadRecoveryRetriesInvalidatedSnapshot(t *testing.T) {
 }
 
 func TestThreadRecoveryRetryIsBounded(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	s.NoteThread("g", "target", "parent", false)
 	s.threads.mu.Lock()

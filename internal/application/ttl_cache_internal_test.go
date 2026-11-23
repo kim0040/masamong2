@@ -9,6 +9,7 @@ import (
 )
 
 func TestTTLCacheExpiresAndStaysBounded(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
 	c := newTTLCache[int](3, time.Hour)
 	c.put("a", 1, now)
@@ -50,6 +51,7 @@ func TestTTLCacheExpiresAndStaysBounded(t *testing.T) {
 // The two caches that used to grow with every place and every person (a service's geocoder and its
 // zodiac cooldowns): a flood of distinct keys leaves them at their caps.
 func TestGeocodeAndCooldownCachesAreCapped(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	s := &Service{}
 	for i := 0; i < geocodeCacheMax+500; i++ {

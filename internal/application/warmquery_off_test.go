@@ -9,6 +9,7 @@ import (
 
 // memory.warm_query: off keeps the message from the embedding provider until a search asks for it.
 func TestWarmQueryOffEmbedsOnlyWhenThePlanSearches(t *testing.T) {
+	t.Parallel()
 	svc, f := warmSvc(t, warmNone)
 	applyDoc(t, svc, func(d *config.Document) { d.Memory.WarmQuery = "off" })
 	warmTurn(t, svc, f, "미리 보내지 않을 질문", false)
@@ -25,6 +26,7 @@ func TestWarmQueryOffEmbedsOnlyWhenThePlanSearches(t *testing.T) {
 
 // The switch is read from the document of each turn: turning it back on warms the next turn, no restart.
 func TestWarmQueryOnAgainWarmsTheNextTurn(t *testing.T) {
+	t.Parallel()
 	svc, f := warmSvc(t, warmNone)
 	applyDoc(t, svc, func(d *config.Document) { d.Memory.WarmQuery = "off" })
 	warmTurn(t, svc, f, "다시 켠 질문", false)
@@ -42,6 +44,7 @@ func TestWarmQueryOnAgainWarmsTheNextTurn(t *testing.T) {
 // Changing the switch only changes when a turn calls the provider. It rebuilds nothing: no summary, no
 // embedding of the indexed rooms, no new index pass work, whichever way it is set.
 func TestWarmQueryChangeDoesNotReindexOrResummarize(t *testing.T) {
+	t.Parallel()
 	svc, f := warmSvc(t, warmNone)
 	svc.MemoryPassForTest(context.Background()) // settle: everything captured is indexed
 	room := embedded(t, svc, "c")

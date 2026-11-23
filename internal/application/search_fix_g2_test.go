@@ -87,6 +87,7 @@ const emptyLinkup = `{"results":[]}`
 // A service that reports no cost (Linkup, Tavily, Serper) is charged at its list price: the month's
 // spending, the turn's guard (cap and cost) all see it, empty answers included.
 func TestSearchWithoutReportedCostIsRecordedAtListPrice(t *testing.T) {
+	t.Parallel()
 	linkup := newRecorder(t, func(string) string {
 		return `{"results":[{"type":"text","name":"L","url":"https://l.example/1","content":"본문"}]}`
 	})
@@ -147,6 +148,7 @@ func TestSearchWithoutReportedCostIsRecordedAtListPrice(t *testing.T) {
 // A deep search at a service that has no reworded queries of its own sends a request for each, and the
 // fee and the daily quota count them all.
 func TestRewordedQueriesAreRequestsInQuotaAndFee(t *testing.T) {
+	t.Parallel()
 	tav := newRecorder(t, tavilyReply)
 	svc := setupSvc(t)
 	pointAt(t, svc, "tavily", tav.srv.URL, "T_KEY", "key-k1")
@@ -226,6 +228,7 @@ func hungService(t *testing.T, delay time.Duration, body string) *slowSearch {
 // The whole search has one time limit: the next service gets what is left (at most its own limit) and is
 // not asked when too little is left.
 func TestSearchHasOneTotalTimeLimit(t *testing.T) {
+	t.Parallel()
 	a := hungService(t, 30*time.Second, "")
 	b := hungService(t, 30*time.Second, "")
 	c := hungService(t, 30*time.Second, "")
@@ -253,6 +256,7 @@ func TestSearchHasOneTotalTimeLimit(t *testing.T) {
 
 // With no time left for the next service, an empty answer of the last one asked is the search's answer.
 func TestSearchTimeLimitKeepsAnEmptyAnswer(t *testing.T) {
+	t.Parallel()
 	// the first service answers (empty) after 400 ms, well inside its 1.5 s limit; the search has 1 s in
 	// all, so at most 600 ms is left, under the 700 ms the next one needs, however slow the answer was
 	first := hungService(t, 400*time.Millisecond, `{"organic":[]}`)
@@ -272,6 +276,7 @@ func TestSearchTimeLimitKeepsAnEmptyAnswer(t *testing.T) {
 
 // The console's connection check gets its own time limit, whatever the caller's context allows.
 func TestProbeHasItsOwnTimeLimit(t *testing.T) {
+	t.Parallel()
 	hung := hungService(t, 30*time.Second, "")
 	svc := setupSvc(t)
 	application.SetProbeTimeoutForTest(svc, 300*time.Millisecond)
@@ -287,6 +292,7 @@ func TestProbeHasItsOwnTimeLimit(t *testing.T) {
 
 // A host is remembered only for what the fetch service said about it; our own cut-offs say nothing.
 func TestHostCacheIgnoresOurCutOffs(t *testing.T) {
+	t.Parallel()
 	svc, fake := withFetch(t, 3, hostOf, func(u string) (int, string, time.Duration) {
 		if strings.Contains(u, "site1.") {
 			return 200, okPage(campPage), 5 * time.Second // slow: the soft deadline cuts it, the host is not at fault
@@ -309,6 +315,7 @@ func TestHostCacheIgnoresOurCutOffs(t *testing.T) {
 }
 
 func TestHostCacheCountsServiceReportedTimeoutsAndResets(t *testing.T) {
+	t.Parallel()
 	var slow atomic.Bool
 	slow.Store(true)
 	svc, fake := withFetch(t, 3, hostOf, func(u string) (int, string, time.Duration) {
@@ -338,6 +345,7 @@ func TestHostCacheCountsServiceReportedTimeoutsAndResets(t *testing.T) {
 
 // A private blog post blocks that blog, not the platform; a rate limit of the host blocks nothing.
 func TestHostCachePlatformHostsAndRateLimits(t *testing.T) {
+	t.Parallel()
 	urls := []string{"https://blog.naver.com/alice/111", "https://blog.naver.com/bob/222", "https://limited.example.com/a", "https://shop.example.com/z"}
 	svc, fake := withFetch(t, 4, func(i int) string { return urls[i] }, func(u string) (int, string, time.Duration) {
 		switch {
@@ -366,6 +374,7 @@ func TestHostCachePlatformHostsAndRateLimits(t *testing.T) {
 // A page the reader failed on is "unavailable", not "service" (which says the passage is the search
 // service's own text).
 func TestFailedPageReadIsUnavailable(t *testing.T) {
+	t.Parallel()
 	svc, _ := withFetch(t, 2, hostOf, func(string) (int, string, time.Duration) { return 500, `{"error":"boom"}`, 0 })
 	res := runVia(svc, "chat", map[string]any{"query": "캠핑"})
 	if r := res.Output["results"].([]any)[0].(map[string]any); r["read"] != "unavailable" {
@@ -375,6 +384,7 @@ func TestFailedPageReadIsUnavailable(t *testing.T) {
 
 // Without a key Jina is asked for one page of a standard search and two of a deep one.
 func TestKeylessJinaReadsFewPages(t *testing.T) {
+	t.Parallel()
 	var jina atomic.Int32
 	jsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		jina.Add(1)
@@ -404,6 +414,7 @@ func TestKeylessJinaReadsFewPages(t *testing.T) {
 
 // A scheduled task reads no pages, not even when the call asks for them.
 func TestScheduledTaskSearchReadsNoPages(t *testing.T) {
+	t.Parallel()
 	svc, fake := withFetch(t, 3, hostOf, func(string) (int, string, time.Duration) { return 200, okPage(campPage), 0 })
 	for _, in := range []map[string]any{{"query": "가평 캠핑장"}, {"query": "가평 캠핑장 요금", "pages": 3}} {
 		res := runVia(svc, "task", in)
@@ -420,6 +431,7 @@ func TestScheduledTaskSearchReadsNoPages(t *testing.T) {
 // attempt beyond the turn's hold). One that timed out after it was sent may have been charged, so it is
 // counted at list price; one the service refused with an HTTP error is not.
 func TestSearchRequestIsSentOnceAndALostAnswerIsCharged(t *testing.T) {
+	t.Parallel()
 	hung := hungService(t, 30*time.Second, "")
 	tf := newRecorder(t, func(string) string { return `{"results":[{"title":"T","url":"https://t.example/1","snippet":"s"}]}` })
 	svc := setupSvc(t)
@@ -481,6 +493,7 @@ func TestSearchRequestIsSentOnceAndALostAnswerIsCharged(t *testing.T) {
 // The service is asked without the bot's name, a research search reaches it as one (TinyFish's search of
 // papers), and the result keeps the query as it was asked.
 func TestSearchAsksWithoutTheBotsNameAndForPapers(t *testing.T) {
+	t.Parallel()
 	var qs []string
 	var mu sync.Mutex
 	tf := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -513,6 +526,7 @@ func TestSearchAsksWithoutTheBotsNameAndForPapers(t *testing.T) {
 // A research search asks the services with a search of papers of their own first (TinyFish, Serper, Exa),
 // the others after them; a search without a topic keeps the configured order.
 func TestResearchSearchAsksTheServicesWithPapersFirst(t *testing.T) {
+	t.Parallel()
 	var tavilyHits, tinyfishHits atomic.Int32
 	tavily := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tavilyHits.Add(1)

@@ -12,6 +12,7 @@ import (
 // Application) and stores it, so the invite link works without copying ids from the Developer Portal,
 // and it says when config wants message content the portal does not grant.
 func TestDiscordCheckFillsTheBotIDFromTheToken(t *testing.T) {
+	t.Parallel()
 	var auth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth = r.Header.Get("Authorization")
@@ -49,6 +50,7 @@ func TestDiscordCheckFillsTheBotIDFromTheToken(t *testing.T) {
 
 // The console asks Discord about the token only when one can be read, so channels.list says so.
 func TestChannelsListSaysWhetherADiscordTokenIsSaved(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	svc.SetEnvForTest(t, "MASAMONG_DISCORD_TOKEN", "")
 	if got := out(t, svc, "channels.list", nil)["discord_token"]; got != false {

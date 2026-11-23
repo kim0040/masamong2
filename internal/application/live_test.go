@@ -15,6 +15,7 @@ import (
 const kmaFlat = `{"item":[{"baseDate":"20260915","baseTime":"1500","category":"T1H","obsrValue":"21.5"},{"category":"REH","obsrValue":"40"},{"category":"WSD","obsrValue":"2.1"},{"category":"PTY","obsrValue":"0"}]}`
 
 func TestLiveWeatherThroughConfiguredProvider(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	var hits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -66,6 +67,7 @@ func TestLiveWeatherThroughConfiguredProvider(t *testing.T) {
 }
 
 func TestLiveProviderRejectedMapsToStableCode(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "typ01") {
@@ -105,6 +107,7 @@ func TestLiveProviderRejectedMapsToStableCode(t *testing.T) {
 }
 
 func TestConfigRejectsInlineSecretsAndUnknownKinds(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	yaml := exec(svc, "config.show", nil).Output["yaml"].(string)
 	bad := strings.Replace(yaml, "credential_ref: env:MASAMONG_KMA_KEY", "credential_ref: abcdef123", 1)
@@ -139,6 +142,7 @@ func TestConfigRejectsInlineSecretsAndUnknownKinds(t *testing.T) {
 }
 
 func TestModelsListRealEndpoint(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/models" || r.Header.Get("Authorization") != "Bearer or-key" {

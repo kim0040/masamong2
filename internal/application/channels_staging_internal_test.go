@@ -12,6 +12,7 @@ import (
 // The staged copy is the file the checks opened: after the handle was taken, renaming another file
 // over the spelled path changes neither what is hashed nor what is copied.
 func TestStagedFileIsHashedAndCopiedFromTheCheckedHandle(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	s := &Service{DataRoot: root}
 	staging := filepath.Join(root, "rag_staging")

@@ -11,6 +11,7 @@ import (
 // An offer track keeps only the turns the score counts, a finished conversation's track and old offers
 // are forgotten, and a closed thread leaves memory after threadKeepClosed.
 func TestThreadStateStaysBounded(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
 	tr := &offerTrack{}
 	for i := 0; i < 500; i++ {

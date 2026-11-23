@@ -19,6 +19,7 @@ func (g *healthGateway) Permissions(string, string) (int64, bool)  { return 0, f
 func (g *healthGateway) GatewayHealth() application.GatewayHealth  { return g.health }
 
 func TestChannelsListCarriesGatewayHealth(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	// a gateway that does not report health leaves the field out, so the console shows nothing extra
 	svc.SetDiscord(&startupDoctorGateway{})
@@ -38,6 +39,7 @@ func TestChannelsListCarriesGatewayHealth(t *testing.T) {
 }
 
 func TestDoctorWarnsWhenTheGatewayLooksStuck(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	applyDoc(t, svc, func(d *config.Document) { d.Discord.Enabled = true })
 	discordOf := func(h application.GatewayHealth) (map[string]any, []map[string]any) {
@@ -80,6 +82,7 @@ func (g *reconcilingGateway) ReconciliationBlocked() int { return g.blocked }
 // A quarantined Discord edit/delete file used to show only in the log. The doctor and the console's
 // notifications must show it too, with the count and no path, id or content.
 func TestDoctorAndAttentionShowBlockedReconciliation(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	applyDoc(t, svc, func(d *config.Document) { d.Discord.Enabled = true })
 	gw := &reconcilingGateway{healthGateway: healthGateway{health: application.GatewayHealth{State: application.GatewayOK, Connected: true}}}

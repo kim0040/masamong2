@@ -13,6 +13,7 @@ import (
 // (every caller but the Discord gateway) both run, lab and dry-run turns included. The runtime reports the
 // stages; this only checks that the plumbing neither requires nor trips over the callback.
 func TestChatTurnOnProgressIsOptional(t *testing.T) {
+	t.Parallel()
 	var planCalls, respCalls atomic.Int32
 	planURL := chatServer(t, `{"memory_requirement":"none","tool_plan":[]}`, "stop", &planCalls)
 	respURL := chatServer(t, "응답", "stop", &respCalls)

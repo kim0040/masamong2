@@ -9,6 +9,7 @@ import (
 
 // How a picture is drawn is the operator's setting: the model is never offered it as a parameter.
 func TestPictureQueueSettingIsNotOfferedToTheModel(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	for _, tool := range s.chatToolset(chat.Voice{Pack: lang.For("en")}, "g", "c").Enabled {
 		if tool.ID != "images.generate" {
@@ -27,6 +28,7 @@ func TestPictureQueueSettingIsNotOfferedToTheModel(t *testing.T) {
 }
 
 func TestPictureRequestsMeanTheSameThingWhenOnlyCaseSpacingAndPunctuationDiffer(t *testing.T) {
+	t.Parallel()
 	a := imageKey("g", "c", "u", "Hamster in a space suit", "1:1")
 	if b := imageKey("g", "c", "u", "  hamster   in a SPACE suit!! ", "1:1"); a != b {
 		t.Fatalf("%q != %q", a, b)

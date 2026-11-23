@@ -30,6 +30,7 @@ func pointAt(t *testing.T, svc *application.Service, id, url, env, key string) {
 // search.web tries the services in order: a refused key hands over to the next one, the answer says
 // which service found the pages, and the refused one shows as rejected on the Connections page.
 func TestSearchFallsBackAndNamesTheService(t *testing.T) {
+	t.Parallel()
 	var tavilyHits, serperHits atomic.Int32
 	tavily := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tavilyHits.Add(1)
@@ -93,6 +94,7 @@ func TestSearchFallsBackAndNamesTheService(t *testing.T) {
 }
 
 func TestWebReadPublicPagesOnly(t *testing.T) {
+	t.Parallel()
 	var path string
 	jina := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
@@ -127,6 +129,7 @@ func TestWebReadPublicPagesOnly(t *testing.T) {
 
 // Instances made before the search services existed can add them from the console.
 func TestAddSearchServiceToAnOldInstance(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	if r := exec(svc, "providers.remove", map[string]any{"id": "linkup"}); !r.OK {
 		t.Fatalf("remove: %+v", r)
@@ -148,6 +151,7 @@ func TestAddSearchServiceToAnOldInstance(t *testing.T) {
 // access to this resource.") is answered from a web search, marked as one; a US symbol still gets the
 // live quote, and without a search service the plan refusal stays an error.
 func TestQuoteFallsBackToSearchOutsideTheQuotePlan(t *testing.T) {
+	t.Parallel()
 	finn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Query().Get("symbol"), ".KS") {
 			w.WriteHeader(403)
@@ -184,6 +188,7 @@ func TestQuoteFallsBackToSearchOutsideTheQuotePlan(t *testing.T) {
 // the next one, and the answer says the first timed out (before, the 15 s HTTP limit cut each attempt
 // and the client retried it twice).
 func TestSlowSearchServiceIsPassedOver(t *testing.T) {
+	t.Parallel()
 	var slowHits atomic.Int32
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		slowHits.Add(1)
@@ -222,6 +227,7 @@ func TestSlowSearchServiceIsPassedOver(t *testing.T) {
 // as often as "day"); a word that names no span the services take is dropped, not sent on (Tavily
 // answers 400 to "hour").
 func TestSearchNarrowsFreshnessWordsWithinTheDay(t *testing.T) {
+	t.Parallel()
 	var got map[string]any
 	tavily := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -245,6 +251,7 @@ func TestSearchNarrowsFreshnessWordsWithinTheDay(t *testing.T) {
 // service that was cut off nor our own time limit goes into a service's health as its failure. A
 // service's own error still does.
 func TestSearchStopsWithTheTurnAndBlamesNoServiceForOurLimits(t *testing.T) {
+	t.Parallel()
 	var slowHits, nextHits atomic.Int32
 	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		slowHits.Add(1)

@@ -32,6 +32,7 @@ var failKeys = []string{
 const goText = `open /var/lib/masamong/x.db: no such table: turn_log (SQLITE_ERROR) dial tcp 10.0.0.7:5432: connect: connection refused`
 
 func TestFailErrKeysExistInEveryLanguageWithoutPlaceholderLeftovers(t *testing.T) {
+	t.Parallel()
 	for _, lang := range []string{"ko", "en", "ja", "es", "zh-Hans"} {
 		raw, err := os.ReadFile(filepath.Join("..", "..", "locales", lang+".json"))
 		if err != nil {
@@ -56,6 +57,7 @@ func TestFailErrKeysExistInEveryLanguageWithoutPlaceholderLeftovers(t *testing.T
 // A failure answers with the key's sentence in the person's language. The Go error is not in the message,
 // not in the args, and goes to the log with the Action's name.
 func TestFailErrKeepsGoTextOutOfTheResult(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	var logs bytes.Buffer
 	s.Log = slog.New(slog.NewTextHandler(&logs, nil))
@@ -92,6 +94,7 @@ func TestFailErrKeepsGoTextOutOfTheResult(t *testing.T) {
 
 // A refusal the caller caused is a warning, a failure of the machine an error.
 func TestFailErrLogsCallerFaultsAsWarnings(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	var logs bytes.Buffer
 	s.Log = slog.New(slog.NewTextHandler(&logs, nil))
@@ -110,6 +113,7 @@ func TestFailErrLogsCallerFaultsAsWarnings(t *testing.T) {
 // Real flows: a table the database cannot read answers with the storage sentence, not with the driver's
 // words, and the log has the driver's words.
 func TestDatabaseFailureAnswersInPlainWords(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, drop, action string
 		in                 map[string]any

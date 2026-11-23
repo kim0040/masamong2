@@ -7,6 +7,7 @@ import (
 
 // The rest grows with each offer passed over and stops at the cap.
 func TestThreadBackoffRestGrowsAndStopsAtTheCap(t *testing.T) {
+	t.Parallel()
 	for streak, want := range map[int]time.Duration{
 		0: 0, 1: 0, // two passed-over offers cost nothing
 		2: 6 * time.Hour, 3: 12 * time.Hour, 4: 24 * time.Hour, 5: 48 * time.Hour, 6: 96 * time.Hour,
@@ -21,6 +22,7 @@ func TestThreadBackoffRestGrowsAndStopsAtTheCap(t *testing.T) {
 // The count reads the log newest first: an opened thread starts it over (except one the bot opened by
 // itself), an offer that never showed or is too young to have been answered is not passed over.
 func TestThreadBackoffCountsOnlyPassedOverOffers(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 	ago := func(d time.Duration) time.Time { return now.Add(-d) }
 	row := func(decision string, d time.Duration) backoffRow { return backoffRow{decision: decision, at: ago(d)} }
@@ -50,6 +52,7 @@ func TestThreadBackoffCountsOnlyPassedOverOffers(t *testing.T) {
 
 // hasCue matches Latin cues as words and other scripts anywhere.
 func TestHasCueMatchesLatinCuesAsWords(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		text string
 		cues []string

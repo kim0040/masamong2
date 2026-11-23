@@ -42,6 +42,7 @@ func memoryRows(t *testing.T, db *storage.Store) string {
 // The start of the whole service on the file of an older release, and the passes that follow it: not one stored row of
 // the history changes. internal/memory/engine/no_reprocess_test.go also shows that no model is asked anything.
 func TestAStartOnAnOlderReleasesStoreLeavesItsRows(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s, err := Open(dir, nil, false)
 	if err != nil {

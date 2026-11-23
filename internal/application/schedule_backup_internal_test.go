@@ -13,6 +13,7 @@ import (
 )
 
 func TestScheduledBackupRunsOutsideTickAndCancelsCleanly(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	s, _ := deliveryService(t)
 	doc := s.Doc()
 	doc.Backup.Schedule, doc.Backup.Hour = "daily", 0
@@ -93,6 +94,7 @@ func TestScheduledBackupRunsOutsideTickAndCancelsCleanly(t *testing.T) {
 }
 
 func TestManualBackupCancellationRemovesItsStage(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	s, _ := deliveryService(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	oldHook := maintenanceHook

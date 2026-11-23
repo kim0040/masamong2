@@ -19,6 +19,7 @@ import (
 // MASAMONG_PROBE_OPENROUTER and at least one of MASAMONG_PROBE_{LINKUP,EXA,KAKAO,TAVILY,SERPER,BRAVE,TINYFISH}.
 // It prints each step for a person to read; it fails only when a step does not happen at all.
 func TestLiveScheduledTask(t *testing.T) {
+	// sequential: it sets process environment variables
 	if os.Getenv("MASAMONG_LIVE_TASK") == "" || os.Getenv("MASAMONG_PROBE_OPENROUTER") == "" {
 		t.Skip("set MASAMONG_LIVE_TASK=1 and the MASAMONG_PROBE_* keys")
 	}

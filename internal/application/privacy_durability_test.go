@@ -37,6 +37,7 @@ func privateLeaf(t *testing.T, s *Service) (string, string) {
 }
 
 func TestAllReviewKindsIndexSourcesAtWriteTimeAndRejectLateCopies(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	leaf, obs := privateLeaf(t, s)
 	input, _ := json.Marshal(map[string]any{"question": "private canary?", "answer": "private canary", "verdict": "good", "meta": map[string]any{"doc_ids": []string{leaf}, "rooms": []string{"discord:g:c"}}})
@@ -77,6 +78,7 @@ func TestAllReviewKindsIndexSourcesAtWriteTimeAndRejectLateCopies(t *testing.T) 
 }
 
 func TestConsentIntentFailureRollsBackConsentAndAudit(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	privateLeaf(t, s)
 	if _, err := s.Store.DB.Exec(`CREATE TRIGGER reject_consent_job BEFORE INSERT ON redaction_jobs BEGIN SELECT RAISE(ABORT,'cannot persist intent'); END`); err != nil {
@@ -101,6 +103,7 @@ func TestConsentIntentFailureRollsBackConsentAndAudit(t *testing.T) {
 }
 
 func TestNativeLessWithdrawalCommitsBoundedProgressAndResumes(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	e, _ := s.MemoryEngine()
 	var obs []corpus.Observation
@@ -151,6 +154,7 @@ func TestNativeLessWithdrawalCommitsBoundedProgressAndResumes(t *testing.T) {
 }
 
 func TestReviewAndEvalBackfillResumesBetweenBatches(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	leaf, _ := privateLeaf(t, s)
 	meta, _ := json.Marshal(map[string]any{"doc_ids": []string{leaf}})
@@ -202,6 +206,7 @@ func TestReviewAndEvalBackfillResumesBetweenBatches(t *testing.T) {
 }
 
 func TestDrainRedactionsReportsStoreFailure(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
@@ -212,6 +217,7 @@ func TestDrainRedactionsReportsStoreFailure(t *testing.T) {
 }
 
 func TestTombstoneRetentionWaitsForPendingCleanup(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	if _, err := s.MemoryEngine(); err != nil {
 		t.Fatal(err)
@@ -240,6 +246,7 @@ func TestTombstoneRetentionWaitsForPendingCleanup(t *testing.T) {
 }
 
 func TestSummariesTracesAndConversationCopiesUseDurableSources(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	leaf, obs := privateLeaf(t, s)
 	e, _ := s.MemoryEngine()
@@ -312,6 +319,7 @@ func TestSummariesTracesAndConversationCopiesUseDurableSources(t *testing.T) {
 }
 
 func TestLegacyUnattributableCachesRetireInResumableBackfill(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	if _, err := s.MemoryEngine(); err != nil {
 		t.Fatal(err)
@@ -341,6 +349,7 @@ func TestLegacyUnattributableCachesRetireInResumableBackfill(t *testing.T) {
 }
 
 func TestLateTurnCannotPersistAnAnswerQuotingItsDeletedRequest(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	if err := s.MessagesDeleted("g", "c", []string{"never-captured"}); err != nil {
 		t.Fatal(err)

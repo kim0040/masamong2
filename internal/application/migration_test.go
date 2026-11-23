@@ -38,6 +38,7 @@ func v1Database(t *testing.T) string {
 }
 
 func TestMigrationBringsConsentedSettingsOver(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	path := v1Database(t)
 	plan := exec(svc, "migration.apply", map[string]any{"path": path})

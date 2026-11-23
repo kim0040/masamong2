@@ -14,6 +14,7 @@ import (
 
 // A lab turn with draft rules and style uses them; the saved channel settings are untouched.
 func TestLabTurnTriesDraftRules(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var prompts []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

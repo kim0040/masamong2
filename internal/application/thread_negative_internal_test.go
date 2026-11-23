@@ -25,6 +25,7 @@ func evictThreadByCap(t *testing.T, s *Service, id string) {
 }
 
 func TestThreadSuccessClearsNegativeCache(t *testing.T) {
+	t.Parallel()
 	for _, source := range []string{"recovery", "registration", "opened", "reactivation"} {
 		t.Run(source, func(t *testing.T) {
 			s, clk := deliveryService(t)
@@ -84,6 +85,7 @@ func TestThreadSuccessClearsNegativeCache(t *testing.T) {
 }
 
 func TestThreadDeletionIsNotANegativeCacheEntry(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	if s.recoverThread("target", recentThreads) {
 		t.Fatal("expected initial miss")

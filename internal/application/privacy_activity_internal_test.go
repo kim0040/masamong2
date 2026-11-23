@@ -11,6 +11,7 @@ import (
 // A withdrawal of memory consent removes the person's activity counts (review H6 item 1): the table
 // keeps the raw account id and display name, and only age removed them before.
 func TestWithdrawalRemovesActivityCounts(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

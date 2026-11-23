@@ -43,6 +43,7 @@ func fakeRelease(t *testing.T, name, version string) []byte {
 }
 
 func TestUpdateApplyInstallsTheReleaseAndRestarts(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("the fake release programs are shell scripts")
 	}
@@ -134,6 +135,7 @@ func TestUpdateApplyInstallsTheReleaseAndRestarts(t *testing.T) {
 }
 
 func TestUpdateApplyRefusesASourceBuild(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"tag_name":"v0.3.0","assets":[]}`))
 	}))
@@ -152,6 +154,7 @@ func TestUpdateApplyRefusesASourceBuild(t *testing.T) {
 }
 
 func TestResetStartsOverButKeepsBackups(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	svc.Daemon = true
 	root := svc.DataRoot
@@ -199,6 +202,7 @@ func TestResetStartsOverButKeepsBackups(t *testing.T) {
 }
 
 func TestFirstStartOfANewVersionTakesABackup(t *testing.T) {
+	t.Parallel()
 	svc := setupSvcVersion(t, "0.2.0")
 	count := func() int {
 		n := 0

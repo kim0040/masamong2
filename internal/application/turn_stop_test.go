@@ -9,6 +9,7 @@ import (
 // A stop word is a whole message in the channel's language or the one it is written in; the same word
 // inside a sentence is ordinary talk.
 func TestTurnStopCue(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	for _, text := range []string{"그만", " 그만! ", "멈춰.", "취소~", "stop", "Stop.", "Never mind!", "nevermind", "cancel", "para", "やめて！", "ストップ", "停止", "取消。", "停"} {
 		if !svc.TurnStopCue("g", "c", text) {

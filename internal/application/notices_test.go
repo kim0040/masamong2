@@ -104,6 +104,7 @@ func collect(t *testing.T, svc *application.Service, only []string) application.
 }
 
 func TestNoticesCollectPersonalizeAndDeliver(t *testing.T) {
+	t.Parallel()
 	var hits atomic.Int32
 	base, host := fakeUniversity(t, &hits)
 	svc := setupSvc(t)

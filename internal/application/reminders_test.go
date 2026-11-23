@@ -103,6 +103,7 @@ func reminderID(t *testing.T, r action.Result) string {
 }
 
 func TestReminderLifecycle(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	now := time.Date(2026, 9, 28, 10, 0, 0, 0, seoul)
 	svc, gw := remindSvc(t, now)
@@ -163,6 +164,7 @@ func (c *pauseReminderClock) Now() time.Time {
 }
 
 func TestStaleReminderConfirmationCannotUndoCancellation(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 5, 10, 0, 0, 0, time.UTC)
 	svc, _ := remindSvc(t, now)
 	inv := person("u1", true)
@@ -191,6 +193,7 @@ func TestStaleReminderConfirmationCannotUndoCancellation(t *testing.T) {
 }
 
 func TestReminderParserRejectsExplicitInvalidDateWithLocalizedMessage(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 2, 20, 10, 0, 0, 0, time.UTC)
 	svc, _ := remindSvc(t, now)
 	res := as(svc, "reminders.propose", map[string]any{"text": "2026-02-30 at 15:30 call"}, person("u1", true))
@@ -203,6 +206,7 @@ func TestReminderParserRejectsExplicitInvalidDateWithLocalizedMessage(t *testing
 }
 
 func TestReminderAmbiguousTimeAndChannel(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	now := time.Date(2026, 9, 28, 10, 0, 0, 0, seoul)
 	svc, gw := remindSvc(t, now)
@@ -253,6 +257,7 @@ func consoleReminders(t *testing.T, svc *application.Service) []map[string]any {
 }
 
 func TestReminderDeliveryOutcomes(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	now := time.Date(2026, 9, 28, 10, 0, 0, 0, seoul)
 	set := func(svc *application.Service, user, text string) string {
@@ -347,6 +352,7 @@ func TestReminderDeliveryOutcomes(t *testing.T) {
 }
 
 func TestReminderCancelRescheduleAndLimits(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	now := time.Date(2026, 9, 28, 10, 0, 0, 0, seoul)
 	svc, gw := remindSvc(t, now)
@@ -390,6 +396,7 @@ func TestReminderCancelRescheduleAndLimits(t *testing.T) {
 }
 
 func TestReminderOfferIsPerPerson(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	now := time.Date(2026, 9, 28, 10, 0, 0, 0, seoul)
 	svc, _ := remindSvc(t, now)
@@ -417,6 +424,7 @@ func TestReminderOfferIsPerPerson(t *testing.T) {
 // Many people asking, confirming and cancelling at once while delivery passes overlap: every
 // reminder goes out at most once, and none is left mid-send.
 func TestRemindersUnderConcurrency(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	now := time.Date(2026, 9, 28, 10, 0, 0, 0, seoul)
 	svc, gw := remindSvc(t, now)

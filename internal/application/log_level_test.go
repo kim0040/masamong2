@@ -9,6 +9,7 @@ import (
 )
 
 func TestApplyLogLevel(t *testing.T) {
+	// sequential: it sets process environment variables
 	t.Cleanup(func() { _ = observability.SetLevel("") })
 	s := &Service{Log: slog.Default()}
 	doc := config.Document{}

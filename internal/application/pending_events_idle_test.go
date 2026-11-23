@@ -9,6 +9,7 @@ import (
 )
 
 func TestPendingEventPollBacksOffAndResetsWhenWorkExists(t *testing.T) {
+	t.Parallel()
 	delay := pendingEventPollMin
 	for _, want := range []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 10 * time.Second, 10 * time.Second} {
 		if delay != want {
@@ -25,6 +26,7 @@ func TestPendingEventPollBacksOffAndResetsWhenWorkExists(t *testing.T) {
 // waiting out the long interval, and shutdown ends it without waiting either. The intervals are shrunk
 // and the passes are counted through the step hook.
 func TestPendingEventWorkerBacksOffWakesOnEnqueueAndStopsOnShutdown(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var steps []time.Time
 	// setting the service up starts the worker, with the shrunk intervals

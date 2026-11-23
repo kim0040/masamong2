@@ -12,6 +12,7 @@ import (
 // about the caller (the last sentence, in any pack), never for a clause inside
 // other words or a request someone else is reported to have made.
 func TestRound3SelfPredicatePrompts(t *testing.T) {
+	t.Parallel()
 	s, m, e := memorySvc(t)
 	f := reviewPerson{s, m, e, time.Now().UTC().Add(-3 * time.Hour)}
 	const marker = "round3-caller-private-fact"

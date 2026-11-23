@@ -11,6 +11,7 @@ import (
 // explicit 0 keeps the search to snippets), so the tool declares it, and the planner's step validation,
 // which keeps only declared parameters, does not strip it.
 func TestPlannerStepKeepsTheSearchPageCount(t *testing.T) {
+	t.Parallel()
 	infos := toolsOf(t, fixg1Svc(t, opsOrder, nil, nil))
 	ts := chat.Toolset{Known: map[string]bool{"search.web": true}, Enabled: []chat.ToolInfo{infos["search.web"]}}
 	p, _ := lang.Get("en")

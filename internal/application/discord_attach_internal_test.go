@@ -10,6 +10,7 @@ func (attachGateway) Connected() bool { return false }
 // channels (blockBySource reads the gateway) while discord.Start attaches it; the plain field this
 // used to be was a data race there (-race).
 func TestDiscordAttachWhileAResumedJobReadsIt(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	done := make(chan struct{})
 	go func() { defer close(done); s.blockBySource("discord:1:2") }()

@@ -7,6 +7,7 @@ import (
 )
 
 func TestUpdateEntryEnforcesDeclaredAndActualSize(t *testing.T) {
+	t.Parallel()
 	const max int64 = 4
 	var buf bytes.Buffer
 	if _, err := writeUpdateEntry("masamong", strings.NewReader("small"), 0, &buf, max); err == nil {

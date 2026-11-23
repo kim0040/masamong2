@@ -14,6 +14,7 @@ import (
 // The console's live log masks what the file log masks: the daemon's logger is
 // ContextHandler(RedactHandler(JSON)) wrapped by CaptureLogs, and the ring sits before the redaction.
 func TestLogRingMasksWhatTheFileLogMasks(t *testing.T) {
+	t.Parallel()
 	bearer := "abcdefghij" + "klmnop1234567890"        // fake; split so secret scanners do not flag it
 	urlKey := "AIza" + "SECRETSECRETSECRET"            // fake
 	skKey := "sk-" + "abcdefghij" + "klmnopqrstuvwxyz" // fake
@@ -49,6 +50,7 @@ func TestLogRingMasksWhatTheFileLogMasks(t *testing.T) {
 // A grouped attribute is walked the way the file handler walks it: a secret in a nested leaf cannot
 // hide inside the group's flattened text, which the counting-prefix exemption used to pass through.
 func TestLogRingRedactsInsideGroups(t *testing.T) {
+	t.Parallel()
 	var file bytes.Buffer
 	base := slog.New(observability.ContextHandler(observability.RedactHandler(slog.NewJSONHandler(&file, nil))))
 	s := &Service{}

@@ -7,6 +7,7 @@ import (
 )
 
 func TestDisasterWatchLevelMatrix(t *testing.T) {
+	t.Parallel()
 	// Each row pairs the KMA severity with the first room level that includes it.
 	for severity, kinds := range map[string]map[string]int{
 		"2":    {"N": 2, "H": 4, "S": 4, "C": 4, "T": 4, "W": 5, "R": 5, "D": 5, "O": 5, "V": 5, "K": 5},

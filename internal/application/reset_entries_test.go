@@ -19,6 +19,7 @@ import (
 // filepath.Join(<data root>, "<name>", ...), so a new folder that nobody thought about fails here
 // instead of silently surviving "erase everything" (rag/ held the attached documents of channels).
 func TestEveryDataRootEntryIsClassified(t *testing.T) {
+	t.Parallel()
 	rootLike := map[string]bool{"root": true, "dataRoot": true, "DataRoot": true}
 	found := map[string][]string{}
 	fset := token.NewFileSet()
@@ -89,6 +90,7 @@ func TestEveryDataRootEntryIsClassified(t *testing.T) {
 
 // A reset journal written before rag/ and notices/ joined the plan resumes and still erases them.
 func TestResetJournalFromBeforeRagAndNoticesFinishesTheWholePlan(t *testing.T) {
+	t.Parallel()
 	s := maintenanceService(t, true)
 	root := s.DataRoot
 	for _, name := range []string{"rag/channels/g/c", "notices", "imports"} {

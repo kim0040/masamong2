@@ -117,6 +117,7 @@ func turnBody(t *testing.T, svc *application.Service, id string) map[string]any 
 }
 
 func TestChatTurnToolLoopRunsToolsThroughTheService(t *testing.T) {
+	t.Parallel()
 	f := &loopServer{plan: `{"memory_requirement":"none","tool_plan":[{"tool_name":"finance.quote","parameters":{"symbol":"AAPL"}}]}`,
 		script: []map[string]any{
 			toolCallMsg([2]string{"weather__query", `{"region":"부산","scope":"discord:other"}`}, [2]string{"polls__create", `{"question":"점심 뭐 먹지?"}`}),
@@ -174,6 +175,7 @@ func TestChatTurnToolLoopRunsToolsThroughTheService(t *testing.T) {
 }
 
 func TestChatTurnShadowModeRecordsWithoutRunning(t *testing.T) {
+	t.Parallel()
 	f := &loopServer{plan: `{"memory_requirement":"none","tool_plan":[{"tool_name":"weather.query","parameters":{"region":"서울"}}]}`,
 		script: []map[string]any{toolCallMsg([2]string{"weather__query", `{"region":"부산"}`}, [2]string{"polls__create", `{"question":"비 와?"}`})}}
 	svc := loopSvc(t, "shadow", f)
@@ -198,6 +200,7 @@ func TestChatTurnShadowModeRecordsWithoutRunning(t *testing.T) {
 }
 
 func TestChatTurnFallsBackToThePlannerWhenTheModelTakesNoTools(t *testing.T) {
+	t.Parallel()
 	f := &loopServer{plan: `{"memory_requirement":"none","tool_plan":[{"tool_name":"weather.query","parameters":{"region":"부산"}}]}`, refuseTools: true}
 	svc := loopSvc(t, "loop", f)
 	for i, id := range []string{"m1", "m2"} {
@@ -228,6 +231,7 @@ func TestChatTurnFallsBackToThePlannerWhenTheModelTakesNoTools(t *testing.T) {
 // that request to an upstream without tools) is asked with tools again on the next turn: the refusal
 // is that upstream's, and remembering it turned the loop off for every later turn (seen live).
 func TestOneRefusalFromAModelThatTookToolsIsNotRemembered(t *testing.T) {
+	t.Parallel()
 	f := &loopServer{plan: `{"memory_requirement":"none","tool_plan":[]}`}
 	svc := loopSvc(t, "loop", f)
 	turn := func(id string) application.ChatResultForTest {
@@ -257,6 +261,7 @@ func TestOneRefusalFromAModelThatTookToolsIsNotRemembered(t *testing.T) {
 }
 
 func TestChatTurnInjectedToolFailure(t *testing.T) {
+	t.Parallel()
 	f := &loopServer{script: []map[string]any{
 		toolCallMsg([2]string{"finance__fx", `{"base":"USD","symbols":"KRW"}`}),
 		toolCallMsg([2]string{"finance__fx", `{"base":"usd","symbols":"krw"}`}), // the same call: not run again
@@ -276,6 +281,7 @@ func TestChatTurnInjectedToolFailure(t *testing.T) {
 // A place search that found something ends the loop: the tool's mark, the setting and the status of a real
 // result meet here. chat.loop_final: off asks again, and so does a search that found nothing.
 func TestChatTurnEndsTheLoopOnAFinalToolsResult(t *testing.T) {
+	t.Parallel()
 	kakao := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Query().Get("query") != "홍대 카페" {
@@ -318,6 +324,7 @@ func TestChatTurnEndsTheLoopOnAFinalToolsResult(t *testing.T) {
 // A weather call does not end the loop, however short the message: the model asks for a weekend one day at
 // a time, and ending on the first call lost the second day (4 of 4 live runs, 2026-11-07).
 func TestAWeatherCallLeavesTheLoopOpen(t *testing.T) {
+	t.Parallel()
 	f := &loopServer{plan: `{"memory_requirement":"none","tool_plan":[]}`, script: []map[string]any{
 		toolCallMsg([2]string{"weather__query", `{"region":"Tokyo","day_offset":0}`}),
 		toolCallMsg([2]string{"weather__query", `{"region":"Tokyo","day_offset":1}`}), {"role": "assistant", "content": "-"}}}

@@ -19,6 +19,7 @@ import (
 // reach a handler. An empty input is enough: a handler may refuse it (INVALID_INPUT, FEATURE_DISABLED,
 // JOB_NOT_FOUND, ...), but not as an unknown Action.
 func TestEveryCatalogActionReachesAHandler(t *testing.T) {
+	t.Parallel()
 	p, err := OpenPractice(context.Background(), t.TempDir(), "en", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -46,6 +47,7 @@ func TestEveryCatalogActionReachesAHandler(t *testing.T) {
 // stop before the handler table, so running them proves nothing (and some would restart or reset a real
 // instance). For those, the table (dispatch.go) must still list the ID.
 func TestPracticeBlockedAndDeferredActionsAreInTheHandlerTable(t *testing.T) {
+	t.Parallel()
 	check := map[string]string{}
 	for _, d := range catalog.All() {
 		if d.Availability != catalog.Executable {
@@ -75,6 +77,7 @@ func TestPracticeBlockedAndDeferredActionsAreInTheHandlerTable(t *testing.T) {
 // does not list can never be reached (Service.execute looks the ID up in the catalog first), so it is a
 // leftover. Operator-defined HTTP tools run before the table and are not in it.
 func TestActionTableMatchesTheCatalog(t *testing.T) {
+	t.Parallel()
 	table := buildActionTable()
 	if len(table) < 100 {
 		t.Fatalf("the Action table has %d entries; dispatch.go changed shape", len(table))

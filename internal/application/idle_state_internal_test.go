@@ -13,6 +13,7 @@ import (
 // A channel's live window goes with the channel once it has been quiet for a day, and the table never
 // holds more than liveMaxChannels windows.
 func TestLiveWindowsOfIdleChannelsAreDropped(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
 	s := &Service{Clock: clock.Fixed{T: now}}
 	s.live.chans = map[string][]conversation.Line{
@@ -78,6 +79,7 @@ func TestParticipationChannelsIdleAreDroppedButBusyOnesStay(t *testing.T) {
 
 // Every use of a channel entry stamps it, which is what the idle sweep reads.
 func TestPartChannelStampsUse(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
 	s := &Service{Clock: clock.Fixed{T: now}}
 	s.part.mu.Lock()
@@ -91,6 +93,7 @@ func TestPartChannelStampsUse(t *testing.T) {
 // Open threads of people leave memory after a quiet day (their rows stay), the bot's own open threads and
 // recent ones stay, and the table is capped without ever dropping a bot thread that is open.
 func TestHumanThreadsLeaveMemoryWhenIdleAndAreCapped(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
 	s := &Service{Clock: clock.Fixed{T: now}}
 	s.threads.loaded = true
@@ -119,6 +122,7 @@ func TestHumanThreadsLeaveMemoryWhenIdleAndAreCapped(t *testing.T) {
 // An archive closes a thread of people so the ordinary cleanup can drop it; an unarchive opens it again
 // but not a thread the bot closed; a delete removes it at once.
 func TestThreadArchiveAndDeleteUpdateTheTable(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	now := clk.Now()
 	s.threads.loaded = true
@@ -158,6 +162,7 @@ func TestThreadArchiveAndDeleteUpdateTheTable(t *testing.T) {
 // A channel entry made again after the old one was dropped counts versions from zero, so a candidate of the
 // old entry must not pass the final check there even when the versions happen to match.
 func TestCandidateOfADroppedChannelEntryIsNotCurrent(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
 	s := &Service{Clock: clock.Fixed{T: now}}
 	s.part.mu.Lock()

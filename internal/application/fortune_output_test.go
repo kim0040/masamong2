@@ -21,6 +21,7 @@ import (
 // expected scores are the hand-derived ones of TestFortuneTagReadingBecomesACard (1995-06-15 on
 // 2026-10-15: 65 60 65 65 59, lucky number 9, west).
 func TestFortuneOutputHasTheComputedPoints(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	url := chatServer(t, "SCORE: 77\nSUMMARY: 좋은 흐름이에요.\nWORK: 집중\nLUCKY_COLOR: 파랑\nLUCKY_ITEM: 시계", "stop", &calls)
 	svc := routedSvc(t, url, url)
@@ -54,6 +55,7 @@ func TestFortuneOutputHasTheComputedPoints(t *testing.T) {
 // a short note only the asker sees, with the seconds left; another channel, a private ask, or the same
 // channel a minute later get the card.
 func TestFortuneAnimalsChannelCooldown(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	svc := fortuneSvc(t, &calls)
 	applyDoc(t, svc, func(d *config.Document) { d.I18n.Timezone = "Asia/Seoul" })
@@ -148,6 +150,7 @@ func (c barrierClock) Now() time.Time {
 // The cooldown check and its set are one step: N asks that reach the check together in a fresh channel
 // post exactly one card, however the goroutines interleave (repeated, so a check-then-set gap shows).
 func TestFortuneAnimalsCooldownIsAtomic(t *testing.T) {
+	t.Parallel()
 	seoul, err := time.LoadLocation("Asia/Seoul")
 	if err != nil {
 		t.Fatal(err)

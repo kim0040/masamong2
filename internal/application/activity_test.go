@@ -15,6 +15,7 @@ import (
 // who withdrew their memory consent are not counted, other channels do not mix in, and the periods are
 // local calendar days, this week and this month.
 func TestActivityRankingCountsPeoplePerChannel(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	for _, c := range []string{"c1", "c2"} {
 		if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": c, "respond": "mention"}); !r.OK {
@@ -64,6 +65,7 @@ func TestActivityRankingCountsPeoplePerChannel(t *testing.T) {
 // last), and a person who withdrew is in neither the list, the total nor the head count, even if a row
 // of theirs is still in the table.
 func TestActivityRankingShowsLastNameAndLeavesOutWithdrawn(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "c1", "respond": "mention"}); !r.OK {
 		t.Fatal(r.Error)

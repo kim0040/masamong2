@@ -9,6 +9,7 @@ import (
 // A hit whose own messages an earlier hit already showed says where they are; a hit that shows its own
 // messages says nothing.
 func TestEvidenceSaysWhereAHitsOwnMessagesAre(t *testing.T) {
+	t.Parallel()
 	hits := []search.Hit{
 		{Rank: 1, LeafObservationIDs: []string{"a", "b"}, VisibleObservationIDs: []string{"x", "a", "b", "c", "d"}},
 		{Rank: 2, LeafObservationIDs: []string{"p"}, VisibleObservationIDs: []string{"p", "q"}},

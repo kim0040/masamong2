@@ -59,6 +59,7 @@ func promptRecorder(t *testing.T, text string) (url string, last func() string) 
 // prompt has them, the public one in Korean and English does not. The registered gender is private too:
 // the public template has no {gender}.
 func TestFortunePublicPromptHasNoBirthData(t *testing.T) {
+	t.Parallel()
 	url, last := promptRecorder(t, "SUMMARY: 좋아요\nWORK: 집중")
 	svc := routedSvc(t, url, url)
 	applyDoc(t, svc, func(d *config.Document) {

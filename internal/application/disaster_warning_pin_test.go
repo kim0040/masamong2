@@ -22,6 +22,7 @@ func warningAt(regID, parent, region, kind, level, cmd, effective string) string
 // regions sorted, lifts grouped without a time, sea areas left out while marine is off, an upgrade
 // naming the level it came from, and deliveries recorded only for the level in force.
 func TestDisasterWarningCardsArePinned(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	feed := &kmaFeed{}
 	pointAt(t, svc, "kma", feed.server(t).URL, "KMA_TEST_KEY", "k")

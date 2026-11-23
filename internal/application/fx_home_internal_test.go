@@ -11,6 +11,7 @@ import (
 // USD. A region that is not such a country (es-419) is skipped, and the reply language alone (the
 // instance default when nothing is saved) never outranks Discord's tag.
 func TestFXHomePrecedence(t *testing.T) {
+	t.Parallel()
 	lex := currency.New(nil)
 	for _, tc := range []struct {
 		name, saved, reply, tag, want string

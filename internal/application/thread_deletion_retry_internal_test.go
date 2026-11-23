@@ -10,6 +10,7 @@ import (
 )
 
 func TestThreadDeletionRetriesFailedTombstoneOnTick(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	s.NoteThread("g", "target", "parent", false)
 	s.NoteThreadParticipant("target", "member")
@@ -54,6 +55,7 @@ func TestThreadDeletionRetriesFailedTombstoneOnTick(t *testing.T) {
 // While the database keeps refusing, the minute tick retries every pending deletion; the warning comes
 // once per threadDeleteWarnEvery, not once per thread per minute.
 func TestThreadDeletionRetryWarnsOncePerInterval(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	var logs bytes.Buffer
 	s.Log = slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))

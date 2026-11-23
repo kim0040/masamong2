@@ -89,6 +89,7 @@ func remStatus(t *testing.T, svc *application.Service, id string) string {
 func remAt(svc *application.Service, t time.Time) { svc.Clock = clock.Fixed{T: t} }
 
 func TestRepeatingDailyIsSentOncePerOccurrenceAndStatesTheRepetition(t *testing.T) {
+	t.Parallel()
 	now, seoul := repSeoulNow()
 	svc, gw := remindSvc(t, now)
 	inv := inChannel("u1")
@@ -125,6 +126,7 @@ func TestRepeatingDailyIsSentOncePerOccurrenceAndStatesTheRepetition(t *testing.
 }
 
 func TestRepeatingWeeklyMonthlyAndHoursPickTheirFirstOccurrence(t *testing.T) {
+	t.Parallel()
 	now, seoul := repSeoulNow()
 	svc, gw := remindSvc(t, now)
 	// Monday 10:00 asked: "Mon and Wed at 9am" starts at Wednesday (the time given is tomorrow 9am)
@@ -171,6 +173,7 @@ func TestRepeatingWeeklyMonthlyAndHoursPickTheirFirstOccurrence(t *testing.T) {
 }
 
 func TestRepeatingDSTKeepsTheWallClock(t *testing.T) {
+	t.Parallel()
 	ny, _ := time.LoadLocation("America/New_York")
 	now := time.Date(2026, 3, 6, 12, 0, 0, 0, ny)
 	svc, gw := remindSvc(t, now)
@@ -195,6 +198,7 @@ func TestRepeatingDSTKeepsTheWallClock(t *testing.T) {
 
 // A stop between the lease and the send must neither send an occurrence twice nor lose the series.
 func TestRepeatingSurvivesAStopBetweenLeaseAndSend(t *testing.T) {
+	t.Parallel()
 	now, seoul := repSeoulNow()
 	for _, after := range []bool{false, true} {
 		t.Run(fmt.Sprintf("crash_after_send=%v", after), func(t *testing.T) {
@@ -231,6 +235,7 @@ func TestRepeatingSurvivesAStopBetweenLeaseAndSend(t *testing.T) {
 }
 
 func TestRepeatingAfterDowntimeSendsOnlyTheNewestOccurrence(t *testing.T) {
+	t.Parallel()
 	now, seoul := repSeoulNow()
 	svc, gw := remindSvc(t, now)
 	id := setSeries(t, svc, "u1", map[string]any{"when": "8am", "what": "pill", "repeat": "daily"})
@@ -258,6 +263,7 @@ func TestRepeatingAfterDowntimeSendsOnlyTheNewestOccurrence(t *testing.T) {
 }
 
 func TestRepeatingCancelPauseAndResumeApplyToTheSeries(t *testing.T) {
+	t.Parallel()
 	now, seoul := repSeoulNow()
 	svc, gw := remindSvc(t, now)
 	inv := inChannel("u1")
@@ -321,6 +327,7 @@ func TestRepeatingCancelPauseAndResumeApplyToTheSeries(t *testing.T) {
 }
 
 func TestRepeatingEndsWithCountOrUntil(t *testing.T) {
+	t.Parallel()
 	now, seoul := repSeoulNow()
 	svc, gw := remindSvc(t, now)
 	counted := setSeries(t, svc, "u1", map[string]any{"when": "8am", "what": "twice", "repeat": "daily", "count": 2})
@@ -346,6 +353,7 @@ func TestRepeatingEndsWithCountOrUntil(t *testing.T) {
 }
 
 func TestRepeatingCapsPerPersonAndPerRoom(t *testing.T) {
+	t.Parallel()
 	now, _ := repSeoulNow()
 	svc, _ := remindSvc(t, now)
 	applyDoc(t, svc, func(d *config.Document) {
@@ -375,6 +383,7 @@ func TestRepeatingCapsPerPersonAndPerRoom(t *testing.T) {
 }
 
 func TestRescheduleKeepsTheRepetition(t *testing.T) {
+	t.Parallel()
 	now, seoul := repSeoulNow()
 	svc, gw := remindSvc(t, now)
 	inv := inChannel("u1")
@@ -404,6 +413,7 @@ func TestRescheduleKeepsTheRepetition(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestContextLinesLimits(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("가", 300)
 	in := [][2]string{{"A", "first line"}, {"B", long}, {"C", long}, {"D", long}, {"E", long}}
 	out := application.CapContextForTest(in)
@@ -462,6 +472,7 @@ func remAskVague(t *testing.T, svc *application.Service, channel string, params 
 }
 
 func TestVagueReminderCarriesTheCallersRecentLinesAndShowsThemWhenItFires(t *testing.T) {
+	t.Parallel()
 	now, seoul := repSeoulNow()
 	svc, gw := remCtxSvc(t, now)
 	base := now.Add(-time.Minute)
@@ -506,6 +517,7 @@ func TestVagueReminderCarriesTheCallersRecentLinesAndShowsThemWhenItFires(t *tes
 // A channel the file never configures is covered by the memory-on default in a served server. A
 // server still waiting for approval is not served at all, so nothing there is kept either way.
 func TestUnconfiguredChannelCapturesByDefaultPendingServerDoesNot(t *testing.T) {
+	t.Parallel()
 	now, _ := repSeoulNow()
 	svc, _ := remCtxSvc(t, now)
 	// approval is on for this check: "g" is served because it has settings, "gp" stays pending
@@ -529,6 +541,7 @@ func TestUnconfiguredChannelCapturesByDefaultPendingServerDoesNot(t *testing.T) 
 }
 
 func TestContextLinesAreNotKeptWhereMemoryIsNotAllowedOrFromWhoWithdrew(t *testing.T) {
+	t.Parallel()
 	now, _ := repSeoulNow()
 	svc, _ := remCtxSvc(t, now)
 	base := now.Add(-time.Minute)
@@ -558,6 +571,7 @@ func TestContextLinesAreNotKeptWhereMemoryIsNotAllowedOrFromWhoWithdrew(t *testi
 }
 
 func TestContextLinesGoWhenTheirMessageIsDeletedOrTheirAuthorWithdraws(t *testing.T) {
+	t.Parallel()
 	now, _ := repSeoulNow()
 	svc, _ := remCtxSvc(t, now)
 	base := now.Add(-time.Minute)
@@ -624,6 +638,7 @@ func remSetupAgain(t *testing.T, svc *application.Service, base time.Time) strin
 // The durable erasure job (not only the immediate hooks) removes the lines of a deleted or edited
 // message and of a person who withdrew.
 func TestErasureJobRemovesReminderContextLines(t *testing.T) {
+	t.Parallel()
 	now, _ := repSeoulNow()
 	svc, _ := remCtxSvc(t, now)
 	base := now.Add(-time.Minute)
@@ -677,6 +692,7 @@ func TestErasureJobRemovesReminderContextLines(t *testing.T) {
 // A second process that read the due list before the first one leased cannot send the occurrence again,
 // not even after the series is back to scheduled with its next due_at.
 func TestRepeatingStaleSecondDelivererCannotSendTheSameOccurrenceAgain(t *testing.T) {
+	t.Parallel()
 	now, seoul := repSeoulNow()
 	svc, gw := remindSvc(t, now)
 	id := setSeries(t, svc, "u1", map[string]any{"when": "8am", "what": "pill", "repeat": "daily"})
@@ -708,6 +724,7 @@ func remHasContext(c action.Card) bool {
 
 // Conversation lines are shown with the first message of a series only, and the rows are gone after it.
 func TestRepeatingShowsContextLinesOnlyWithTheFirstOccurrence(t *testing.T) {
+	t.Parallel()
 	now, seoul := repSeoulNow()
 	svc, gw := remCtxSvc(t, now)
 	base := now.Add(-time.Minute)
@@ -729,6 +746,7 @@ func TestRepeatingShowsContextLinesOnlyWithTheFirstOccurrence(t *testing.T) {
 
 // Context is read under the channel's rules at delivery: turning capture off drops the lines unsent.
 func TestContextLinesAreNotShownAfterCaptureIsTurnedOff(t *testing.T) {
+	t.Parallel()
 	now, seoul := repSeoulNow()
 	svc, gw := remCtxSvc(t, now)
 	base := now.Add(-time.Minute)
@@ -751,6 +769,7 @@ func TestContextLinesAreNotShownAfterCaptureIsTurnedOff(t *testing.T) {
 
 // When grace is longer than the interval, the newest missed occurrence is sent, not the oldest.
 func TestRepeatingWithLongGraceSendsTheNewestOccurrence(t *testing.T) {
+	t.Parallel()
 	now, seoul := repSeoulNow()
 	svc, gw := remindSvc(t, now)
 	applyDoc(t, svc, func(d *config.Document) {
@@ -767,6 +786,7 @@ func TestRepeatingWithLongGraceSendsTheNewestOccurrence(t *testing.T) {
 
 // A weekly rule that did not name its weekday follows the option that was picked, not the first one.
 func TestRepeatingDerivedWeekdayFollowsThePickedOption(t *testing.T) {
+	t.Parallel()
 	now, seoul := repSeoulNow() // Monday 10:00
 	inv := inChannel("u1")
 	seen := map[string]bool{}
@@ -807,6 +827,7 @@ func TestRepeatingDerivedWeekdayFollowsThePickedOption(t *testing.T) {
 }
 
 func TestRepeatingFinalOccurrenceRetriesLikeAOneTimeReminder(t *testing.T) {
+	t.Parallel()
 	now, seoul := repSeoulNow()
 	svc, base := remindSvc(t, now)
 	base.failDM = fmt.Errorf("%w: 500", application.ErrNotDelivered)
@@ -836,6 +857,7 @@ func TestRepeatingFinalOccurrenceRetriesLikeAOneTimeReminder(t *testing.T) {
 }
 
 func TestRepeatingMissedSeriesDropsContextAndPauseCannotStrandTheLastOccurrence(t *testing.T) {
+	t.Parallel()
 	now, seoul := repSeoulNow()
 	// the series ended (until passed) while the daemon was off: missed, and its lines are gone
 	svc, _ := remCtxSvc(t, now)
@@ -867,6 +889,7 @@ func TestRepeatingMissedSeriesDropsContextAndPauseCannotStrandTheLastOccurrence(
 }
 
 func TestRepeatingCapsAreCheckedAgainAtConfirmation(t *testing.T) {
+	t.Parallel()
 	now, _ := repSeoulNow()
 	svc, _ := remindSvc(t, now)
 	applyDoc(t, svc, func(d *config.Document) {

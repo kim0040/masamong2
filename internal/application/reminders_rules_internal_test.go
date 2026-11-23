@@ -12,6 +12,7 @@ import (
 // A daily series due at 09:00 is sent on time, catches up with the newest occurrence still inside grace
 // (never the older ones), and skips one that is past grace with nothing newer inside it.
 func TestSeriesDue(t *testing.T) {
+	t.Parallel()
 	daily := reminders.Rule{Kind: reminders.RepeatDaily, Time: "09:00"}
 	loc := time.UTC
 	at := time.Date(2026, 11, 1, 9, 0, 0, 0, loc)
@@ -35,6 +36,7 @@ func TestSeriesDue(t *testing.T) {
 }
 
 func TestOneOffReminderOutcome(t *testing.T) {
+	t.Parallel()
 	refused := fmt.Errorf("x: %w", ErrNotDelivered)
 	for _, tc := range []struct {
 		err      error

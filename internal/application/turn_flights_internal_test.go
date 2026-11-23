@@ -8,6 +8,7 @@ import (
 )
 
 func TestFlyTurnRegistersOnlyTurnsThatStore(t *testing.T) {
+	t.Parallel()
 	s := &Service{}
 	if fl, unreg := s.flyTurn(ChatInput{DryRun: true, MessageID: "m1"}); fl != nil {
 		t.Fatal("a lab turn must not be noted")
@@ -25,6 +26,7 @@ func TestFlyTurnRegistersOnlyTurnsThatStore(t *testing.T) {
 }
 
 func TestFlyTurnUnregisterRemovesOnlyItsOwnFlight(t *testing.T) {
+	t.Parallel()
 	s := &Service{}
 	a, unregA := s.flyTurn(ChatInput{MessageID: "m1"})
 	b, unregB := s.flyTurn(ChatInput{MessageID: "m1"})
@@ -43,6 +45,7 @@ func TestFlyTurnUnregisterRemovesOnlyItsOwnFlight(t *testing.T) {
 }
 
 func TestFlightEditNewestRevisionWinsInEitherArrivalOrder(t *testing.T) {
+	t.Parallel()
 	s := &Service{}
 	fl, unreg := s.flyTurn(ChatInput{MessageID: "m1"})
 	defer unreg()
@@ -60,6 +63,7 @@ func TestFlightEditNewestRevisionWinsInEitherArrivalOrder(t *testing.T) {
 }
 
 func TestFlightEditBlankIsADeletionAndIsNotNoted(t *testing.T) {
+	t.Parallel()
 	s := &Service{}
 	fl, unreg := s.flyTurn(ChatInput{MessageID: "m1"})
 	defer unreg()
@@ -74,6 +78,7 @@ func TestFlightEditBlankIsADeletionAndIsNotNoted(t *testing.T) {
 }
 
 func TestFlightKeptWordsOnlyAfterAnEdit(t *testing.T) {
+	t.Parallel()
 	s := &Service{}
 	fl, unreg := s.flyTurn(ChatInput{MessageID: "m1"})
 	defer unreg()
@@ -106,6 +111,7 @@ func userTurn(callAddress int) store.ChatTurn {
 }
 
 func TestFlightToKeepPassesThroughUneditedTurns(t *testing.T) {
+	t.Parallel()
 	var f turnFlights
 	turns := []store.ChatTurn{userTurn(store.CallReply), {Role: "assistant", Content: "answer"}}
 	if got := f.toKeep(nil, turns); len(got) != 2 {
@@ -118,6 +124,7 @@ func TestFlightToKeepPassesThroughUneditedTurns(t *testing.T) {
 }
 
 func TestFlightToKeepRewritesTheUserRowWithNewWords(t *testing.T) {
+	t.Parallel()
 	at := time.Date(2026, 1, 1, 10, 0, 5, 0, time.UTC)
 	for _, tc := range []struct {
 		name        string

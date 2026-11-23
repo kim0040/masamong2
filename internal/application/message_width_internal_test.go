@@ -7,6 +7,7 @@ import (
 )
 
 func TestMessageVectorDoctorUnknownWidthAndQueryError(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	widthConfig(t, s, "baai/bge-m3", 4096)
 	e, err := s.MemoryEngine()

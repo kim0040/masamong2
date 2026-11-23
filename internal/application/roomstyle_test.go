@@ -16,6 +16,7 @@ import (
 // Room style (experimental): counted in code, a few model-picked traits with evidence, applied only after
 // approval and only where the room turned it on; a deleted source message makes the version stale.
 func TestRoomStyleApproveApplyAndStale(t *testing.T) {
+	t.Parallel()
 	var plan, resp recordingServer
 	planURL := plan.start(t, func(p string) string {
 		if strings.Contains(p, "\"items\"") {
@@ -153,6 +154,7 @@ func styleShown(t *testing.T, svc *application.Service) string {
 // no reason to refuse the version after its model call was paid. A line deleted while the model was
 // thinking still never makes it into the note.
 func TestRoomStyleEditedLineStillBuilds(t *testing.T) {
+	t.Parallel()
 	var svc *application.Service
 	deleteDuring := false
 	svc = styleRoom(t, func() {
@@ -188,6 +190,7 @@ func TestRoomStyleEditedLineStillBuilds(t *testing.T) {
 // "Don't analyze me" during the model call keeps the person's lines out of the version being saved, and
 // withdrawing after an approval makes the version that quotes the person stale.
 func TestRoomStyleProfileWithdrawal(t *testing.T) {
+	t.Parallel()
 	var svc *application.Service
 	svc = styleRoom(t, func() {
 		if r := as(svc, "privacy.consent", map[string]any{"scope": "profile", "decision": "withdraw"}, inChannel("u1")); !r.OK {

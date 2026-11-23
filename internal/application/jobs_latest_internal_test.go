@@ -75,6 +75,7 @@ func referenceLatestPrepare(t *testing.T, s *Service) map[string]string {
 }
 
 func TestLatestPrepareJobsMatchOldLogicAndStayFastAtScale(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	seedPrepareJobs(t, s, 2500, 120)
 	want := referenceLatestPrepare(t, s)
@@ -136,6 +137,7 @@ func TestLatestPrepareJobsMatchOldLogicAndStayFastAtScale(t *testing.T) {
 }
 
 func TestLatestPrepareJobTieBreaksByInsertionOrder(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	// the first job of the second fails at once and is retried: both carry the same created_at, and the
 	// first one's random id sorts later than the retry's
@@ -160,6 +162,7 @@ func TestLatestPrepareJobTieBreaksByInsertionOrder(t *testing.T) {
 }
 
 func TestPruneFinishedJobsJudgesAgeByUpdatedAtAndListKeepsOpenJobs(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	ins := func(id, status, created, updated string) {
 		t.Helper()

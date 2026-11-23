@@ -64,6 +64,7 @@ var fxOrigins = []string{viaChat, viaTask, "cli", "web"}
 // a code the service lacks is the only late one; the raw rates keep their shape. (A blank base is USD for
 // direct callers: TestFXRawInputKeepsItsOldMeaning.)
 func TestFXActionSurfaces(t *testing.T) {
+	t.Parallel()
 	s := fixg1Svc(t, []string{"serper"}, nil, nil)
 	calls := fxRates(t, s)
 	for _, via := range fxOrigins {
@@ -99,6 +100,7 @@ func TestFXActionSurfaces(t *testing.T) {
 
 // What the person typed is read like a code: a name in any language, any case.
 func TestFXActionReadsCurrencyNames(t *testing.T) {
+	t.Parallel()
 	s := fixg1Svc(t, []string{"serper"}, nil, nil)
 	fxRates(t, s)
 	for _, name := range []string{"엔화", "Japanese Yen", " jpy ", "円"} {
@@ -114,6 +116,7 @@ func TestFXActionReadsCurrencyNames(t *testing.T) {
 
 // An input error is an answer: nothing carries on from it into a conversation.
 func TestFXInputErrorIsNotUnanswered(t *testing.T) {
+	t.Parallel()
 	s := fixg1Svc(t, []string{"serper"}, nil, nil)
 	fxRates(t, s)
 	for _, in := range []string{"U$D", "BTN"} {
@@ -145,6 +148,7 @@ func quotesOf(t *testing.T, data map[string]any) []map[string]any {
 // Chat, tasks, the CLI and the console get the raw rates as before, plus quotes in the unit people use,
 // in the language of the request (chat: the answer language).
 func TestFXQuotesNextToRawRates(t *testing.T) {
+	t.Parallel()
 	s := fixg1Svc(t, []string{"serper"}, nil, nil)
 	fxRates(t, s)
 	for _, via := range fxOrigins {
@@ -173,6 +177,7 @@ func TestFXQuotesNextToRawRates(t *testing.T) {
 
 // With an amount the quote is that amount; a name works for the base and the symbols.
 func TestFXAmountAndNames(t *testing.T) {
+	t.Parallel()
 	s := fixg1Svc(t, []string{"serper"}, nil, nil)
 	calls := fxRates(t, s)
 	for _, amount := range []any{"50,000", "50000", 50000, 50000.0, json.Number("50000")} {
@@ -195,6 +200,7 @@ func TestFXAmountAndNames(t *testing.T) {
 
 // The command's request (home currency, what was typed): one provider call serves a card.
 func TestFXHomeRequest(t *testing.T) {
+	t.Parallel()
 	s := fixg1Svc(t, []string{"serper"}, nil, nil)
 	calls := fxRates(t, s)
 	res := s.Execute(context.Background(), action.Request{Action: "finance.fx", Locale: "ko", Input: []byte(`{"home":"KRW","currency":"엔화"}`)})
@@ -233,6 +239,7 @@ func TestFXHomeRequest(t *testing.T) {
 // The model that words the answer is told, in the result itself and in its own language, to quote the
 // quotes: the tool's description is only seen where the tool is chosen.
 func TestFXResultCarriesTheAnswerHint(t *testing.T) {
+	t.Parallel()
 	s := fixg1Svc(t, []string{"serper"}, nil, nil)
 	fxRates(t, s)
 	for _, tag := range []string{"en", "ko", "ja", "es", "zh-Hans"} {
@@ -262,6 +269,7 @@ func TestFXResultCarriesTheAnswerHint(t *testing.T) {
 // blank or null base is USD, blank symbols are skipped, a list of only blanks selects nothing. A name that
 // is no currency is an error on every surface; a blank option is invalid only on a command's own request.
 func TestFXRawInputKeepsItsOldMeaning(t *testing.T) {
+	t.Parallel()
 	s := fixg1Svc(t, []string{"serper"}, nil, nil)
 	calls := fxRates(t, s)
 	for _, via := range fxOrigins {
@@ -310,6 +318,7 @@ func TestFXRawInputKeepsItsOldMeaning(t *testing.T) {
 
 // A rate that overflows the amount gives no quote, and the result stays one that can be sent as JSON.
 func TestFXOverflowingQuoteIsSkipped(t *testing.T) {
+	t.Parallel()
 	s := fixg1Svc(t, []string{"serper"}, nil, nil)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

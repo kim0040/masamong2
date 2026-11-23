@@ -90,6 +90,7 @@ func seedEditedTurn(t *testing.T, s *Service, key, message, speaker string) {
 // A crash between a finished edit and the removal of its job runs the same job again. By then replies on the new
 // words have been kept: the walk from the message reaches them through the user turn that stayed.
 func TestAnEditJobRunTwiceKeepsRepliesOnTheNewWords(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	e, _ := s.MemoryEngine()
 	db, _ := s.adminDB()
@@ -149,6 +150,7 @@ func TestAnEditJobRunTwiceKeepsRepliesOnTheNewWords(t *testing.T) {
 // Settling and removing the job are one commit: there is no moment at which a new turn can be excused while the
 // job can still run again. A removal that fails leaves nothing settled, and the next run finishes the edit.
 func TestSettlingAndRemovingTheJobAreOneCommit(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	db, _ := s.adminDB()
 	seedEditedTurn(t, s, "discord:g:c", "secret", "alice")
@@ -186,6 +188,7 @@ func TestSettlingAndRemovingTheJobAreOneCommit(t *testing.T) {
 
 // A job of a later revision is not a replay: the message changed again, and the job runs in full.
 func TestAnEditJobOfALaterRevisionStillRuns(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	seedEditedTurn(t, s, "discord:g:c", "secret", "alice")
 	first := s.Clock.Now()
@@ -218,6 +221,7 @@ func TestAnEditJobOfALaterRevisionStillRuns(t *testing.T) {
 
 // Any withdrawal in the same batch used to leave every edit in it unsettled for good.
 func TestAnEditInABatchWithAWithdrawalIsSettled(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	e, _ := s.MemoryEngine()
 	const key = "discord:g:c"
@@ -258,6 +262,7 @@ func TestAnEditInABatchWithAWithdrawalIsSettled(t *testing.T) {
 
 // An edit by the person who withdrew, in the same batch: nothing of theirs is excused, in either order of the jobs.
 func TestAnEditByThePersonWithdrawingIsNotSettled(t *testing.T) {
+	t.Parallel()
 	for _, order := range []string{"edit first", "withdrawal first"} {
 		t.Run(order, func(t *testing.T) {
 			s := privacyService(t)
@@ -319,6 +324,7 @@ func TestAnEditByThePersonWithdrawingIsNotSettled(t *testing.T) {
 // A thread starts from the parent's turns. An edited (settled) user turn is a kept turn of the parent, and so is a
 // reply on its new words.
 func TestAThreadSeedAfterAnEditKeepsTheEditedTurn(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	e, _ := s.MemoryEngine()
 	const key = "discord:g:c"
@@ -367,6 +373,7 @@ func TestAThreadSeedAfterAnEditKeepsTheEditedTurn(t *testing.T) {
 
 // A copy of a message deleted or under way stays refused however new the mark.
 func TestAThreadSeedRefusesATurnWhoseMessageIsNotSettled(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"edit under way", "delete under way"} {
 		t.Run(change, func(t *testing.T) {
 			s := privacyService(t)
@@ -397,6 +404,7 @@ func TestAThreadSeedRefusesATurnWhoseMessageIsNotSettled(t *testing.T) {
 // A withdrawal still waiting in the queue, in a channel without capture: no stored row says the person withdrew, but
 // the account tombstone does, and an edit of theirs is not settled in the meantime.
 func TestAnEditIsNotSettledWhileItsAuthorsWithdrawalWaits(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	seedEditedTurn(t, s, "discord:g:c", "carol-m", "carol")
 	db, _ := s.adminDB()
@@ -422,6 +430,7 @@ func TestAnEditIsNotSettledWhileItsAuthorsWithdrawalWaits(t *testing.T) {
 
 // A copy is refused for a person who withdrew however new its mark, and stays tied to every message of a burst.
 func TestAThreadSeedRefusesAPersonWhoWithdrew(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	seedEditedTurn(t, s, "discord:g:c", "m", "carol")
 	db, _ := s.adminDB()
@@ -438,6 +447,7 @@ func TestAThreadSeedRefusesAPersonWhoWithdrew(t *testing.T) {
 }
 
 func TestAThreadCopyOfAMergedTurnGoesWithItsFirstMessage(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	e, _ := s.MemoryEngine()
 	if err := e.Store.AppendChatTurns("discord:g:c", []store.ChatTurn{
@@ -471,6 +481,7 @@ func TestAThreadCopyOfAMergedTurnGoesWithItsFirstMessage(t *testing.T) {
 // The words of the bot's lines in the live window go where a reply can have read the changed message: its channel,
 // the thread family, a channel with blocks attached. Not in the rest of the guild, and a withdrawal reaches them all.
 func TestLiveBlankingStaysWithTheChannelsThatCanReadIt(t *testing.T) {
+	t.Parallel()
 	setup := func(t *testing.T) (*Service, func(guild, channel, id string) string) {
 		t.Helper()
 		s := privacyService(t)
@@ -594,6 +605,7 @@ func TestLiveBlankingStaysWithTheChannelsThatCanReadIt(t *testing.T) {
 // add: writing its tombstone again would undo the settling, the job would run again and take the replies built on
 // the new words, and the new number would refuse the turns under way.
 func TestTheSameEditDeliveredTwiceChangesNothing(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	e, err := s.MemoryEngine()
 	if err != nil {

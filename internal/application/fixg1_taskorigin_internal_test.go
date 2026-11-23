@@ -13,6 +13,7 @@ import (
 // Discord gate refuses a chat call's), a paused channel refuses it, and a chat tool is allowed on its
 // surface.
 func TestTaskToolCallsKeepTheChatChecks(t *testing.T) {
+	t.Parallel()
 	s := fixg1Svc(t, []string{"serper"}, nil, nil)
 	p, _ := lang.Get("ko")
 	in := ChatInput{GuildID: "g", ChannelID: "c", SpeakerID: "777777"}

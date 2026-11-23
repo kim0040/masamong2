@@ -16,6 +16,7 @@ import (
 // golden files pin what the model is shown for a few tools; MASAMONG_UPDATE_GOLDEN=1 rewrites them
 // after an intended change.
 func TestToolLoopSchemasMatchGolden(t *testing.T) {
+	t.Parallel()
 	on := true
 	all := tools.Resolve(map[string]tools.Settings{"web.read": {Enabled: &on}}, nil)
 	ids := []string{"weather.query", "finance.quote", "places.search", "polls.create", "web.read", "search.web", "memory.search"}
@@ -69,6 +70,7 @@ func TestToolLoopSchemasMatchGolden(t *testing.T) {
 
 // The loop knows which tools bring text from the open web and which ones write.
 func TestToolInfoMarksWebAndWritingTools(t *testing.T) {
+	t.Parallel()
 	p, _ := lang.Get("en")
 	all := tools.Resolve(map[string]tools.Settings{"x.y": {Description: "op tool", HTTP: &tools.HTTP{URL: "https://example.com/{q}"}, Params: []tools.Param{{Name: "q", Required: true, Description: "the q"}}}}, nil)
 	want := map[string][2]bool{"search.web": {true, false}, "web.read": {true, false}, "polls.create": {false, true}, "reminders.propose": {false, true},

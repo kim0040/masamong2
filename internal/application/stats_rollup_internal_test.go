@@ -114,6 +114,7 @@ func histTotal(h []int64) int64 {
 // turns are left out (L3), an llm_calls row that aggregates a job's calls counts its calls, adds no
 // latency to the histogram and counts once as an error (M3), and a day without rows still finishes.
 func TestStatsRollupComputesEachGroupFromItsSources(t *testing.T) {
+	t.Parallel()
 	s, _ := statsRollupService(t, "Asia/Seoul")
 	at := time.Date(2026, 10, 9, 1, 30, 0, 0, statsKST) // 2026-10-08 16:30 UTC: the local day decides
 	statsTurn(t, s, at, "answered", 0, 900, 2, 0.1)
@@ -237,6 +238,7 @@ func TestStatsRollupComputesEachGroupFromItsSources(t *testing.T) {
 // outside the sources' retention window is refused (H1), and the days a long downtime left unfinished
 // are finished before the prune that would take their rows (H3).
 func TestStatsFinishedDayOutlivesItsPrunedSource(t *testing.T) {
+	t.Parallel()
 	s, clk := statsRollupService(t, "Asia/Seoul")
 	ctx := context.Background()
 	local := func(day, hm string) time.Time {
@@ -309,6 +311,7 @@ func TestStatsFinishedDayOutlivesItsPrunedSource(t *testing.T) {
 // whose group finished through some day is pruned only up to the end of that day, and the schedule state
 // says why. With statistics off the gate is off.
 func TestStatsPruneWaitsForUnrolledDays(t *testing.T) {
+	t.Parallel()
 	s, clk := statsRollupService(t, "Asia/Seoul")
 	ctx := context.Background()
 	old := clk.t.AddDate(0, 0, -100)
@@ -406,6 +409,7 @@ func TestStatsPruneWaitsForUnrolledDays(t *testing.T) {
 // inside every source's retention window and skips each source's oldest surviving day, which a prune
 // may have cut in half (H1). An install that never pruned starts at its oldest row.
 func TestStatsBackfillAfterUpgradeSkipsPartialDays(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name     string
 		upgraded bool
@@ -444,6 +448,7 @@ func TestStatsBackfillAfterUpgradeSkipsPartialDays(t *testing.T) {
 // The day is the local day in the zone at rollup time; a finished day keeps its zone, and the first day
 // after a zone change starts where the last finished one ended, so every row counts exactly once (M6).
 func TestStatsRollupZoneChangeCountsEveryRowOnce(t *testing.T) {
+	t.Parallel()
 	s, clk := statsRollupService(t, "Asia/Seoul")
 	ctx := context.Background()
 	turn := func(at time.Time) { statsTurn(t, s, at, "answered", 0, 100, 0, 0) }
@@ -509,6 +514,7 @@ func TestStatsRollupZoneChangeCountsEveryRowOnce(t *testing.T) {
 // Close stops a backfill between days (M5): the days finished so far are whole, nothing is pruned, the
 // schedule does not record a run, and the next start continues after the last finished day.
 func TestStatsRollupStopsBetweenDaysOnClose(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	clk := &movableClock{t: time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)}
 	s.Clock = clk
@@ -582,6 +588,7 @@ func TestStatsRollupStopsBetweenDaysOnClose(t *testing.T) {
 }
 
 func TestStatsRollupAction(t *testing.T) {
+	t.Parallel()
 	s, _ := statsRollupService(t, "Asia/Seoul")
 	run := func(in map[string]any) action.Result {
 		raw, _ := json.Marshal(in)

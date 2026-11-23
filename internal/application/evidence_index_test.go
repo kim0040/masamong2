@@ -51,6 +51,7 @@ func countRows(t *testing.T, s *Service, table string) int {
 // The Discord event only queues the work: one durable row, no scan of the history, and nothing a chat
 // reply waits for. The copies are redacted by the background worker.
 func TestMessageEventQueuesTheRedactionAndTheWorkerFindsTheTurnsByIndex(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	hit := captureAndAnswer(t, s, "m1", "private canary text of the first message")
 	other := captureAndAnswer(t, s, "m2", "another message that stays")
@@ -78,6 +79,7 @@ func TestMessageEventQueuesTheRedactionAndTheWorkerFindsTheTurnsByIndex(t *testi
 
 // A crash cannot skip a redaction: the job is a row in the database, and the next start finishes it.
 func TestQueuedRedactionSurvivesARestart(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	root := s.DataRoot
 	turn := captureAndAnswer(t, s, "m1", "private canary text of the first message")
@@ -104,6 +106,7 @@ func TestQueuedRedactionSurvivesARestart(t *testing.T) {
 // Turns written before the index existed are classified once in the background, and a job never runs
 // before they are, so none can be missed.
 func TestTurnsFromBeforeTheIndexAreClassifiedBeforeAnyJobRuns(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	e, _ := s.MemoryEngine()
 	if _, err := e.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", MessageID: "m1", AuthorID: "alice", Content: "private canary text of the first message", At: time.Now().Add(-time.Hour)}); err != nil {
@@ -131,6 +134,7 @@ func TestTurnsFromBeforeTheIndexAreClassifiedBeforeAnyJobRuns(t *testing.T) {
 
 // The answer to a deleted message loses the message's text too (the turn answered it).
 func TestTurnThatAnsweredADeletedMessageLosesItsText(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	s.recordTurn(TurnRecord{ID: "t1", GuildID: "g", ChannelID: "c", SpeakerID: "alice", Body: map[string]any{"message": "my address is secret street", "message_id": "m9", "answer": "ok"}})
 	s.MessagesDeleted("g", "c", []string{"m9"})
@@ -142,6 +146,7 @@ func TestTurnThatAnsweredADeletedMessageLosesItsText(t *testing.T) {
 }
 
 func TestTextMatcherFindsCopiesWithoutComparingEveryPair(t *testing.T) {
+	t.Parallel()
 	var texts []string
 	for i := 0; i < 3000; i++ {
 		texts = append(texts, fmt.Sprintf("message number %d said something private", i))
@@ -169,6 +174,7 @@ func TestTextMatcherFindsCopiesWithoutComparingEveryPair(t *testing.T) {
 
 // Retention deletes old turns; their entries in the evidence index go with them.
 func TestRetentionDropsIndexEntriesOfDeletedTurns(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	kept := captureAndAnswer(t, s, "m1", "a message the turn used")
 	if _, err := s.Store.DB.Exec(`INSERT INTO evidence_refs(source_id, holder_kind, holder_id) VALUES('x','turn_ev','ghost'),('y','turn_msg','ghost')`); err != nil {

@@ -9,6 +9,7 @@ import (
 // The slot boundaries of briefingSlot (its comment): 04:00 and 10:59 morning, 11:00 and 16:59 day,
 // 17:00 and 23:59 evening (tomorrow's date), 00:00 and 03:59 night (the same date).
 func TestBriefingSlotBoundaries(t *testing.T) {
+	t.Parallel()
 	seoul, err := time.LoadLocation("Asia/Seoul")
 	if err != nil {
 		t.Fatalf("time zone data: %v", err)
@@ -39,6 +40,7 @@ func TestBriefingSlotBoundaries(t *testing.T) {
 // The fact sheet is read for any date, tomorrow's included: no "today" or "now" in its labels, in any
 // of the five languages.
 func TestFortuneDataLabelsNameTheReadingDate(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	at := time.Date(2026, 10, 16, 21, 0, 0, 0, time.UTC)
 	p := fortuneProfile{BirthDate: "1995-06-15", BirthTime: "14:30"}

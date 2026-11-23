@@ -62,6 +62,7 @@ func (rs *recordingServer) all() []string {
 // The user's example: one friend talks to the bot while two others pick a game. The game talk never
 // reaches the planner or the answer; the bot's earlier exchange with the caller does.
 func TestBusyRoomShowsOnlyTheCallersConversation(t *testing.T) {
+	t.Parallel()
 	var plan, resp recordingServer
 	planURL := plan.start(t, func(p string) string {
 		if strings.Contains(p, "refers_to") {
@@ -111,6 +112,7 @@ func TestBusyRoomShowsOnlyTheCallersConversation(t *testing.T) {
 // When the call points at the other talk ("what do you think of that?"), the classifier's pick brings
 // exactly that line in.
 func TestPointedAtLineComesIn(t *testing.T) {
+	t.Parallel()
 	var plan, resp recordingServer
 	planURL := plan.start(t, func(p string) string {
 		if strings.Contains(p, "refers_to") {
@@ -139,6 +141,7 @@ func TestPointedAtLineComesIn(t *testing.T) {
 
 // attribution: off keeps the old behaviour (every recent stored line), for channels that want it.
 func TestAttributionOffKeepsEverything(t *testing.T) {
+	t.Parallel()
 	var plan, resp recordingServer
 	planURL := plan.start(t, func(string) string { return `{"memory_requirement":"none","tool_plan":[]}` })
 	respURL := resp.start(t, func(string) string { return "ok" })
@@ -165,6 +168,7 @@ func TestAttributionOffKeepsEverything(t *testing.T) {
 // A message that only says the bot's name is answered when the classifier hears it said to the bot, and
 // left alone (and logged) when it is talk about the bot.
 func TestNameOnlyCall(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		verdict string
 		answer  bool
@@ -212,6 +216,7 @@ func TestNameOnlyCall(t *testing.T) {
 // The follow-up window: off by default, where it only records what it would have done; in window mode it
 // answers the person the bot just answered, and closes when they turn to someone else.
 func TestFollowUpWindow(t *testing.T) {
+	t.Parallel()
 	var plan, resp recordingServer
 	planURL := plan.start(t, func(string) string { return `{"memory_requirement":"none","tool_plan":[]}` })
 	respURL := resp.start(t, func(string) string { return "내일은 맑아. 우산 필요해?" })

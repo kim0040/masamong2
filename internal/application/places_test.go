@@ -10,6 +10,7 @@ import (
 // A place search with words Kakao cannot match ("분위기 좋은") is tried once more with the place and
 // the kind of shop only, and the result says what was searched.
 func TestPlacesSearchRetriesWithoutTheWordsInBetween(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	var asked []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -47,6 +47,7 @@ func awaitThreadDBWait(t *testing.T, pool *sql.DB, before int64) {
 }
 
 func TestThreadDBWaitDoesNotBlockCachedMessage(t *testing.T) {
+	t.Parallel()
 	for _, operation := range []string{"archive", "delete", "note", "save", "rooms", "participant", "forget"} {
 		t.Run(operation, func(t *testing.T) {
 			s, _ := deliveryService(t)
@@ -101,6 +102,7 @@ func TestThreadDBWaitDoesNotBlockCachedMessage(t *testing.T) {
 }
 
 func TestThreadInitialLoadDoesNotHoldCacheLock(t *testing.T) {
+	t.Parallel()
 	for _, kind := range []string{"reader", "writer"} {
 		t.Run(kind, func(t *testing.T) {
 			s, _ := deliveryService(t)
@@ -129,6 +131,7 @@ func TestThreadInitialLoadDoesNotHoldCacheLock(t *testing.T) {
 }
 
 func TestThreadRecoveryDuringForgetWriterWaitIsCleared(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	s.ThreadOpened(context.Background(), "g", "parent", "target", "member", "")
 	s.threads.mu.Lock()

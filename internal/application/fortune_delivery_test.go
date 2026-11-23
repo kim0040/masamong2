@@ -148,6 +148,7 @@ func wantNone(t *testing.T, what, text string, words ...string) {
 // A 23:30 subscription under quiet hours 23:00–07:00 is delivered at 07:00: it is worded and dated from
 // that moment (a morning briefing for the date it arrives on), not as an evening briefing for tomorrow.
 func TestBriefingHeldByQuietHoursIsWordedForItsDelivery(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	rig := newBriefingRig(t, time.Date(2026, 10, 15, 20, 0, 0, 0, seoul), "23:30", []string{"23:00", "07:00"}, nil)
 	gw := &dmGateway{}
@@ -173,6 +174,7 @@ func TestBriefingHeldByQuietHoursIsWordedForItsDelivery(t *testing.T) {
 // A 07:00 briefing that could only go out at 15:00 (the host was down) is written again for the daytime,
 // once; with the generation cap spent it goes out with a title and greeting that claim no time of day.
 func TestCatchUpBriefingIsRewrittenForItsSlot(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	t.Run("rewritten", func(t *testing.T) {
 		rig := newBriefingRig(t, time.Date(2026, 10, 15, 5, 0, 0, 0, seoul), "07:00", nil, nil)
@@ -214,6 +216,7 @@ func TestCatchUpBriefingIsRewrittenForItsSlot(t *testing.T) {
 // An evening briefing due 23:58 whose send failed is retried after midnight: it is now the night slot of
 // the same date, so it is written again for that slot instead of being titled "tomorrow".
 func TestEveningBriefingRetriedAfterMidnight(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	rig := newBriefingRig(t, time.Date(2026, 10, 15, 20, 0, 0, 0, seoul), "23:58", nil, nil)
 	gw := &flakyDM{fail: 1}
@@ -236,6 +239,7 @@ func TestEveningBriefingRetriedAfterMidnight(t *testing.T) {
 // When the one rewrite for a late send fails, the text written for the planned slot goes out at the next
 // try, as it is, under the neutral title (not left unsent until the generation cap fails the job).
 func TestFailedRewriteSendsTheWrittenTextNeutrally(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	rig := newBriefingRig(t, time.Date(2026, 10, 15, 5, 0, 0, 0, seoul), "07:00", nil, nil)
 	gw := &dmGateway{}
@@ -261,6 +265,7 @@ func TestFailedRewriteSendsTheWrittenTextNeutrally(t *testing.T) {
 // A briefing that could not go out on its day (the host was down past the next morning) is not
 // rewritten for the date the next day's own briefing covers: that one goes, once.
 func TestDayOldBriefingGivesWayToTodays(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	rig := newBriefingRig(t, time.Date(2026, 10, 15, 5, 0, 0, 0, seoul), "07:00", nil, nil)
 	gw := &dmGateway{}
@@ -279,6 +284,7 @@ func TestDayOldBriefingGivesWayToTodays(t *testing.T) {
 // An evening briefing sent at 23:59 on the last day of a month and of a year is the next month's and
 // the next year's first day.
 func TestEveningBriefingAtMonthAndYearEnd(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	for _, c := range []struct {
 		day   time.Time
@@ -303,6 +309,7 @@ func TestEveningBriefingAtMonthAndYearEnd(t *testing.T) {
 // An evening briefing is tomorrow's reading: its prompt does not call the day "today" or the sky "now"
 // (the data labels name the reading's date and time, the SUMMARY line the day).
 func TestEveningPromptDoesNotSayToday(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	rig := newBriefingRig(t, time.Date(2026, 10, 15, 18, 0, 0, 0, seoul), "21:00", nil, nil)
 	rig.svc.SetDiscord(&dmGateway{})
@@ -334,6 +341,7 @@ func (r *briefingRig) setJobJSON(t *testing.T, raw string) {
 // neutrally, once, with no further model call. (The job saved at the moment of the call is what a crash
 // leaves; the rest of the run is thrown away by restoring it.)
 func TestCrashDuringRewriteKeepsTheWrittenText(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	rig := newBriefingRig(t, time.Date(2026, 10, 15, 5, 0, 0, 0, seoul), "07:00", nil, nil)
 	gw := &dmGateway{}
@@ -385,6 +393,7 @@ func TestCrashDuringRewriteKeepsTheWrittenText(t *testing.T) {
 // 10:59 and sent at 11:02 is still the morning one, not written again for the daytime. Five minutes past
 // the boundary (and an evening briefing past midnight, which is no longer "tomorrow's") it is.
 func TestBriefingSlotGraceAfterTheBoundary(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	run := func(t *testing.T, sub string, planned time.Time, fail int, late time.Duration) (prompts int, sent []action.Card) {
 		rig := newBriefingRig(t, planned.Add(-3*time.Hour), sub, nil, nil)

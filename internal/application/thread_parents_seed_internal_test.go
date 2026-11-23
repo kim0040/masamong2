@@ -9,6 +9,7 @@ import (
 // copies its parent into thread_parents (keeping a parent already stored), so after retention removes the
 // row the stored parent still answers, and nothing else is written.
 func TestThreadParentsSeededFromThreadRows(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	at := s.Clock.Now().Add(-40 * 24 * time.Hour).UTC().Format(time.RFC3339)
 	for _, row := range [][3]string{{"old", "g1", "off"}, {"known", "g1", "first"}, {"orphan", "g1", ""}} {

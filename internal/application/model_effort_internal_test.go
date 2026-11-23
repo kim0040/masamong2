@@ -74,6 +74,7 @@ func effortService(t *testing.T, url string, edit func(d *config.Document)) *Ser
 // classifier asks for none unless the level is set, and then for that level capped at low, with room
 // to think.
 func TestRoleEffortPrecedenceOnChatCalls(t *testing.T) {
+	t.Parallel()
 	h := &effortHost{}
 	url := h.server(t)
 	for _, c := range []struct {
@@ -110,6 +111,7 @@ func TestRoleEffortPrecedenceOnChatCalls(t *testing.T) {
 // A fallback's own effort replaces the role's on that model; without one it keeps the role's. Quick
 // calls (RoleEffort) take either capped at low; the summary role's own level is the job's and stays.
 func TestFallbackEffortIsWired(t *testing.T) {
+	t.Parallel()
 	h := &effortHost{}
 	url := h.server(t)
 	s := effortService(t, url, func(d *config.Document) {
@@ -150,6 +152,7 @@ func TestFallbackEffortIsWired(t *testing.T) {
 // Feature write-ups follow the role's effort; the summary job and fortunes are Quick (none unless the
 // summary role's own effort is set), also when the summary falls back to the response model.
 func TestFeatureTextEffort(t *testing.T) {
+	t.Parallel()
 	h := &effortHost{}
 	url := h.server(t)
 	s := effortService(t, url, func(d *config.Document) {
@@ -219,6 +222,7 @@ func TestFeatureTextEffort(t *testing.T) {
 // summary job's level (none while models.summary.effort is empty), not at the response role's high; one
 // with its own effort uses it capped at low (a Quick call of the response role).
 func TestEngineSummaryFallbackEffort(t *testing.T) {
+	t.Parallel()
 	h := &effortHost{}
 	url := h.server(t)
 	s := effortService(t, url, func(d *config.Document) {
@@ -247,6 +251,7 @@ func TestEngineSummaryFallbackEffort(t *testing.T) {
 // The status action lists what is known about each chat role's model; capabilities a list gave are kept
 // with the price list and come back after a restart.
 func TestModelReasoningRows(t *testing.T) {
+	t.Parallel()
 	h := &effortHost{}
 	url := h.server(t)
 	s := effortService(t, url, func(d *config.Document) {})
@@ -274,6 +279,7 @@ func TestModelReasoningRows(t *testing.T) {
 // price list, so after a restart the model still reads as "no effort field" (empty), not "unknown" (nil,
 // which would send a guessed effort field and need a refused call to learn); an unknown list stays unknown.
 func TestStoredCapsKeepKnownEmptyLists(t *testing.T) {
+	t.Parallel()
 	h := &effortHost{}
 	url := h.server(t)
 	s := effortService(t, url, func(d *config.Document) {})
@@ -298,6 +304,7 @@ func TestStoredCapsKeepKnownEmptyLists(t *testing.T) {
 // every level, low and up being budgets of their own (anthropic.go thinkingRoom); native_efforts keeps
 // what the model's own field takes (none here). A model with the effort field is unchanged.
 func TestBudgetModelRowOffersEveryLevel(t *testing.T) {
+	t.Parallel()
 	yes := true
 	row := reasoningRow(openai.Caps{Reasoning: &yes, Efforts: []string{}, Thinking: []string{"enabled", "disabled"}})
 	native, hasNative := row["native_efforts"].([]string)
@@ -312,6 +319,7 @@ func TestBudgetModelRowOffersEveryLevel(t *testing.T) {
 
 // GPT-6 Sol on OpenAI's own host: no list says anything, the docs say it takes no none.
 func TestReasoningRowFromHostDocs(t *testing.T) {
+	t.Parallel()
 	c := openai.Caps{Efforts: openai.HostEfforts("https://api.openai.com/v1", "gpt-6.1-sol")}
 	row := reasoningRow(c)
 	if strings.Join(row["efforts"].([]string), ",") != "low,medium,high,xhigh" {
@@ -326,6 +334,7 @@ func TestReasoningRowFromHostDocs(t *testing.T) {
 // (the list is "unavailable"), models.list says so instead of failing, and the key is proven by a
 // one-token answer once a role uses the host.
 func TestAnthropicFormatHostWithoutModelList(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var chats int
 	var headers []http.Header

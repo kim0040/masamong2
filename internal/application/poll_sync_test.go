@@ -11,6 +11,7 @@ import (
 
 // Votes in a Discord poll reach the bot's record of it; a deleted poll message closes the poll.
 func TestDiscordPollVotesSync(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	r := exec(svc, "polls.create", map[string]any{"question": "점심?", "options_text": "국밥\n라멘", "scope": "discord:c"})
 	if !r.OK {
@@ -37,6 +38,7 @@ func TestDiscordPollVotesSync(t *testing.T) {
 
 // A reply Discord refused for lack of permission shows in doctor until its alert goes stale (LIVE-16).
 func TestDoctorShowsDeliveryPermissionProblems(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	svc.NoteDeliveryProblem("g", "c", errclass.Permission)
 	raw, _ := json.Marshal(exec(svc, "runtime.doctor", nil).Output)
@@ -49,6 +51,7 @@ func TestDoctorShowsDeliveryPermissionProblems(t *testing.T) {
 // configuration saved while the console flattened lists, as one comma-separated text: both name the
 // same choices. Nothing named gives yes/no.
 func TestPollCreateAcceptsOptionsAsListOrText(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	labels := func(r action.Result) []string {
 		t.Helper()

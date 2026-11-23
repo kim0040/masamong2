@@ -78,6 +78,7 @@ func runDailyDeliveries(svc *application.Service) {
 }
 
 func TestOvernightQuietHoursDeliverTheOriginalDailySlot(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		zone string
 		date time.Time
@@ -119,6 +120,7 @@ func TestOvernightQuietHoursDeliverTheOriginalDailySlot(t *testing.T) {
 }
 
 func TestNewDailySubscriptionWaitsForItsFirstSlot(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 5, 10, 0, 0, 0, time.UTC)
 	date := now.Format("2006-01-02")
 	sender := &scriptedDailySender{}
@@ -150,6 +152,7 @@ func TestNewDailySubscriptionWaitsForItsFirstSlot(t *testing.T) {
 }
 
 func TestUnknownDailyDMOutcomesAreNotRetriedButDefiniteFailuresAre(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 5, 10, 0, 0, 0, time.UTC)
 	date := now.Format("2006-01-02")
 	unknown := errors.New("connection reset after remote acceptance")

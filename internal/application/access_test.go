@@ -8,6 +8,7 @@ import (
 )
 
 func TestAdminCommandNeedsOperatorOrServerManager(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	serveAnyServer(t, svc)
 	member := &action.Invoker{Via: "command", GuildID: "g", ChannelID: "c", UserID: "111111"}
@@ -51,6 +52,7 @@ func TestAdminCommandNeedsOperatorOrServerManager(t *testing.T) {
 }
 
 func TestUserSettingsFillTheWeatherPlaceAndQuietHours(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	serveAnyServer(t, svc)
 	u := &action.Invoker{Via: "command", GuildID: "g", ChannelID: "c", UserID: "u1"}

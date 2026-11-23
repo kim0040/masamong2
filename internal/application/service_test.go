@@ -94,6 +94,7 @@ func intVal(in map[string]any, k string) int {
 }
 
 func TestSetupIdempotent(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	res := exec(svc, "setup.resume", map[string]any{"instance": "gate"})
 	if !res.OK {
@@ -108,6 +109,7 @@ func TestSetupIdempotent(t *testing.T) {
 }
 
 func TestDoctorNotSingleReady(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	res := exec(svc, "runtime.doctor", nil)
 	if !res.OK {
@@ -144,6 +146,7 @@ func TestDoctorNotSingleReady(t *testing.T) {
 }
 
 func TestDeferredActionUnavailable(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	// storage.migrate is switched off with the TiDB backend (catalog OperatorDisabled)
 	res := exec(svc, "storage.migrate", nil)
@@ -156,6 +159,7 @@ func TestDeferredActionUnavailable(t *testing.T) {
 }
 
 func TestConfigCASStaleRejected(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	doc := config.Default("gate", svc.DataRoot)
 	doc.I18n.DefaultLocale = "ko"
@@ -174,6 +178,7 @@ func TestConfigCASStaleRejected(t *testing.T) {
 }
 
 func TestJobStaleWorkerAndIdempotency(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	j, err := svc.Enqueue("demo", "idem-1", `{}`)
 	if err != nil {
@@ -207,6 +212,7 @@ func TestJobStaleWorkerAndIdempotency(t *testing.T) {
 }
 
 func TestJobProgressShowsOnList(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	j, err := svc.Enqueue("demo", "progress-1", `{}`)
 	if err != nil {
@@ -236,6 +242,7 @@ func TestJobProgressShowsOnList(t *testing.T) {
 }
 
 func TestStalePersistDoesNotOverwriteNewerLease(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	j, err := svc.Enqueue("demo", "idem-cas", `{}`)
 	if err != nil {
@@ -257,6 +264,7 @@ func TestStalePersistDoesNotOverwriteNewerLease(t *testing.T) {
 }
 
 func TestWeatherNoticesFortunePolls(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	// with the worldwide source switched off and no KMA key, weather has no live source
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{map[string]any{"path": []any{"providers", "openmeteo", "disabled"}, "value": true}}}); !r.OK {
@@ -294,6 +302,7 @@ func TestWeatherNoticesFortunePolls(t *testing.T) {
 }
 
 func TestEmptyAgentPlanRejectedBeforeCost(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	res := exec(svc, "agent.simulate", map[string]any{"plan": map[string]any{"nodes": []any{}}})
 	if res.OK || res.Error == nil || res.Error.Code != errcode.PlanRejected {
@@ -305,6 +314,7 @@ func TestEmptyAgentPlanRejectedBeforeCost(t *testing.T) {
 }
 
 func TestAgentPlanReject(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	res := exec(svc, "agent.simulate", map[string]any{
 		"plan": map[string]any{"nodes": []any{
@@ -321,6 +331,7 @@ func TestAgentPlanReject(t *testing.T) {
 }
 
 func TestOperatorConfigForm(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	res := exec(svc, "config.apply", map[string]any{
 		"form":               "operator",
@@ -355,6 +366,7 @@ func TestOperatorConfigForm(t *testing.T) {
 }
 
 func TestBackupDryRun(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	c := exec(svc, "backup.create", nil)
 	if !c.OK {
@@ -389,6 +401,7 @@ func TestBackupDryRun(t *testing.T) {
 // Every capability that ships reports its real state: none is "not implemented", and each non-ready
 // reason has text a person can read.
 func TestDoctorReportsShippedFeatures(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	res := exec(svc, "runtime.doctor", map[string]any{})
 	feats := res.Output["features"].(map[string]any)

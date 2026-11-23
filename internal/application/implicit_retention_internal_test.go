@@ -8,6 +8,7 @@ import (
 
 // Implicit rows go with the turn records' retention, like the ratings they sit beside.
 func TestRetentionDropsOldImplicitFeedback(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	db, err := s.adminDB()
 	if err != nil {

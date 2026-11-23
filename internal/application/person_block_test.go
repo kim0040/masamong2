@@ -33,6 +33,7 @@ type reviewPerson struct {
 }
 
 func TestReviewExactAccountMembership(t *testing.T) {
+	t.Parallel()
 	s, _, _ := memorySvc(t)
 	seedServerPerson(t, s, "old-member", "discord:g:c", "101", "Old member", "2026-01-01T00:00:00Z")
 	for i := range 200 {
@@ -89,6 +90,7 @@ func (f reviewPerson) attach(t *testing.T, guild, channel string) {
 }
 
 func TestReviewPersonPrivacy(t *testing.T) {
+	t.Parallel()
 	tests := map[string]func(*testing.T, reviewPerson){
 		"ForgetAll": func(t *testing.T, f reviewPerson) {
 			by, _ := json.Marshal([]string{store.PersonRef("101")})
@@ -228,6 +230,7 @@ func TestReviewPersonPrivacy(t *testing.T) {
 }
 
 func TestEpisodePersonBlockScope(t *testing.T) {
+	t.Parallel()
 	s, m, e := memorySvc(t)
 	s.SetDiscord(&personGateway{})
 	applyDoc(t, s, func(d *config.Document) { d.Guilds["g"].Channels["other"] = config.ChannelPolicy{Capture: true} })

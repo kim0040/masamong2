@@ -10,6 +10,7 @@ import (
 // A key with less left than the month's budget still allows is a warning; a key about to run out is
 // danger whatever the budget; a key with room says nothing.
 func TestCreditAttention(t *testing.T) {
+	t.Parallel()
 	s, err := Open(t.TempDir(), nil, false)
 	if err != nil {
 		t.Fatal(err)
@@ -38,6 +39,7 @@ func TestCreditAttention(t *testing.T) {
 // A failed read keeps the key's last figure for creditKeep; a key answering without a limit, or no
 // longer configured, drops out.
 func TestCreditStoreKeepsLastFigureOnError(t *testing.T) {
+	t.Parallel()
 	f := func(v float64) *float64 { return &v }
 	var c creditCache
 	t0 := time.Date(2026, 10, 14, 12, 0, 0, 0, time.UTC)

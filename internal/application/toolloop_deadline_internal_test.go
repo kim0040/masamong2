@@ -31,6 +31,7 @@ func testModelAdapter(t *testing.T, rt registryGateTransport) *openai.Adapter {
 // A tool loop round whose model hangs past its own limit is asked of the model's fallback: the round's
 // deadline is the whole chain's (each model's limit), not the first model's alone.
 func TestToolLoopRoundReachesTheFallbackModel(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	const limit = 200 * time.Millisecond
 	hang := registryGateTransport(func(r *http.Request) (*http.Response, error) {

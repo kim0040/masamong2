@@ -55,6 +55,7 @@ func repliesKept(t *testing.T, s *Service, channel string) int {
 // A turn that read the window before the deletion writes after the worker finished. It read a reply that is gone and
 // no deleted message: it stays, and its link can still be followed. One that read the message itself is refused.
 func TestAReplyWrittenAfterTheRedactionIsJudgedByWhatItRead(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	e, _ := s.MemoryEngine()
 	window := chainOf(t, s, "c", "secret", 3)
@@ -107,6 +108,7 @@ func TestAReplyWrittenAfterTheRedactionIsJudgedByWhatItRead(t *testing.T) {
 // A reply committed while the job waits in the queue is judged when the worker runs: found if it read the message,
 // left if it read only replies.
 func TestAReplyCommittedWhileTheJobWaitsIsFound(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	e, _ := s.MemoryEngine()
 	window := chainOf(t, s, "c", "secret", 3)
@@ -136,6 +138,7 @@ func TestAReplyCommittedWhileTheJobWaitsIsFound(t *testing.T) {
 // The chat holders of a chain stay as long as anything still kept links through them, and go all at once,
 // however deep, when nothing does.
 func TestRetentionKeepsAChainWhileAReplyLinksThroughIt(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	const depth = 60 // past the 40 kept turns
 	chainOf(t, s, "c", "secret", depth)
@@ -176,6 +179,7 @@ func TestRetentionKeepsAChainWhileAReplyLinksThroughIt(t *testing.T) {
 // A person who withdraws reaches replies built on their words through a turn of theirs that left the kept
 // window, even when their message was never stored as memory.
 func TestWithdrawalFollowsLinksThroughATrimmedTurn(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	e, _ := s.MemoryEngine()
 	if err := e.Store.AppendChatTurns("discord:g:c", []store.ChatTurn{{Role: "user", Speaker: "alice", Content: "my words", NativeID: "alice-q", SpeakerID: "alice"}}, 40); err != nil {
@@ -209,6 +213,7 @@ func TestWithdrawalFollowsLinksThroughATrimmedTurn(t *testing.T) {
 
 // Between the walk and the rows being deleted, the tombstones alone refuse a reply on the lineage.
 func TestTheWalkTombstonesTheLineageBeforeTheRowsGo(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	e, _ := s.MemoryEngine()
 	window := chainOf(t, s, "c", "secret", 3)

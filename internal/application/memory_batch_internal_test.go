@@ -224,6 +224,7 @@ func blockOf(t *testing.T, s *Service, room string) map[string]any {
 // memory.blocks.prepare in batch mode: a dry run prices the batch, the job submits it, waits, applies the
 // results and ends like a live preparation; only leftovers would be paid live (here: none).
 func TestBatchPrepareJobEndToEnd(t *testing.T) {
+	t.Parallel()
 	host := newBatchHost(openai.BatchDone)
 	s, eng, live := batchService(t, host)
 	room := captureRoom(t, eng, "hiking", 24)
@@ -280,6 +281,7 @@ func TestBatchPrepareJobEndToEnd(t *testing.T) {
 // After a restart, a prepare job that was waiting on its batch runs again by itself and polls the same
 // batch (nothing is submitted twice); a stored plan whose job is gone gets a job of its own.
 func TestBatchPrepareResumesAfterRestart(t *testing.T) {
+	t.Parallel()
 	host := newBatchHost(openai.BatchRunning)
 	s, eng, live := batchService(t, host)
 	room := captureRoom(t, eng, "resume", 24)
@@ -333,6 +335,7 @@ func TestBatchPrepareResumesAfterRestart(t *testing.T) {
 // A cancel from the console while the batch waits cancels it at the host, keeps what finished (here
 // nothing), deletes the plan and ends the job cancelled.
 func TestBatchPrepareCancelStopsTheBatch(t *testing.T) {
+	t.Parallel()
 	host := newBatchHost(openai.BatchRunning)
 	s, eng, live := batchService(t, host)
 	room := captureRoom(t, eng, "cancel", 24)
@@ -372,6 +375,7 @@ func TestBatchPrepareCancelStopsTheBatch(t *testing.T) {
 // for there) and keeps it queued; other rooms are indexed as usual, and the room is indexed again once
 // its batch is done.
 func TestMemoryPassSkipsRoomWaitingForBatch(t *testing.T) {
+	t.Parallel()
 	host := newBatchHost(openai.BatchRunning)
 	s, eng, live := batchService(t, host)
 	room := captureRoom(t, eng, "waiting", 24)

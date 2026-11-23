@@ -9,6 +9,7 @@ import (
 )
 
 func TestDeletedThreadExcludedFromStoredLookups(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	s.NoteThread("g", "deleted", "parent", false)
 	s.NoteThreadParticipant("deleted", "member")
@@ -45,6 +46,7 @@ func awaitThreadSignal(t *testing.T, ch <-chan struct{}, what string) {
 // Pause after both reads, then finish the privacy change before allowing publication. This is a
 // logical race even when every map access has its mutex and the race detector reports no data race.
 func TestThreadReadCannotPublishAfterPrivacyChange(t *testing.T) {
+	t.Parallel()
 	for _, source := range []string{"recover", "note"} {
 		for _, change := range []string{"delete", "withdraw"} {
 			t.Run(source+"/"+change, func(t *testing.T) {

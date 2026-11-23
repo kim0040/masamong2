@@ -9,6 +9,7 @@ import (
 // A command refused for who asks (a server waiting for approval, a blocked member) uses none of the
 // tool's shared daily allowance: the Discord gate runs before the tool's limits are counted.
 func TestRefusedCommandsSpendNoToolQuota(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	if r := exec(svc, "tools.configure", map[string]any{"id": "help.version", "per_day": 2}); !r.OK {
 		t.Fatal(r.Error)

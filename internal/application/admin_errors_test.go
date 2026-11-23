@@ -7,6 +7,7 @@ import (
 // A series that cannot be read fails the Action: a chart with a missing series would pass for a quiet
 // week (error-drop rule, fix-plan R04).
 func TestStatsSeriesFailsWhenASeriesTableIsGone(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	out(t, svc, "stats.series", map[string]any{"days": 3}) // healthy first, so the failure below is the table
 	if _, err := svc.Store.DB.Exec(`DROP TABLE memory_spend`); err != nil {
@@ -19,6 +20,7 @@ func TestStatsSeriesFailsWhenASeriesTableIsGone(t *testing.T) {
 
 // The dashboard still draws when a section cannot be read, and says so instead of showing zeros.
 func TestDashboardReportsAnUnreadableSection(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	hasDBError := func() bool {
 		for _, raw := range out(t, svc, "dashboard.overview", nil)["attention"].([]any) {

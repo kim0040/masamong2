@@ -17,6 +17,7 @@ import (
 // through its consent command), in the asker's language with the room's prefix; a tool the planner
 // calls itself is not repeated there, and a feature that is off is not offered.
 func TestHelpNamesCommandOnlyFeatures(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	url := chatServer(t, "ok", "stop", &calls)
 	svc := setupSvc(t)

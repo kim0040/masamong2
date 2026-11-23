@@ -12,6 +12,7 @@ import (
 // The channel conversation keeps what reached the channel: a reply that was withheld or failed to send
 // is not one the next turn builds on, and a reply cut short is kept as far as it went.
 func TestChatTurnKeepsOnlyTheDeliveredReply(t *testing.T) {
+	t.Parallel()
 	var planCalls, respCalls atomic.Int32
 	planURL := chatServer(t, `{"memory_requirement":"none","tool_plan":[]}`, "stop", &planCalls)
 	respURL := chatServer(t, "첫 부분. 둘째 부분.", "stop", &respCalls)
@@ -47,6 +48,7 @@ func TestChatTurnKeepsOnlyTheDeliveredReply(t *testing.T) {
 // The reply is posted before the turn is recorded, so the turn id must already be known when it is
 // posted: reply feedback is tied to it.
 func TestChatTurnIDIsKnownWhenTheReplyIsPosted(t *testing.T) {
+	t.Parallel()
 	var planCalls, respCalls atomic.Int32
 	planURL := chatServer(t, `{"memory_requirement":"none","tool_plan":[]}`, "stop", &planCalls)
 	respURL := chatServer(t, "안녕!", "stop", &respCalls)

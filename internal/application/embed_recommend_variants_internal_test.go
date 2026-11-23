@@ -46,6 +46,7 @@ func widthProposal(t *testing.T, r action.Result, key string) map[string]any {
 }
 
 func TestProvidersListReportsRerankUsable(t *testing.T) {
+	// sequential: it sets process environment variables
 	for _, tc := range []struct {
 		name string
 		key  string
@@ -83,6 +84,7 @@ func TestProvidersListReportsRerankUsable(t *testing.T) {
 }
 
 func TestModelsRecommendPreviewOffersWidthWithoutRerankPick(t *testing.T) {
+	// sequential: it installs the process's host profile
 	stale := config.Model{Provider: "openrouter", Model: "text-embedding-3-large", Dimensions: 1024}
 	for _, tc := range []struct {
 		name        string
@@ -133,6 +135,7 @@ func TestModelsRecommendPreviewOffersWidthWithoutRerankPick(t *testing.T) {
 }
 
 func TestModelsRecommendAppliesWidthOfTheKeptPicks(t *testing.T) {
+	// sequential: it installs the process's host profile
 	stale := config.Model{Provider: "openrouter", Model: "text-embedding-3-large", Dimensions: 1024}
 	s := rerankPickService(t, hostprofile.TierMedium, "", stale)
 	picks := map[string]any{"embed": "qwen/qwen3-embedding-8b", "rerank": "voyageai/rerank-2.5-lite"}
@@ -146,6 +149,7 @@ func TestModelsRecommendAppliesWidthOfTheKeptPicks(t *testing.T) {
 }
 
 func TestModelsRecommendWithoutRerankPickOnlyForAnEmbeddingChange(t *testing.T) {
+	// sequential: it installs the process's host profile
 	s := rerankPickService(t, hostprofile.TierMedium, "", config.Model{Provider: "pick-fixture", Model: "qwen/qwen3-embedding-8b", Dimensions: 1024})
 	r := widthExecute(s, "models.recommend", map[string]any{"provider": "pick-fixture"})
 	if !r.OK || r.Output["embed_changes"] != false {
@@ -158,6 +162,7 @@ func TestModelsRecommendWithoutRerankPickOnlyForAnEmbeddingChange(t *testing.T) 
 }
 
 func TestModelsRecommendSameModelOtherProviderKeepsWidth(t *testing.T) {
+	// sequential: it installs the process's host profile
 	for _, dims := range []int{0, 1024, 2048} {
 		s := rerankPickService(t, hostprofile.TierMedium, "", config.Model{Provider: "openrouter", Model: "qwen/qwen3-embedding-8b", Dimensions: dims})
 		r := widthExecute(s, "models.recommend", map[string]any{"provider": "pick-fixture"})

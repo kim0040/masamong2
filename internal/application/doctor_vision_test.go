@@ -13,6 +13,7 @@ import (
 // its provider's key, and a model that refused pictures lately shows as degraded, each with a reason a
 // person can read.
 func TestDoctorReportsTheVisionRole(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.NotFoundHandler())
 	t.Cleanup(srv.Close)
 	svc := setupSvc(t)

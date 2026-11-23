@@ -21,6 +21,7 @@ import (
 // through config.show, which says its settings are redacted and which the console's export downloads;
 // a backup, which must keep it to restore the tool, says it includes a secret.
 func TestDirectToolKeysAreMaskedInTheExportAndDeclaredInBackups(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	const headerKey, queryKey = "synthetic-header-key-value", "synthetic-query-key-value"
 	// A save refuses a typed key now (tools.Validate); an older configuration that holds one still loads at
@@ -133,6 +134,7 @@ func TestDirectToolKeysAreMaskedInTheExportAndDeclaredInBackups(t *testing.T) {
 // The database copy in a backup keeps the whole configuration history: a key typed into an HTTP
 // tool in an older committed revision marks the backup even after the latest revision dropped it.
 func TestBackupSecretsIncludedScansEveryStoredRevision(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	const marker = "synthetic-old-revision-key-value"
 	d := s.Doc()
@@ -181,6 +183,7 @@ func TestBackupSecretsIncludedScansEveryStoredRevision(t *testing.T) {
 }
 
 func TestBackupWithoutTypedKeysSaysNoSecrets(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	b := s.Execute(context.Background(), action.Request{Action: "backup.create", Locale: "en"})
 	if !b.OK {

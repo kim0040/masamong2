@@ -16,6 +16,7 @@ import (
 // one change, rerank left where it was (Gemini has none), and the embedding width reset for the new
 // model.
 func TestAddGeminiAndFillRoles(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasSuffix(r.URL.Path, "/models") || r.Header.Get("Authorization") != "Bearer g-key" {
 			w.WriteHeader(400)
@@ -98,6 +99,7 @@ func TestAddGeminiAndFillRoles(t *testing.T) {
 }
 
 func TestModelsRecommendExplainsWhenNoRuleMatches(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.HasPrefix(r.URL.Path, "/models") {
 			http.NotFound(w, r)
@@ -127,6 +129,7 @@ func TestModelsRecommendExplainsWhenNoRuleMatches(t *testing.T) {
 // is embedded again: the preview says what that costs, apply refuses it unless the operator confirms,
 // recommend --apply keeps the indexed model, and the doctor reports the gap instead of "ready".
 func TestEmbeddingSwitchWaitsForConfirmationWhileIndexed(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"models/gemini-3.8-flash"},{"id":"models/gemini-embedding-2"}]}`))
 	}))
@@ -219,6 +222,7 @@ func TestEmbeddingSwitchWaitsForConfirmationWhileIndexed(t *testing.T) {
 
 // Without a memory index there is nothing to empty: models.select switches the embedding model freely.
 func TestEmbeddingSelectWithoutIndexIsNotGuarded(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	if r := exec(svc, "providers.add", map[string]any{"api": "gemini", "id": "gem"}); !r.OK {
 		t.Fatalf("add: %+v", r)
@@ -229,6 +233,7 @@ func TestEmbeddingSelectWithoutIndexIsNotGuarded(t *testing.T) {
 }
 
 func TestModelsSelectEmbeddingDimensionsFollowKnownMRLWidths(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Models["embed"] = config.Model{Provider: "openrouter", Model: "vendor/old-embed", Dimensions: 2048}
@@ -269,6 +274,7 @@ func TestModelsSelectEmbeddingDimensionsFollowKnownMRLWidths(t *testing.T) {
 }
 
 func TestModelsRecommendEmbeddingDimensionsAndApplySuggestedWidth(t *testing.T) {
+	t.Parallel()
 	svc := listService(t)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Models["rerank"] = config.Model{}
@@ -303,6 +309,7 @@ func TestModelsRecommendEmbeddingDimensionsAndApplySuggestedWidth(t *testing.T) 
 }
 
 func TestModelsRecommendEmbeddingDimensionsUseDefaultOrSmallHost(t *testing.T) {
+	// sequential: it installs the process's host profile
 	t.Run("rerank uses default", func(t *testing.T) {
 		svc := listService(t)
 		applyDoc(t, svc, func(d *config.Document) {

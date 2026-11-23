@@ -81,6 +81,7 @@ func implicitRows(t *testing.T, svc *application.Service, turn string, min int) 
 // What a person does right after a reply lands on that reply's turn as implicit rows, apart from the
 // ratings people give: the turn shows both, the summary counts both, and neither counts as the other.
 func TestImplicitSignalsAreNotedApartFromRatings(t *testing.T) {
+	t.Parallel()
 	svc := implicitSvc(t)
 	t0 := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
 	svc.Clock = clock.Fixed{T: t0}
@@ -150,6 +151,7 @@ func TestImplicitSignalsAreNotedApartFromRatings(t *testing.T) {
 // Nothing is noted for a person who withdrew memory consent or is blocked, and what was noted goes with
 // the person when they withdraw.
 func TestImplicitSignalsFollowConsentAndBlocking(t *testing.T) {
+	t.Parallel()
 	svc := implicitSvc(t)
 	t0 := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
 	svc.Clock = clock.Fixed{T: t0}
@@ -189,6 +191,7 @@ func TestImplicitSignalsFollowConsentAndBlocking(t *testing.T) {
 // The decline of a thread offer is noted on the turn that carried the offer; a person without consent
 // leaves nothing.
 func TestDecliningAThreadOfferIsNotedOnItsTurn(t *testing.T) {
+	t.Parallel()
 	var plan, resp recordingServer
 	planURL := plan.start(t, func(string) string { return `{"memory_requirement":"none","tool_plan":[]}` })
 	respURL := resp.start(t, func(string) string { return strings.Repeat("길게 설명하는 답이야. ", 30) })
@@ -221,6 +224,7 @@ func TestDecliningAThreadOfferIsNotedOnItsTurn(t *testing.T) {
 // Tagging the bot right after an untagged message of theirs was left alone is noted as "retag" on the
 // reply the follow-up window belonged to; a tag with no skipped message before it is only a recall.
 func TestRetagAfterASkippedFollowUpIsNoted(t *testing.T) {
+	t.Parallel()
 	svc := implicitSvc(t)
 	t0 := time.Date(2026, 11, 7, 10, 0, 0, 0, time.UTC)
 	svc.Clock = clock.Fixed{T: t0}

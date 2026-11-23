@@ -53,6 +53,7 @@ func routedSvc(t *testing.T, planURL, respURL string) *application.Service {
 }
 
 func TestChatRolesSharingAModelNameKeepTheirProviders(t *testing.T) {
+	t.Parallel()
 	var planCalls, respCalls atomic.Int32
 	planURL := chatServer(t, `{"memory_requirement":"none","tool_plan":[]}`, "stop", &planCalls)
 	respURL := chatServer(t, "응답 호스트", "stop", &respCalls)
@@ -75,6 +76,7 @@ func TestChatRolesSharingAModelNameKeepTheirProviders(t *testing.T) {
 // without thinking and with room past the thinking (the adapter's two retries): the other chat model answers instead, and when that one comes back empty too the turn fails saying why, never with an empty
 // reply.
 func TestEmptyReplyCutByTokenBudgetIsAnError(t *testing.T) {
+	t.Parallel()
 	var planCalls, respCalls atomic.Int32
 	planURL := chatServer(t, `{"memory_requirement":"none","tool_plan":[]}`, "stop", &planCalls)
 	respURL := chatServer(t, "", "length", &respCalls)
@@ -95,6 +97,7 @@ func TestEmptyReplyCutByTokenBudgetIsAnError(t *testing.T) {
 // When the answer prompt is longer than both chat models take, the turn asks the answer once more with
 // less context instead of failing, and the turn record says why.
 func TestContextLengthErrorRetriesTheAnswerWithLessContext(t *testing.T) {
+	t.Parallel()
 	var planCalls, respCalls atomic.Int32
 	tooLong := func(w http.ResponseWriter) {
 		w.WriteHeader(400)
@@ -159,6 +162,7 @@ func TestContextLengthErrorRetriesTheAnswerWithLessContext(t *testing.T) {
 // A role's fallbacks answer before the other chat role is asked: the response host is down, its
 // fallback on another host answers, and the planner host is not asked to stand in.
 func TestResponseFallbackAnswersWhenItsHostIsDown(t *testing.T) {
+	t.Parallel()
 	var planCalls, downCalls, fbCalls atomic.Int32
 	planURL := chatServer(t, `{"memory_requirement":"none","tool_plan":[]}`, "stop", &planCalls)
 	down := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -203,6 +207,7 @@ func TestResponseFallbackAnswersWhenItsHostIsDown(t *testing.T) {
 
 // A model provider's daily call limit counts its calls; when it is reached the role's fallback answers.
 func TestModelProviderDailyLimitHandsOverToTheFallback(t *testing.T) {
+	t.Parallel()
 	var planCalls, respCalls, fbCalls atomic.Int32
 	planURL := chatServer(t, `{"memory_requirement":"none","tool_plan":[]}`, "stop", &planCalls)
 	respURL := chatServer(t, "기본 호스트", "stop", &respCalls)

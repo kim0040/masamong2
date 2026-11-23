@@ -62,6 +62,7 @@ func widthRoom(t *testing.T, s *Service) blocks.Block {
 }
 
 func TestEmbedWidthLowerKeepsBlockConnections(t *testing.T) {
+	t.Parallel()
 	for _, path := range []string{"config.patch", "models.embed_width"} {
 		t.Run(path, func(t *testing.T) {
 			s := privacyService(t)
@@ -208,6 +209,7 @@ func TestEmbedWidthLowerKeepsBlockConnections(t *testing.T) {
 }
 
 func TestEmbedWidthAction(t *testing.T) {
+	t.Parallel()
 	for _, dims := range []int{1024, 2048} {
 		t.Run("narrow-"+strconv.Itoa(dims), func(t *testing.T) {
 			s := privacyService(t)
@@ -261,6 +263,7 @@ func TestEmbedWidthAction(t *testing.T) {
 }
 
 func TestEmbedWidthValidationAndNoop(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	widthConfig(t, s, "qwen/qwen3-embedding-8b", 4096)
 	for _, dims := range []any{-1, 1, 128, 256, 512, 768, 1536, 3072, 4096, 8192, "bad", 1024.5, true, nil} {
@@ -307,6 +310,7 @@ func TestEmbedWidthValidationAndNoop(t *testing.T) {
 }
 
 func TestEmbedWidthReadMetadata(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	for _, tc := range []struct {
 		model                 string
@@ -341,6 +345,7 @@ func TestEmbedWidthReadMetadata(t *testing.T) {
 }
 
 func TestEmbedWidthAliasesKeepModelAndRecipeIdentity(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	widthConfig(t, s, "qwen/qwen3-embedding-8b", 4096)
 	old := widthRoom(t, s)
@@ -364,6 +369,7 @@ func TestEmbedWidthAliasesKeepModelAndRecipeIdentity(t *testing.T) {
 }
 
 func TestEmbedWidthAliasesForLegacyPatchWidths(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	widthConfig(t, s, "qwen/qwen3-embedding-8b", 1536)
 	widthRoom(t, s)
@@ -400,6 +406,7 @@ func TestEmbedWidthAliasesForLegacyPatchWidths(t *testing.T) {
 }
 
 func TestEmbedWidthNativeFromOversizedSettingNeedsReindex(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	widthConfig(t, s, "qwen/qwen3-embedding-4b", 3000)
 	widthRoom(t, s)
@@ -415,6 +422,7 @@ func TestEmbedWidthNativeFromOversizedSettingNeedsReindex(t *testing.T) {
 }
 
 func TestBlockLookupRejectsLabelsBeforeReadingStorage(t *testing.T) {
+	t.Parallel()
 	s := &Service{}
 	for _, id := range []string{"", "fixture label", "kakao:fixture", "0123456789abcde", "0123456789abcdef0", "0123456789abcdeg", "0123456789abcde한"} {
 		if _, ok := s.lookupBlock(id); ok {
@@ -424,6 +432,7 @@ func TestBlockLookupRejectsLabelsBeforeReadingStorage(t *testing.T) {
 }
 
 func TestEmbedWidthAliasesUseFixedCandidatesAndInvalidate(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	widthConfig(t, s, "qwen/qwen3-embedding-8b", 1024)
 	b := widthRoom(t, s)
@@ -472,6 +481,7 @@ func TestEmbedWidthAliasesUseFixedCandidatesAndInvalidate(t *testing.T) {
 }
 
 func TestEmbedWidthDirectionIsCheckedByTheServer(t *testing.T) {
+	t.Parallel()
 	changed := func(t *testing.T, r action.Result, s *Service, before int, dims int) {
 		t.Helper()
 		if r.OK || r.Error == nil || r.Error.Code != errcode.ConfigConflict || r.Error.MessageKey != "models.embed_width_direction_changed" || r.Error.Message == "models.embed_width_direction_changed" {

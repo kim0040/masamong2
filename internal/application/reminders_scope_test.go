@@ -49,6 +49,7 @@ func seen(r chat.ToolResult) string {
 // resume by words, by words that point at another room's or a DM's reminder, or by its id, never reach
 // a reminder made elsewhere, and their names never come back to the model. A task's turn is the same.
 func TestChatTurnInARoomChangesOnlyThatRoomsReminders(t *testing.T) {
+	t.Parallel()
 	svc, here, there, dm := scopeFixture(t)
 	run := chatRun(svc, "g", "c")
 	for _, in := range []map[string]any{
@@ -90,6 +91,7 @@ func TestChatTurnInARoomChangesOnlyThatRoomsReminders(t *testing.T) {
 // A DM chat is the person's alone: it lists, and changes, the reminders they made by DM command (stored
 // with no channel) as well as the ones made in rooms. A chat turn in a room is the exclusion control.
 func TestDMChatListsTheRemindersMadeInDMs(t *testing.T) {
+	t.Parallel()
 	svc, _, there, dm := scopeFixture(t)
 	if out := seen(chatRun(svc, "", "dm1")(map[string]any{"op": "list"})); !strings.Contains(out, "zebra") || !strings.Contains(out, "walrus") {
 		t.Fatalf("a DM chat's list leaves out the person's reminders: %s", out)

@@ -19,6 +19,7 @@ import (
 // comes from the answer model, not a canned card. Answered commands, refusals, tools the chat does not
 // use and channels that do not chat keep their card.
 func TestCommandWithoutAnswerCarriesOnAsConversation(t *testing.T) {
+	t.Parallel()
 	var plannerPrompt, answerPrompt string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
