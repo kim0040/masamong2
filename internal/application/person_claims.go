@@ -32,6 +32,8 @@ func init() {
 //
 //   - shape: guild, Discord subject and speaker references (never kakao: or label:), a known kind, the
 //     subject's {@ref} in a text of at most 120 runes, a topic of at most 20, at least one evidence id;
+//   - a direct claim (subject = speaker) names nobody but its subject: one naming another person is what
+//     the speaker said about them, never the speaker's own statement;
 //   - evidence: every observation is a live human Discord line of this server, current (no pending
 //     deletion or edit: store.ObservationCurrent), written by the speaker, with the text the writer read
 //     (Lines) and not edited after it read it (ReadAt); all of it in one room;
@@ -121,7 +123,13 @@ func (s *Service) personClaimPasses(tx *sql.Tx, c *store.PersonClaim, memoryOut,
 	if c.Link == store.LinkSelf && !c.Direct() {
 		return false, nil
 	}
-	people := uniqueStrings(append([]string{c.SubjectRef, c.SpeakerRef}, episodes.TextRefs(c.Text)...))
+	named := episodes.TextRefs(c.Text)
+	if c.Direct() && slices.ContainsFunc(named, func(ref string) bool { return ref != c.SubjectRef }) {
+		// a statement of one's own names only its subject: "{p1}가 전하길 {p2}는 …" filed under its speaker
+		// is hearsay about p2, and as a direct claim it would be read server-wide as p1's own words
+		return false, nil
+	}
+	people := uniqueStrings(append([]string{c.SubjectRef, c.SpeakerRef}, named...))
 	for _, ref := range people {
 		if !store.DiscordPersonRef(ref) || memoryOut[ref] {
 			return false, nil

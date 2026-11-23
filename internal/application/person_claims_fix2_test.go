@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"masamong/internal/config"
 	"masamong/internal/memory/store"
 )
 
@@ -82,5 +83,42 @@ func TestCorrectionKeepsOtherClaimsFromSharedEvidence(t *testing.T) {
 				t.Errorf("the other statement of the same line went with the correction: %d", n)
 			}
 		})
+	}
+}
+
+// A statement filed under its own speaker that names another person ("{p1}가 전하길 {p2}는 …") is
+// hearsay about that person. As a direct claim it would be read in every channel of the server, also on a
+// no_hearsay server, as the speaker's own words, so the write gate refuses it. The control: the same
+// speaker's plain statement about themselves from the same answer is stored and read in another channel.
+func TestSelfStatementNamingAnotherPersonDoesNotTravel(t *testing.T) {
+	t.Parallel()
+	s, m, e := memorySvc(t)
+	applyDoc(t, s, func(d *config.Document) { d.Guilds["g"].Channels["other"] = config.ChannelPolicy{Capture: true} })
+	strict(t, s, config.GuildPrivacy{NoHearsay: true})
+	m.extract = func(string) string {
+		return `{"episodes":[],"people":[
+		 {"about":"p1","kind":"other","topic":"소문","text":"{p1}가 전하길 {p2}는 debt-sentinel 빚이 있음","by":["p1"],"ev":["m1"]},
+		 {"about":"p1","kind":"like","topic":"음료","text":"{p1}는 own-tea-sentinel을 좋아함","by":["p1"],"ev":["m3"]}]}`
+	}
+	at := time.Now().Add(-3 * time.Hour)
+	sayIn(e, at,
+		said{"9101", "101", "민수", "영희 빚 있다던데 진짜야"}, said{"9102", "202", "영희", "그런 얘기 하지 마 제발"},
+		said{"9103", "101", "민수", "알았어 미안 나는 차나 마실래"}, said{"9104", "202", "영희", "응 고마워 부탁할게"})
+	if rep := s.RunRoomMemory(t.Context()); rep.PeopleClaims() == 0 {
+		t.Fatalf("control: the extraction saved nothing: %+v", rep)
+	}
+	if n := personClaimCount(t, s, "instr(text,'debt-sentinel')>0"); n != 0 {
+		t.Errorf("a self statement naming another person was stored: %d row(s)", n)
+	}
+	if n := personClaimCount(t, s, "instr(text,'own-tea-sentinel')>0 AND subject_ref=speaker_ref"); n != 1 {
+		t.Fatalf("control: the plain self statement was not stored: %d", n)
+	}
+	f := reviewPerson{s, m, e, at}
+	got := f.askIn(t, "other", "<@101> 어떤 사람이야?")
+	if strings.Contains(got, "debt-sentinel") {
+		t.Errorf("hearsay about another person travelled to #other on a no_hearsay server, as the speaker's own statement: %q", got)
+	}
+	if !strings.Contains(got, "own-tea-sentinel") {
+		t.Errorf("control: the speaker's own statement is not read in #other: %q", got)
 	}
 }
