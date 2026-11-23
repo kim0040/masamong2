@@ -1115,6 +1115,18 @@ func (s *Service) pbRebasePilot(ctx context.Context, db *storage.Store, confirm 
 	for _, w := range plan.Windows {
 		byID[w.ID] = w
 	}
+	// a pilot window that kept its id while its lines changed (one inside it gone or captured late, the
+	// id being its room, first and last line) or while its prompt changed (an edit, a withdrawal) is no
+	// longer the window the pilot reviewed: a new pilot is needed, it is never sent straight to a batch
+	pilots, err := store.BackfillWindows(db.Reader(), run.ID, true)
+	if err != nil {
+		return plan, false, err
+	}
+	for _, w := range pilots {
+		if changed, err := s.pbPilotWindowChanged(db, run.GuildID, w, byID); err != nil || changed {
+			return plan, false, err
+		}
+	}
 	now := s.Clock.Now().UTC().Format(time.RFC3339)
 	ok := true
 	err = db.WithWriterContext(ctx, func(tx *sql.Tx) error {
@@ -1125,7 +1137,7 @@ func (s *Service) pbRebasePilot(ctx context.Context, db *storage.Store, confirm 
 		kept := map[string]bool{}
 		for _, w := range have {
 			if w.Pilot {
-				if _, in := byID[w.ID]; !in {
+				if pw, in := byID[w.ID]; !in || !slices.Equal(pw.Obs, w.Obs) {
 					ok = false
 					return nil
 				}
@@ -1177,6 +1189,31 @@ func (s *Service) pbRebasePilot(ctx context.Context, db *storage.Store, confirm 
 	}
 	s.Log.Info("people backfill: pilot kept for a changed plan", "run", run.ID, "windows", len(plan.Windows))
 	return plan, true, nil
+}
+
+// pbPilotWindowChanged reports whether a stored pilot window is not in plan any more as the pilot saw it:
+// gone, holding other lines under the same id, or giving another prompt than the one its stored answers
+// were given (a window the pilot found nothing to send in that now has something, or the reverse).
+func (s *Service) pbPilotWindowChanged(db *storage.Store, guild string, w store.BackfillWindow, plan map[string]pbWindow) (bool, error) {
+	pw, in := plan[w.ID]
+	if !in || !slices.Equal(pw.Obs, w.Obs) {
+		return true, nil
+	}
+	bp, err := s.pbBuildPrompt(db, guild, w)
+	if err != nil {
+		return false, err
+	}
+	for _, a := range pbAnswers(w.Result) {
+		switch {
+		case a.Skipped:
+			if bp.ok {
+				return true, nil
+			}
+		case !bp.ok || a.Hash != bp.hash:
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // pbStartedPlan is the plan of a run that already started (a model chosen) whose token confirm names:

@@ -2482,3 +2482,77 @@ func TestPeopleBackfillReviewKeepsHiddenTopicHidden(t *testing.T) {
 		t.Fatalf("after Mina said %q herself, the review shows hearsay on %v", open, again)
 	}
 }
+
+// A pilot window keeps its id while a line inside it goes (the id is the room, the first and last line
+// and the prompt version) or while one of its lines is edited. Such a window is no longer the one the
+// pilot reviewed: the run refuses with plan_changed (a new pilot is needed) and sends no batch, instead of
+// moving the pilot onto the changed plan and sending the window straight to a batch.
+func TestPeopleBackfillRejectsChangedPilotWithSameWindowID(t *testing.T) {
+	for _, how := range []string{"deleted", "edited"} {
+		t.Run(how, func(t *testing.T) {
+			h := newPBHost(t)
+			s := pbService(t, h, "anthropic")
+			pbSeed(t, s, 70)
+			token, run := pbPiloted(t, s, nil)
+			pilots, _ := store.BackfillWindows(s.Store.Reader(), run.ID, true)
+			var w store.BackfillWindow
+			for _, p := range pilots {
+				if len(p.Obs) >= 3 {
+					w = p
+					break
+				}
+			}
+			if w.ID == "" {
+				t.Fatal("no pilot window with an inside line")
+			}
+			inside := w.Obs[1]
+			if how == "deleted" {
+				if _, err := s.Store.DB.Exec(`UPDATE memory_observations SET deleted_at='2026-11-01T00:00:00Z', content='' WHERE observation_id=?`, inside); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				if _, err := s.Store.DB.Exec(`UPDATE memory_observations SET content='I really like editedtopic now', edited_at='2026-10-01T00:00:00Z' WHERE observation_id=?`, inside); err != nil {
+					t.Fatal(err)
+				}
+				// and a line captured late outside the pilot, so the plan changes and the pilot is moved onto it
+				var outside store.BackfillWindow
+				all, _ := store.BackfillWindows(s.Store.Reader(), run.ID, false)
+				for _, o := range all {
+					if !o.Pilot && o.State == store.WindowQueued {
+						outside = o
+						break
+					}
+				}
+				first, _ := time.Parse(time.RFC3339Nano, outside.FirstAt)
+				e, _ := s.MemoryEngine()
+				if ok, err := e.Capture(engine.LiveMessage{GuildID: "g1", ChannelID: "c1", MessageID: "late2", AuthorID: "101", AuthorName: "Mina",
+					Content: "and I really like latecomer things", At: first.Add(30 * time.Second)}); err != nil || !ok {
+					t.Fatal(ok, err)
+				}
+			}
+			dry := pbDry(t, s, nil)
+			if dry["token"] == token {
+				t.Fatal("the plan did not change")
+			}
+			ids := map[string]bool{}
+			for _, p := range pilots {
+				ids[p.ID] = true
+			}
+			if dry["windows"].(float64) != 70 || !ids[w.ID] {
+				t.Fatalf("windows: %v", dry["windows"])
+			}
+			res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token})
+			if res.OK || res.Error.MessageKey != "people_backfill.plan_changed" {
+				t.Fatalf("a run whose pilot window changed under the same id: %+v", res)
+			}
+			time.Sleep(100 * time.Millisecond)
+			if n := len(h.creations()); n != 0 {
+				t.Fatalf("%d batches were sent", n)
+			}
+			kept, _, _ := store.LoadBackfillRun(s.Store.Reader(), run.ID)
+			if kept.Token != token || kept.State != store.BackfillPiloted {
+				t.Fatalf("the pilot was moved onto the changed plan: %+v", kept)
+			}
+		})
+	}
+}
