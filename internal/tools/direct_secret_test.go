@@ -27,10 +27,10 @@ func TestDirectSecretsAreRefusedOnChangeOnly(t *testing.T) {
 		{"custom token header", tool("https://api.example/v1", map[string]string{"X-Service-Token": direct}), "headers.X-Service-Token"},
 		{"cookie with a second literal", tool("https://api.example/v1", map[string]string{"Cookie": "session={credential}; fallback=" + direct}), "headers.Cookie"},
 		// a literal beside the reference keeps a key in the configuration even without an = segment:
-		// fused to it, after it or before it
+		// fused to it, after it, or as a second word before it (the word right before is the scheme)
 		{"authorization literal fused", tool("https://api.example/v1", map[string]string{"Authorization": "Bearer " + direct + "{credential}"}), "headers.Authorization"},
 		{"authorization literal after", tool("https://api.example/v1", map[string]string{"Authorization": "Bearer {credential} " + direct}), "headers.Authorization"},
-		{"authorization literal before", tool("https://api.example/v1", map[string]string{"Authorization": direct + " {credential}"}), "headers.Authorization"},
+		{"authorization literal before", tool("https://api.example/v1", map[string]string{"Authorization": "Bearer " + direct + " {credential}"}), "headers.Authorization"},
 		{"x-api-key fused", tool("https://api.example/v1", map[string]string{"X-API-Key": direct + "{credential}"}), "headers.X-API-Key"},
 		{"query key", tool("https://api.example/v1?q={q}&key="+direct, nil), "the key parameter"},
 		{"query authKey", tool("https://api.example/v1?authKey="+direct, nil), "the authKey parameter"},
@@ -58,6 +58,9 @@ func TestDirectSecretsAreRefusedOnChangeOnly(t *testing.T) {
 		// a credential behind a scheme word or a cookie's name is the reference alone
 		tool("https://api.example/v1", map[string]string{"Authorization": "Bearer {credential}", "Cookie": "session={credential}"}),
 		tool("https://api.example/v1", map[string]string{"Authorization": "Basic {credential}", "X-Service-Token": "Private-Token {credential}"}),
+		// services name their own scheme word: Elasticsearch's ApiKey, fal's Key, Imgur's Client-ID
+		tool("https://api.example/v1", map[string]string{"Authorization": "ApiKey {credential}", "X-API-Key": "Key {credential}"}),
+		tool("https://api.example/v1", map[string]string{"Authorization": "Client-ID {credential}", "X-Service-Token": "GenieKey {credential}"}),
 	}
 	for i, s := range allowed {
 		if err := Validate("ops.lookup", s); err != nil {

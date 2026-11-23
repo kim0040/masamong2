@@ -238,6 +238,7 @@ func TestCollectSkipsWhatIsNotAllowed(t *testing.T) {
 		})
 		t.Run(tc.name+"/name mention", func(t *testing.T) {
 			svc, _, js := partSvc(t, "collect")
+			_, drain := application.ManualParticipationForTest(svc)
 			nameCallRoom(t, svc, js)
 			tc.setup(t, svc)
 			sayName(svc, "m9", "u1")
@@ -248,6 +249,7 @@ func TestCollectSkipsWhatIsNotAllowed(t *testing.T) {
 					return filteredOf(t, svc)[tc.reason] == 1
 				})
 			}
+			drain() // a mention write the check wrongly queued lands before the row check
 			if rows := plRows(t, svc); len(rows) != 0 {
 				t.Fatalf("recorded: %+v", rows)
 			}
@@ -687,12 +689,15 @@ func TestCollectModeSwitchWhilePending(t *testing.T) {
 func TestCollectDropsMomentsOfDeletedMessages(t *testing.T) {
 	t.Run("deleted while it waits", func(t *testing.T) {
 		svc, _, _ := partSvc(t, "collect")
-		_, drain := application.ManualParticipationForTest(svc)
+		finishWait, drain := application.ManualParticipationForTest(svc)
 		say(svc, "m1", "u1", "누가 텐트 챙기기로 했지?")
 		if err := svc.MessagesDeleted("g", "c", []string{"m1"}); err != nil {
 			t.Fatal(err)
 		}
 		drain() // anything the deletion queued has run; the dropped candidate writes nothing
+		if finishWait("g", "c") {
+			t.Fatal("the deleted message's moment was still waiting")
+		}
 		if rows := plRows(t, svc); len(rows) != 0 {
 			t.Fatalf("a deleted message was collected: %+v", rows)
 		}
@@ -742,13 +747,16 @@ func TestCollectDropsMomentsOfDeletedMessages(t *testing.T) {
 // and no cancelled one either.
 func TestCollectWithdrawnWhileWaitingLeavesNoRow(t *testing.T) {
 	svc, _, _ := partSvc(t, "collect")
-	_, drain := application.ManualParticipationForTest(svc)
+	finishWait, drain := application.ManualParticipationForTest(svc)
 	say(svc, "m1", "u1", "누가 텐트 챙기기로 했지?")
 	if r := as(svc, "privacy.consent", map[string]any{"scope": "participation", "decision": "withdraw"}, inChannel("u1")); !r.OK {
 		t.Fatal(r.Error)
 	}
 	say(svc, "m2", "u2", "내가 가져갈게") // would cancel the moment as handled
 	drain()                         // the queued cancellation write leaves no row for a person who withdrew
+	if finishWait("g", "c") {
+		t.Fatal("the withdrawn person's moment was still waiting")
+	}
 	if rows := plRows(t, svc); len(rows) != 0 {
 		t.Fatalf("rows about a person who withdrew: %+v", rows)
 	}

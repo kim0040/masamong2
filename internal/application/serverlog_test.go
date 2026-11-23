@@ -106,12 +106,18 @@ func TestServerLogPostsDeletesWithTheirText(t *testing.T) {
 	svc.LogDeletes("g", "9000001", []application.DeletedMessage{{ID: msgID(written, 2), AuthorID: "222", AuthorBot: true}})
 	svc.LogDeletes("g", "9000002", []application.DeletedMessage{{ID: msgID(written, 3), AuthorID: "111"}})
 	svc.LogDeletes("", "dm", []application.DeletedMessage{{ID: msgID(written, 4), AuthorID: "111"}})
-	gw.posted(t, "9000002", 1)
+	// the check must wait until a wrongly queued entry would have posted: a marker entry queued
+	// behind them is that signal, and the worker posts the queue in order
+	svc.LogDeletes("g", "9000001", []application.DeletedMessage{{ID: msgID(written, 40), AuthorID: "111", Text: "marker"}})
+	if cards := gw.posted(t, "9000002", 2); cards[1].Text != "marker" {
+		t.Fatalf("a dropped delete was posted: %+v", cards)
+	}
+	gw.posted(t, "9000001", 0)
 
 	// many at once are one entry, with the authors named once and the unknown ones counted
 	svc.LogDeletes("g", "9000001", []application.DeletedMessage{{ID: msgID(written, 5), AuthorID: "111", Text: "하나\n둘"}, {ID: msgID(written.Add(time.Hour), 6), AuthorID: "111", Text: "셋"},
 		{ID: msgID(written, 7), AuthorID: "333", Text: "넷"}, {ID: msgID(written, 8)}})
-	bulk := gw.posted(t, "9000002", 2)[1]
+	bulk := gw.posted(t, "9000002", 3)[2]
 	if !strings.Contains(bulk.Title, "4") || fieldOf(bulk, "작성자") != "<@111>, <@333>\n작성자를 알 수 없는 메시지 1개" || !strings.Contains(fieldOf(bulk, "작성 시각"), " – ") {
 		t.Fatalf("bulk %+v", bulk)
 	}
@@ -123,7 +129,7 @@ func TestServerLogPostsDeletesWithTheirText(t *testing.T) {
 	f := false
 	setLog(t, svc, config.GuildLog{Channel: config.GuildLogAuto, DeletedText: &f})
 	svc.LogDeletes("g", "9000001", []application.DeletedMessage{{ID: msgID(written, 9), AuthorID: "111", Text: "비밀"}})
-	if c := gw.posted(t, "9000002", 3)[2]; c.Text != "" || strings.Contains(c.Footer, "기억") {
+	if c := gw.posted(t, "9000002", 4)[3]; c.Text != "" || strings.Contains(c.Footer, "기억") {
 		t.Fatalf("text off %+v", c)
 	}
 }
@@ -166,14 +172,21 @@ func TestServerLogFollowsItsSettings(t *testing.T) {
 
 	setLog(t, svc, config.GuildLog{Channel: "off"})
 	svc.LogDeletes("g", "9000001", []application.DeletedMessage{{ID: "7004", AuthorID: "111"}})
-	gw.posted(t, "9000001", 1)
-	gw.posted(t, "9000002", 1)
 
 	shown := exec(svc, "config.show", nil).Output["yaml"].(string)
 	bad := regexp.MustCompile(`channel: ["']?off["']?`).ReplaceAllString(shown, "channel: logs")
 	if v := exec(svc, "config.validate", map[string]any{"yaml": bad}); bad == shown || v.OK || !strings.Contains(v.Error.Message, "log.channel") {
 		t.Fatalf("a channel name was taken as the log channel: %+v", v)
 	}
+
+	// "off" queues nothing, but the check must wait until a wrongly queued entry would have posted:
+	// a marker entry queued behind it is that signal (the worker posts the queue in order)
+	setLog(t, svc, config.GuildLog{Channel: config.GuildLogAuto})
+	svc.LogDeletes("g", "9000001", []application.DeletedMessage{{ID: "7005", AuthorID: "111", Text: "marker"}})
+	if cards := gw.posted(t, "9000002", 2); cards[1].Text != "marker" {
+		t.Fatalf("the off setting still posted: %+v", cards)
+	}
+	gw.posted(t, "9000001", 1)
 }
 
 func TestServerLogPostsAProblemOncePerWhile(t *testing.T) {
@@ -207,5 +220,10 @@ func TestServerLogTestAndListView(t *testing.T) {
 	if r := exec(svc, "serverlog.test", map[string]any{"guild_id": "g"}); r.OK || r.Error.Args["reason"] != "off" {
 		t.Fatalf("unset: %+v", r)
 	}
-	gw.posted(t, "9000002", 1)
+	// the delete must not post either: a marker entry queued behind it ends the wait
+	setLog(t, svc, config.GuildLog{Channel: config.GuildLogAuto})
+	svc.LogDeletes("g", "9000001", []application.DeletedMessage{{ID: "8002", AuthorID: "111", Text: "marker"}})
+	if cards := gw.posted(t, "9000002", 2); cards[1].Text != "marker" {
+		t.Fatalf("an unset log posted: %+v", cards)
+	}
 }

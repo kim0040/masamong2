@@ -3,7 +3,6 @@ package application
 import (
 	"fmt"
 	"sort"
-	"time"
 
 	"masamong/internal/action"
 	"masamong/internal/errcode"
@@ -37,6 +36,11 @@ const activityTiDB = `CREATE TABLE IF NOT EXISTS activity_counts (
 		PRIMARY KEY (day, guild_id, channel_id, user_id)
 	)`
 
+// activityStamp is the stored form of a message's time. It must be fixed width: ordering is a string
+// compare, and RFC3339Nano drops trailing zeros, so "…:00.5Z" would sort after "…:00.52Z" and every
+// whole-second stamp after every fraction of its second.
+const activityStamp = "2006-01-02T15:04:05.000000000Z"
+
 // countActivity adds one message of a person to today's count for its channel.
 func (s *Service) countActivity(m ObservedMessage) {
 	if m.FromBot || m.GuildID == "" || m.AuthorID == "" || s.practice || !s.GuildAllowed(m.GuildID) || !s.MemoryAllowed(m.AuthorID) {
@@ -51,18 +55,22 @@ func (s *Service) countActivity(m ObservedMessage) {
 		at = s.Clock.Now()
 	}
 	day := at.In(s.instanceZone()).Format("2006-01-02")
-	stamp := at.UTC().Format(time.RFC3339Nano)
+	stamp := at.UTC().Format(activityStamp)
 	// Every observation counts, but the row keeps the newest one's name and time: messages can arrive
 	// out of order (a relayed or retried one lands after a later one), and arrival order is not time.
+	// Rows an older release wrote in RFC3339Nano or whole-second RFC3339 stay comparable without a
+	// rewrite: cutting their 'Z' pads the fraction to the right length ("…:00" and "…:00.5" both read
+	// as the start of the second's range they are the prefix of), so the fixed-width stamp orders
+	// against them.
 	q := `INSERT INTO activity_counts(day, guild_id, channel_id, user_id, name, n, last_at) VALUES(?,?,?,?,?,1,?)
 		ON CONFLICT(day, guild_id, channel_id, user_id) DO UPDATE SET n=activity_counts.n+1,
-		name=CASE WHEN excluded.last_at>=activity_counts.last_at THEN excluded.name ELSE activity_counts.name END,
-		last_at=MAX(activity_counts.last_at, excluded.last_at)`
+		name=CASE WHEN excluded.last_at>=REPLACE(activity_counts.last_at,'Z','') THEN excluded.name ELSE activity_counts.name END,
+		last_at=CASE WHEN excluded.last_at>=REPLACE(activity_counts.last_at,'Z','') THEN excluded.last_at ELSE activity_counts.last_at END`
 	if !db.IsSQLite() {
 		q = `INSERT INTO activity_counts(day, guild_id, channel_id, user_id, name, n, last_at) VALUES(?,?,?,?,?,1,?)
 		ON DUPLICATE KEY UPDATE n=n+1,
-		name=IF(VALUES(last_at)>=last_at, VALUES(name), name),
-		last_at=GREATEST(last_at, VALUES(last_at))`
+		name=IF(VALUES(last_at)>=REPLACE(last_at,'Z',''), VALUES(name), name),
+		last_at=IF(VALUES(last_at)>=REPLACE(last_at,'Z',''), VALUES(last_at), last_at)`
 	}
 	if _, err := db.DB.Exec(q, day, m.GuildID, m.ChannelID, m.AuthorID, clip(m.AuthorName, 120), stamp); err != nil {
 		s.Log.Debug("activity count failed", "err", err)
@@ -116,7 +124,7 @@ func (s *Service) activityRanking(req action.Request) action.Result {
 		where += " AND day>=?"
 		args = append(args, from)
 	}
-	rows, err := db.DB.Query(`SELECT user_id, SUM(n), MAX(last_at) FROM activity_counts WHERE `+where+` GROUP BY user_id`, args...)
+	rows, err := db.DB.Query(`SELECT user_id, SUM(n), MAX(REPLACE(last_at,'Z','')) FROM activity_counts WHERE `+where+` GROUP BY user_id`, args...)
 	if err != nil {
 		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
@@ -180,7 +188,7 @@ func (s *Service) activityRanking(req action.Request) action.Result {
 // alphabetically greatest name. where and args are the ranking's filter (channel and period).
 func (s *Service) activityName(db *storage.Store, userID, where string, args []any) string {
 	var name string
-	q := `SELECT name FROM activity_counts WHERE ` + where + ` AND user_id=? ORDER BY last_at DESC, day DESC LIMIT 1`
+	q := `SELECT name FROM activity_counts WHERE ` + where + ` AND user_id=? ORDER BY REPLACE(last_at,'Z','') DESC, day DESC LIMIT 1`
 	if err := db.DB.QueryRow(q, append(append([]any{}, args...), userID)...).Scan(&name); err != nil {
 		return ""
 	}
