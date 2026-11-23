@@ -321,16 +321,6 @@ func (s *Service) remindersPropose(req action.Request) action.Result {
 	return action.WithCard(action.OK(req, out), s.proposalCard(req, r, private))
 }
 
-func futureOnly(ts []time.Time, now time.Time) []time.Time {
-	var out []time.Time
-	for _, t := range ts {
-		if t.After(now) {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
 func (s *Service) activeReminders(userID string) int {
 	db, err := s.adminDB()
 	if err != nil {
@@ -634,18 +624,6 @@ func (s *Service) cancelReminder(r reminder) bool {
 		s.emit("reminders", r.ID, map[string]any{"status": reminderCancelled})
 	}
 	return n > 0
-}
-
-// cancellable is the Go form of the reminderLive SQL condition: a reminder that can still be
-// cancelled is live — before it is sent, or a series while one occurrence is being sent.
-func cancellable(r reminder) bool {
-	switch r.Status {
-	case reminderProposed, reminderScheduled, reminderPaused:
-		return true
-	case reminderSending:
-		return r.Repeat != nil
-	}
-	return false
 }
 
 // reminderStateCard answers a press on a reminder that has moved on (already set, sent, cancelled).
