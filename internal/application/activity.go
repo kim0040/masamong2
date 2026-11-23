@@ -51,7 +51,7 @@ func (s *Service) countActivity(m ObservedMessage) {
 		at = s.Clock.Now()
 	}
 	day := at.In(s.instanceZone()).Format("2006-01-02")
-	stamp := at.UTC().Format(time.RFC3339)
+	stamp := at.UTC().Format(time.RFC3339Nano)
 	// Every observation counts, but the row keeps the newest one's name and time: messages can arrive
 	// out of order (a relayed or retried one lands after a later one), and arrival order is not time.
 	q := `INSERT INTO activity_counts(day, guild_id, channel_id, user_id, name, n, last_at) VALUES(?,?,?,?,?,1,?)
