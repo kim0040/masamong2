@@ -89,6 +89,7 @@ func (s *Service) itemClaimsTx(tx *sql.Tx, items []string, hide bool, by string)
 	}
 	ids := map[string]bool{}
 	marks := []store.PersonSuppress{}
+	guilds := map[string]bool{}
 	stamp, now := s.suppressStamp(), s.Clock.Now().UTC().Format(time.RFC3339)
 	for _, item := range uniqueStrings(items) {
 		var it deriveItem
@@ -101,6 +102,7 @@ func (s *Service) itemClaimsTx(tx *sql.Tx, items []string, hide bool, by string)
 		if err != nil {
 			return 0, err
 		}
+		guilds[guild] = true
 		_ = json.Unmarshal([]byte(ev), &it.evidence)
 		_ = json.Unmarshal([]byte(by2), &it.by)
 		authors, _, err := evidenceAuthors(tx, it.evidence)
@@ -145,6 +147,12 @@ func (s *Service) itemClaimsTx(tx *sql.Tx, items []string, hide bool, by string)
 	}
 	for _, m := range marks {
 		if err := writeSuppress(tx, m); err != nil {
+			return 0, err
+		}
+	}
+	// the paid backfill's stored pilot answers are another copy: the new markers purge them too
+	for g := range guilds {
+		if err := s.pbRecheckPilotTx(tx, g); err != nil {
 			return 0, err
 		}
 	}

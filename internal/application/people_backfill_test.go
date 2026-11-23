@@ -2413,3 +2413,72 @@ func TestPeopleBackfillDoesNotSendDeletedThread(t *testing.T) {
 		}
 	})
 }
+
+// The pilot review follows chat's hidden-topic rule: once hearsay on a topic about a person was hidden,
+// hearsay on that topic stays out of the review, even a statement made after the hide by someone else,
+// until the person says it themselves. Their own statement on the topic is the control that shows it again.
+func TestPeopleBackfillReviewKeepsHiddenTopicHidden(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	pbPiloted(t, s, nil)
+	mina := store.PersonRef("101")
+	review := func() []map[string]any {
+		res, out := pbExec(t, s, "memory.people.backfill.review", map[string]any{"guild_id": "g1"})
+		if !res.OK || out["available"] != true {
+			t.Fatalf("review: %+v %v", res.Error, out)
+		}
+		var items []map[string]any
+		for _, it := range out["items"].([]any) {
+			items = append(items, it.(map[string]any))
+		}
+		return items
+	}
+	// what Joon said about Mina's drinks (the hearsay the review set holds)
+	hearsay := func(items []map[string]any) map[string]bool {
+		topics := map[string]bool{}
+		for _, m := range items {
+			if m["subject"] == "Mina" && slices.Contains(m["speakers"].([]any), any("Joon")) && strings.HasPrefix(m["topic"].(string), "tea") {
+				topics[m["topic"].(string)] = true
+			}
+		}
+		return topics
+	}
+	topics := hearsay(review())
+	if len(topics) == 0 {
+		t.Fatal("the review set has no hearsay on Mina's drinks to start with")
+	}
+	// the topics were hidden about Mina before any of it was said (the markers' time is before the lines)
+	for topic := range topics {
+		if _, err := s.Store.DB.Exec(`INSERT INTO person_memory_suppress(guild_id,person_ref,role,scope,before_ts,by,created_at) VALUES('g1',?,'subject',?,'2026-08-01T00:00:00.000000000Z','self','x')`,
+			mina, "topic:"+store.PersonTopicKey("trait", topic)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if left := hearsay(review()); len(left) != 0 {
+		t.Fatalf("hearsay on a hidden topic is shown in the review: %v", left)
+	}
+	// Mina says one of them herself after the hide: hearsay on that topic is shown again
+	var open string
+	for topic := range topics {
+		open = topic
+		break
+	}
+	var line string
+	if err := s.Store.Reader().QueryRow(`SELECT observation_id FROM memory_observations WHERE actor_account='101' ORDER BY parsed_time LIMIT 1`).Scan(&line); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Store.WithWriter(func(tx *sql.Tx) error {
+		n, err := s.savePersonClaims(t.Context(), tx, []store.PersonClaim{{GuildID: "g1", SubjectRef: mina, SpeakerRef: mina, Kind: "trait", Topic: open,
+			Text: "{@" + mina + "} drinks " + open, Evidence: []string{line}, Source: "extract:pb-test", Link: store.LinkSelf}})
+		if err == nil && n != 1 {
+			err = fmt.Errorf("the self statement was not saved: %d", n)
+		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if again := hearsay(review()); !again[open] || len(again) != 1 {
+		t.Fatalf("after Mina said %q herself, the review shows hearsay on %v", open, again)
+	}
+}

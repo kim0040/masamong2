@@ -697,11 +697,18 @@ func (s *Service) pbPilotStoreTx(tx *sql.Tx, run store.BackfillRun, windowID str
 // pbFactPasses applies the write gate, read-only, to a stored pilot fact: what a claim of it would face
 // when written (evidence current and the speaker's own, read before any edit, consent, tombstones of
 // every person the text names, the suppress markers), plus the statement-level forget and hide check.
-// The pilot keeps, and its review shows, only facts that pass. lines (may be nil) are the texts the model read.
+// A person who withdrew profile consent leaves the pilot as they leave every prompt (pbSendable): no fact
+// said by them or naming them stays, not only the facts about them. The pilot keeps, and its review shows,
+// only facts that pass. lines (may be nil) are the texts the model read.
 func (s *Service) pbFactPasses(tx *sql.Tx, guild, runID string, f episodes.PersonFact, readAt string, lines map[string]string,
 	memoryOut, profileOut map[string]bool) (bool, error) {
 	if len(f.By) != 1 {
 		return false, nil
+	}
+	for _, ref := range append([]string{f.About, f.By[0]}, episodes.TextRefs(f.Text)...) {
+		if profileOut[ref] {
+			return false, nil
+		}
 	}
 	c := store.PersonClaim{GuildID: guild, SubjectRef: f.About, SpeakerRef: f.By[0], Kind: f.Kind, Topic: f.Topic, Text: f.Text,
 		Evidence: f.Ev, Source: "backfill:" + runID, Link: f.Link, ReadAt: readAt}
@@ -1833,8 +1840,12 @@ func (s *Service) peopleBackfillReview(ctx context.Context, req action.Request, 
 	defer tx.Rollback()
 	memoryOut, err := withdrawnRefsTx(tx, privacy.Memory)
 	if err == nil {
-		var profileOut map[string]bool
+		var profileOut, denied map[string]bool
 		profileOut, err = withdrawnRefsTx(tx, privacy.Profile)
+		if err == nil {
+			denied, err = s.deniedPeople(tx, run.GuildID)
+		}
+		topicHidden := s.pbTopicHidden(tx, run.GuildID, denied)
 		kept := cands[:0]
 		for _, c := range cands {
 			if err != nil {
@@ -1842,6 +1853,9 @@ func (s *Service) peopleBackfillReview(ctx context.Context, req action.Request, 
 			}
 			var ok bool
 			ok, err = s.pbFactPasses(tx, run.GuildID, run.ID, c.f, c.ans.ReadAt, c.bp.text, memoryOut, profileOut)
+			if ok && topicHidden(c.f) {
+				ok = false // hearsay on a hidden topic, as a chat turn would leave it out
+			}
 			if ok {
 				kept = append(kept, c)
 			} else {
@@ -1869,6 +1883,50 @@ func (s *Service) peopleBackfillReview(ctx context.Context, req action.Request, 
 		out["items"] = []any{}
 	}
 	return action.OK(req, out)
+}
+
+// pbTopicHidden is chat's hidden-topic rule (hiddenTopic) for the pilot review: hearsay on a topic that
+// was hidden about its subject stays hidden, even when it was said after the hide, until the subject said
+// it themselves after the hide in a statement that may be read (usableClaim), in any room of the server
+// (the review is the operator's, of the whole server).
+func (s *Service) pbTopicHidden(tx *sql.Tx, guild string, denied map[string]bool) func(episodes.PersonFact) bool {
+	type person struct {
+		markers  map[string]string
+		unlocked func(kind, topic, at string) bool
+	}
+	people := map[string]person{}
+	usable := map[string]bool{}
+	return func(f episodes.PersonFact) bool {
+		if len(f.By) != 1 || f.By[0] == f.About || store.PersonTopic(f.Topic) == "" {
+			return false
+		}
+		p, ok := people[f.About]
+		if !ok {
+			p.markers = topicMarkers(tx, guild, f.About)
+			rooms := map[string]bool{}
+			if len(p.markers) > 0 {
+				if rows, err := tx.Query(`SELECT DISTINCT room_id FROM person_claim WHERE guild_id=? AND subject_ref=?`, guild, f.About); err == nil {
+					for rows.Next() {
+						var room string
+						if rows.Scan(&room) == nil {
+							rooms[room] = true
+						}
+					}
+					rows.Close()
+				}
+			}
+			p.unlocked = topicUnlocker(tx, guild, f.About, rooms, func(c claimRow) bool {
+				v, seen := usable[c.id]
+				if !seen {
+					v = usableClaim(tx, c, denied)
+					usable[c.id] = v
+				}
+				return v
+			})
+			people[f.About] = p
+		}
+		return hiddenTopic(claimRow{subject: f.About, speaker: f.By[0], kind: f.Kind, topic: store.PersonTopic(f.Topic)}, p.markers, p.unlocked)
+	}
 }
 
 func pbLabel(bp pbPrompt, ref string) string {
