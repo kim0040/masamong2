@@ -284,3 +284,36 @@ func TestAlertSendKeepsAnIdenticalEventQueuedDuringIt(t *testing.T) {
 		t.Fatalf("queue after the second send = %v", got)
 	}
 }
+
+// The console's last attempt is the one that started last: a test sent while a tick's send waits is not
+// replaced by the tick's attempt when that one ends (Sol review of E8, finding 6).
+func TestAlertStatusKeepsTheAttemptThatStartedLast(t *testing.T) {
+	s, dm := alertQueueService(t)
+	ctx := context.Background()
+	s.alertTick(ctx)
+	dm.take()
+	s.queueAlert(alertMemoryScope, map[string]any{"n": 1})
+	entered, free := make(chan struct{}), make(chan struct{})
+	var first atomic.Bool
+	dm.mu.Lock()
+	dm.onSend = func() {
+		if first.CompareAndSwap(false, true) { // only the tick's send waits
+			close(entered)
+			<-free
+		}
+	}
+	dm.mu.Unlock()
+	ticked := make(chan struct{})
+	go func() { defer close(ticked); s.alertTick(ctx) }()
+	<-entered
+	if r := s.Execute(ctx, action.Request{Action: "alerts.test"}); !r.OK {
+		t.Fatalf("alerts.test: %+v", r.Error)
+	}
+	close(free)
+	<-ticked
+	r := s.Execute(ctx, action.Request{Action: "alerts.status"})
+	last, _ := r.Output["last"].(*alertDelivery)
+	if last == nil || !last.Test {
+		t.Fatalf("last attempt = %+v, want the test that started after the tick's send", last)
+	}
+}
