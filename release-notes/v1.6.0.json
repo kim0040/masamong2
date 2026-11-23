@@ -1,0 +1,60 @@
+{
+  "version": "v1.6.0",
+  "date": "2026-11-23",
+  "user": {
+    "en": [
+      "New /updates command (/업데이트): shows what changed in the running version. Rooms and people can opt in to an update card after an upgrade. Both are off by default.",
+      "Personal commands like !내기억, !알림목록 and !잊어줘 used in a server now answer by DM, so the card no longer lands in the room. If DMs are closed, the room gets a short line pointing to the slash command.",
+      "Fixed: a message you deleted or edited while the bot was shutting down is no longer lost. It is applied at the next start, so a deleted message does not come back into memory.",
+      "Fixed: people who withdrew from participation or memory, and blocked people, get no banter or chime-in. Their thread, poll and more buttons are refused. A withdrawal during the judge stops the reply.",
+      "Fixed: threads of a room whose memory is off are never remembered, even if the thread itself says on.",
+      "Fixed: a chat in a room lists and changes only that room's reminders. The model can no longer confirm or move a reminder without the button press.",
+      "Fixed: the ranking shows each person's latest name, leaves out people who withdrew, and understands the period words of every language.",
+      "Fixed: chime-ins and banter no longer fire right after the bot answered, messages are judged in the order they came, and a disaster alert queued during a send is no longer dropped.",
+      "Fixed: a room set to commands only no longer carries on as chat, and a custom word for one tool no longer takes over other commands such as !이번달운세.",
+      "Fixed: failures now show a readable sentence in your language instead of raw error text. This covers the bot, the CLI and the console in all five languages."
+    ],
+    "ko": [
+      "새 /업데이트 명령(/updates): 지금 버전에서 바뀐 점을 보여줘요. 방과 사람이 원하면 업데이트 뒤에 소식 카드를 받을 수 있고, 둘 다 기본은 꺼져 있어요.",
+      "!내기억, !알림목록, !잊어줘 같은 개인 명령을 서버에서 쓰면 이제 DM으로 답해요. 카드가 방에 올라가지 않아요. DM이 막혀 있으면 방에는 슬래시 명령을 안내하는 한 줄만 남아요.",
+      "수정: 봇이 꺼지는 동안 지우거나 고친 메시지가 사라지던 문제를 고쳤어요. 다음 시작 때 반영하니, 지운 메시지가 기억에 다시 남지 않아요.",
+      "수정: 참여나 기억 동의를 철회한 사람과 차단한 사람에게는 장난 대꾸나 끼어들기를 하지 않아요. 이들의 스레드·투표·더보기 버튼은 거절하고, 판단 중 철회하면 답을 멈춰요.",
+      "수정: 기억을 끈 방의 스레드는, 스레드 자체가 켜짐이라도 기억하지 않아요.",
+      "수정: 방에서 하는 채팅은 그 방의 알림만 보여 주고 바꿔요. 모델이 버튼 없이 알림을 확정하거나 옮길 수도 없어요.",
+      "수정: 랭킹이 사람마다 가장 최근 이름을 보여 주고, 철회한 사람은 빼며, 모든 언어의 기간 단어를 알아들어요.",
+      "수정: 봇이 막 답한 뒤에 끼어들거나 장난 대꾸를 하지 않아요. 메시지는 온 순서대로 판단하고, 보내는 중에 쌓인 재난 알림도 사라지지 않아요.",
+      "수정: 명령만 받는 방이 채팅처럼 계속 답하던 문제와, 도구 하나에 단어를 붙이면 !이번달운세 같은 다른 명령이 밀려나던 문제를 고쳤어요.",
+      "수정: 실패했을 때 오류 원문 대신 쓰는 언어로 읽기 쉬운 문장을 보여줘요. 봇, CLI, 콘솔 다섯 언어 모두 해당해요."
+    ]
+  },
+  "operator": {
+    "en": [
+      "Statistics: counts stay in the local database. Build a weekly export file on the console Stats page or with masamong stats export --file. Nothing is sent. Turn it off with stats.enabled.",
+      "Update news: Maintenance shows a What's new card and a newer release's notes. Turn room cards on under Servers & rooms (update_news). Nothing is announced unless a room or person opted in.",
+      "Console link: it keeps working. New: re-issue the token from the console button or masamong admin token rotate. Every old token, link and session then stops at once.",
+      "Behaviour change: memory is on by default. Rooms and configs that never set it start capturing. Turn it off with memory.capture false or per room. Values you set are never changed.",
+      "Security: console login limits, loopback checks and the launcher proof are tighter, and keys are masked in the live log and provider errors. Keys typed into tool headers are refused.",
+      "Logging: logging off or errors no longer keeps tool arguments. A room can set logging.retain_days to drop its old text sooner. Statistics finish before old rows are pruned.",
+      "Stability: a panic in the tool loop no longer ends the daemon, and alert and chime paths hold locks less. Shutdown takes about a second longer. The code was reorganised and tested more strictly.",
+      "Upgrading: a new CLI needs a v1.6 daemon, so update both together. Browser sessions saved by older versions end once; sign in again with the console link, which keeps working.",
+      "Behaviour change: when a query fails, the statistics charts now fail instead of drawing partial data. The log names the cause.",
+      "Known limit: a tool header like Word {credential} accepts any short letters-only word as the scheme (needed for ApiKey), so a short key made only of letters would not be caught.",
+      "Known limit: a one-time link can still be sent to an unproven recorded address when no daemon is running.",
+      "Release files are not signed yet. For the first-launch warning, see https://github.com/kim0040/masamong2/wiki/Installation"
+    ],
+    "ko": [
+      "통계: 집계는 로컬 데이터베이스에 쌓이고, 콘솔 통계 화면이나 masamong stats export --file로 주간 내보내기 파일을 만들어요. 자동으로 보내지 않아요. stats.enabled로 끌 수 있어요.",
+      "업데이트 소식: 유지보수에 새 소식 카드가 생기고 새 릴리스의 노트도 보여요. 방 카드는 서버·방에서 update_news로 켜요. 방이나 사람이 원하지 않으면 아무것도 알리지 않아요.",
+      "콘솔 링크: 그대로 써요. 새로 콘솔 버튼이나 masamong admin token rotate로 토큰을 다시 발급할 수 있어요. 그러면 예전 토큰, 링크, 세션이 한꺼번에 멈춰요.",
+      "동작 변경: 기억이 기본으로 켜져요. 설정한 적 없는 방과 설정 파일은 이제 기억을 모아요. 끄려면 memory.capture를 false로 하거나 방마다 꺼요. 직접 정한 값은 바꾸지 않아요.",
+      "보안: 콘솔 로그인 제한, 루프백 확인, 런처 확인이 더 엄격해졌고 실시간 로그와 공급자 오류에서 키를 가려요. 도구 헤더에 키를 직접 쓰면 거절해요.",
+      "기록과 보관: 기록을 끄거나 오류만 남기면 도구 인자를 남기지 않아요. 방마다 logging.retain_days로 오래된 본문을 더 일찍 지울 수 있어요. 통계를 먼저 마치고 오래된 행을 지워요.",
+      "안정성과 속도: 도구 루프에서 패닉이 나도 데몬이 꺼지지 않고, 알림·장난·끼어들기 경로가 잠금을 짧게 잡아요. 종료가 1초쯤 더 걸려요. 코드를 다시 정리하고 테스트를 더 엄격히 했어요.",
+      "업데이트할 때: 새 CLI는 v1.6 데몬이 필요해요. 둘을 함께 업데이트해 주세요. 예전 버전이 저장한 브라우저 세션은 한 번 끝나니 콘솔 링크로 다시 로그인하세요. 링크는 그대로 써요.",
+      "동작 변경: 조회가 실패하면 통계 차트가 일부만 그리지 않고 실패로 보여줘요. 원인은 로그에 남아요.",
+      "알려진 한계: Word {credential} 같은 도구 헤더는 짧은 영문자 단어를 모두 인증 방식으로 받아요(ApiKey 때문). 영문자만 있는 짧은 키는 걸러내지 못해요.",
+      "알려진 한계: 데몬이 없을 때는 확인되지 않은 기록 주소로 일회용 링크가 나갈 수 있어요.",
+      "배포 파일은 아직 서명하지 않았어요. 첫 실행 경고는 https://github.com/kim0040/masamong2/wiki/설치 안내를 보세요."
+    ]
+  }
+}
