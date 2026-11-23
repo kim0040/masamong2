@@ -4,10 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"masamong/internal/lang"
 	"masamong/internal/memory/episodes"
@@ -35,8 +38,9 @@ var liveSinceMu sync.Mutex
 // label, and outlive the line that said it (the backfill drops such a fact too, pbAttribute). A self
 // claim (the speaker is the subject) must also name nobody but its subject, the derivation's rule
 // (derivedClaims). Each claim keeps the text each line had when the model read it, and its link says
-// self only when the speaker is the subject.
-func liveClaims(r memRoom, source, readAt string, facts []episodes.PersonFact, lines []roomLine) (claims []store.PersonClaim, skipped int) {
+// self only when the speaker is the subject. names (nil = none) first ties the people the text names by
+// their exact label to their token, or refuses the fact (liveNames).
+func liveClaims(r memRoom, source, readAt string, facts []episodes.PersonFact, lines []roomLine, names nameTie) (claims []store.PersonClaim, skipped int) {
 	author, text := map[string]string{}, map[string]string{}
 	for _, l := range lines {
 		if !l.Bot {
@@ -44,6 +48,14 @@ func liveClaims(r memRoom, source, readAt string, facts []episodes.PersonFact, l
 		}
 	}
 	for _, f := range facts {
+		if names != nil {
+			tied, ok := names(f.Text, f.About)
+			if !ok {
+				skipped++
+				continue
+			}
+			f.Text = tied
+		}
 		c, ok := liveClaim(r, source, readAt, f, author, text)
 		if !ok {
 			skipped++
@@ -79,6 +91,123 @@ func liveClaim(r memRoom, source, readAt string, f episodes.PersonFact, author, 
 	}
 	return store.PersonClaim{GuildID: r.guild, SubjectRef: f.About, SpeakerRef: speaker, Kind: f.Kind, Topic: f.Topic,
 		Text: f.Text, Evidence: append([]string(nil), f.Ev...), Source: source, Link: link, Lines: read, ReadAt: readAt}, true
+}
+
+// nameTie rewrites a claim's stored text so that the people it names by their exact label are written as
+// their {@ref} token; false means the text names someone who cannot be told apart, and the claim is
+// dropped.
+type nameTie func(text, subject string) (string, bool)
+
+// liveRefToken is a stored person reference in a text ({@ref}).
+var liveRefToken = regexp.MustCompile(`\{@[^{}]+\}`)
+
+// liveNames ties the people a live claim's text names literally (the model copied a name from a line
+// instead of writing its token) to the people of the prompt: its people list (the authors of the lines,
+// the people their mentions name and the exact alias matches) and every person the caller listed as
+// mentioned, a name two people share included. A name stands for a person when it is a whole word or the
+// word plus a particle or honorific (search.NameMatcher, the rule a chat turn resolves names by), outside
+// a {@ref} token. A name of exactly one person other than the subject is replaced by that person's token,
+// so forgetting that person reaches the claim; a name that maps to two people (or to the subject and
+// someone else) drops the claim. The subject's own name is left as written.
+func (s *Service) liveNames(p episodes.Prompt, in episodes.Input) nameTie {
+	var (
+		built   bool
+		byLabel map[string]map[string]bool
+		labels  []string
+		matches func(string, string) bool
+	)
+	build := func() {
+		built, byLabel = true, map[string]map[string]bool{}
+		add := func(label, ref string) {
+			if label = strings.TrimSpace(label); label == "" || ref == "" {
+				return
+			}
+			if byLabel[label] == nil {
+				byLabel[label] = map[string]bool{}
+				labels = append(labels, label)
+			}
+			byLabel[label][ref] = true
+		}
+		for _, per := range p.PersonRefs() {
+			add(per.Label, per.Ref)
+		}
+		for _, per := range in.Mentioned {
+			add(per.Label, per.Ref)
+		}
+		for _, m := range in.Lines {
+			if !m.Bot && in.RefOf != nil {
+				add(m.Author, in.RefOf(m))
+			}
+		}
+		// the longest name first, so a name inside a longer one is not taken for it
+		slices.SortFunc(labels, func(a, b string) int { return len(b) - len(a) })
+		doc := s.Doc()
+		matches = search.NameMatcher(lang.MergeSearch(append(slices.Clone(doc.Memory.Languages), "ko", "ja"), doc.BotNames()))
+	}
+	return func(text, subject string) (string, bool) {
+		if !built {
+			build()
+		}
+		for _, label := range labels {
+			only := ""
+			if who := byLabel[label]; len(who) == 1 {
+				for ref := range who {
+					only = ref
+				}
+			}
+			if only == subject {
+				continue // the subject's own name: the claim is tied to them already
+			}
+			for from := 0; ; {
+				i := literalName(text, label, from, matches)
+				if i < 0 {
+					break
+				}
+				if only == "" {
+					return "", false // a name two people share: whose it is cannot be told
+				}
+				tok := "{@" + only + "}"
+				text = text[:i] + tok + text[i+len(label):]
+				from = i + len(tok)
+			}
+		}
+		if utf8.RuneCountInString(text) > episodes.MaxPersonText {
+			return "", false // the write gate's limit, on the stored text
+		}
+		return text, true
+	}
+}
+
+// literalName is the byte offset of the first place at or after from where text names label as a person
+// (outside a {@ref} token, at the start of a word, followed only by what matches allows), or -1.
+func literalName(text, label string, from int, matches func(string, string) bool) int {
+	tokens := liveRefToken.FindAllStringIndex(text, -1)
+	for from < len(text) {
+		off := strings.Index(text[from:], label)
+		if off < 0 {
+			return -1
+		}
+		i := from + off
+		from = i + len(label)
+		if slices.ContainsFunc(tokens, func(t []int) bool { return i >= t[0] && i < t[1] }) {
+			continue
+		}
+		if r, _ := utf8.DecodeLastRuneInString(text[:i]); i > 0 && (unicode.IsLetter(r) || unicode.IsDigit(r)) {
+			continue
+		}
+		end := i + len(label)
+		for end < len(text) {
+			r, size := utf8.DecodeRuneInString(text[end:])
+			if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+				break
+			}
+			end += size
+		}
+		if matches(text[i:end], label) {
+			return i
+		}
+	}
+	return -1
 }
 
 // liveSource is the claim source of a segment: extract:<its first observation id>.
@@ -210,7 +339,7 @@ func (s *Service) extractSelfStatement(ctx context.Context, db *storage.Store, r
 	if err != nil {
 		return ps, err
 	}
-	claims, skipped := liveClaims(r, liveSource(lines), readAt, facts, lines)
+	claims, skipped := liveClaims(r, liveSource(lines), readAt, facts, lines, s.liveNames(p, in))
 	ps.skipped = skipped
 	if len(claims) == 0 {
 		return ps, nil

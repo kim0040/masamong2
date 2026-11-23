@@ -756,8 +756,9 @@ func (s *Service) extractSegment(ctx context.Context, db *storage.Store, r memRo
 	}
 	msgs := segmentMessages(lines, bots)
 	readAt := s.Clock.Now().UTC().Format(time.RFC3339Nano)
-	p := episodes.Build(s.personBuild(db, r, episodes.Input{Lines: msgs, BotName: botName, Now: lines[len(lines)-1].At, Location: s.instanceZone(),
-		Plans: s.openPlans(db, r.room), RefOf: func(m episodes.Message) string { return personRefOf(r, m) }, LabelOf: s.refLabels(db, r.room)}, lines))
+	in := s.personBuild(db, r, episodes.Input{Lines: msgs, BotName: botName, Now: lines[len(lines)-1].At, Location: s.instanceZone(),
+		Plans: s.openPlans(db, r.room), RefOf: func(m episodes.Message) string { return personRefOf(r, m) }, LabelOf: s.refLabels(db, r.room)}, lines)
+	p := episodes.Build(in)
 	system := lang.Fill(pack.Memory.EpisodeExtractSystem, "bot", botName)
 	prompt := p.FillExtract(pack.Memory.EpisodeExtract)
 	var res episodes.Result
@@ -781,7 +782,7 @@ func (s *Service) extractSegment(ctx context.Context, db *storage.Store, r memRo
 	if err != nil {
 		return 0, ps, err
 	}
-	claims, skipped := liveClaims(r, liveSource(lines), readAt, facts, lines)
+	claims, skipped := liveClaims(r, liveSource(lines), readAt, facts, lines, s.liveNames(p, in))
 	ps.skipped = skipped
 	if len(res.Ops) == 0 && len(claims) == 0 {
 		return 0, ps, nil
@@ -1180,8 +1181,9 @@ func (s *Service) regenerateEpisodes(ctx context.Context, db *storage.Store, now
 		pack, botName := s.roomVoice(j.r)
 		readAt := s.Clock.Now().UTC().Format(time.RFC3339Nano)
 		regenLines := withReplies(lines, nil)
-		p := episodes.Build(s.personBuild(db, j.r, episodes.Input{Lines: regenLines, BotName: botName, Now: lines[len(lines)-1].At, Location: s.instanceZone(),
-			RefOf: func(m episodes.Message) string { return personRefOf(j.r, m) }, LabelOf: s.refLabels(db, j.r.room)}, lines))
+		in := s.personBuild(db, j.r, episodes.Input{Lines: regenLines, BotName: botName, Now: lines[len(lines)-1].At, Location: s.instanceZone(),
+			RefOf: func(m episodes.Message) string { return personRefOf(j.r, m) }, LabelOf: s.refLabels(db, j.r.room)}, lines)
+		p := episodes.Build(in)
 		system := lang.Fill(pack.Memory.EpisodeExtractSystem, "bot", botName)
 		prompt := p.FillExtract(pack.Memory.EpisodeExtract)
 		var res episodes.Result
@@ -1210,7 +1212,7 @@ func (s *Service) regenerateEpisodes(ctx context.Context, db *storage.Store, now
 			return n, skipped, err
 		}
 		// the same statements made again are the same claims (the id is the statement's), so they merge
-		claims, dropped := liveClaims(j.r, liveSource(lines), readAt, facts, lines)
+		claims, dropped := liveClaims(j.r, liveSource(lines), readAt, facts, lines, s.liveNames(p, in))
 		skipped += dropped
 		_, _, err = s.saveEpisodeOps(ctx, db, j.r, lines, res.Ops, j.id, claims)
 		if errors.Is(err, errEvidenceDeleted) {

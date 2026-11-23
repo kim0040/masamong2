@@ -239,3 +239,82 @@ func TestLiveOneLineDoesNotSendTombstonedText(t *testing.T) {
 		})
 	}
 }
+
+// A live claim that names a third person literally (the model copied 찰리's name from the line instead of
+// writing the token) is tied to 찰리's token when the name is 찰리's alone, so 찰리's forget-all reaches it:
+// afterwards neither the stored row nor the recall prompt carries it. With the cutoff written first, the
+// statement is never stored. (A name two people share drops the claim: TestLiveNamesTieLiteralNames.)
+func TestLiveForgetCoversKnownLiteralNames(t *testing.T) {
+	t.Parallel()
+	const marker = "r4-literal-marker"
+	charlie := store.PersonRef("505")
+	conversation := []said{
+		{"9301", "101", "민수", "영희는 요즘 찰리랑 " + marker + " 연습해"}, {"9302", "202", "영희", "응 맞아 매주 하고 있어"},
+		{"9303", "101", "민수", "부럽다 나도 끼워줘"}, {"9304", "202", "영희", "좋아 다음에 같이 하자"},
+	}
+	answer := `{"episodes":[],"people":[{"about":"p2","kind":"other","topic":"연습","text":"{p2}는 찰리와 ` + marker + ` 연습을 함","by":["p1"],"ev":["m1"]}]}`
+	setup := func(t *testing.T) reviewPerson {
+		s, m, e := memorySvc(t)
+		f := reviewPerson{s, m, e, time.Now().UTC().Add(-3 * time.Hour)}
+		f.source(t, "g", "c", "r4-charlie", "505", "찰리", f.at.Add(-time.Hour))
+		f.source(t, "g", "c", "r4-asker", "303", "지수", f.at.Add(-40*time.Minute))
+		m.extract = func(prompt string) string {
+			if !strings.Contains(prompt, marker) {
+				return `{"episodes":[]}` // the lines that gave the names
+			}
+			return answer
+		}
+		return f
+	}
+	forgetAll := func(t *testing.T, f reviewPerson) {
+		t.Helper()
+		req := func(confirm any) map[string]any {
+			return map[string]any{"guild_id": "g", "user_id": "505", "scope": "all", "confirm": confirm}
+		}
+		p := exec(f.Service, "memory.mine.forget", req(""))
+		if !p.OK {
+			t.Fatalf("preview: %+v", p)
+		}
+		if r := exec(f.Service, "memory.mine.forget", req(p.Output["token"])); !r.OK || r.Output["applied"] != true {
+			t.Fatalf("forget: %+v", r)
+		}
+	}
+	recall := func(t *testing.T, f reviewPerson) string {
+		return block(f.ask(t, "<@202> 요즘 뭐 해?"), cardOpen, cardClose)
+	}
+
+	t.Run("forget after", func(t *testing.T) {
+		t.Parallel()
+		f := setup(t)
+		sayIn(f.engine, f.at, conversation...)
+		if rep := f.RunRoomMemory(context.Background()); rep.PeopleClaims() != 1 {
+			t.Fatalf("pass: %+v claims=%d skipped=%d", rep, rep.PeopleClaims(), rep.PeopleSkipped())
+		}
+		if n := personClaimCount(t, f.Service, "instr(text,?)>0 AND instr(text,'찰리')=0", "{@"+charlie+"}"); n != 1 {
+			t.Fatalf("the literal name was not tied to 찰리's token: %d row(s)", n)
+		}
+		if got := recall(t, f); !strings.Contains(got, marker) || !strings.Contains(got, "찰리") {
+			t.Fatalf("control: the statement is read with 찰리's name: %q", got)
+		}
+		forgetAll(t, f)
+		if n := personClaimCount(t, f.Service, "instr(text,?)>0", marker); n != 0 {
+			t.Errorf("after 찰리's forget-all, %d stored statement(s) still name him", n)
+		}
+		if got := recall(t, f); strings.Contains(got, marker) {
+			t.Errorf("after 찰리's forget-all the recall prompt carries the statement: %q", got)
+		}
+	})
+	t.Run("cutoff first", func(t *testing.T) {
+		t.Parallel()
+		f := setup(t)
+		sayIn(f.engine, f.at, conversation...)
+		forgetAll(t, f)
+		f.RunRoomMemory(context.Background())
+		if n := personClaimCount(t, f.Service, "instr(text,?)>0", marker); n != 0 {
+			t.Errorf("a statement naming 찰리 was stored after his forget-all: %d row(s)", n)
+		}
+		if got := recall(t, f); strings.Contains(got, marker) {
+			t.Errorf("the recall prompt carries a statement naming 찰리 after his forget-all: %q", got)
+		}
+	})
+}
