@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	"masamong/internal/catalog"
 	"masamong/internal/providers/websearch"
@@ -361,6 +362,12 @@ var (
 	credPlaceRE   = regexp.MustCompile(`\{credential\}`)
 	credQuotedRE  = regexp.MustCompile(`"\{credential\}"|'\{credential\}'`)
 	literalPairRE = regexp.MustCompile(`=[^\s=;&]+`)
+
+	// Words that may stand beside a {credential} reference without being read as a key: the
+	// authentication schemes a service asks for (Authorization: Bearer {credential}). Compared
+	// normalized, like header names.
+	authSchemes = []string{"basic", "bearer", "bot", "digest", "hoba", "mutual", "negotiate", "oauth",
+		"privatetoken", "scramsha1", "scramsha256", "token", "aws4hmacsha256"}
 )
 
 // normalizedSecretName folds a header or query name for comparison: lowercase, - and _ dropped.
@@ -390,9 +397,10 @@ func SecretQueryName(name string) bool {
 
 // DirectHeaderValue reports whether a header value holds a key itself. Any literal is one; a
 // {credential} placeholder alone (Bearer {credential}, a cookie's session={credential}) is the
-// reference it should be, with or without quotes around it (session="{credential}"). A placeholder mixed
-// with a second literal value — a name=literal beside it (session={credential}; fallback=x), or text
-// inside its quotes — keeps a key in the configuration.
+// reference it should be, with or without quotes around it (session="{credential}"). What stands
+// beside the placeholder must be syntax — the name it is assigned to (session=), a separator or a
+// scheme word; any other literal is a key kept in the configuration, with or without an = segment
+// (session={credential}; fallback=x, Bearer lit{credential}, lit {credential}).
 func DirectHeaderValue(value string) bool {
 	v := strings.TrimSpace(value)
 	if v == "" {
@@ -402,7 +410,16 @@ func DirectHeaderValue(value string) bool {
 		return true
 	}
 	v = credQuotedRE.ReplaceAllString(v, "{credential}") // the quotes around the reference alone hold nothing
-	return literalPairRE.MatchString(credPlaceRE.ReplaceAllString(v, ""))
+	rest := credPlaceRE.ReplaceAllString(v, "")
+	if literalPairRE.MatchString(rest) {
+		return true
+	}
+	for _, seg := range strings.FieldsFunc(rest, func(r rune) bool { return r == ';' || unicode.IsSpace(r) }) {
+		if !strings.HasSuffix(seg, "=") && !slices.Contains(authSchemes, normalizedSecretName(seg)) {
+			return true
+		}
+	}
+	return false
 }
 
 // DirectSecretError says which field of an operator tool holds a key written into the configuration. The

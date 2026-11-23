@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"masamong/internal/action"
@@ -35,6 +36,19 @@ func TestExpectedStatesAreNot5xx(t *testing.T) {
 	}
 	if got := statusFor(action.Result{OK: true}); got != http.StatusOK {
 		t.Errorf("ok: %d", got)
+	}
+}
+
+// A value that cannot be encoded answers 500 with an error body, not a 200 with a truncated one.
+func TestWriteJSONAnswers500WhenTheValueCannotBeEncoded(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeJSON(rec, http.StatusOK, map[string]any{"ch": make(chan int)})
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status %d", rec.Code)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out["ok"] != false {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 }
 

@@ -13,6 +13,7 @@ import (
 	"masamong/internal/errcode"
 	"masamong/internal/i18n"
 	"masamong/internal/providers"
+	"masamong/internal/providers/openai"
 	"masamong/internal/providers/websearch"
 )
 
@@ -57,4 +58,17 @@ func TestProviderResultShowsClassAndStatusOnly(t *testing.T) {
 	assert("refused key", err, srv, errcode.ProviderRejected, 401)
 	srv, err = refuse(500)
 	assert("server error", err, srv, errcode.ProviderUnavailable, 500)
+
+	// a typed service error keeps its HTTP status and shows neither its type nor its code: both are
+	// the service's own words
+	res := s.providerResult(action.Request{Locale: "en"}, "openai", &openai.APIError{Status: 503, Type: "service-type", Code: "service-code", Message: serviceWords})
+	if res.OK || res.Error.Code != errcode.ProviderRejected || res.Error.Args["status"] != 503 {
+		t.Fatalf("typed error keeps class and status: %+v", res.Error)
+	}
+	raw, _ := json.Marshal(res.Error)
+	for _, leak := range []string{serviceWords, "service-type", "service-code"} {
+		if strings.Contains(string(raw), leak) {
+			t.Fatalf("the console action carries %q: %s", leak, raw)
+		}
+	}
 }

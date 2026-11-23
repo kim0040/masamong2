@@ -80,6 +80,23 @@ func TestStoreSecretWriteFailureKeepsPreviousCredential(t *testing.T) {
 	}
 }
 
+// A rollback that cannot undo the store reports the failure instead of dropping it: the second call,
+// with the stored key already gone, returns the removal's failure.
+func TestSecretRollbackReportsAFailureItCannotUndo(t *testing.T) {
+	t.Setenv("MASAMONG_SECRET_STORE", "file")
+	s, _ := testServer(t)
+	st, err := s.storeSecret("rbkey", "synthetic-key", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.rollback(); err != nil {
+		t.Fatalf("putting back what was stored failed: %v", err)
+	}
+	if err := st.rollback(); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a rollback that could not remove the stored key reported %v", err)
+	}
+}
+
 func TestFileFallbackNoteNamesTheRealProtectionAndTheCause(t *testing.T) {
 	long := fileFallbackNote(fmt.Errorf("write: %w", secrets.ErrKeychainValueTooLong))
 	if !strings.Contains(long, "longer than") || !strings.Contains(long, "file") {
@@ -111,7 +128,7 @@ func TestOversizedKeyFallsBackToAFileWithAWarningOnWindows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.rollback()
+	defer func() { _ = st.rollback() }()
 	if st.where != "file" || !strings.HasPrefix(st.ref, "file:") || !strings.Contains(st.note, "longer than") {
 		t.Fatalf("%+v", st)
 	}

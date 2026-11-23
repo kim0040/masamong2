@@ -14,6 +14,7 @@ import (
 
 	"masamong/internal/action"
 	"masamong/internal/chat"
+	"masamong/internal/errclass"
 	"masamong/internal/errcode"
 	"masamong/internal/features/poll"
 	"masamong/internal/providers"
@@ -61,7 +62,9 @@ func (s *Service) providerResult(req action.Request, provider string, err error)
 		res.Error.Retryable = true
 		return res
 	case errors.As(err, &ae):
-		args["type"], args["code"] = ae.Type, ae.Code
+		if ae.Status != 0 {
+			args["status"] = ae.Status
+		}
 		return action.Fail(req, errcode.ProviderRejected, "generic.error", s.msg(req, "generic.error"), args)
 	case errors.As(err, &pe):
 		res := action.Fail(req, errcode.ProviderUnavailable, "generic.error", s.msg(req, "generic.error"), args)
@@ -69,6 +72,28 @@ func (s *Service) providerResult(req action.Request, provider string, err error)
 		return res
 	}
 	return action.Fail(req, errcode.ProviderError, "generic.error", s.msg(req, "generic.error"), args)
+}
+
+// providerErrorSummary is a provider failure as the console may repeat it (the health card, the
+// list of services a search passed over): the error's class and HTTP status, never the service's
+// own words or the request's address — either can repeat the key back.
+func providerErrorSummary(err error) string {
+	class := errclass.Of(err)
+	if class == "" {
+		class = errclass.Unknown
+	}
+	var status int
+	var pe *providers.Error
+	var ae *openai.APIError
+	if errors.As(err, &pe) {
+		status = pe.Status
+	} else if errors.As(err, &ae) {
+		status = ae.Status
+	}
+	if status != 0 {
+		return fmt.Sprintf("%s (HTTP %d)", class, status)
+	}
+	return string(class)
 }
 
 func fptr(v *float64) any {
@@ -792,7 +817,7 @@ func (r *searchRun) absorb(t searchTry, more bool) bool {
 		if t.timedOut {
 			reason = "timeout"
 		}
-		r.tried = append(r.tried, map[string]any{"provider": t.id, "reason": reason, "detail": clip(t.err.Error(), 200)})
+		r.tried = append(r.tried, map[string]any{"provider": t.id, "reason": reason, "detail": providerErrorSummary(t.err)})
 		r.lastID, r.lastErr, r.lastIsProviders = t.id, t.err, !t.ours
 	case len(t.res.Results) == 0 && more:
 		r.tried = append(r.tried, map[string]any{"provider": t.id, "reason": "empty"})

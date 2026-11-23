@@ -64,17 +64,11 @@ func tokenTag(tok string) string {
 }
 
 // madeWith reports whether a session or one-time code was made with the token whose tag is tag, from
-// the tag it recorded and the time it was made. One made by an older version records no tag: it counts
-// only when it is newer than the token file, so it cannot be from before a re-issue.
-func madeWith(dataRoot, recorded, tag string, made time.Time) bool {
-	if tag == "" {
-		return false
-	}
-	if recorded != "" {
-		return subtle.ConstantTimeCompare([]byte(recorded), []byte(tag)) == 1
-	}
-	st, err := os.Stat(TokenPath(dataRoot))
-	return err == nil && made.After(st.ModTime())
+// the tag it recorded. One made by an older version records no tag; treated as made with an unknown
+// token, it is refused whenever a token exists. Comparing its time to the token file's instead would
+// let a clock rollback make a file from before a re-issue look newer than the replacement.
+func madeWith(recorded, tag string) bool {
+	return tag != "" && subtle.ConstantTimeCompare([]byte(recorded), []byte(tag)) == 1
 }
 
 // RotateToken replaces the bootstrap token with a new one and deletes pending one-time codes and the
@@ -196,7 +190,7 @@ func ConsumeOnce(dataRoot, code, tag string, now time.Time) bool {
 	if os.Remove(p) != nil || err != nil {
 		return false
 	}
-	return now.Sub(info.ModTime()) <= onceTTL && madeWith(dataRoot, recorded, tag, info.ModTime())
+	return now.Sub(info.ModTime()) <= onceTTL && madeWith(recorded, tag)
 }
 
 // readOnce reads the token tag a code file holds (empty for a code made by an older version).

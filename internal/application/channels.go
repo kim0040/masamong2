@@ -251,96 +251,61 @@ func (s *Service) defaultPersonaFor(guildID string) string {
 	return "friendly_ko"
 }
 
+// channelConfigInput is a channels.configure request parsed: each field is one configurable piece of
+// the channel policy, kept only when the request named it.
+type channelConfigInput struct {
+	guild      string
+	channel    string
+	respond    string
+	persona    string
+	logging    string
+	retain     int
+	hasCapture bool
+	capture    bool
+	memoryUse  string
+	disaster   string
+	news       string
+	hasRules   bool
+	rules      string
+	hasWatch   bool
+	watch      any
+}
+
+func channelConfig(in map[string]any) channelConfigInput {
+	_, hasCapture := in["capture"]
+	_, hasRules := in["rules"]
+	watch, hasWatch := in["watch_level"]
+	return channelConfigInput{
+		guild:      strVal(in, "guild_id", ""),
+		channel:    strVal(in, "id", strVal(in, "channel_id", "")),
+		respond:    strVal(in, "respond", ""),
+		persona:    strVal(in, "persona_ref", ""),
+		logging:    strVal(in, "logging_level", ""),
+		retain:     intVal(in, "logging_retain", -1),
+		hasCapture: hasCapture,
+		capture:    boolVal(in, "capture"),
+		memoryUse:  strVal(in, "memory_use", ""),
+		disaster:   strVal(in, "disaster_alerts", ""),
+		news:       strVal(in, "update_news", ""),
+		hasRules:   hasRules,
+		rules:      strVal(in, "rules", ""),
+		hasWatch:   hasWatch,
+		watch:      watch,
+	}
+}
+
 func (s *Service) channelsConfigure(req action.Request, in map[string]any) action.Result {
-	guildID := strVal(in, "guild_id", "")
-	channelID := strVal(in, "id", strVal(in, "channel_id", ""))
-	if guildID == "" || channelID == "" {
+	c := channelConfig(in)
+	if c.guild == "" || c.channel == "" {
 		return action.Fail(req, errcode.InvalidInput, "generic.error", "guild_id and channel id required", nil)
 	}
-	respond := strVal(in, "respond", "")
-	persona := strVal(in, "persona_ref", "")
-	logging := strVal(in, "logging_level", "")
-	retain := intVal(in, "logging_retain", -1)
-	_, hasCapture := in["capture"]
-	capture := boolVal(in, "capture")
-	memoryUse := strVal(in, "memory_use", "")
-	_, hasRules := in["rules"]
-	rules := strVal(in, "rules", "")
-	disaster := strVal(in, "disaster_alerts", "")
-	news := strVal(in, "update_news", "")
-
 	res := s.mutateConfig(req, func(d *config.Document) error {
-		ensureGuildChannelMaps(d, guildID)
-		p := config.NormalizeChannelPolicy(d.Guilds[guildID].Channels[channelID])
-		if respond != "" {
-			if !config.ValidRespond(respond) {
-				return fmt.Errorf("respond must be one of %v", config.RespondModes)
-			}
-			p.Respond = respond
-		}
-		if persona != "" {
-			if !personaExists(*d, persona) {
-				return fmt.Errorf("unknown persona_ref %s", persona)
-			}
-			p.PersonaRef = persona
-		}
-		if logging != "" {
-			if !config.ValidLoggingLevel(logging) {
-				return fmt.Errorf("logging_level must be one of %v", config.LoggingLevels)
-			}
-			p.Logging.Level = logging
-		}
-		if retain >= 0 {
-			p.Logging.RetainDays = retain
-		}
-		if hasCapture {
-			p.Capture = capture
-		}
-		if memoryUse != "" {
-			if memoryUse != "on" && memoryUse != "off" {
-				return fmt.Errorf("memory_use must be on or off")
-			}
-			p.MemoryUse = memoryUse
-		}
-		if disaster != "" {
-			if disaster != "on" && disaster != "off" {
-				return fmt.Errorf("disaster_alerts must be on or off")
-			}
-			p.DisasterAlerts = disaster
-			if disaster == "on" {
-				p.DisasterAlerts = "" // on is the default
-			}
-		}
-		if news != "" {
-			if news != "on" && news != "off" {
-				return fmt.Errorf("update_news must be on or off")
-			}
-			p.UpdateNews = news
-			if news == "off" {
-				p.UpdateNews = "" // off is the default
-			}
-		}
-		if hasRules {
-			if len([]rune(rules)) > 2000 {
-				return fmt.Errorf("rules must be at most 2000 characters")
-			}
-			p.Rules = rules
-		}
-		if raw, supplied := in["watch_level"]; supplied {
-			data, err := json.Marshal(raw)
-			var levels map[string]int
-			if err != nil || json.Unmarshal(data, &levels) != nil || levels == nil {
-				return fmt.Errorf("watch_level must map region codes or names to levels 1–5")
-			}
-			p.WatchLevel = levels
-		}
-		p = config.NormalizeChannelPolicy(p)
-		d.Guilds[guildID].Channels[channelID] = p
-		return nil
+		return applyChannelConfig(d, c)
 	})
 	if !res.OK {
 		return res
 	}
+	guildID, channelID := c.guild, c.channel
 	pol := s.channelPolicy(guildID, channelID)
 	_ = s.appendChannelOp(guildID, channelID, "policy_update",
 		fmt.Sprintf("respond=%s persona=%s logging=%s capture=%v", pol.Respond, pol.PersonaRef, pol.Logging.Level, pol.Capture),
@@ -361,6 +326,78 @@ func (s *Service) channelsConfigure(req action.Request, in map[string]any) actio
 	res.Output["rules_set"] = pol.Rules != ""
 	res.Output["cannot_override_memory_scope"] = true
 	return res
+}
+
+// applyChannelConfig writes the pieces of c the request named into the channel's policy, in the
+// order they were read.
+func applyChannelConfig(d *config.Document, c channelConfigInput) error {
+	ensureGuildChannelMaps(d, c.guild)
+	p := config.NormalizeChannelPolicy(d.Guilds[c.guild].Channels[c.channel])
+	if c.respond != "" {
+		if !config.ValidRespond(c.respond) {
+			return fmt.Errorf("respond must be one of %v", config.RespondModes)
+		}
+		p.Respond = c.respond
+	}
+	if c.persona != "" {
+		if !personaExists(*d, c.persona) {
+			return fmt.Errorf("unknown persona_ref %s", c.persona)
+		}
+		p.PersonaRef = c.persona
+	}
+	if c.logging != "" {
+		if !config.ValidLoggingLevel(c.logging) {
+			return fmt.Errorf("logging_level must be one of %v", config.LoggingLevels)
+		}
+		p.Logging.Level = c.logging
+	}
+	if c.retain >= 0 {
+		p.Logging.RetainDays = c.retain
+	}
+	if c.hasCapture {
+		p.Capture = c.capture
+	}
+	if c.memoryUse != "" {
+		if c.memoryUse != "on" && c.memoryUse != "off" {
+			return fmt.Errorf("memory_use must be on or off")
+		}
+		p.MemoryUse = c.memoryUse
+	}
+	if c.disaster != "" {
+		if c.disaster != "on" && c.disaster != "off" {
+			return fmt.Errorf("disaster_alerts must be on or off")
+		}
+		p.DisasterAlerts = c.disaster
+		if c.disaster == "on" {
+			p.DisasterAlerts = "" // on is the default
+		}
+	}
+	if c.news != "" {
+		if c.news != "on" && c.news != "off" {
+			return fmt.Errorf("update_news must be on or off")
+		}
+		p.UpdateNews = c.news
+		if c.news == "off" {
+			p.UpdateNews = "" // off is the default
+		}
+	}
+	if c.hasRules {
+		if len([]rune(c.rules)) > 2000 {
+			return fmt.Errorf("rules must be at most 2000 characters")
+		}
+		p.Rules = c.rules
+	}
+	if c.hasWatch {
+		data, err := json.Marshal(c.watch)
+		var levels map[string]int
+		if err != nil || json.Unmarshal(data, &levels) != nil || levels == nil {
+			return fmt.Errorf("watch_level must map region codes or names to levels 1–5")
+		}
+		p.WatchLevel = levels
+	}
+	p = config.NormalizeChannelPolicy(p)
+	d.Guilds[c.guild].Channels[c.channel] = p
+	return nil
 }
 
 func (s *Service) channelsInvite(req action.Request) action.Result {
@@ -445,11 +482,12 @@ func (s *Service) channelsAttachmentAdd(req action.Request, in map[string]any) a
 	if purpose != "retrieval_context" {
 		return action.Fail(req, errcode.InvalidInput, "generic.error", "purpose must be retrieval_context", nil)
 	}
-	abs, err := s.resolveStagingPath(source)
+	f, err := s.openStagedFile(source)
 	if err != nil {
 		return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
 	}
-	sum, size, err := hashFile(abs)
+	defer f.Close()
+	sum, size, err := hashFile(f)
 	if err != nil {
 		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
 	}
@@ -460,7 +498,10 @@ func (s *Service) channelsAttachmentAdd(req action.Request, in map[string]any) a
 	}
 	dest := filepath.Join(destDir, stored)
 	if _, err := os.Stat(dest); err != nil {
-		if err := copyFile(abs, dest); err != nil {
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		}
+		if err := copyFile(f, dest); err != nil {
 			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
 		}
 	}
@@ -802,10 +843,13 @@ func (s *Service) channelRAGDir(guildID, channelID string) string {
 	return filepath.Join(s.DataRoot, "rag", "channels", safePathID(guildID), safePathID(channelID))
 }
 
-func (s *Service) resolveStagingPath(source string) (string, error) {
+// openStagedFile checks a source path under rag_staging and returns it open for reading. The checks
+// bind to the handle returned: the leaf it opened is compared to the one it looked at, so a file or
+// link swapped in afterwards cannot redirect the read to a file that was not checked.
+func (s *Service) openStagedFile(source string) (*os.File, error) {
 	source = filepath.Clean(source)
 	if strings.Contains(source, "..") {
-		return "", fmt.Errorf("source_path may not include a parent-directory marker")
+		return nil, fmt.Errorf("source_path may not include a parent-directory marker")
 	}
 	stagingRoot := filepath.Join(s.DataRoot, "rag_staging")
 	if !filepath.IsAbs(source) {
@@ -813,55 +857,64 @@ func (s *Service) resolveStagingPath(source string) (string, error) {
 	}
 	abs, err := filepath.Abs(source)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	root, err := filepath.Abs(stagingRoot)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if abs != root && !strings.HasPrefix(abs, root+string(os.PathSeparator)) {
-		return "", fmt.Errorf("source_path must be under %s", stagingRoot)
+		return nil, fmt.Errorf("source_path must be under %s", stagingRoot)
 	}
 	// Only a regular file inside a real staging folder: a linked root, a linked folder on the way,
 	// or a link as the leaf could each copy anything this account can read into a channel.
 	if st, err := os.Lstat(root); err != nil {
-		return "", fmt.Errorf("source file not found under rag_staging")
+		return nil, fmt.Errorf("source file not found under rag_staging")
 	} else if st.Mode()&os.ModeSymlink != 0 || !st.IsDir() {
-		return "", fmt.Errorf("rag_staging must be a real directory, not a link")
+		return nil, fmt.Errorf("rag_staging must be a real directory, not a link")
 	}
 	st, err := os.Lstat(abs)
 	if err != nil {
-		return "", fmt.Errorf("source file not found under rag_staging")
+		return nil, fmt.Errorf("source file not found under rag_staging")
 	}
 	if st.IsDir() {
-		return "", fmt.Errorf("source_path must be a file")
+		return nil, fmt.Errorf("source_path must be a file")
 	}
 	if !st.Mode().IsRegular() {
-		return "", fmt.Errorf("source_path must be a regular file, not a link or a special file")
+		return nil, fmt.Errorf("source_path must be a regular file, not a link or a special file")
 	}
 	rel, err := filepath.Rel(root, abs)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	dir := root
 	parts := strings.Split(rel, string(filepath.Separator))
 	for _, part := range parts[:len(parts)-1] {
 		dir = filepath.Join(dir, part)
 		if st, err := os.Lstat(dir); err != nil || st.Mode()&os.ModeSymlink != 0 || !st.IsDir() {
-			return "", fmt.Errorf("source_path may not pass through a link or a non-directory")
+			return nil, fmt.Errorf("source_path may not pass through a link or a non-directory")
 		}
 	}
 	realRoot, err := filepath.EvalSymlinks(root)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	real, err := filepath.EvalSymlinks(abs)
 	if err != nil || !strings.HasPrefix(real, realRoot+string(os.PathSeparator)) {
-		return "", fmt.Errorf("source_path must be under %s", stagingRoot)
+		return nil, fmt.Errorf("source_path must be under %s", stagingRoot)
 	}
-	// the resolved path is what the checks covered: hash and copy read this file, not the spelled
-	// path (a swapped link on the way cannot redirect the read to a file that was not checked)
-	return real, nil
+	// the file the checks covered is what the handle pins: a leaf replaced after this point is a
+	// different file, and every read below comes from the checked one
+	f, err := os.Open(real)
+	if err != nil {
+		return nil, err
+	}
+	fst, err := f.Stat()
+	if err != nil || !os.SameFile(st, fst) {
+		_ = f.Close()
+		return nil, fmt.Errorf("source file changed while it was checked")
+	}
+	return f, nil
 }
 
 // generatedStoredName is the name channelsAttachmentAdd gives a staged copy: the content's sha256 hex
@@ -892,32 +945,22 @@ func safePathID(id string) string {
 	return b.String()
 }
 
-func hashFile(path string) (sum string, size int64, err error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", 0, err
-	}
-	defer f.Close()
+func hashFile(r io.Reader) (sum string, size int64, err error) {
 	h := sha256.New()
-	n, err := io.Copy(h, f)
+	n, err := io.Copy(h, r)
 	if err != nil {
 		return "", 0, err
 	}
 	return hex.EncodeToString(h.Sum(nil)), n, nil
 }
 
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
+func copyFile(src io.Reader, dst string) error {
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
 	defer out.Close()
-	if _, err := io.Copy(out, in); err != nil {
+	if _, err := io.Copy(out, src); err != nil {
 		return err
 	}
 	return out.Close()
