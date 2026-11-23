@@ -62,6 +62,9 @@ func TestParticipationCollectRecordsWithoutAModelCall(t *testing.T) {
 		t.Fatalf("handled row: %+v", log[0])
 	}
 	drain() // every message's queued work has run: the handled moment cannot also be collected
+	if finishWait("g", "c") {
+		t.Fatal("the handled moment's candidate was still waiting")
+	}
 	if n := len(partLog(t, svc, 2)); n != 2 {
 		t.Fatalf("a handled moment must not also be collected: %d rows", n)
 	}
