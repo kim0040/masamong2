@@ -317,3 +317,84 @@ func TestAlertStatusKeepsTheAttemptThatStartedLast(t *testing.T) {
 		t.Fatalf("last attempt = %+v, want the test that started after the tick's send", last)
 	}
 }
+
+// ctxDM is a connected Discord stand-in whose send honors cancellation: it passes on the error of the
+// context it got.
+type ctxDM struct {
+	alertDM
+	got chan error
+}
+
+func (d *ctxDM) SendDM(ctx context.Context, _ string, _ action.Card, _ string) error {
+	d.got <- ctx.Err()
+	return ctx.Err()
+}
+
+// A busy store writer does not hold an operator DM back: the attempt is numbered in memory and stored
+// after the send, so Discord is called while the writer is held and gets a live context (Sol round-2
+// review of E8, regression R1).
+func TestAlertSendDoesNotWaitForTheStoreWriter(t *testing.T) {
+	s, _ := alertQueueService(t)
+	dm := &ctxDM{got: make(chan error, 1)}
+	release := takeWriter(t, s)
+	ctx, cancel := context.WithTimeout(context.Background(), lockScopeWait)
+	defer cancel()
+	done := make(chan alertDelivery, 1)
+	go func() { done <- s.sendAlert(ctx, dm, "en", []string{"line"}, false, true) }()
+	select {
+	case err := <-dm.got:
+		if err != nil {
+			t.Errorf("the sender got a finished context while the writer was held: %v", err)
+		}
+	case <-ctx.Done():
+		release()
+		t.Errorf("no DM while the writer was held; once it was freed the sender got %v", <-dm.got)
+	}
+	release()
+	if d := <-done; d.Sent != 1 {
+		t.Fatalf("delivery = %+v, want one operator reached", d)
+	}
+	r := s.Execute(context.Background(), action.Request{Action: "alerts.status"})
+	if last, _ := r.Output["last"].(*alertDelivery); last == nil || !last.Test || last.Sent != 1 {
+		t.Fatalf("last attempt = %+v, want the test recorded after the send", last)
+	}
+}
+
+// The attempt numbers start again in a new run: the first attempt after a restart replaces the last one
+// an earlier run stored, however high its number.
+func TestAlertStatusTakesTheFirstAttemptAfterARestart(t *testing.T) {
+	s, dm := alertQueueService(t)
+	if err := s.kvSet(alertLastKey, alertDelivery{At: "2026-11-01T00:00:00Z", Items: 1, Attempt: 1 << 40}); err != nil {
+		t.Fatal(err)
+	}
+	if d := s.sendAlert(context.Background(), dm, "en", []string{"line"}, false, true); d.Sent != 1 {
+		t.Fatalf("delivery = %+v", d)
+	}
+	r := s.Execute(context.Background(), action.Request{Action: "alerts.status"})
+	if last, _ := r.Output["last"].(*alertDelivery); last == nil || !last.Test {
+		t.Fatalf("last attempt = %+v, want the attempt of this run", last)
+	}
+}
+
+// alerts.test fails with a message key in the request's language, not English or Go text; the reason
+// stays in the arguments, where the console reads it.
+func TestAlertTestFailuresAnswerWithMessageKeys(t *testing.T) {
+	s, dm := alertQueueService(t)
+	ctx := context.Background()
+	dm.mu.Lock()
+	dm.fail = true
+	dm.mu.Unlock()
+	check := func(key, reason string) {
+		t.Helper()
+		req := action.Request{Action: "alerts.test", Locale: "ko"}
+		r := s.Execute(ctx, req)
+		if r.OK || r.Error.MessageKey != key || r.Error.Message != s.msg(req, key) || r.Error.Args["reason"] != reason {
+			t.Fatalf("alerts.test = %+v, want key %s with reason %s", r.Error, key, reason)
+		}
+	}
+	check("alerts.unreachable", "send_failed")
+	doc := s.Doc()
+	doc.Access.Operators = nil
+	s.setDoc(doc, s.Revision())
+	check("alerts.cannot_send", "no_operators")
+}

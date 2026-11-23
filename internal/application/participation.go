@@ -123,7 +123,8 @@ type partCandidate struct {
 	key, guild, channel, kind string
 	msg                       partMsg
 	version                   int
-	gen                       uint64 // the channel entry it was made in (partChannel.gen)
+	gen                       uint64    // the channel entry it was made in (partChannel.gen)
+	lastCall                  time.Time // the entry's last call to the bot when it was made (stillCurrent)
 	signals                   participation.Signals
 	timer                     *time.Timer
 	// collect marks a candidate made in collect mode (no budget was checked for it); features are its
@@ -385,7 +386,7 @@ func (s *Service) Observe(m ObservedMessage) {
 		return
 	}
 	cand := &partCandidate{key: key, guild: m.GuildID, channel: m.ChannelID, kind: kind, version: arrived.version, gen: arrived.gen, signals: sig,
-		msg: partMsg{id: m.MessageID, author: m.AuthorID, name: m.AuthorName, text: clip(m.Content, 400), at: m.At}}
+		lastCall: c.lastCall, msg: partMsg{id: m.MessageID, author: m.AuthorID, name: m.AuthorName, text: clip(m.Content, 400), at: m.At}}
 	if collect {
 		cand.collect, cand.features = true, s.momentFeatures(m.GuildID, m.ChannelID, m.At, m.Content)
 	}
@@ -639,14 +640,6 @@ func candTimes(w reminders.When) []time.Time {
 		out = append(out, c.At)
 	}
 	return out
-}
-
-// stillCurrent is the final check: nothing was said in the channel since the candidate, and the channel's
-// entry is the one the candidate was made in (a dropped and made-again entry counts versions anew).
-func (s *Service) stillCurrent(cand *partCandidate) bool {
-	c := s.lockPartChannel(cand.key)
-	defer s.part.mu.Unlock()
-	return c.gen == cand.gen && c.version == cand.version
 }
 
 func (s *Service) noteSpoken(cand *partCandidate) {
@@ -1002,7 +995,7 @@ func (s *Service) participationMode(req action.Request) action.Result {
 	in := inputMap(req)
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	if id := strVal(in, "review", ""); id != "" {
 		v := strVal(in, "verdict", "")
@@ -1010,7 +1003,7 @@ func (s *Service) participationMode(req action.Request) action.Result {
 			return action.Fail(req, errcode.InvalidInput, "generic.error", "verdict must be good, bad or empty", nil)
 		}
 		if _, err := db.DB.Exec(`UPDATE participation_log SET verdict=? WHERE id=?`, v, id); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		return action.OK(req, map[string]any{"id": id, "verdict": v})
 	}
@@ -1049,7 +1042,7 @@ func (s *Service) participationMode(req action.Request) action.Result {
 		COALESCE(json_extract(features,'$.next'),'')
 		FROM participation_log`+cond+` ORDER BY created_at DESC LIMIT ?`, append(args, min(200, max(1, intVal(in, "limit", 40))))...)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	log := []map[string]any{}
 	for rows.Next() {

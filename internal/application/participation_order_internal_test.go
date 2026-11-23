@@ -1,6 +1,8 @@
 package application
 
 import (
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -241,4 +243,100 @@ func TestConsiderCandidateReadsTheModeBeforeTheLock(t *testing.T) {
 	release()
 	<-considered
 	<-other
+}
+
+// A call to the bot held at its cold mute restore still stops a draft made after it arrived: a chime does not
+// post once the call has set the after-call pause, as when the call moved the room on under the lock (Sol
+// round-2 review of E8, regression R2).
+func TestAFinalCheckFailsOnceAHeldCallSetsTheAfterCallPause(t *testing.T) {
+	s, clk, drain := partOrderService(t, "conservative")
+	s.Paused("g", "a") // the thread lookup is warm: only the mute restore reads the store
+	release := holdReaders(t, s)
+	called := make(chan struct{})
+	go func() {
+		defer close(called)
+		s.Observe(ObservedMessage{GuildID: "g", ChannelID: "a", MessageID: "m1", AuthorID: "u1", AuthorName: "u1",
+			Content: "마사몽 이거 알아?", At: clk.t, Addressed: true, BotCall: "mention"})
+	}()
+	waitsInStore(t, "(*Service).restorePartMute(")
+	s.part.mu.Lock()
+	s.partChannel("g:a").backoffLoaded = true // as a concurrent restore would
+	s.part.mu.Unlock()
+	s.Observe(ObservedMessage{GuildID: "g", ChannelID: "a", MessageID: "m2", AuthorID: "u2", AuthorName: "u2", Content: partQuestion, At: clk.t})
+	s.part.mu.Lock()
+	c := s.part.chans["g:a"]
+	cand := c.pending
+	c.pending = nil // considerCandidate took it: it is judged and drafted now
+	s.part.mu.Unlock()
+	if cand == nil {
+		t.Fatal("precondition: the question is a candidate")
+	}
+	release()
+	<-called
+	drain()
+	s.part.mu.Lock()
+	lastCall := s.part.chans["g:a"].lastCall
+	s.part.mu.Unlock()
+	if !lastCall.Equal(clk.t) {
+		t.Fatalf("precondition: the call set the after-call pause (lastCall %v)", lastCall)
+	}
+	if s.stillCurrent(cand) {
+		t.Fatal("a draft passes the final check after a call set the after-call pause")
+	}
+}
+
+// lockClock is a fixed clock that runs onLock when lockPartChannel reads it: once per try of Observe's
+// reads for a loaded entry (partChannel), after the try's reads and under part.mu.
+type lockClock struct {
+	t      time.Time
+	onLock func()
+}
+
+func (c *lockClock) Now() time.Time {
+	pc := make([]uintptr, 32)
+	frames := runtime.CallersFrames(pc[:runtime.Callers(2, pc)])
+	for {
+		f, more := frames.Next()
+		if strings.HasSuffix(f.Function, "(*Service).lockPartChannel") {
+			c.onLock()
+			break
+		}
+		if !more {
+			break
+		}
+	}
+	return c.t
+}
+
+// When the configuration changes during every read, the last read still has the author's answer for
+// collected rows that began waiting during it: the retry limit does not leave advanceWatches without it, so
+// the row gets this message as its answer (Sol round-2 review of E8, finding 5).
+func TestObserveReadsTheAuthorsAnswerAtTheRetryLimit(t *testing.T) {
+	s, clk, _ := partOrderService(t, "collect")
+	s.Paused("g", "a") // the thread lookup is warm
+	s.part.mu.Lock()
+	s.partChannel("g:a").backoffLoaded = true // no mute restore: one clock read per try
+	s.part.mu.Unlock()
+	tries := 0
+	s.Clock = &lockClock{t: clk.t, onLock: func() {
+		tries++
+		switch {
+		case tries < partRereads:
+			next := *s.cfg.Load() // the configuration changes during this try's reads
+			s.cfg.Store(&next)
+		case tries == partRereads: // a collected row begins waiting during the last try's reads
+			c := s.part.chans["g:a"]
+			c.watches = append(c.watches, nextWatch{row: "pl_seed", msg: "src", author: "u1", until: clk.t.Add(collectNextWindow)})
+		}
+	}}
+	m := ObservedMessage{GuildID: "g", ChannelID: "a", MessageID: "m2", AuthorID: "u1", AuthorName: "u1", Content: partQuestion, At: clk.t}
+	c, r := s.lockObserved("g:a", m, false)
+	done := s.advanceWatches(c, m, r.counted)
+	s.part.mu.Unlock()
+	if tries < partRereads {
+		t.Fatalf("precondition: %d tries, want the retry limit %d", tries, partRereads)
+	}
+	if len(done) != 1 || done[0].next != "continued" {
+		t.Fatalf("settled rows = %+v, want pl_seed continued by this message", done)
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"masamong/internal/action"
@@ -78,15 +79,23 @@ type alertDelivery struct {
 	Failed int    `json:"failed"` // operators not reached
 	Reason string `json:"reason,omitempty"`
 	Test   bool   `json:"test,omitempty"`
-	// Attempt numbers the attempts in the order they started (alerts:attempts), so one that ends after a
-	// later one does not replace it as the last
-	Attempt int64 `json:"attempt,omitempty"`
+	// Attempt numbers the attempts of one run in the order they started, so one that ends after a later
+	// one does not replace it as the last; Run tells this run's numbers from an earlier run's.
+	Attempt int64  `json:"attempt,omitempty"`
+	Run     string `json:"run,omitempty"`
 }
 
 const (
-	alertQueueKey    = "alerts:queue"
-	alertLastKey     = "alerts:last"
-	alertAttemptsKey = "alerts:attempts"
+	alertQueueKey = "alerts:queue"
+	alertLastKey  = "alerts:last"
+)
+
+// alertAttempts numbers the delivery attempts in memory, so a busy store writer never holds a DM back
+// (the attempt is stored after the send); alertRun names this process's numbering. The services of one
+// process share both: the numbers only need to grow in the order the attempts start.
+var (
+	alertAttempts atomic.Int64
+	alertRun      = newID("run_")
 )
 
 // alertTicks holds the stores whose alert tick is running: two ticks of one instance at once would send
@@ -342,7 +351,8 @@ func (s *Service) sendAlert(ctx context.Context, dm DiscordSender, locale string
 	if test {
 		card.Title = c.T(locale, "alerts.test_title")
 	}
-	d := alertDelivery{At: s.Clock.Now().UTC().Format(time.RFC3339), Items: len(lines), Test: test, Attempt: s.nextAlertAttempt()}
+	d := alertDelivery{At: s.Clock.Now().UTC().Format(time.RFC3339), Items: len(lines), Test: test,
+		Attempt: alertAttempts.Add(1), Run: alertRun}
 	ops := append([]string(nil), s.Doc().Access.Operators...)
 	sort.Strings(ops)
 	closed := 0
@@ -373,20 +383,12 @@ func (s *Service) sendAlert(ctx context.Context, dm DiscordSender, locale string
 	return d
 }
 
-// nextAlertAttempt numbers a delivery attempt as it starts (0 when the count could not be kept).
-func (s *Service) nextAlertAttempt() int64 {
-	var n int64
-	if err := kvUpdate(s, alertAttemptsKey, func(prev int64) int64 { n = prev + 1; return n }); err != nil {
-		return 0
-	}
-	return n
-}
-
-// recordAlertAttempt keeps d as the last attempt for the console, unless an attempt that started after it
-// (a test sent while a tick's send waited) is kept already; an unnumbered one is kept as before.
+// recordAlertAttempt keeps d as the last attempt for the console, unless an attempt of the same run that
+// started after it (a test sent while a tick's send waited) is kept already. An earlier run's attempt is
+// always replaced.
 func (s *Service) recordAlertAttempt(d alertDelivery) {
 	err := kvUpdate(s, alertLastKey, func(prev alertDelivery) alertDelivery {
-		if d.Attempt > 0 && prev.Attempt > d.Attempt {
+		if prev.Run == d.Run && prev.Attempt > d.Attempt {
 			return prev
 		}
 		return d
@@ -429,13 +431,14 @@ func (s *Service) alertsAction(ctx context.Context, req action.Request) action.R
 		if why == "discord_offline" {
 			code = errcode.DiscordNotConnected
 		}
-		return action.Fail(req, code, "generic.error", "alerts cannot be sent: "+why, map[string]any{"reason": why})
+		return s.failErr(req, code, "alerts.cannot_send", errors.New("alerts cannot be sent: "+why), map[string]any{"reason": why})
 	}
 	locale := s.alertLocale()
 	d := s.sendAlert(ctx, dm, locale, []string{uiCatalog().T(locale, "alerts.test_line")}, false, true)
 	status["last"] = d
 	if d.Sent == 0 {
-		return action.Fail(req, errcode.ProviderUnavailable, "generic.error", "no operator could be reached: "+d.Reason, map[string]any{"reason": d.Reason, "last": d})
+		return s.failErr(req, errcode.ProviderUnavailable, "alerts.unreachable", errors.New("no operator could be reached: "+d.Reason),
+			map[string]any{"reason": d.Reason, "last": d})
 	}
 	return action.OK(req, status)
 }

@@ -16,7 +16,8 @@ import (
 // (lockObserved, lockCandidate).
 
 // partRereads bounds how often a decision reads again because the configuration changed (or, for Observe,
-// collected rows began waiting) before it took the lock; one that keeps changing gets the last read.
+// collected rows began waiting) before it took the lock; one that keeps changing gets the last read. Observe
+// reads once more past it when rows began waiting during the last read, so they get this message's answer.
 const partRereads = 3
 
 // observeArrival is what Observe's first step leaves for the rest.
@@ -213,7 +214,7 @@ func (s *Service) lockObserved(key string, m ObservedMessage, watched bool) (*pa
 		}
 		c := s.lockPartChannel(key)
 		watched = len(c.watches) > 0
-		if try == partRereads || s.cfg.Load() == cfg && (r.counted != nil || !watched) {
+		if (try >= partRereads || s.cfg.Load() == cfg) && (r.counted != nil || !watched) {
 			return c, r
 		}
 		s.part.mu.Unlock()

@@ -26,6 +26,8 @@
   "web.not_public": "Esa dirección no es una página web pública, así que no se puede leer.",
   "polls.invalid": "No se aceptó la encuesta. Necesita una pregunta (hasta 300 caracteres) y de 2 a 10 respuestas (hasta 55 caracteres cada una).",
   "polls.vote_invalid": "No se aceptó ese voto. Puede que la encuesta esté cerrada o que las opciones no coincidan con ella.",
+  "alerts.cannot_send": "Ahora no se pueden enviar avisos a los operadores. Comprueba que haya operadores configurados y que Discord esté conectado.",
+  "alerts.unreachable": "No se pudo avisar a ningún operador. Los detalles están en el registro del servicio.",
   "memory.not_ready": "La memoria aún no está lista. Termina la configuración y revisa los modelos de memoria en Ajustes.",
   "memory.failed": "No se pudo completar el paso de memoria. Los detalles están en el registro del servicio.",
   "memory.provider_missing": "No hay un modelo configurado para este paso de memoria. Añade una clave en Ajustes.",

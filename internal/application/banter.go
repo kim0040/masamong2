@@ -304,9 +304,14 @@ func (s *Service) storeBanterChannel(db *storage.Store, guildID, channelID strin
 	}
 }
 
+// banterTurnSlack is how far after the read began a stored banter turn may lie and still be kept: after a
+// short clock rollback a later run reads it once the clock has caught up.
+const banterTurnSlack = time.Minute
+
 // loadBanterTurns reads the stored banter turns of the last day once, before banter.mu is taken. Rows dated
-// after the read began were written before the clock went back and are deleted, except the turns noted
-// while this reads: a turn is in memory before its row is written, so memory tells them apart.
+// more than banterTurnSlack after the read began were written before the clock went back and are deleted,
+// except the turns noted while this reads: a turn is in memory before its row is written, so memory tells
+// them apart.
 func (s *Service) loadBanterTurns() {
 	b := &s.banter
 	b.mu.Lock()
@@ -350,7 +355,7 @@ func (s *Service) loadBanterTurns() {
 }
 
 // readBanterTurns reads the stored banter turns of the day before now, and the turn IDs (with their stamps)
-// dated after it; ok is false when the store could not be read.
+// dated more than banterTurnSlack after it; ok is false when the store could not be read.
 func readBanterTurns(db *storage.Store, now time.Time) (read map[string]banterTurn, future map[string]string, ok bool) {
 	rows, err := db.Reader().Query(`SELECT turn_id,guild_id,channel_id,created_at FROM banter_turns WHERE created_at>=? AND created_at<=? ORDER BY created_at DESC LIMIT 200`,
 		banterStamp(now.Add(-24*time.Hour)), banterStamp(now))
@@ -369,7 +374,7 @@ func readBanterTurns(db *storage.Store, now time.Time) (read map[string]banterTu
 		}
 	}
 	_ = rows.Close()
-	rows, err = db.Reader().Query(`SELECT turn_id,created_at FROM banter_turns WHERE created_at>?`, banterStamp(now))
+	rows, err = db.Reader().Query(`SELECT turn_id,created_at FROM banter_turns WHERE created_at>?`, banterStamp(now.Add(banterTurnSlack)))
 	if err != nil {
 		return nil, nil, false
 	}
