@@ -12,6 +12,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"masamong/internal/errclass"
 	"masamong/internal/lang"
 	"masamong/internal/memory/episodes"
 	"masamong/internal/memory/search"
@@ -502,19 +503,18 @@ func (s *Service) extractSelfStatement(ctx context.Context, db *storage.Store, r
 	}
 	system := lang.Fill(pack.Memory.PersonExtractSystem, "bot", botName)
 	prompt := p.FillPersonExtract(pack.Memory.PersonExtract)
-	var facts []episodes.PersonFact
-	asked := false
-	err = s.askValidated(ctx, spendEpisode, system, prompt, extractTokens, func(text string, _ bool) error {
-		asked = true
-		facts, _ = p.ParsePeople(text, episodes.PeopleOptions{}) // a bad answer is no claims, never a second ask
-		return nil
-	})
-	if asked {
-		ps.calls = 1
+	if !s.derivedAllows(spendEpisode) {
+		return ps, errRoomMemoryStop
 	}
-	if err != nil {
+	// sent once (featureTextOnce): an answer cut at the output limit is not asked again, so the line goes
+	// out one time per model; an empty answer is paid for and, like a bad one, is no claims, never a
+	// second ask
+	text, _, err := s.featureTextOnce(ctx, "summary", spendEpisode, system, prompt, extractTokens, extractTemp)
+	if err != nil && !errors.Is(err, errNoText) && errclass.Of(err) != errclass.Empty {
 		return ps, err
 	}
+	ps.calls = 1
+	facts, _ := p.ParsePeople(text, episodes.PeopleOptions{})
 	claims, skipped := liveClaims(r, liveSource(lines), readAt, facts, lines, s.liveNames(p, in))
 	ps.skipped = skipped
 	if len(claims) == 0 {

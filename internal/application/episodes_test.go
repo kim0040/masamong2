@@ -24,7 +24,8 @@ type roomModel struct {
 	mu      sync.Mutex
 	extract func(prompt string) string
 	state   func(prompt string) string
-	prompts map[string][]string // kind (episode|state) → prompts
+	finish  func(prompt string) string // the finish reason of an answer; nil = "stop"
+	prompts map[string][]string        // kind (episode|state) → prompts
 }
 
 func (m *roomModel) calls(kind string) int {
@@ -67,10 +68,15 @@ func newRoomModel(t *testing.T) (*roomModel, string) {
 		if kind == "state" {
 			fn = m.state
 		}
+		finish := m.finish
 		m.mu.Unlock()
 		answer = fn(prompt)
+		reason := "stop"
+		if finish != nil {
+			reason = finish(prompt)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": answer}, "finish_reason": "stop"}},
+			"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": answer}, "finish_reason": reason}},
 			"usage":   map[string]any{"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.00001},
 		})
 	}))
