@@ -16,8 +16,9 @@ import (
 // testModelAdapter is an adapter for a model whose host answers with rt, in process.
 func testModelAdapter(t *testing.T, rt registryGateTransport) *openai.Adapter {
 	t.Helper()
-	t.Setenv("MASAMONG_A3_LOOP_TEST_KEY", "synthetic-test-credential")
-	cred, err := providers.Resolve("env:MASAMONG_A3_LOOP_TEST_KEY")
+	var creds credentialStandIns
+	creds.setForTest(t, "MASAMONG_A3_LOOP_TEST_KEY", "synthetic-test-credential")
+	cred, err := creds.resolve("env:MASAMONG_A3_LOOP_TEST_KEY")
 	if err != nil {
 		t.Fatal(err)
 	}
