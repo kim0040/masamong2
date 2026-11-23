@@ -59,7 +59,12 @@ func init() {
 		`CREATE INDEX IF NOT EXISTS idx_thread_participants_user ON thread_participants(user_id)`,
 		`CREATE TABLE IF NOT EXISTS thread_tombstones (thread_id TEXT PRIMARY KEY)`,
 		// Retain only thread IDs permanently, even after retention removes the closed relation row.
-		`INSERT OR IGNORE INTO thread_tombstones(thread_id) SELECT thread_id FROM channel_threads WHERE close_reason='deleted'`)
+		`INSERT OR IGNORE INTO thread_tombstones(thread_id) SELECT thread_id FROM channel_threads WHERE close_reason='deleted'`,
+		// A thread seen before thread_parents existed (capture_policy.go; its init runs before this file's) gets
+		// its parent there too, so the parent's capture off still finds it once retention removes its row. Only
+		// IDs are copied, a parent already stored is kept, and no stored message is read or changed.
+		`INSERT OR IGNORE INTO thread_parents(thread_id,guild_id,parent_id)
+			SELECT thread_id,guild_id,parent_id FROM channel_threads WHERE guild_id<>'' AND parent_id<>''`)
 }
 
 // Every relation/participant lookup uses the same durable deletion boundary.
