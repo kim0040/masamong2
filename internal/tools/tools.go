@@ -171,6 +171,9 @@ func Builtins() []Builtin {
 			Inputs:    []Input{{Name: "url", Type: "url", Required: true, Example: "https://…"}, {Name: "max_chars", Type: "number", Min: 500, Max: 20000, Example: "2800"}}},
 		{ID: "images.generate", Feature: "images", Chat: true, Command: true, Uses: "model", Role: "image", Implemented: true, Required: []string{"prompt"}, Writes: true, Once: true,
 			Inputs: []Input{{Name: "prompt", Type: "text", Required: true}, {Name: "aspect_ratio", Type: "select", Options: ratios},
+				// subjects: who is drawn, by name or <@id> (at most 3); the server adds what they said about their looks,
+				// likes, traits and nicknames as reference text (image_subjects.go)
+				{Name: "subjects", Type: "list", Max: 3, Example: "names or <@id> of the people drawn"},
 				// async: a picture asked for in chat is drawn in the background (default on; imagequeue.go)
 				{Name: "async", Type: "bool", Operator: true}}},
 		{ID: "polls.create", Feature: "polls", Chat: true, Command: true, Implemented: true, Required: []string{"question"}, Scoped: true, Writes: true, Once: true,

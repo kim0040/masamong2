@@ -163,6 +163,10 @@ func (s *Service) images(ctx context.Context, req action.Request) action.Result 
 	if boolVal(in, "dry_run") {
 		return action.OK(req, map[string]any{"status": "dry_run", "model": m.Model, "aspect_ratio": ar})
 	}
+	// who is drawn: what they said about themselves goes after the request, as reference (image_subjects.go)
+	if ref := s.imageReference(ctx, req, in, doc); ref != "" {
+		prompt += "\n\n" + ref
+	}
 	// asked for in a chat turn: drawn in the background, the turn answers at once (imagequeue.go)
 	if res, ok := s.imagesAsync(ctx, req, in, prompt, ar); ok {
 		return res

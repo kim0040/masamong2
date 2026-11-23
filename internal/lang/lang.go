@@ -164,6 +164,9 @@ type Features struct {
 	ChannelSummary            string            `json:"channel_summary"`             // {conversation}
 	ChannelSummaryIncremental string            `json:"channel_summary_incremental"` // {previous} {conversation}
 	ImagePrompt               string            `json:"image_prompt"`                // {request}
+	// ImageReference is appended after the request of a picture that names people (images.generate
+	// subjects): what they said about themselves, as reference and never as instructions. {people}
+	ImageReference string `json:"image_reference"`
 	// ImageBlockedWords refuse an image request before any model call (clearly sexual or violent
 	// words; every pack's list applies, since a request can mix languages).
 	ImageBlockedWords []string `json:"image_blocked_words"`
@@ -506,8 +509,9 @@ func (p *Pack) missing() []string {
 		"memory.explicit_system": p.Memory.ExplicitSystem, "memory.explicit": p.Memory.Explicit,
 		"memory.sensitive_system": p.Memory.SensitiveSystem, "memory.sensitive": p.Memory.Sensitive,
 		"features.channel_summary": p.Features.ChannelSummary, "features.channel_summary_incremental": p.Features.ChannelSummaryIncremental,
-		"features.image_prompt":   p.Features.ImagePrompt,
-		"features.fortune_system": p.Features.FortuneSystem, "features.fortune_public": p.Features.FortunePublic,
+		"features.image_prompt":    p.Features.ImagePrompt,
+		"features.image_reference": p.Features.ImageReference,
+		"features.fortune_system":  p.Features.FortuneSystem, "features.fortune_public": p.Features.FortunePublic,
 		"features.fortune_today": p.Features.FortuneToday, "features.fortune_detail_day": p.Features.FortuneDetailDay,
 		"features.fortune_detail_month": p.Features.FortuneDetailMonth, "features.fortune_detail_year": p.Features.FortuneDetailYear,
 		"features.fortune_morning": p.Features.FortuneMorning, "features.zodiac_system": p.Features.ZodiacSystem,
