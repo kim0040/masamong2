@@ -35,7 +35,7 @@ func fixg1Svc(t *testing.T, order []string, extra map[string]string, url map[str
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("FIXG1_KEY", "fixg1-key")
+	s.SetEnvForTest(t, "FIXG1_KEY", "fixg1-key")
 	for id, kind := range extra {
 		d.Providers[id] = config.Provider{Kind: kind}
 	}

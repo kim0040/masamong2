@@ -64,7 +64,7 @@ func TestQuickAnswerAsksWithoutThinking(t *testing.T) {
 	if _, err := llm.ChatDetailed(withQuickAnswer(context.Background()), "planner", msgs, 60, 0); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("QUICK_KEY", "k")
+	s.SetEnvForTest(t, "QUICK_KEY", "k")
 	doc := s.Doc()
 	doc.Providers["fake"] = config.Provider{Kind: config.KindOpenAI, BaseURL: srv.URL, CredentialRef: "env:QUICK_KEY"}
 	doc.Models["planner"] = config.Model{Provider: "fake", Model: "m"}
