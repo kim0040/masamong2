@@ -745,6 +745,91 @@ func TestNativeAnswerToChatCompletionsHost(t *testing.T) {
 	}
 }
 
+// ChatRequest.EphemeralCache adds a top-level cache_control {"type":"ephemeral"} to the Messages
+// body (the paid people backfill asks for it); off by default the request is exactly as before. A
+// request that names no temperature sends no temperature field, live and inside a batch item.
+func TestAnthropicEphemeralCacheFlag(t *testing.T) {
+	a := &Adapter{API: APIAnthropic}
+	req := ChatRequest{Model: "m", Messages: []Message{{Role: "user", Content: "x"}}, MaxTokens: 10, Effort: "none"}
+	bodyOf := func(r ChatRequest) map[string]any {
+		t.Helper()
+		p, err := a.anthropicPayload(r, shape{}, Caps{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := json.Marshal(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(b, &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	off := bodyOf(req)
+	if _, ok := off["cache_control"]; ok {
+		t.Fatalf("off by default, no cache_control: %v", off)
+	}
+	if _, ok := off["temperature"]; ok {
+		t.Fatalf("no temperature was asked, none is sent: %v", off)
+	}
+	reqOn := req
+	reqOn.EphemeralCache = true
+	on := bodyOf(reqOn)
+	if !reflect.DeepEqual(on["cache_control"], map[string]any{"type": "ephemeral"}) {
+		t.Fatalf("the flag adds the top-level breakpoint: %v", on)
+	}
+	// the rest of the body is unchanged by the flag
+	delete(on, "cache_control")
+	if !reflect.DeepEqual(on, off) {
+		t.Fatalf("only cache_control differs:\n off %v\n on  %v", off, on)
+	}
+	// on the wire, once (the flag is a request field, not adapter state)
+	h := &anthropicHost{caps: map[string]string{"claude-haiku-5-5": capsHaiku55}}
+	b := newAnthropicHost(t, "/v1", h)
+	if _, err := b.Chat(context.Background(), ChatRequest{Model: "claude-haiku-5-5", Messages: []Message{{Role: "user", Content: "x"}},
+		MaxTokens: 10, Effort: "none", EphemeralCache: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(h.bodies[0]["cache_control"], map[string]any{"type": "ephemeral"}) {
+		t.Fatalf("the posted body carries it: %v", h.bodies[0])
+	}
+	if _, err := b.Chat(context.Background(), ChatRequest{Model: "claude-haiku-5-5", Messages: []Message{{Role: "user", Content: "y"}},
+		MaxTokens: 10, Effort: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := h.bodies[1]["cache_control"]; ok || h.bodies[1]["temperature"] != nil {
+		t.Fatalf("the next request is byte-clean: %v", h.bodies[1])
+	}
+	// a batch item's params are the same Messages request: flag on, no temperature
+	params, err := b.anthropicParamsOf(BatchItem{ID: "w1", Chat: &ChatRequest{Model: "claude-haiku-5-5",
+		Messages: []Message{{Role: "user", Content: "x"}}, MaxTokens: 10, Effort: "none", EphemeralCache: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(params)
+	var pm map[string]any
+	_ = json.Unmarshal(raw, &pm)
+	if !reflect.DeepEqual(pm["cache_control"], map[string]any{"type": "ephemeral"}) {
+		t.Fatalf("batch item params: %v", pm)
+	}
+	if _, ok := pm["temperature"]; ok {
+		t.Fatalf("a batch request without a temperature sends none: %v", pm)
+	}
+	params2, err := b.anthropicParamsOf(BatchItem{ID: "w2", Chat: &ChatRequest{Model: "claude-haiku-5-5",
+		Messages: []Message{{Role: "user", Content: "x"}}, MaxTokens: 10, Effort: "none"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw2, _ := json.Marshal(params2)
+	var pm2 map[string]any
+	_ = json.Unmarshal(raw2, &pm2)
+	if _, ok := pm2["cache_control"]; ok {
+		t.Fatalf("off by default inside a batch too: %v", pm2)
+	}
+}
+
 func TestClampEffort(t *testing.T) {
 	for _, c := range []struct {
 		effort string

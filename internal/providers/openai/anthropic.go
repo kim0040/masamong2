@@ -71,6 +71,9 @@ type anthropicRequest struct {
 	Thinking     map[string]any  `json:"thinking,omitempty"`
 	OutputConfig map[string]any  `json:"output_config,omitempty"`
 	Temperature  *float64        `json:"temperature,omitempty"`
+	// CacheControl is a top-level cache breakpoint for the whole request (ChatRequest
+	// .EphemeralCache): the host caches the stable prefix itself. Left out unless asked for.
+	CacheControl map[string]string `json:"cache_control,omitempty"`
 }
 
 type anthropicTurn struct {
@@ -267,6 +270,9 @@ func (a *Adapter) anthropicPayload(req ChatRequest, sh shape, caps Caps) (anthro
 		}
 	}
 	p.Messages = turns
+	if req.EphemeralCache {
+		p.CacheControl = cacheControlEphemeral
+	}
 	req.bareToolTurn = a.bareToolTurn(req)
 	thinking, level, thinks := anthropicThinking(req, caps, sh)
 	p.Thinking = thinking
