@@ -796,23 +796,83 @@ func (s *Service) pbRecheckPersonTx(tx *sql.Tx, ref string) error {
 }
 
 // pbRecheckSoftTx runs the re-check that follows a member's own change (a deleted or edited line, a
-// withdrawal of consent) inside a savepoint. If it fails, its own writes are rolled back, the failure is
-// logged with counts only (never text: an error may quote a stored answer) and the member's change still
-// commits: a deletion or a withdrawal is never held back by the pilot copy. A fact the purge missed is not
-// read: the review and the apply gate every stored fact again. A failure to roll back is returned.
-func (s *Service) pbRecheckSoftTx(tx *sql.Tx, after string, count int, recheck func() error) error {
+// withdrawal of consent, a correction or item forget) inside a savepoint. If it fails, its own writes are
+// rolled back, the failure is logged with counts only (never text: an error may quote a stored answer)
+// and the member's change still commits: it is never held back by the pilot copy. The purge is not lost:
+// a flag written in the member's transaction (pbPurgePendingKey; guild "" is every server) makes the pilot
+// review, a run start, an apply and a grant of consent run the full re-check first (pbPurgePendingTx), so
+// a re-grant cannot bring the copy back. A failure to roll back or to write the flag is returned.
+func (s *Service) pbRecheckSoftTx(tx *sql.Tx, guild, after string, count int, recheck func() error) error {
 	if _, err := tx.Exec(`SAVEPOINT pb_recheck`); err != nil {
 		s.Log.Warn("people backfill: pilot copy not re-checked", "after", after, "count", count, "class", string(errclass.Of(err)))
-		return nil
+		return s.pbMarkPurgePending(tx, guild)
 	}
 	if err := recheck(); err != nil {
 		s.Log.Warn("people backfill: pilot copy not re-checked", "after", after, "count", count, "class", string(errclass.Of(err)))
 		if _, err := tx.Exec(`ROLLBACK TO pb_recheck`); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(`RELEASE pb_recheck`); err != nil {
+			return err
+		}
+		return s.pbMarkPurgePending(tx, guild)
 	}
 	_, err := tx.Exec(`RELEASE pb_recheck`)
 	return err
+}
+
+// pbPurgePendingPrefix + guild ("*" for every server) flags a pilot re-check a member's change could not
+// run (pbRecheckSoftTx).
+const pbPurgePendingPrefix = "people:pilot_purge_pending:"
+
+func pbPurgePendingKey(guild string) string {
+	if guild == "" {
+		guild = "*"
+	}
+	return pbPurgePendingPrefix + guild
+}
+
+// pbMarkPurgePending writes the flag in the member's transaction.
+func (s *Service) pbMarkPurgePending(tx *sql.Tx, guild string) error {
+	now := s.Clock.Now().UTC()
+	_, err := kvWriteTx(tx, storage.BackendSQLite, pbPurgePendingKey(guild), now.Format(time.RFC3339), now)
+	return err
+}
+
+// pbPurgePendingTx runs, when a flag is set, the pilot re-check a member's change could not run: the full
+// pass over guild's stored pilot answers (every server's when the flag is for every server, or guild is
+// ""), then the flag goes. The pilot review, a run start, an apply and a grant of consent call it first; a
+// failure is returned and they refuse.
+func (s *Service) pbPurgePendingTx(tx *sql.Tx, guild string) error {
+	if !tableExists(tx, "people_backfill_window") {
+		return nil
+	}
+	var all, mine, some bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM admin_state WHERE k=?), EXISTS(SELECT 1 FROM admin_state WHERE k=?),
+		EXISTS(SELECT 1 FROM admin_state WHERE substr(k,1,?)=?)`, pbPurgePendingKey(""), pbPurgePendingKey(guild),
+		len(pbPurgePendingPrefix), pbPurgePendingPrefix).Scan(&all, &mine, &some); err != nil {
+		return err
+	}
+	switch {
+	case all || (guild == "" && some):
+		if err := s.pbRecheckPilotTx(tx, ""); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`DELETE FROM admin_state WHERE substr(k,1,?)=?`, len(pbPurgePendingPrefix), pbPurgePendingPrefix)
+		return err
+	case mine:
+		if err := s.pbRecheckPilotTx(tx, guild); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`DELETE FROM admin_state WHERE k=?`, pbPurgePendingKey(guild))
+		return err
+	}
+	return nil
+}
+
+// pbPurgePending is pbPurgePendingTx in a writer transaction of its own.
+func (s *Service) pbPurgePending(ctx context.Context, db *storage.Store, guild string) error {
+	return db.WithWriterContext(ctx, func(tx *sql.Tx) error { return s.pbPurgePendingTx(tx, guild) })
 }
 
 // pbRecheckScopedTx is the re-check over the windows of guild that hold one of obs (all when empty), and
@@ -1082,6 +1142,10 @@ func (s *Service) pbStartRun(ctx context.Context, req action.Request, db *storag
 			return *fail
 		}
 		plan = rebuilt
+	}
+	// a purge a member's change could not run comes first; while it cannot run, the run does not start
+	if err := s.pbPurgePending(ctx, db, plan.Params.Guild); err != nil {
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	model, ok := pbModels[strVal(in, "model", "")]
 	if !ok {
@@ -1731,6 +1795,9 @@ func (s *Service) pbRequeueBatch(ctx context.Context, db *storage.Store, runID, 
 // items'). A window without an outcome, an expired or failed item, or a window whose prompt changed
 // since it was sent goes back to the queue; a refusal is counted and skipped.
 func (s *Service) pbApplyBatch(ctx context.Context, db *storage.Store, run store.BackfillRun, key string, model peoplebackfill.Model, outs []openai.BatchOutcome) error {
+	if err := s.pbPurgePending(ctx, db, run.GuildID); err != nil {
+		return err // a purge a member's change could not run comes first
+	}
 	byID := make(map[string]openai.BatchOutcome, len(outs))
 	for _, o := range outs {
 		byID[o.ID] = o
@@ -1785,6 +1852,10 @@ func (s *Service) pbApplyBatch(ctx context.Context, db *storage.Store, run store
 func (s *Service) pbApplyPilot(ctx context.Context, db *storage.Store, runID string) error {
 	run, ok, err := store.LoadBackfillRun(db.Reader(), runID)
 	if err != nil || !ok {
+		return err
+	}
+	// a purge a member's change could not run comes first: nothing of the stored copy is applied before it
+	if err := s.pbPurgePending(ctx, db, run.GuildID); err != nil {
 		return err
 	}
 	ws, err := store.BackfillWindows(db.Reader(), runID, true, store.WindowQueued)
@@ -1892,6 +1963,10 @@ func (s *Service) peopleBackfillReview(ctx context.Context, req action.Request, 
 	out["run_id"] = run.ID
 	if !run.PilotDone || run.Model != "" || (run.State != store.BackfillPiloted && run.State != store.BackfillStopped) {
 		return action.OK(req, out) // no pilot yet, or the run started and the answers are gone
+	}
+	// a purge a member's change could not run comes first; while it cannot run, nothing is shown
+	if err := s.pbPurgePending(ctx, db, run.GuildID); err != nil {
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	ws, err := store.BackfillWindows(db.Reader(), run.ID, true)
 	if err != nil {

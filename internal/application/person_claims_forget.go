@@ -166,9 +166,11 @@ func (s *Service) itemClaimsTx(tx *sql.Tx, items []string, hide bool, by string)
 			return 0, err
 		}
 	}
-	// the paid backfill's stored pilot answers are another copy: the new markers purge them too
+	// the paid backfill's stored pilot answers are another copy: the new markers purge them too. A failure
+	// there never holds back the member's correction or forget: the purge is flagged and runs before the
+	// pilot is read, applied or a consent granted again (pbRecheckSoftTx)
 	for g := range guilds {
-		if err := s.pbRecheckPilotTx(tx, g); err != nil {
+		if err := s.pbRecheckSoftTx(tx, g, "correction", len(items), func() error { return s.pbRecheckPilotTx(tx, g) }); err != nil {
 			return 0, err
 		}
 	}

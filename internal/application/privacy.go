@@ -173,6 +173,13 @@ func (s *Service) setConsent(userID, scope, status, via string) (privacy.State, 
 				return err
 			}
 		}
+		if status == privacy.Granted {
+			// a pilot purge a withdrawal could not run goes first, while the person is still withdrawn: the
+			// grant must not bring the stored copy back (a failure refuses the grant, to be asked again)
+			if err := s.pbPurgePendingTx(tx, ""); err != nil {
+				return err
+			}
+		}
 		granted, withdrawn := "", ""
 		if status == privacy.Granted {
 			granted = now
@@ -193,7 +200,7 @@ func (s *Service) setConsent(userID, scope, status, via string) (privacy.State, 
 		// a withdrawn person's words leave the paid backfill's stored pilot answers in every server: only the
 		// facts that name them, and a failure there never holds back the withdrawal
 		if status == privacy.Withdrawn && (scope == privacy.Memory || scope == privacy.Profile) {
-			return s.pbRecheckSoftTx(tx, "withdrawal", 1, func() error { return s.pbRecheckPersonTx(tx, personRef(userID)) })
+			return s.pbRecheckSoftTx(tx, "", "withdrawal", 1, func() error { return s.pbRecheckPersonTx(tx, personRef(userID)) })
 		}
 		return nil
 	})
