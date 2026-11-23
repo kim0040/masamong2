@@ -30,6 +30,7 @@ import (
 	"masamong/internal/observability"
 	"masamong/internal/providers"
 	"masamong/internal/providers/openai"
+	"masamong/internal/providers/openmeteo"
 	"masamong/internal/storage"
 	"masamong/internal/tools"
 )
@@ -129,6 +130,9 @@ type Service struct {
 	// animalsPosted is when each public channel last got the twelve-animal card (fortune.go animals)
 	animalsOnce   sync.Once
 	animalsPosted *ttlCache[struct{}]
+	// geocodes keeps place lookups for a day (geocodeCache, features.go)
+	geocodesOnce sync.Once
+	geocodes     *ttlCache[openmeteo.Place]
 
 	pendingMsgs pendingMessageCount // the console's count of messages waiting for a vector (pending_count.go)
 	// cfgMu serializes config writers so two changes based on the same revision cannot both commit.

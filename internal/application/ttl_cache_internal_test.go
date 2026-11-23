@@ -47,17 +47,18 @@ func TestTTLCacheExpiresAndStaysBounded(t *testing.T) {
 	}
 }
 
-// The two caches that used to grow with every place and every person (the geocoder's, shared by the
-// process, and a service's zodiac cooldowns): a flood of distinct keys leaves them at their caps.
+// The two caches that used to grow with every place and every person (a service's geocoder and its
+// zodiac cooldowns): a flood of distinct keys leaves them at their caps.
 func TestGeocodeAndCooldownCachesAreCapped(t *testing.T) {
 	now := time.Now()
+	s := &Service{}
 	for i := 0; i < geocodeCacheMax+500; i++ {
-		geocodeCache.put(fmt.Sprintf("en|capped-test-%d", i), openmeteo.Place{Name: "x"}, now)
+		s.geocodeCache().put(fmt.Sprintf("en|capped-test-%d", i), openmeteo.Place{Name: "x"}, now)
 	}
-	if n := geocodeCache.len(); n > geocodeCacheMax {
+	if n := s.geocodeCache().len(); n > geocodeCacheMax {
 		t.Fatalf("geocode cache holds %d places, cap %d", n, geocodeCacheMax)
 	}
-	cooldown := (&Service{}).zodiacCooldown()
+	cooldown := s.zodiacCooldown()
 	for i := 0; i < zodiacCooldownMax+500; i++ {
 		cooldown.put(fmt.Sprintf("capped-test-user-%d", i), struct{}{}, now)
 	}

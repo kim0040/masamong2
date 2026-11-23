@@ -48,7 +48,9 @@ func OpenWithEnvForTest(t testing.TB, dir string, env map[string]string) (*Servi
 }
 
 // CredentialForTest reads a credential reference the way this service does (SetEnvForTest applies).
-func (s *Service) CredentialForTest(ref string) (providers.Credential, error) { return s.credential(ref) }
+func (s *Service) CredentialForTest(ref string) (providers.Credential, error) {
+	return s.credential(ref)
+}
 
 // ReopenForTest opens prev's data root again the way a restart would: the environment's variables that
 // SetEnvForTest gave prev are still there.
