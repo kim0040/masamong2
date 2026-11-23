@@ -8,13 +8,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"masamong/internal/action"
 	"masamong/internal/errclass"
@@ -22,6 +23,7 @@ import (
 	"masamong/internal/memory/episodes"
 	"masamong/internal/memory/peoplebackfill"
 	"masamong/internal/memory/store"
+	"masamong/internal/providers"
 	"masamong/internal/providers/openai"
 	"masamong/internal/storage"
 )
@@ -99,7 +101,15 @@ type pbAnswer struct {
 	Failed   string                `json:"failed,omitempty"` // the error class; the window is sent again by the run
 	Skipped  bool                  `json:"skipped,omitempty"`
 	USD      float64               `json:"usd,omitempty"`
+	// Intent is the reserved maximum of a send in progress, written before the call: an answer still
+	// carrying it after a restart was sent and never settled, and is charged at that maximum.
+	Intent float64 `json:"intent,omitempty"`
+	// Unknown: the call may have been run and billed with no answer read; it was charged at its maximum.
+	Unknown bool `json:"unknown,omitempty"`
 }
+
+// pbUnknownClass is the Failed class of a send whose outcome is not known.
+const pbUnknownClass = "unknown"
 
 func pbAnswers(raw []byte) map[string]pbAnswer {
 	out := map[string]pbAnswer{}
@@ -170,16 +180,54 @@ func (s *Service) pbRelease(runID string, l *pbLoop) {
 // budget
 // ---------------------------------------------------------------------------
 
-// pbMaxCost is the most one window's request can cost: every prompt rune as one input token (no cache
-// discount) and the whole output limit. The budget check reserves it; the settlement uses the usage.
-func pbMaxCost(bp pbPrompt, lines int, model peoplebackfill.Model, mode peoplebackfill.Mode) float64 {
-	est, _ := peoplebackfill.EstimateTokens([]peoplebackfill.Window{{Lines: make([]peoplebackfill.MergedLine, lines)}})
-	in := max(est, utf8.RuneCountInString(bp.system)+utf8.RuneCountInString(bp.user)+64)
-	v, err := peoplebackfill.Settle(peoplebackfill.Usage{InputTokens: in, OutputTokens: pbMaxTokens}, model, mode)
+// pbMaxIn bounds a prompt's input tokens: a token covers at least one byte of text, so the prompt's UTF-8
+// length plus the format's framing is never exceeded, whatever the language or the tokenizer.
+func pbMaxIn(bp pbPrompt) int { return len(bp.system) + len(bp.user) + pbFraming }
+
+// pbMaxCost is the most one window's request can be billed: every input token at the cache-write price
+// (1.25 of the input price, the highest any input token is billed at) and every output token the request
+// allows on the wire (pbWireOut, thinking room included). The budget check reserves it; the settlement
+// uses the reported usage, which can never be higher.
+func pbMaxCost(bp pbPrompt, model peoplebackfill.Model, mode peoplebackfill.Mode) float64 {
+	in := pbMaxIn(bp)
+	in += (in + 3) / 4 // the cache-write surcharge, rounded up as pbSettle rounds it
+	v, err := peoplebackfill.Settle(peoplebackfill.Usage{InputTokens: in, OutputTokens: pbWireOut}, model, mode)
 	if err != nil {
 		return 0
 	}
 	return v
+}
+
+// pbSendTracker marks, through the request's context, that a Messages call reached the transport: a
+// failure after that may have been billed (pbSendUnknown).
+type pbSendTracker struct{ base http.RoundTripper }
+
+type pbSentKey struct{}
+
+func (t pbSendTracker) RoundTrip(r *http.Request) (*http.Response, error) {
+	if f, ok := r.Context().Value(pbSentKey{}).(*atomic.Bool); ok && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/messages") {
+		f.Store(true)
+	}
+	return t.base.RoundTrip(r)
+}
+
+// pbSendUnknown reports a failed standard call that may have been run and billed: the request reached the
+// transport, and no answer came back (a timeout, a lost connection, a call cut by a shutdown, an answer
+// that could not be read). A host that answered with an error status, or a connection never made, ran
+// nothing.
+func pbSendUnknown(err error, sent bool) bool {
+	if err == nil || !sent || errors.Is(err, providers.ErrOffline) {
+		return false
+	}
+	var ae *openai.APIError
+	if errors.As(err, &ae) && ae.Status >= 400 {
+		return false
+	}
+	var pe *providers.Error
+	if errors.As(err, &pe) && (pe.NotSent || (pe.Kind == "status" && pe.Status >= 400)) {
+		return false
+	}
+	return true
 }
 
 // pbBudget is the pilot's running budget: spend settled plus the maxima of the requests in flight.
@@ -189,6 +237,7 @@ type pbBudget struct {
 	inflight float64
 	cap      float64
 	over     bool
+	unknown  bool // a send's outcome is not known: nothing more is sent until the operator goes on
 }
 
 func (b *pbBudget) reserve(v float64) bool {
@@ -212,7 +261,19 @@ func (b *pbBudget) settle(reserved, spent float64) {
 func (b *pbBudget) stopped() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.over
+	return b.over || b.unknown
+}
+
+func (b *pbBudget) halt() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.unknown = true
+}
+
+func (b *pbBudget) halted() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.unknown
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +400,10 @@ func (s *Service) pbPilot(ctx context.Context, runID string, a *openai.Adapter) 
 	if err != nil || !ok || run.State != store.BackfillPiloting {
 		return
 	}
+	if err := s.pbSettleLeftIntents(db, runID); err != nil {
+		s.Log.Warn("people backfill: unsettled pilot sends not charged", "run", runID, "err", err)
+		return
+	}
 	ws, err := store.BackfillWindows(db.Reader(), runID, true, store.WindowQueued)
 	if err != nil {
 		s.Log.Warn("people backfill: pilot windows not read", "run", runID, "err", err)
@@ -391,6 +456,9 @@ func (s *Service) pbPilot(ctx context.Context, runID string, a *openai.Adapter) 
 		}
 		if budget.stopped() {
 			cur.State, cur.StoppedBy = store.BackfillStopped, "budget"
+			if budget.halted() {
+				cur.StoppedBy = "submit_unknown"
+			}
 		} else {
 			rep, err := pbPilotReport(tx, runID)
 			if err != nil {
@@ -410,55 +478,120 @@ func (s *Service) pbPilot(ctx context.Context, runID string, a *openai.Adapter) 
 }
 
 // pbPilotOne sends one window to one model and stores the answer (validated facts, counts and cost).
+// The send's intent (its reserved maximum) is stored before the call, so a send cut by a crash is charged
+// at that maximum when the pilot is resumed, and the call is made once: a send whose outcome is not known
+// (it may have been run and billed with no answer read) is charged at its maximum and stops the pilot.
 func (s *Service) pbPilotOne(ctx context.Context, db *storage.Store, run store.BackfillRun, a *openai.Adapter, w store.BackfillWindow,
 	model peoplebackfill.Model, budget *pbBudget) {
 	bp, err := s.pbBuildPrompt(db, run.GuildID, w)
 	ans := pbAnswer{}
-	spent, calls := 0.0, 0
+	spent, held, calls := 0.0, 0.0, 0
 	switch {
 	case err != nil:
 		ans.Failed = string(errclass.Of(err))
 	case !bp.ok:
 		ans.Skipped = true
 	default:
-		reserved := pbMaxCost(bp, w.Lines, model, peoplebackfill.ModeStandard)
+		reserved := pbMaxCost(bp, model, peoplebackfill.ModeStandard)
 		if !budget.reserve(reserved) {
 			return
 		}
-		res, err := a.Chat(ctx, pbRequest(model, bp))
-		if err == nil || errors.Is(err, openai.ErrRefused) {
-			spent, calls = pbSettle(&res, model, peoplebackfill.ModeStandard), 1
+		if err := s.pbPilotStore(db, run.ID, w.ID, model, pbAnswer{Hash: bp.hash, ReadAt: bp.readAt, Intent: reserved}, 0, 0, 0); err != nil {
+			budget.settle(reserved, 0)
+			s.Log.Warn("people backfill: pilot send not recorded, not sent", "run", run.ID, "err", err)
+			return
 		}
-		budget.settle(reserved, spent)
-		ans.Hash, ans.ReadAt, ans.USD = bp.hash, bp.readAt, spent
+		sent := &atomic.Bool{}
+		res, err := a.Chat(context.WithValue(ctx, pbSentKey{}, sent), pbRequest(model, bp))
+		ans.Hash, ans.ReadAt = bp.hash, bp.readAt
+		switch {
+		case err == nil || errors.Is(err, openai.ErrRefused):
+			spent, calls = pbSettle(&res, model, peoplebackfill.ModeStandard), 1
+		case pbSendUnknown(err, sent.Load()):
+			held, calls = reserved, 1 // charged at its maximum: the host may have run it
+			ans.Unknown = true
+			budget.halt()
+		case res.PromptTokens+res.CompletionTokens > 0:
+			spent, calls = pbSettle(&res, model, peoplebackfill.ModeStandard), 1 // a failure inside an answer is still billed
+		}
+		budget.settle(reserved, spent+held)
+		ans.USD = spent + held
 		switch {
 		case errors.Is(err, openai.ErrRefused):
 			ans.Refused = true
+		case ans.Unknown:
+			ans.Failed = pbUnknownClass
 		case err != nil:
-			if ctx.Err() != nil {
-				return
-			}
 			ans.Failed = string(errclass.Of(err))
 		default:
 			ans.Facts, ans.Rejected = bp.p.ParsePeople(res.Content, episodes.PeopleOptions{})
 		}
 	}
+	if err := s.pbPilotStore(db, run.ID, w.ID, model, ans, spent, held, calls); err != nil {
+		s.Log.Warn("people backfill: pilot answer not stored", "run", run.ID, "err", err)
+	}
+}
+
+// pbPilotStore writes one model's answer (or a send's intent) to a pilot window with its spend, in one
+// transaction. held is a send charged at its maximum: it counts against the cap (the run's spend) but is
+// not reported usage (memory_spend).
+func (s *Service) pbPilotStore(db *storage.Store, runID, windowID string, model peoplebackfill.Model, ans pbAnswer, spent, held float64, calls int) error {
 	now := s.Clock.Now().UTC()
-	err = db.WithWriterContext(context.Background(), func(tx *sql.Tx) error {
-		cur, ok, err := store.LoadBackfillWindow(tx, run.ID, w.ID)
+	return db.WithWriterContext(context.Background(), func(tx *sql.Tx) error {
+		cur, ok, err := store.LoadBackfillWindow(tx, runID, windowID)
 		if err != nil || !ok {
 			return err
 		}
 		have := pbAnswers(cur.Result)
 		have[string(model)] = ans
 		cur.Result, _ = json.Marshal(have)
-		cur.CostUSD += spent
+		cur.CostUSD += spent + held
 		cur.UpdatedAt = now.Format(time.RFC3339)
-		return pbSettleTx(tx, run.ID, cur, spent, calls, now)
+		if err := pbSettleTx(tx, runID, cur, spent, calls, now); err != nil {
+			return err
+		}
+		if held > 0 {
+			return store.AddBackfillRunSpend(tx, runID, held, now.Format(time.RFC3339))
+		}
+		return nil
 	})
-	if err != nil {
-		s.Log.Warn("people backfill: pilot answer not stored", "run", run.ID, "err", err)
-	}
+}
+
+// pbSettleLeftIntents charges the pilot sends a crash or a restart cut between their intent and their
+// answer at their reserved maximum (the host may have run them) and marks them unknown, so the pilot asks
+// them again only under a new reservation.
+func (s *Service) pbSettleLeftIntents(db *storage.Store, runID string) error {
+	now := s.Clock.Now().UTC()
+	return db.WithWriterContext(context.Background(), func(tx *sql.Tx) error {
+		ws, err := store.BackfillWindows(tx, runID, true)
+		if err != nil {
+			return err
+		}
+		for _, w := range ws {
+			have := pbAnswers(w.Result)
+			held := 0.0
+			for m, ans := range have {
+				if ans.Intent <= 0 {
+					continue
+				}
+				held += ans.Intent
+				have[m] = pbAnswer{Hash: ans.Hash, ReadAt: ans.ReadAt, Failed: pbUnknownClass, Unknown: true, USD: ans.Intent}
+			}
+			if held == 0 {
+				continue
+			}
+			w.Result, _ = json.Marshal(have)
+			w.CostUSD += held
+			w.UpdatedAt = now.Format(time.RFC3339)
+			if err := store.SaveBackfillWindow(tx, w); err != nil {
+				return err
+			}
+			if err := store.AddBackfillRunSpend(tx, runID, held, now.Format(time.RFC3339)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // pbReviewItem is one claim of the pilot review set (ids only; the text is read when shown).
@@ -971,7 +1104,7 @@ func (s *Service) pbSubmit(ctx context.Context, db *storage.Store, runID string,
 			skipped = append(skipped, w)
 			continue
 		}
-		v := pbMaxCost(bp, w.Lines, model, peoplebackfill.ModeBatch)
+		v := pbMaxCost(bp, model, peoplebackfill.ModeBatch)
 		if !peoplebackfill.CanSubmit(spent, reserved, next+v, run.BudgetUSD) {
 			full = true
 			break

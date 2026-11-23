@@ -15,7 +15,6 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"masamong/internal/action"
 	"masamong/internal/config"
@@ -24,6 +23,7 @@ import (
 	"masamong/internal/memory/engine"
 	"masamong/internal/memory/peoplebackfill"
 	"masamong/internal/memory/store"
+	"masamong/internal/providers/openai"
 )
 
 // A fake Anthropic host for the people backfill: the Messages API and Message Batches, with answers
@@ -37,8 +37,10 @@ type pbFakeHost struct {
 	creates   []map[string]any // POST /v1/messages/batches bodies
 	batches   map[string][]string
 	running   atomic.Bool // batches stay in progress while set
-	fullUsage atomic.Bool // report the reserved maximum: every prompt rune + 64 in, 1400 out
+	fullUsage atomic.Bool // report the reserved maximum: every prompt byte + framing written to the cache, the wire's max_tokens out
 	refuse    map[string]bool
+	drop      int // the next chat requests are read and their connection closed without an answer
+	fail500   int // the next chat requests are answered 500
 }
 
 func newPBHost(t *testing.T) *pbFakeHost {
@@ -72,6 +74,19 @@ func (h *pbFakeHost) serve(w http.ResponseWriter, r *http.Request) {
 		var req map[string]any
 		_ = json.Unmarshal(body, &req)
 		h.chats = append(h.chats, req)
+		if h.drop > 0 {
+			h.drop--
+			if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
+				_ = conn.Close() // accepted and maybe billed, but no answer arrives
+			}
+			return
+		}
+		if h.fail500 > 0 {
+			h.fail500--
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"api_error","message":"internal"}}`))
+			return
+		}
 		_ = json.NewEncoder(w).Encode(h.message(req, false))
 	case r.Method == http.MethodPost && path == "/v1/messages/batches":
 		var req struct {
@@ -130,13 +145,14 @@ func (h *pbFakeHost) message(req map[string]any, refuse bool) map[string]any {
 	var all []string
 	pbStrings(req["system"], "system", &all)
 	pbStrings(req["messages"], "messages", &all)
-	runes := 0
+	bytes := 0
 	for _, s := range all {
-		runes += utf8.RuneCountInString(s)
+		bytes += len(s)
 	}
-	in, out := 400, 60
+	in, write, out := 400, 0, 60
 	if h.fullUsage.Load() {
-		in, out = runes+64, pbMaxTokens
+		maxOut, _ := req["max_tokens"].(float64)
+		in, write, out = 0, bytes+pbFraming, int(maxOut)
 	}
 	text, stop := pbFakeAnswer(model, strings.Join(all, "\n")), "end_turn"
 	if refuse {
@@ -144,7 +160,7 @@ func (h *pbFakeHost) message(req map[string]any, refuse bool) map[string]any {
 	}
 	return map[string]any{"id": "msg_fake", "type": "message", "role": "assistant", "model": model,
 		"content": []any{map[string]any{"type": "text", "text": text}}, "stop_reason": stop,
-		"usage": map[string]any{"input_tokens": in, "output_tokens": out}}
+		"usage": map[string]any{"input_tokens": in, "cache_creation_input_tokens": write, "output_tokens": out}}
 }
 
 // pbStrings collects the text of a request: string system and content values and text blocks.
@@ -527,7 +543,8 @@ func TestPeopleBackfillPilotAndRun(t *testing.T) {
 	s := pbService(t, h, "anthropic")
 	pbSeed(t, s, 70)
 	token, run := pbPiloted(t, s, nil)
-	// both models, standard API, every pilot window once each; no temperature, top-level cache_control
+	// both models, standard API, every pilot window once each; no temperature, no cache_control, an output
+	// limit the reservation covers
 	h.mu.Lock()
 	chats := slices.Clone(h.chats)
 	h.mu.Unlock()
@@ -540,9 +557,11 @@ func TestPeopleBackfillPilotAndRun(t *testing.T) {
 		if _, ok := c["temperature"]; ok {
 			t.Fatalf("a request with temperature: %v", c["temperature"])
 		}
-		cc, _ := c["cache_control"].(map[string]any)
-		if cc["type"] != "ephemeral" {
-			t.Fatalf("no ephemeral cache_control: %v", c)
+		if _, ok := c["cache_control"]; ok {
+			t.Fatalf("a request with cache_control: %v", c["cache_control"])
+		}
+		if mt, _ := c["max_tokens"].(float64); mt < pbMaxTokens || mt > pbWireOut {
+			t.Fatalf("max_tokens on the wire %v, reserved %d", c["max_tokens"], pbWireOut)
 		}
 	}
 	if models[string(peoplebackfill.ModelHaiku)] != peoplebackfill.PilotSize || models[string(peoplebackfill.ModelSonnet)] != peoplebackfill.PilotSize {
@@ -611,8 +630,11 @@ func TestPeopleBackfillPilotAndRun(t *testing.T) {
 		if _, ok := p["temperature"]; ok || p["model"] != string(peoplebackfill.ModelHaiku) {
 			t.Fatalf("batch params: %v", p)
 		}
-		if cc, _ := p["cache_control"].(map[string]any); cc["type"] != "ephemeral" {
-			t.Fatalf("batch item without cache_control: %v", p)
+		if _, ok := p["cache_control"]; ok {
+			t.Fatalf("batch item with cache_control: %v", p)
+		}
+		if mt, _ := p["max_tokens"].(float64); mt < pbMaxTokens || mt > pbWireOut {
+			t.Fatalf("batch max_tokens %v, reserved %d", p["max_tokens"], pbWireOut)
 		}
 	}
 	c, _ := store.CountBackfillWindows(s.Store.Reader(), done.ID)
@@ -662,7 +684,7 @@ func pbWindowMax(t *testing.T, s *Service, run store.BackfillRun) []float64 {
 		if err != nil || !bp.ok {
 			t.Fatal(err, bp.ok)
 		}
-		out = append(out, pbMaxCost(bp, w.Lines, peoplebackfill.ModelHaiku, peoplebackfill.ModeBatch))
+		out = append(out, pbMaxCost(bp, peoplebackfill.ModelHaiku, peoplebackfill.ModeBatch))
 	}
 	return out
 }
@@ -1017,5 +1039,159 @@ func TestPeopleBackfillCapIsServerTotal(t *testing.T) {
 	st := out["run"].(map[string]any)
 	if got := st["guild_spent_usd"].(float64); got < 2.95+run.SpentUSD-1e-6 || got > 2.95+run.SpentUSD+1e-6 {
 		t.Fatalf("status server total %v, run %v", got, run.SpentUSD)
+	}
+}
+
+// The reservation of a window is the most it can be billed: every input token written to the cache
+// (1.25 of the input price) and the whole output limit on the wire, whatever the text's language.
+func TestPeopleBackfillReservesCacheWrites(t *testing.T) {
+	for _, bp := range []pbPrompt{
+		{user: strings.Repeat("a", 4000-64)},
+		{user: strings.Repeat("🧪", 2000)},
+		{system: strings.Repeat("s", 1100), user: strings.Repeat("u", 6000)},
+		{system: "시스템", user: strings.Repeat("가나다라 ", 900)},
+	} {
+		for _, model := range []peoplebackfill.Model{peoplebackfill.ModelHaiku, peoplebackfill.ModelSonnet} {
+			for _, mode := range []peoplebackfill.Mode{peoplebackfill.ModeBatch, peoplebackfill.ModeStandard} {
+				reserved := pbMaxCost(bp, model, mode)
+				// a token is at least one byte: the prompt's bytes bound its tokens, all billed as cache writes
+				in := len(bp.system) + len(bp.user) + pbFraming
+				for _, res := range []*openai.ChatResult{
+					{PromptTokens: 4000, CacheWriteTokens: 4000, CompletionTokens: 1400},
+					{PromptTokens: in, CacheWriteTokens: in, CompletionTokens: pbWireOut},
+					{PromptTokens: in, CompletionTokens: pbWireOut},
+				} {
+					if res.PromptTokens > in {
+						continue
+					}
+					if billed := pbSettle(res, model, mode); billed > reserved+1e-12 {
+						t.Fatalf("%s %s: reserved %.6f, billable %.6f (%+v)", model, mode, reserved, billed, res)
+					}
+				}
+			}
+		}
+	}
+}
+
+// A pilot send whose answer never arrives (the host read it and the connection closed) may have been
+// billed: it is charged at its reserved maximum, the pilot stops until the operator goes on, and the
+// operator's resume asks it again under a new reservation; it is never resent by the client.
+func TestPeopleBackfillPilotUnknownSendIsHeld(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	dry := pbDry(t, s, nil)
+	h.mu.Lock()
+	h.drop = 1
+	h.mu.Unlock()
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": dry["token"], "guild_id": "g1"}); !res.OK {
+		t.Fatalf("pilot: %+v", res.Error)
+	}
+	stopped := pbWait(t, s, "unknown stop", pbState(store.BackfillStopped))
+	if stopped.StoppedBy != "submit_unknown" || stopped.PilotDone {
+		t.Fatalf("pilot after an unknown send: %+v", stopped)
+	}
+	ws, _ := store.BackfillWindows(s.Store.Reader(), stopped.ID, true)
+	var unknown []pbAnswer
+	held := 0.0
+	for _, w := range ws {
+		for m, a := range pbAnswers(w.Result) {
+			if a.Unknown {
+				unknown = append(unknown, a)
+				bp, err := s.pbBuildPrompt(s.Store, "g1", w)
+				if err != nil {
+					t.Fatal(err)
+				}
+				held = pbMaxCost(bp, peoplebackfill.Model(m), peoplebackfill.ModeStandard)
+			}
+			if a.Intent != 0 {
+				t.Fatalf("an intent left after the pilot stopped: %+v", a)
+			}
+		}
+	}
+	if len(unknown) != 1 || unknown[0].Failed != pbUnknownClass || unknown[0].USD != held {
+		t.Fatalf("unknown answers: %+v (held %v)", unknown, held)
+	}
+	var usage float64
+	if err := s.Store.Reader().QueryRow(`SELECT COALESCE(SUM(usd),0) FROM memory_spend WHERE kind=?`, store.SpendPeopleBackfill).Scan(&usage); err != nil {
+		t.Fatal(err)
+	}
+	if stopped.SpentUSD < held || stopped.SpentUSD-held > usage+1e-9 {
+		t.Fatalf("run spend %v: held %v, reported usage %v", stopped.SpentUSD, held, usage)
+	}
+	h.mu.Lock()
+	sentBefore := len(h.chats)
+	h.mu.Unlock()
+	if sentBefore >= 2*peoplebackfill.PilotSize {
+		t.Fatalf("the pilot went on after an unknown send: %d calls", sentBefore)
+	}
+	// the operator resumes: only the missing and the unknown answers are asked, each once
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": dry["token"], "guild_id": "g1"}); !res.OK {
+		t.Fatalf("resume: %+v", res.Error)
+	}
+	done := pbWait(t, s, "resumed pilot", pbState(store.BackfillPiloted))
+	h.mu.Lock()
+	total := len(h.chats)
+	h.mu.Unlock()
+	if total != 2*peoplebackfill.PilotSize+1 {
+		t.Fatalf("calls: %d, want every answer once plus the lost one", total)
+	}
+	if done.SpentUSD < stopped.SpentUSD {
+		t.Fatalf("the held maximum was released: %v → %v", stopped.SpentUSD, done.SpentUSD)
+	}
+}
+
+// A send cut by a crash between its stored intent and its answer is charged at its maximum when the pilot
+// is resumed, then asked again.
+func TestPeopleBackfillPilotIntentSurvivesCrash(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	_, run := pbPiloted(t, s, nil)
+	ws, _ := store.BackfillWindows(s.Store.Reader(), run.ID, true)
+	w := ws[0]
+	have := pbAnswers(w.Result)
+	have[string(peoplebackfill.ModelSonnet)] = pbAnswer{Hash: "h", Intent: 0.5}
+	w.Result, _ = json.Marshal(have)
+	if err := store.SaveBackfillWindow(s.Store.DB, w); err != nil {
+		t.Fatal(err)
+	}
+	// as a restart leaves a cut pilot
+	if _, err := s.Store.DB.Exec(`UPDATE people_backfill_run SET state='stopped', stopped_by='restart', pilot_done=0 WHERE id=?`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	h.mu.Lock()
+	before := len(h.chats)
+	h.mu.Unlock()
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": run.Token, "guild_id": "g1"}); !res.OK {
+		t.Fatalf("resume: %+v", res.Error)
+	}
+	done := pbWait(t, s, "resumed pilot", pbState(store.BackfillPiloted))
+	h.mu.Lock()
+	after := len(h.chats)
+	h.mu.Unlock()
+	if after-before != 1 {
+		t.Fatalf("resume asked %d calls, want the cut one only", after-before)
+	}
+	if done.SpentUSD < run.SpentUSD+0.5-1e-9 {
+		t.Fatalf("the cut send is not charged at its maximum: %v → %v", run.SpentUSD, done.SpentUSD)
+	}
+}
+
+// Fable R8: a legitimate answer whose whole prompt was written to the cache (usage
+// cache_creation_input_tokens equal to the prompt) settles above a reservation that priced input at the
+// base rate; the reservation must still be an upper bound.
+func TestPeopleBackfillReservationIsAnUpperBound(t *testing.T) {
+	bp := pbPrompt{system: strings.Repeat("s", 1100), user: strings.Repeat("u", 6000)}
+	for _, model := range []peoplebackfill.Model{peoplebackfill.ModelHaiku, peoplebackfill.ModelSonnet} {
+		for _, mode := range []peoplebackfill.Mode{peoplebackfill.ModeBatch, peoplebackfill.ModeStandard} {
+			reserved := pbMaxCost(bp, model, mode)
+			prompt := 1100 + 6000 + 64
+			// the adapter reports PromptTokens = input + cache_read + cache_creation
+			res := &openai.ChatResult{PromptTokens: prompt, CacheWriteTokens: prompt, CompletionTokens: pbMaxTokens}
+			if settled := pbSettle(res, model, mode); settled > reserved {
+				t.Errorf("%s %s: settled %.6f > reserved %.6f (+%.0f%%)", model, mode, settled, reserved, (settled/reserved-1)*100)
+			}
+		}
 	}
 }

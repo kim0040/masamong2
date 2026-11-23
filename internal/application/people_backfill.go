@@ -61,8 +61,15 @@ const (
 	pbPageLines     = 2000 // observations read per page
 	pbChunkMax      = 4 * pbPageLines
 	pbMaxBatch      = 1000 // windows per Message Batches job (contract §5)
-	pbMaxTokens     = 1400 // output limit of one window (the room-memory extraction's)
-	pbMaxAttempts   = 3    // sends of one window before it is failed
+	pbMaxTokens     = 1400 // output limit of one window's answer (the room-memory extraction's)
+	// pbThinkRoom is the output room the adapter adds on top of pbMaxTokens when the model may think at
+	// effort low (openai thinkingRoom, the thinking headroom, a manual thinking budget: all 1024), so
+	// pbWireOut is the most output tokens one request can be billed for.
+	pbThinkRoom = 1024
+	pbWireOut   = pbMaxTokens + pbThinkRoom
+	// pbFraming bounds the tokens the Messages format adds around the system and user text.
+	pbFraming       = 256
+	pbMaxAttempts   = 3 // sends of one window before it is failed
 	pbPilotWorkers  = 4
 	pbHearsaySample = 30
 	// pbHardGap is the segmenter's default hard cut (episodes.Options.HardGap): a page is cut only where
@@ -680,6 +687,8 @@ func (s *Service) pbAdapter(doc config.Document, want string) (string, *openai.A
 	}
 	client := providers.NewClient(120*time.Second, s.Log)
 	client.MaxBody = 64 << 20
+	client.MaxRetries = 0 // a paid call is never sent again by the client: every send has its own reservation
+	client.HTTP.Transport = pbSendTracker{base: client.HTTP.Transport}
 	a := newLLMAdapter(client, p, cred)
 	if a.API != openai.APIAnthropic || !pbNativeAnthropic(a.BaseURL) {
 		return id, nil, errPBNoAnthropic // the resolved destination, checked again
@@ -698,9 +707,11 @@ func (s *Service) pbProviderFail(req action.Request, err error) action.Result {
 	return action.Fail(req, errcode.ProviderUnconfigured, "people_backfill.no_anthropic", s.msg(req, "people_backfill.no_anthropic"), nil)
 }
 
-// pbRequest is one window's request: no temperature, top-level ephemeral cache_control.
+// pbRequest is one window's request: no temperature, no cache_control (every window is unique, so a
+// cache breakpoint would only add the cache-write surcharge), thinking at effort low with its room, and
+// sent once (Once: an answer cut at the limit is not asked again; each send has its own reservation).
 func pbRequest(model peoplebackfill.Model, bp pbPrompt) openai.ChatRequest {
-	return openai.ChatRequest{Model: string(model), MaxTokens: pbMaxTokens, EphemeralCache: true,
+	return openai.ChatRequest{Model: string(model), MaxTokens: pbMaxTokens, Effort: "low", Once: true,
 		Messages: []openai.Message{{Role: "system", Content: bp.system}, {Role: "user", Content: bp.user}}}
 }
 
