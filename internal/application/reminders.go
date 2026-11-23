@@ -850,15 +850,11 @@ func (s *Service) deliverRows(ctx context.Context, due []reminder, now time.Time
 				s.dropReminderContext(r.ID)
 				continue
 			}
-		} else if next, ok := r.Repeat.Next(at, loc); now.Sub(at) > grace || (ok && !next.After(now)) {
-			// a series that was not served (the daemon was off, or grace is longer than its interval): the
-			// newest occurrence still inside grace is sent and the older ones are skipped, never sent in a burst
-			if occ, ok := r.Repeat.Latest(now, grace, loc); ok {
-				at = occ
-			} else if now.Sub(at) > grace {
-				s.skipSeries(r, now)
-				continue
-			}
+		} else if occ, skip := seriesDue(*r.Repeat, at, now, grace, loc); skip {
+			s.skipSeries(r, now)
+			continue
+		} else {
+			at = occ
 		}
 		if r.Destination == "dm" {
 			if until := s.quietUntil(s.userPrefs(r.OwnerID), now); until.After(now) {
@@ -929,22 +925,22 @@ func (s *Service) deliverRows(ctx context.Context, due []reminder, now time.Time
 				s.dropReminderContext(r.ID)
 			}
 		} else {
-			switch {
-			case err == nil:
+			switch oneOffOutcome(err, r.Attempts) {
+			case reminderOutcomeSent:
 				if _, err := db.DB.Exec(`UPDATE reminders SET status='sent', delivered_id=?, error='', updated_at=? WHERE id=?`, msgID, outcomeStamp, r.ID); err != nil {
 					s.warnRecordFailed("reminders: sent mark failed", err)
 				}
-			case errors.Is(err, ErrDMClosed):
+			case reminderOutcomeDMClosed:
 				if _, err := db.DB.Exec(`UPDATE reminders SET status='failed', error='dm_closed', updated_at=? WHERE id=?`, outcomeStamp, r.ID); err != nil {
 					s.warnRecordFailed("reminders: failed mark failed", err)
 				}
-			case errors.Is(err, ErrNotDelivered) && r.Attempts < reminderMaxAttempts:
+			case reminderOutcomeRetry:
 				// Discord answered with a refusal: nothing was posted, try again a little later
-				next := s.Clock.Now().Add(time.Duration(r.Attempts*r.Attempts) * time.Minute).UTC().Format(time.RFC3339)
+				next := s.Clock.Now().Add(reminderRetryDelay(r.Attempts)).UTC().Format(time.RFC3339)
 				if _, err := db.DB.Exec(`UPDATE reminders SET status='scheduled', due_at=?, error=?, updated_at=? WHERE id=?`, next, clip(err.Error(), 300), outcomeStamp, r.ID); err != nil {
 					s.warnRecordFailed("reminders: retry mark failed", err)
 				}
-			case errors.Is(err, ErrNotDelivered):
+			case reminderOutcomeFailed:
 				if _, err := db.DB.Exec(`UPDATE reminders SET status='failed', error=?, updated_at=? WHERE id=?`, clip(err.Error(), 300), outcomeStamp, r.ID); err != nil {
 					s.warnRecordFailed("reminders: failed mark failed", err)
 				}
