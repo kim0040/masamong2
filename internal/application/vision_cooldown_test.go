@@ -229,7 +229,7 @@ func TestVisionAdapterIsKeptBetweenCalls(t *testing.T) {
 		"key reference": other(func(p *config.Provider, m *config.Model) { p.CredentialRef = "env:ANOTHER_KEY" }),
 		"model":         other(func(p *config.Provider, m *config.Model) { m.Model = "eyes/other" }),
 	} {
-		t.Setenv("ANOTHER_KEY", "k2")
+		svc.SetEnvForTest(t, "ANOTHER_KEY", "k2")
 		a, err := application.VisionAdapterForTest(svc, *d)
 		if err != nil || a == a1 {
 			t.Fatalf("a changed %s builds another adapter: %v", name, err)
@@ -278,7 +278,7 @@ func TestVisionAdapterWithoutAKeyIsKeptBriefly(t *testing.T) {
 	svc, _ := visionSvc(t)
 	clk := &stepClock{t: time.Now()}
 	svc.Clock = clk
-	t.Setenv("MASAMONG_TEST_NO_SUCH_KEY", "")
+	svc.SetEnvForTest(t, "MASAMONG_TEST_NO_SUCH_KEY", "")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["eyes-host"] = config.Provider{Kind: config.KindOpenAI, BaseURL: "http://127.0.0.1:9", CredentialRef: "env:MASAMONG_TEST_NO_SUCH_KEY"}
 		d.Models["vision"] = config.Model{Provider: "eyes-host", Model: "eyes/model"}
@@ -287,7 +287,7 @@ func TestVisionAdapterWithoutAKeyIsKeptBriefly(t *testing.T) {
 	if a1 != nil && a1.Configured() {
 		t.Fatal("the key is not set")
 	}
-	t.Setenv("MASAMONG_TEST_NO_SUCH_KEY", "k")
+	svc.SetEnvForTest(t, "MASAMONG_TEST_NO_SUCH_KEY", "k")
 	if again, _ := application.VisionAdapterForTest(svc, svc.Doc()); again != a1 {
 		t.Fatal("a keyless adapter is kept for a few seconds (no lookup per turn)")
 	}
@@ -302,7 +302,7 @@ func TestVisionAdapterWithoutAKeyIsKeptBriefly(t *testing.T) {
 // are rebuilt anyway, so a connection test right after the save uses the new key.
 func TestKeySavedUnderTheSameReferenceRebuildsTheAdapters(t *testing.T) {
 	svc, _ := visionSvc(t)
-	t.Setenv("MASAMONG_TEST_ROTATED_KEY", "old")
+	svc.SetEnvForTest(t, "MASAMONG_TEST_ROTATED_KEY", "old")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["eyes-host"] = config.Provider{Kind: config.KindOpenAI, BaseURL: "http://127.0.0.1:9", CredentialRef: "env:MASAMONG_TEST_ROTATED_KEY"}
 	})
@@ -310,7 +310,7 @@ func TestKeySavedUnderTheSameReferenceRebuildsTheAdapters(t *testing.T) {
 	if before == nil {
 		t.Fatal("no adapter for the provider")
 	}
-	t.Setenv("MASAMONG_TEST_ROTATED_KEY", "new")
+	svc.SetEnvForTest(t, "MASAMONG_TEST_ROTATED_KEY", "new")
 	if r := exec(svc, "providers.credentials", map[string]any{"id": "eyes-host", "credential_ref": "env:MASAMONG_TEST_ROTATED_KEY"}); !r.OK {
 		t.Fatalf("credentials: %+v", r.Error)
 	}

@@ -29,7 +29,7 @@ func TestDiscordCheckFillsTheBotIDFromTheToken(t *testing.T) {
 	if r := exec(svc, "discord.check", nil); r.OK || r.Error.Args["reason"] != "no_token" {
 		t.Fatalf("no token yet: %+v", r)
 	}
-	t.Setenv("MASAMONG_DISCORD_TOKEN", "tok-1")
+	svc.SetEnvForTest(t, "MASAMONG_DISCORD_TOKEN", "tok-1")
 	res := out(t, svc, "discord.check", map[string]any{"apply": true})
 	if res["bot_id"] != "172150183260323840" || res["bot_name"] != "masamong" || res["message_content_portal"] != true || res["stored"] != true {
 		t.Fatalf("check: %v", res)
@@ -41,7 +41,7 @@ func TestDiscordCheckFillsTheBotIDFromTheToken(t *testing.T) {
 	if inv := out(t, svc, "channels.invite", nil); inv["url"] == nil {
 		t.Fatalf("invite from the stored id: %v", inv)
 	}
-	t.Setenv("MASAMONG_DISCORD_TOKEN", "wrong")
+	svc.SetEnvForTest(t, "MASAMONG_DISCORD_TOKEN", "wrong")
 	if r := exec(svc, "discord.check", nil); r.OK || r.Error.Args["reason"] != "token_rejected" {
 		t.Fatalf("a rejected token: %+v", r)
 	}
@@ -50,11 +50,11 @@ func TestDiscordCheckFillsTheBotIDFromTheToken(t *testing.T) {
 // The console asks Discord about the token only when one can be read, so channels.list says so.
 func TestChannelsListSaysWhetherADiscordTokenIsSaved(t *testing.T) {
 	svc := setupSvc(t)
-	t.Setenv("MASAMONG_DISCORD_TOKEN", "")
+	svc.SetEnvForTest(t, "MASAMONG_DISCORD_TOKEN", "")
 	if got := out(t, svc, "channels.list", nil)["discord_token"]; got != false {
 		t.Fatalf("no token: discord_token = %v", got)
 	}
-	t.Setenv("MASAMONG_DISCORD_TOKEN", "tok-1")
+	svc.SetEnvForTest(t, "MASAMONG_DISCORD_TOKEN", "tok-1")
 	if got := out(t, svc, "channels.list", nil)["discord_token"]; got != true {
 		t.Fatalf("token set: discord_token = %v", got)
 	}

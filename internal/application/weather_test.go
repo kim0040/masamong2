@@ -75,7 +75,7 @@ func weatherSvc(t *testing.T, f *fakeWeather, kmaKey bool, openMeteoLimit int) *
 		map[string]any{"path": []any{"providers", "kma", "base_url"}, "value": f.srv.URL},
 	}
 	if kmaKey {
-		t.Setenv("WEATHER_TEST_KMA", "kma-key")
+		svc.SetEnvForTest(t, "WEATHER_TEST_KMA", "kma-key")
 		ops = append(ops, map[string]any{"path": []any{"providers", "kma", "credential_ref"}, "value": "env:WEATHER_TEST_KMA"})
 	}
 	if r := exec(svc, "config.patch", map[string]any{"ops": ops}); !r.OK {

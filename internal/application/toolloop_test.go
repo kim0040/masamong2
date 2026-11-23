@@ -78,7 +78,7 @@ func toolCallMsg(calls ...[2]string) map[string]any {
 func loopSvc(t *testing.T, mode string, f *loopServer) *application.Service {
 	svc := setupSvc(t)
 	srv := f.start(t)
-	t.Setenv("FAKE_LOOP_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_LOOP_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["openrouter"] = config.Provider{Kind: config.KindOpenAI, BaseURL: srv.URL, CredentialRef: "env:FAKE_LOOP_KEY"}
 		d.Providers["openmeteo"] = config.Provider{Kind: config.KindOpenMeteo, Disabled: true} // the weather answers "unconfigured"
@@ -285,11 +285,11 @@ func TestChatTurnEndsTheLoopOnAFinalToolsResult(t *testing.T) {
 		_, _ = w.Write([]byte(`{"meta":{"total_count":1,"same_name":{"selected_region":"서울 마포구 홍대"}},"documents":[{"place_name":"골목 카페","place_url":"http://place.map.kakao.com/1","address_name":"서울 마포구 1"}]}`))
 	}))
 	defer kakao.Close()
-	t.Setenv("KAKAO_TEST", "kakao-secret")
 	run := func(t *testing.T, final, query string) (application.ChatResultForTest, int) {
 		f := &loopServer{plan: `{"memory_requirement":"none","tool_plan":[]}`, script: []map[string]any{
 			toolCallMsg([2]string{"places__search", `{"query":"` + query + `"}`}), {"role": "assistant", "content": "-"}}}
 		svc := loopSvc(t, "loop", f)
+		svc.SetEnvForTest(t, "KAKAO_TEST", "kakao-secret")
 		applyDoc(t, svc, func(d *config.Document) {
 			p := d.Providers["kakao"]
 			p.BaseURL, p.CredentialRef = kakao.URL, "env:KAKAO_TEST"

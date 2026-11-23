@@ -132,7 +132,7 @@ func TestPracticeInstanceAnswersOfflineFromTheSample(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()
-	t.Setenv("PRACTICE_TEST_KEY", "sk-test")
+	p.SetEnvForTest(t, "PRACTICE_TEST_KEY", "sk-test")
 	ops := []any{
 		map[string]any{"path": []any{"providers", "real"}, "value": map[string]any{"kind": "openai_compat", "base_url": srv.URL, "credential_ref": "env:PRACTICE_TEST_KEY"}},
 		map[string]any{"path": []any{"models", "response"}, "value": map[string]any{"provider": "real", "model": "gpt-real"}},

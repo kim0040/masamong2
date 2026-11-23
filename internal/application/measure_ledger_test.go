@@ -34,7 +34,7 @@ func exaServer(t *testing.T, cost float64) *httptest.Server {
 func measureSvc(t *testing.T, f *loopServer, searchURL string, mutate func(d *config.Document, hostURL string)) *application.Service {
 	svc := setupSvc(t)
 	host := f.start(t)
-	t.Setenv("FAKE_LOOP_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_LOOP_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["openrouter"] = config.Provider{Kind: config.KindOpenAI, BaseURL: host.URL, CredentialRef: "env:FAKE_LOOP_KEY"}
 		d.Providers["openmeteo"] = config.Provider{Kind: config.KindOpenMeteo, Disabled: true}

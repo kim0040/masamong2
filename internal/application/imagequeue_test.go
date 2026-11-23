@@ -156,7 +156,7 @@ func imageChatSvc(t *testing.T) (*application.Service, *gatedImages, *pictureGat
 	img := newGatedImages(t)
 	svc := setupSvc(t)
 	serveAnyServer(t, svc)
-	t.Setenv("FAKE_IMG_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_IMG_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Discord.Enabled = true
 		d.Providers["img"] = config.Provider{Kind: config.KindOpenAI, BaseURL: img.url, CredentialRef: "env:FAKE_IMG_KEY"}

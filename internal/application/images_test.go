@@ -42,7 +42,7 @@ func TestImagesGenerateSavesThePicture(t *testing.T) {
 	if r := as(svc, "images.generate", map[string]any{"prompt": "고양이"}, u); !r.OK || r.Output["status"] != "unconfigured" {
 		t.Fatalf("without an image model: %+v", r)
 	}
-	t.Setenv("FAKE_IMG_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_IMG_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["img"] = config.Provider{Kind: config.KindOpenAI, BaseURL: url, CredentialRef: "env:FAKE_IMG_KEY"}
 		d.Models["image"] = config.Model{Provider: "img", Model: "google/gemini-image"}
