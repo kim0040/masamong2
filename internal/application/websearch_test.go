@@ -18,7 +18,7 @@ import (
 // pointAt moves a provider to a test server and gives it a key from the environment.
 func pointAt(t *testing.T, svc *application.Service, id, url, env, key string) {
 	t.Helper()
-	t.Setenv(env, key)
+	svc.SetEnvForTest(t, env, key)
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{
 		map[string]any{"path": []any{"providers", id, "base_url"}, "value": url},
 		map[string]any{"path": []any{"providers", id, "credential_ref"}, "value": "env:" + env},

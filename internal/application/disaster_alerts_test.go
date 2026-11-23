@@ -604,7 +604,7 @@ func TestDisasterOlderWarningStateIsAStartingPoint(t *testing.T) {
 			if err := svc.Close(); err != nil {
 				t.Fatal(err)
 			}
-			reopened, err := application.Open(svc.DataRoot, clock.Fixed{T: now.Add(5 * time.Minute)}, false)
+			reopened, err := application.ReopenForTest(svc, clock.Fixed{T: now.Add(5 * time.Minute)}, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -823,7 +823,7 @@ func TestDisasterDeliveriesFollowTheLevelInForce(t *testing.T) {
 			if err := svc.Close(); err != nil {
 				t.Fatal(err)
 			}
-			reopened, err := application.Open(svc.DataRoot, clock.Fixed{T: start.Add(20 * time.Minute)}, false)
+			reopened, err := application.ReopenForTest(svc, clock.Fixed{T: start.Add(20 * time.Minute)}, false)
 			if err != nil {
 				t.Fatal(err)
 			}

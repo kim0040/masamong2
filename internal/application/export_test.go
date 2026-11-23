@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"masamong/internal/chat"
+	"masamong/internal/clock"
 	"masamong/internal/config"
 	"masamong/internal/features/reminders"
 	"masamong/internal/lang"
@@ -32,6 +33,17 @@ func (c *credentialStandIns) setForTest(t testing.TB, name, value string) {
 		t.Fatal(err)
 	}
 	c.refs.Store("env:"+name, "file:"+path)
+}
+
+// ReopenForTest opens prev's data root again the way a restart would: the environment's variables that
+// SetEnvForTest gave prev are still there.
+func ReopenForTest(prev *Service, clk clock.Clock, webBuild bool) (*Service, error) {
+	return openService(prev.DataRoot, clk, webBuild, nil, func(h *serviceHooks) {
+		prev.hooks.credentials.refs.Range(func(k, v any) bool {
+			h.credentials.refs.Store(k, v)
+			return true
+		})
+	})
 }
 
 // SetDocForTest swaps the live configuration without the apply flow (no revision, no audit), for
