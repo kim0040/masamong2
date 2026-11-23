@@ -15,6 +15,7 @@
 | autostart | — |
 | backfill | — |
 | backup | — |
+| channels | — |
 | cli | — |
 | common | — |
 | config | — |
@@ -65,3 +66,4 @@
 | updates | — |
 | usage | — |
 | weather | — |
+| web | — |
