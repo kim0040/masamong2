@@ -238,3 +238,49 @@ func TestAlertQueueDoesNotWaitForAnAlertSend(t *testing.T) {
 		t.Fatalf("queue after the tick = %v, want [2]", got)
 	}
 }
+
+// A send removes from the queue only the events it carried. When the cap pushes a sent event out while it
+// sends and an identical one (same key, arguments and second) is queued, that one stays for the next
+// message (Sol review of E8, finding 1).
+func TestAlertSendKeepsAnIdenticalEventQueuedDuringIt(t *testing.T) {
+	s, dm := alertQueueService(t)
+	ctx := context.Background()
+	s.alertTick(ctx)
+	dm.take()
+	same := map[string]any{"n": -1}
+	s.queueAlert(alertMemoryScope, same)
+	entered, free := make(chan struct{}), make(chan struct{})
+	var first atomic.Bool
+	dm.mu.Lock()
+	dm.onSend = func() {
+		if first.CompareAndSwap(false, true) {
+			close(entered)
+			<-free
+		}
+	}
+	dm.mu.Unlock()
+	ticked := make(chan struct{})
+	go func() { defer close(ticked); s.alertTick(ctx) }()
+	<-entered
+	s.queueAlert(alertMemoryScope, same) // the clock has not moved: equal to the one being sent
+	for i := range alertMaxQueued - 1 {
+		s.queueAlert(alertMemoryScope, map[string]any{"n": i})
+	}
+	close(free)
+	<-ticked
+	if texts := dm.take(); len(texts) != 1 || !strings.Contains(texts[0], "(-1)") {
+		t.Fatalf("first message: %q", texts)
+	}
+	got := queuedNs(t, s)
+	if len(got) != alertMaxQueued || got[0] != -1 {
+		t.Fatalf("queue after the send = %v, want the second -1 and 0..%d", got, alertMaxQueued-2)
+	}
+	s.alertTick(ctx)
+	texts := dm.take()
+	if len(texts) != 1 || !strings.Contains(texts[0], "(-1)") {
+		t.Fatalf("the event queued during the send did not go out next: %q", texts)
+	}
+	if got := queuedNs(t, s); len(got) != 0 {
+		t.Fatalf("queue after the second send = %v", got)
+	}
+}

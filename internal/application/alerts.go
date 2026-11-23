@@ -57,6 +57,9 @@ var alertSkip = map[string]bool{
 var severityRank = map[string]int{"info": 0, "warn": 1, "danger": 2}
 
 type alertEvent struct {
+	// ID tells events apart that are otherwise equal (same key, arguments and second), so a send removes
+	// from the queue only the ones it carried. Events queued before it existed have none.
+	ID   string         `json:"id,omitempty"`
 	Key  string         `json:"key"`
 	Args map[string]any `json:"args,omitempty"`
 	At   string         `json:"at"`
@@ -88,7 +91,7 @@ func (s *Service) queueAlert(key string, args map[string]any) {
 	if s.Store == nil || s.practice {
 		return
 	}
-	e := alertEvent{Key: key, Args: args, At: s.Clock.Now().UTC().Format(time.RFC3339)}
+	e := alertEvent{ID: newID("al_"), Key: key, Args: args, At: s.Clock.Now().UTC().Format(time.RFC3339)}
 	err := kvUpdate(s, alertQueueKey, func(q []alertEvent) []alertEvent {
 		q = append(q, e)
 		if len(q) > alertMaxQueued {
@@ -101,9 +104,9 @@ func (s *Service) queueAlert(key string, args map[string]any) {
 	}
 }
 
-// dropSentAlerts removes from the queue the events one message carried. They were its first events; what
-// was queued while the message went out stays for the next one. (Were an event cut by the cap meanwhile
-// and an identical one queued after it, that one goes instead: the operators read the same line.)
+// dropSentAlerts removes from the queue the events one message carried, matched by their ID; what was
+// queued while the message went out stays for the next one, even an event equal to a sent one that the
+// cap pushed out meanwhile.
 func (s *Service) dropSentAlerts(sent []alertEvent) error {
 	if len(sent) == 0 {
 		return nil
@@ -126,7 +129,7 @@ func (s *Service) dropSentAlerts(sent []alertEvent) error {
 }
 
 func alertIdentity(e alertEvent) string {
-	b, _ := json.Marshal(e) // map keys are sorted: equal events give equal text
+	b, _ := json.Marshal(e) // the ID makes it unique; map keys are sorted, so an old event without one matches its equal
 	return string(b)
 }
 
