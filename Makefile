@@ -1,6 +1,6 @@
 # Common builds. The console (internal/transport/web/ui) is committed pre-built in ui/dist, so plain
 # `go build` works without Node; run `make ui` after changing the console.
-.PHONY: ui check build test parity docs docs-record codemap release-notes try install uninstall app release
+.PHONY: ui check build test parity docs docs-record codemap testnames testnames-update release-notes try install uninstall app release
 
 ui:
 	cd internal/transport/web/ui && npm ci && npm run build
@@ -31,6 +31,14 @@ docs-record:
 # code map: writes the generated indexes under docs/code-map (a stale map fails go test ./tools/codemap)
 codemap:
 	go run ./tools/codemap
+
+# no test may disappear from internal/application/... when code moves between packages (golden: internal/application/testdata/testnames.golden)
+testnames:
+	scripts/testnames.sh
+
+# after removing a test on purpose
+testnames-update:
+	scripts/testnames.sh -update
 
 # draft the release notes of a version before tagging: make release-notes VERSION=v1.6.0 [SINCE=v1.5.1]
 # (ANTHROPIC_API_KEY in the environment; without it a draft of commit subjects is written and the exit is non-zero).

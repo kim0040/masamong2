@@ -1,0 +1,58 @@
+# What testdata/schema_upgrade_old.sql becomes after migrateAdmin: the objects whose SQL differs from a fresh store's.
+# The added columns sit at the end of the CREATE text, which is also where the add-column list put them in older databases.
+== upgraded objects that differ from a fresh store (4 objects)
+-- table audit_log on audit_log
+CREATE TABLE audit_log (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		at TEXT NOT NULL,
+		action TEXT NOT NULL,
+		via TEXT NOT NULL,
+		ok INTEGER NOT NULL,
+		code TEXT NOT NULL DEFAULT '',
+		rev_before INTEGER NOT NULL DEFAULT 0,
+		rev_after INTEGER NOT NULL DEFAULT 0,
+		summary TEXT NOT NULL DEFAULT ''
+	, actor TEXT NOT NULL DEFAULT '', actor_id TEXT NOT NULL DEFAULT '', guild_id TEXT NOT NULL DEFAULT '')
+-- table llm_calls on llm_calls
+CREATE TABLE llm_calls (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		turn_id TEXT NOT NULL DEFAULT '',
+		job_id TEXT NOT NULL DEFAULT '',
+		role TEXT NOT NULL,
+		model TEXT NOT NULL DEFAULT '',
+		provider TEXT NOT NULL DEFAULT '',
+		prompt_tokens INTEGER NOT NULL DEFAULT 0,
+		completion_tokens INTEGER NOT NULL DEFAULT 0,
+		cached_tokens INTEGER NOT NULL DEFAULT 0,
+		latency_ms INTEGER NOT NULL DEFAULT 0,
+		cost_usd REAL NOT NULL DEFAULT 0,
+		class TEXT NOT NULL DEFAULT '',
+		fallback INTEGER NOT NULL DEFAULT 0,
+		finish_reason TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL
+	, call_count INTEGER NOT NULL DEFAULT 1)
+-- table tool_calls on tool_calls
+CREATE TABLE tool_calls (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		turn_id TEXT NOT NULL DEFAULT '',
+		tool TEXT NOT NULL,
+		param_keys TEXT NOT NULL DEFAULT '[]',
+		param_sources TEXT NOT NULL DEFAULT '{}',
+		guard TEXT NOT NULL DEFAULT 'allowed',
+		status TEXT NOT NULL DEFAULT '',
+		latency_ms INTEGER NOT NULL DEFAULT 0,
+		cost_usd REAL NOT NULL DEFAULT 0,
+		result_chars INTEGER NOT NULL DEFAULT 0,
+		class TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL
+	, provider TEXT NOT NULL DEFAULT '')
+-- table user_prefs on user_prefs
+CREATE TABLE user_prefs (
+		user_id TEXT PRIMARY KEY,
+		locale TEXT NOT NULL DEFAULT '',
+		timezone TEXT NOT NULL DEFAULT '',
+		quiet_start TEXT NOT NULL DEFAULT '',
+		quiet_end TEXT NOT NULL DEFAULT '',
+		weather_region TEXT NOT NULL DEFAULT '',
+		updated_at TEXT NOT NULL
+	, update_news INTEGER NOT NULL DEFAULT 0)

@@ -1,0 +1,420 @@
+func AbandonPendingUpdate() (string, error)
+func AcceptedLocale(header string) string
+func ApplyPendingReset(dataRoot string, log *log/slog.Logger) bool
+func ApplyPendingRestore(dataRoot string, log *log/slog.Logger) *RestoreResult
+type BackfillChannel struct
+  field ChannelID string
+  field GuildID string
+  field Read int
+  field Skipped string
+  field Stored int
+  field Truncated bool
+type BackfillReport struct
+  field At string
+  field Channels []BackfillChannel
+  field Days int
+  field Stored int
+  field Trigger string
+func CancelMaintenance(dataRoot string) error
+type ChannelEditor interface
+  method EditChannel(ctx context.Context, channelID string, messageID string, card *masamong/internal/action.Card) error
+type ChannelInfo struct
+  field GuildID string
+  field ID string
+  field Name string
+  field Type string
+type ChannelPlace struct
+  field Known bool
+  field Parent string
+type ChannelPoster interface
+  method PostChannel(ctx context.Context, channelID string, replyTo string, text string, card *masamong/internal/action.Card) (string, error)
+type ChannelReactor interface
+  method React(ctx context.Context, channelID string, messageID string, emoji string) error
+type ChatInput struct
+  field Addressed func()
+  field ChannelID string
+  field Deliver func(ctx context.Context, res masamong/internal/chat.Result) string
+  field DraftRules *string
+  field DraftStyle *string
+  field DryRun bool
+  field Earlier []masamong/internal/chat.ToolResult
+  field FollowUp bool
+  field Fragments []string
+  field GuildID string
+  field ImageEarlier bool
+  field ImageOnly bool
+  field ImageSkipped map[string]int
+  field ImageTotal int
+  field Images []masamong/internal/vision.Ref
+  field Locale string
+  field MaxWait time.Duration
+  field Message string
+  field MessageID string
+  field NameOnly bool
+  field OnProgress func(masamong/internal/chat.Progress)
+  field OnRefusal func(error)
+  field OnVisionNotice func(string)
+  field PersonaRef string
+  field Proactive bool
+  field Ranking string
+  field ReadFrom int64
+  field Speaker string
+  field SpeakerID string
+  field TurnTimeout time.Duration
+const ChatQueueWait time.Duration = 120000000000
+const ChatTurnCeiling time.Duration = 330000000000
+const ChatTurnTimeout time.Duration = 180000000000
+func CleanDataLeftovers(root string) (remaining []string)
+func CleanUpdateLeftovers() error
+type CollectReport struct
+  field At string
+  field Changed int
+  field Details int
+  field Failures map[string]string
+  field New int
+  field Sources int
+type CommandHint struct
+  field Action string
+  field Name string
+type DMLimited struct
+  field Scope string
+  method (DMLimited) Error() string
+type DeletedMessage struct
+  field AuthorBot bool
+  field AuthorID string
+  field Files []string
+  field ID string
+  field Text string
+type DeliveryReport struct
+  field Class masamong/internal/errclass.Class
+  field MessageIDs []string
+  field PartEnds []int
+  field Parts int
+  field ReferenceDropped bool
+  field Retries int
+  field Sent int
+type DiscordHealthReporter interface
+  method GatewayHealth() GatewayHealth
+type DiscordHistory interface
+  method History(ctx context.Context, channelID string, afterID string, limit int) ([]HistoryMessage, error)
+type DiscordInfo interface
+  method BotUser() (id string, name string)
+  method Channels(guildID string) []ChannelInfo
+  method Connected() bool
+  method Guilds() []GuildInfo
+  method Permissions(guildID string, channelID string) (int64, bool)
+type DiscordMembership interface
+  method SharedGuildMember(context.Context, string) bool
+type DiscordReconciliationReporter interface
+  method ReconciliationBlocked() int
+type DiscordSender interface
+  method SendDM(ctx context.Context, userID string, card masamong/internal/action.Card, imageID string) error
+type DiscordStartupReporter interface
+  method StartupStatus() DiscordStartupStatus
+type DiscordStartupStatus struct
+  field Attempts int
+  field Connecting bool
+  field LastError string
+  field NextRetry string
+const EmbedReindexRequiredKey untyped string = "models.embed_reindex_required"
+var ErrChatBudget error
+var ErrChatBusy error
+var ErrChatDisabled error
+var ErrChatLimited error
+var ErrChatPaused error
+var ErrDMClosed error
+var ErrDMClosedChat error
+var ErrImageUnreadable error
+var ErrNoVision error
+var ErrNotAddressed error
+var ErrNotDelivered error
+var ErrNotThread error
+var ErrPostForbidden error
+var ErrReplyTargetGone error
+var ErrServiceClosing error
+type Event struct
+  field At time.Time
+  field Data map[string]any
+  field ID int64
+  field Kind string
+  field Ref string
+  field Revision int
+var FeedbackReasons []string
+const GatewayCheck untyped string = "check"
+type GatewayHealth struct
+  field AckAgeSec int64
+  field Connected bool
+  field Disconnects int64
+  field EventAgeSec int64
+  field LatencyMs int64
+  field Ready int64
+  field Resumed int64
+  field State string
+const GatewayOK untyped string = "ok"
+const GatewayUnknown untyped string = "unknown"
+type GuildInfo struct
+  field ID string
+  field JoinedAt string
+  field Members int
+  field Name string
+type GuildLeaver interface
+  method LeaveGuild(ctx context.Context, guildID string) error
+type HistoryMessage struct
+  field At time.Time
+  field AuthorID string
+  field AuthorName string
+  field Bot bool
+  field Content string
+  field ID string
+type ImagePoster interface
+  method PostPicture(ctx context.Context, channelID string, replyTo string, card masamong/internal/action.Card, imageID string) (string, error)
+const ImageUploadLimit untyped int = 10485760
+var ImplicitKinds []string
+func InstallDir() (string, error)
+func IsFXInputError(res masamong/internal/action.Result) bool
+type Lifecycle string
+func MaintenanceCase(dataRoot string) (string, []string)
+func MaintenancePage(dataRoot string, locale string) string
+func MaintenanceStatus(dataRoot string) map[string]any
+func NoteFirstSend(ctx context.Context)
+type ObservedMessage struct
+  field Addressed bool
+  field At time.Time
+  field AuthorID string
+  field AuthorName string
+  field BotCall string
+  field ChannelID string
+  field Content string
+  field FromBot bool
+  field GuildID string
+  field Mentions []string
+  field MentionsOthers bool
+  field MessageID string
+  field ReplyAuthorID string
+  field ReplyTo string
+  field ToSomeone bool
+func Open(dataRoot string, clk masamong/internal/clock.Clock, webBuild bool) (*Service, error)
+func OpenLogged(dataRoot string, clk masamong/internal/clock.Clock, webBuild bool, log *log/slog.Logger) (*Service, error)
+func OpenPractice(ctx context.Context, dataRoot string, locale string, log *log/slog.Logger) (*Service, error)
+type PauseState struct
+  field All bool
+  field At string
+  field Channels map[string]bool
+  field Guilds map[string]bool
+  field Reason string
+const PracticeChannel untyped string = "lounge"
+const PracticeGuild untyped string = "practice"
+func PracticeRoot(dataRoot string) string
+type ProviderHealth struct
+  field KeyUpdatedAt string
+  field LastError string
+  field LastErrorAt string
+  field LastOK string
+  field Rejected bool
+type ProviderStatus struct
+  field Builtin bool
+  field Configured bool
+  field CredentialRef string
+  field DailyLimit int
+  field Disabled bool
+  field Error string
+  field ID string
+  field KeyPresent bool
+  field Kind string
+  field Status string
+  field UsedToday int
+type ReactOnly struct
+  field Emoji string
+  method (ReactOnly) Error() string
+  method (ReactOnly) Sent()
+func RecoverMaintenance(dataRoot string, log *log/slog.Logger) error
+func RecoverUpdateAt(dir string) error
+type Registry struct
+  field Client *masamong/internal/providers.Client
+  field FX *masamong/internal/providers/fx.Adapter
+  field Finnhub *masamong/internal/providers/finnhub.Adapter
+  field KMA *masamong/internal/providers/kma.Adapter
+  field LLM map[string]*masamong/internal/providers/openai.Adapter
+  field OpenMeteo *masamong/internal/providers/openmeteo.Adapter
+  field Places *masamong/internal/providers/kakao.Adapter
+  field Quota *masamong/internal/providers.Quota
+  field Reader *masamong/internal/providers/websearch.Reader
+  field Search map[string]masamong/internal/providers/websearch.Searcher
+  method (*Registry) Probe(ctx context.Context, id string) (map[string]any, error)
+  method (*Registry) Status(id string) (ProviderStatus, bool)
+  method (*Registry) Statuses() []ProviderStatus
+func ResetPractice(dataRoot string) error
+type RestoreResult struct
+  field At string
+  field Error string
+  field Method string
+  field Name string
+  field OK bool
+  field RollbackError string
+  field RollbackOK bool
+  field Rows int64
+  field Safety string
+  field Warning string
+func RollbackMaintenance(dataRoot string) error
+func RollbackPendingUpdate() (bool, error)
+type RoomMemoryReport struct
+  field Episodes int
+  field Expired int
+  field Failed int
+  field Regenerated int
+  field Segments int
+  field States int
+  field StoppedBy string
+type Service struct
+  field CfgPath string
+  field Clock masamong/internal/clock.Clock
+  field Daemon bool
+  field DataRoot string
+  field I18n *masamong/internal/i18n.Catalog
+  field Log *log/slog.Logger
+  field Store *masamong/internal/storage.Store
+  field WebBuild bool
+  method (*Service) Backfill(ctx context.Context, trigger string, guildID string, channelID string) (BackfillReport, error)
+  method (*Service) BackfillAfterConnect(ctx context.Context)
+  method (*Service) BackupOnUpgrade()
+  method (*Service) Blocked(userID string) bool
+  method (*Service) BlockedIn(guildID string, userID string) bool
+  method (*Service) CallsSomeoneElse(guildID string, channelID string, authorID string, text string) bool
+  method (*Service) CancelPictureJobs(channelID string, messageIDs []string)
+  method (*Service) CaptureLogs(l *log/slog.Logger) *log/slog.Logger
+  method (*Service) CapturesIn(guildID string, channelID string, place ChannelPlace) bool
+  method (*Service) ChannelPolicyFor(guildID string, channelID string) masamong/internal/config.ChannelPolicy
+  method (*Service) ChatTurn(ctx context.Context, in ChatInput) (masamong/internal/chat.Result, error)
+  method (*Service) ClaimDMNotice(userID string, kind string) bool
+  method (*Service) Close() error
+  method (*Service) CloseThread(ctx context.Context, threadID string, reason string) error
+  method (*Service) CommandToChat(ctx context.Context, res masamong/internal/action.Result, in ChatInput) (masamong/internal/chat.Result, bool)
+  method (*Service) CompleteWithToken(id string, token string, result string) (masamong/internal/jobs.Job, error)
+  method (*Service) ConsentAllows(userID string, scope string) bool
+  method (*Service) DMChatAllowed(ctx context.Context, userID string) bool
+  method (*Service) DeclineThread(guildID string, channelID string, callerID string)
+  method (*Service) DeliverReplyContinuation(ctx context.Context, guildID string, channelID string, headID string, send func() (string, []string, []int)) error
+  method (*Service) Discord() DiscordInfo
+  method (*Service) Doc() masamong/internal/config.Document
+  method (*Service) DrainRedactions(ctx context.Context) error
+  method (*Service) Enqueue(typ string, idempotency string, payload string) (masamong/internal/jobs.Job, error)
+  method (*Service) Execute(ctx context.Context, req masamong/internal/action.Request) masamong/internal/action.Result
+  method (*Service) FollowUp(ctx context.Context, m ObservedMessage) bool
+  method (*Service) FollowWindowOpen(guildID string, channelID string, authorID string) bool
+  method (*Service) GuildAllowed(guildID string) bool
+  method (*Service) HasMessage(key string) bool
+  method (*Service) ImageFile(id string) (io.ReadCloser, string, error)
+  method (*Service) IsOperator(userID string) bool
+  method (*Service) LeaseComplete(id string, token string, result string, ttl time.Duration) (masamong/internal/jobs.Job, error)
+  method (*Service) LedgerDropped() int64
+  method (*Service) LifecycleRequests() <-chan Lifecycle
+  method (*Service) LinkPollMessage(pollID string, channelID string, messageID string)
+  method (*Service) LocaleFor(userID string, fallback string) string
+  method (*Service) LogDeletes(guildID string, channelID string, msgs []DeletedMessage)
+  method (*Service) LogProblem(guildID string, channelID string, kind string, tool string, class masamong/internal/errclass.Class)
+  method (*Service) MemoryAllowed(accountID string) bool
+  method (*Service) MemoryEngine() (*masamong/internal/memory/engine.Engine, error)
+  method (*Service) MessageEdited(guildID string, channelID string, messageID string, content string, at time.Time) error
+  method (*Service) MessageKeptItsWords(guildID string, channelID string, messageID string, content string, at time.Time) (bool, error)
+  method (*Service) MessagesDeleted(guildID string, channelID string, messageIDs []string) error
+  method (*Service) MoreLabel(guildID string, channelID string) string
+  method (*Service) Msg(locale string, key string, args ...any) string
+  method (*Service) NoteDelivery(turnID string, guildID string, channelID string, rep DeliveryReport)
+  method (*Service) NoteDeliveryProblem(guildID string, channelID string, class masamong/internal/errclass.Class)
+  method (*Service) NoteDirectCall(guildID string, channelID string, authorID string)
+  method (*Service) NoteReplyContinuation(guildID string, channelID string, headID string, said string, ids []string, ends ...int) error
+  method (*Service) NoteReplyMessages(turnID string, guildID string, channelID string, messageIDs []string, ends ...int)
+  method (*Service) NoteStop(restart bool)
+  method (*Service) NoteThread(guildID string, threadID string, parentID string, botOwned bool)
+  method (*Service) NoteThreadParent(ctx context.Context, guildID string, threadID string, parentID string) error
+  method (*Service) NoteThreadParticipant(channelID string, authorID string)
+  method (*Service) Observe(m ObservedMessage)
+  method (*Service) Paused(guildID string, channelID string) bool
+  method (*Service) PollVote(messageID string, userID string, answerID int, add bool)
+  method (*Service) Practice() bool
+  method (*Service) RateReply(guildID string, messageID string, userID string, good bool, reason string) bool
+  method (*Service) ReactionFeedback(guildID string, messageID string, userID string, emoji string, added bool)
+  method (*Service) Ready() bool
+  method (*Service) Registry() *Registry
+  method (*Service) ReplyTurn(messageID string) (string, bool)
+  method (*Service) ResumeJobs(ctx context.Context)
+  method (*Service) Revision() int
+  method (*Service) RunMemoryWorker(ctx context.Context)
+  method (*Service) RunRoomMemory(ctx context.Context) RoomMemoryReport
+  method (*Service) RunScheduler(ctx context.Context)
+  method (*Service) SeedServers(ids []string)
+  method (*Service) SetCommandMenu(hints []CommandHint)
+  method (*Service) SetDiscord(d DiscordInfo)
+  method (*Service) SetJobProgress(id string, token string, p masamong/internal/jobs.Progress) (masamong/internal/jobs.Job, error)
+  method (*Service) SettledMark() int64
+  method (*Service) Subscribe() (<-chan Event, func())
+  method (*Service) TakeLease(id string, token string, ttl time.Duration) (masamong/internal/jobs.Job, error)
+  method (*Service) TakeThreadOffer(turnID string) (ThreadOffer, bool)
+  method (*Service) ThreadArchived(threadID string, archived bool)
+  method (*Service) ThreadDeleted(threadID string)
+  method (*Service) ThreadFor(channelID string, authorID string) (ThreadView, bool)
+  method (*Service) ThreadNotYours(guildID string, channelID string) string
+  method (*Service) ThreadOffNotice(guildID string, channelID string) string
+  method (*Service) ThreadOfferDropped(guildID string, channelID string, reason string)
+  method (*Service) ThreadOfferFailed(offer ThreadOffer, reason string)
+  method (*Service) ThreadOpened(ctx context.Context, guildID string, parentID string, threadID string, callerID string, turnID string) string
+  method (*Service) ThreadStopCue(guildID string, channelID string, authorID string, text string) bool
+  method (*Service) ThreadStopLabel(guildID string, channelID string) string
+  method (*Service) ThreadsOff(guildID string, channelID string) bool
+  method (*Service) ToolCommandEnabled(tool string) bool
+  method (*Service) ToolCommandReady(action string) bool
+  method (*Service) ToolCommands() []ToolCommand
+  method (*Service) TurnStopCue(guildID string, channelID string, text string) bool
+  method (*Service) WaitJobs(timeout time.Duration)
+type ThreadArchiver interface
+  method ArchiveThread(ctx context.Context, threadID string) error
+type ThreadOffer struct
+  field Auto bool
+  field Caller string
+  field Open string
+  field Score int
+  field Stay string
+  field Text string
+type ThreadView struct
+  field Alone bool
+  field BotOwned bool
+  field Open bool
+  field Participant bool
+type ToolCommand struct
+  field Aliases []string
+  field Custom bool
+  field FirstParam string
+  field Tool string
+type TurnRecord struct
+  field At string
+  field Body map[string]any
+  field ChannelID string
+  field ChannelName string
+  field CostUSD float64
+  field Feedback map[string]any
+  field Fragments []string
+  field GuildID string
+  field Hits int
+  field ID string
+  field Implicit map[string]int
+  field Lab bool
+  field LatencyMS int
+  field Mark string
+  field MarkBlocked string
+  field Outcome string
+  field ReadAsOf int64
+  field SpeakerID string
+  field Tools []string
+func Unanswered(res masamong/internal/action.Result) bool
+func UpdateJournalState() string
+var UpdateRepo string
+type UserPrefs struct
+  field Locale string
+  field QuietEnd string
+  field QuietStart string
+  field Timezone string
+  field UpdateNews bool
+  field UpdatedAt string
+  field UserID string
+  field WeatherRegion string
+var Version string
