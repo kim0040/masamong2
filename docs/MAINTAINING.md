@@ -25,7 +25,7 @@
   - 콘솔을 고치면 `make ui`로 `ui/dist`를 다시 빌드해 함께 커밋한다.
   - 문구는 `ui/scripts/strings.py`(ko·en)와 `locales/ui`(ja·es·zh-Hans)에 넣는다.
 - **검색 동작을 바꾸면 샌드박스(`experimental/rag-leaf-parent`)와 Go를 함께 고친다.**
-  - parity 테스트로 확인한다.
+  - `make parity`로 확인한다(§5). 비공개 인덱스가 있으면 실데이터 parity도 돌린다.
   - 한국어 플래너·문맥·기억·보안·색인 요약 프롬프트는 샌드박스와 **바이트 단위로 같아야** 한다.
 - **문서를 고치면 `make docs`를 돌린다.** 한국어 위키나 README를 고쳤으면 다른 언어도 고친 뒤 `make docs-record`를 돌린다.
 - **스크린샷은 `output/layout/`에만** 저장하고 커밋하지 않는다. README 화면만 예외로, 연습 모드에서 찍어 `docs/images/readme/`에 커밋한다.
@@ -102,7 +102,7 @@ gh release create v1.0.1 build/release/* --title "Masamong v1.0.1" --generate-no
 **패치를 낼 때 확인할 것**
 1. 기본값을 바꾸면 기존 설치에서 무엇이 일어나는지 적는다. 예를 들어 임베딩 폭이나 메시지 벡터 폭을 바꾸면 다시 임베딩해야 한다. 그 비용과 시간을 [기억 운영](memory-operations.md)과 릴리스 노트에 적는다.
 2. 마이그레이션은 이전 버전으로 롤백해도 안전해야 한다. 저사양 기기에서 시작을 막거나 디스크를 크게 쓰는 마이그레이션은 피한다([기억 운영 §16](memory-operations.md)).
-3. 바뀐 영역의 로컬 테스트를 돌린다. 검색을 바꿨으면 parity도 돌린다(§5).
+3. 바뀐 영역의 로컬 테스트를 돌린다. 검색을 바꿨으면 `make parity`도 돌린다(§5).
 4. 위키 [릴리스 체크리스트](wiki/릴리스-체크리스트.md)를 따른다.
 
 **v1.1.x로 되돌릴 때**
@@ -145,6 +145,11 @@ make docs
 
 # 샌드박스 단위 테스트(numpy 필요). 아래 명령은 모두 저장소 루트에서 실행한다
 (cd experimental/rag-leaf-parent && PYTHONPATH=../../tools/evaluation uv run --no-project --with numpy python -m unittest discover -s .)
+
+# 합성 말뭉치 parity: 샌드박스(Python)와 Go 포트가 같은 leaf·전문 검색 순위·검색 결과를 내는지 본다.
+# 지어낸 말뭉치로 만들어 저장된 대화도 키도 네트워크도 필요 없다. numpy가 있는 python이 필요하다.
+# 검색·leaf·색인·플래너 의도(시간 범위, 사람) 동작을 바꿨을 때 돌린다. 세 parity 테스트 중 하나라도 건너뛰면 실패한다.
+PYTHON=python3.12 make parity                                 # scripts/parity.sh. KEEP=1이면 작업 폴더를 남긴다
 
 # 실데이터 검색 parity(비공개 샌드박스 인덱스 test-sandbox/ 필요, API 호출 없음)
 O="$PWD/.masamong-scratch/parity" && mkdir -p "$O"
