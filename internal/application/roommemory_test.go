@@ -28,6 +28,7 @@ type turnModel struct {
 	explicit  func(prompt string) string
 	sensitive func(prompt string) string
 	state     func(prompt string) string // nil: no topics
+	planner   func(prompt string) string // nil: no memory, no tools
 	prompts   map[string][]string
 }
 
@@ -65,6 +66,10 @@ func memorySvc(t *testing.T) (*application.Service, *turnModel, *engine.Engine) 
 		prompt := req.Messages[len(req.Messages)-1].Content
 		var kind, answer string
 		m.mu.Lock()
+		system := ""
+		if len(req.Messages) > 1 {
+			system = req.Messages[0].Content
+		}
 		switch {
 		case strings.Contains(prompt, `"threads"`):
 			kind, answer = "state", `{"threads":[]}`
@@ -76,11 +81,13 @@ func memorySvc(t *testing.T) (*application.Service, *turnModel, *engine.Engine) 
 			kind = "episode"
 		case strings.Contains(prompt, "tool_plan"):
 			kind, answer = "planner", `{"memory_requirement":"none","tool_plan":[]}`
+		case m.planner != nil && strings.Contains(system, "tool_plan"): // a test that answers the planner itself
+			kind, answer = "planner", `{"memory_requirement":"none","tool_plan":[]}`
 		default:
 			kind, answer = "answer", "응"
 		}
 		m.prompts[kind] = append(m.prompts[kind], prompt)
-		fn := map[string]func(string) string{"episode": m.extract, "explicit": m.explicit, "sensitive": m.sensitive, "state": m.state}[kind]
+		fn := map[string]func(string) string{"episode": m.extract, "explicit": m.explicit, "sensitive": m.sensitive, "state": m.state, "planner": m.planner}[kind]
 		m.mu.Unlock()
 		if fn != nil {
 			answer = fn(prompt)
@@ -662,7 +669,7 @@ func TestSegmentSealedAfterTwoRefusals(t *testing.T) {
 
 // "Remember this" about someone else is an episode fact said by the speaker, never something about the
 // speaker; about the one person the message names it is what the speaker told (a told statement, shown
-// with who said it), and on a no_hearsay server it is not kept as one.
+// with who said it). On a no_hearsay server it is kept too, and hidden when read (contract §2.4).
 func TestExplicitFactAboutOthersIsNoCard(t *testing.T) {
 	t.Parallel()
 	svc, m, eng := memorySvc(t)
@@ -688,8 +695,11 @@ func TestExplicitFactAboutOthersIsNoCard(t *testing.T) {
 	}
 	turn(t, svc, "u1", "철수", "기억해, 영희는 고양이를 키워", live("7003"))
 	var told int
-	if err := svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM person_claim WHERE source='explicit' AND subject_ref<>speaker_ref`).Scan(&told); err != nil || told != 1 {
-		t.Fatalf("no_hearsay kept a told statement: %d (%v)", told, err)
+	if err := svc.Store.DB.QueryRow(`SELECT COUNT(*) FROM person_claim WHERE source='explicit' AND subject_ref<>speaker_ref`).Scan(&told); err != nil || told != 2 {
+		t.Fatalf("no_hearsay stores a told statement: %d (%v)", told, err)
+	}
+	if r := as(svc, "memory.mine.show", map[string]any{}, inChannel("u2")); len(jsonList(r.Output["person"])) != 0 {
+		t.Fatalf("no_hearsay shows told statements: %+v", r.Output["person"])
 	}
 }
 

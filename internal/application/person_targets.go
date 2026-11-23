@@ -368,7 +368,25 @@ func (s *Service) targetPeople(db *storage.Store, in ChatInput, _ []string) []tu
 	return people
 }
 
+// toldPeople are the people a "remember this" about someone else may be about: targetPeople without the
+// own_card_only drop. The told statement is stored; own_card_only hides it when read.
+func (s *Service) toldPeople(db *storage.Store, in ChatInput) []turnPerson {
+	tx, err := db.Reader().Begin()
+	if err != nil {
+		return nil
+	}
+	defer tx.Rollback()
+	rooms := s.personRooms(tx, in.GuildID, in.ChannelID, s.guildPrivacy(in.GuildID).CardChannelOnly)
+	people, _ := s.resolvePeopleFor(tx, in, rooms, false)
+	return people
+}
+
 func (s *Service) resolvePeople(tx *sql.Tx, in ChatInput, rooms map[string]bool) ([]turnPerson, turnNames) {
+	return s.resolvePeopleFor(tx, in, rooms, s.guildPrivacy(in.GuildID).OwnCardOnly)
+}
+
+// resolvePeopleFor is resolvePeople with ownOnly (own_card_only: keep only the caller) given.
+func (s *Service) resolvePeopleFor(tx *sql.Tx, in ChatInput, rooms map[string]bool, ownOnly bool) ([]turnPerson, turnNames) {
 	if len(rooms) == 0 || in.GuildID == "" || in.GuildID == "0" || in.SpeakerID == "" || s.BlockedIn(in.GuildID, in.SpeakerID) || !s.MemoryAllowed(in.SpeakerID) {
 		return nil, turnNames{}
 	}
@@ -382,7 +400,6 @@ func (s *Service) resolvePeople(tx *sql.Tx, in ChatInput, rooms map[string]bool)
 	bot := personRef(botID)
 	names.denied[bot] = true
 	caller := personRef(in.SpeakerID)
-	ownOnly := s.guildPrivacy(in.GuildID).OwnCardOnly
 	var out []turnPerson
 	seen := map[string]bool{}
 	add := func(ref string, explicit bool, link string) {

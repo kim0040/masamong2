@@ -315,7 +315,9 @@ func relationKey(a, b string) (string, string) {
 func relCursorKey(guild, channel string) string { return "cards:relations:" + guild + ":" + channel }
 
 // countRelations adds the reply and mention exchanges of a room's new live lines to the pair counts. A
-// pair with someone who withdrew memory or profile is not counted.
+// pair with someone who withdrew memory or profile, or whose forget marker covers the line, is not
+// counted: checked again in the write transaction, so a withdrawal or forget that commits after the
+// lines were read is not undone.
 func (s *Service) countRelations(ctx context.Context, db *storage.Store, r memRoom) error {
 	if r.kakao() || r.guild == "" {
 		return nil
@@ -334,8 +336,8 @@ func (s *Service) countRelations(ctx context.Context, db *storage.Store, r memRo
 			bots[l.AuthorID] = true
 		}
 	}
-	type pair struct{ a, b string }
-	replies, mentions := map[pair]int{}, map[pair]int{}
+	type exchange struct{ from, to, col, at string }
+	var seen []exchange
 	newest := last
 	for _, l := range lines {
 		stamp := l.At.UTC().Format(time.RFC3339Nano) + "|" + l.ID
@@ -349,21 +351,37 @@ func (s *Service) countRelations(ctx context.Context, db *storage.Store, r memRo
 			continue
 		}
 		from := personRef(l.AuthorID)
+		at := l.At.UTC().Format(store.PersonClaimStamp)
 		if to, ok := authorOf[l.ReplyTo]; ok && !to.Bot && to.AuthorID != "" && to.AuthorID != l.AuthorID && s.MemoryAllowed(to.AuthorID) {
-			a, b := relationKey(from, personRef(to.AuthorID))
-			replies[pair{a, b}]++
+			seen = append(seen, exchange{from, personRef(to.AuthorID), "replies", at})
 		}
 		for _, m := range l.Mentions {
 			if m == "" || m == l.AuthorID || bots[m] || !s.MemoryAllowed(m) {
 				continue
 			}
-			a, b := relationKey(from, personRef(m))
-			mentions[pair{a, b}]++
+			seen = append(seen, exchange{from, personRef(m), "mentions", at})
 		}
 	}
-	if len(replies)+len(mentions) > 0 {
+	if len(seen) > 0 {
 		now := s.Clock.Now().UTC().Format(time.RFC3339)
 		err := db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+			gone, err := s.relationGone(tx, r.guild)
+			if err != nil {
+				return err
+			}
+			type pair struct{ a, b string }
+			replies, mentions := map[pair]int{}, map[pair]int{}
+			for _, e := range seen {
+				if gone(e.from, e.at) || gone(e.to, e.at) {
+					continue
+				}
+				a, b := relationKey(e.from, e.to)
+				if e.col == "replies" {
+					replies[pair{a, b}]++
+				} else {
+					mentions[pair{a, b}]++
+				}
+			}
 			for _, set := range []struct {
 				m   map[pair]int
 				col string
@@ -388,6 +406,61 @@ func (s *Service) countRelations(ctx context.Context, db *storage.Store, r memRo
 	return nil
 }
 
+// relationGone is the relation counters' check, on the write transaction, of a person and the time of a
+// line: true when they withdrew memory or profile, are blocked or tombstoned, or have a forget marker
+// (person_memory_suppress, all) at or after the line.
+func (s *Service) relationGone(tx *sql.Tx, guild string) (func(ref, at string) bool, error) {
+	out, err := withdrawnRefsTx(tx, privacy.Memory)
+	if err != nil {
+		return nil, err
+	}
+	profileOut, err := withdrawnRefsTx(tx, privacy.Profile)
+	if err != nil {
+		return nil, err
+	}
+	blocked := map[string]bool{}
+	doc := s.Doc()
+	for _, list := range [][]string{doc.Access.BlockedUsers, doc.Guilds[guild].BlockedUsers} {
+		for _, id := range list {
+			blocked[personRef(id)] = true
+		}
+	}
+	forgot := map[string]string{} // ref -> newest forget marker
+	if tableExists(tx, "person_memory_suppress") {
+		rows, err := tx.Query(`SELECT person_ref,MAX(before_ts) FROM person_memory_suppress WHERE guild_id=? AND scope='all' GROUP BY person_ref`, guild)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var ref, ts string
+			if rows.Scan(&ref, &ts) == nil {
+				forgot[ref] = ts
+			}
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	goneOf := map[string]bool{}
+	return func(ref, at string) bool {
+		if forgot[ref] != "" && at <= forgot[ref] {
+			return true
+		}
+		v, ok := goneOf[ref]
+		if !ok {
+			v = out[ref] || profileOut[ref] || blocked[ref]
+			if !v {
+				b, err := store.SourceBlocked(tx, ref)
+				v = err != nil || b
+			}
+			goneOf[ref] = v
+		}
+		return v
+	}, nil
+}
+
 // relFillKey marks a server whose pair counts were recomputed from the stored messages (v1.7.0).
 func relFillKey(guild string) string { return "people:relations:fill:" + guild }
 
@@ -396,7 +469,9 @@ func relFillKey(guild string) string { return "people:relations:fill:" + guild }
 // of the server counts, except where either of them withdrew memory or profile, is blocked, or has a
 // forget marker (person_memory_suppress, all) at or after the line. Replies are not stored with the
 // messages, so the reply counts stay the live ones. The live cursors of the server's rooms move to the
-// newest live line, so the lines the fill counted are not counted again.
+// newest live line seen before the scan, and the scan leaves out a room's lines after it; a live line
+// before it that is not stored yet is counted from the live window. A line is counted once, by the fill
+// or by the live counter, even when it arrives or is stored during the fill.
 func (s *Service) relationsFill(ctx context.Context, db *storage.Store, rooms []memRoom) error {
 	var guilds []string
 	seen := map[string]bool{}
@@ -413,9 +488,29 @@ func (s *Service) relationsFill(ctx context.Context, db *storage.Store, rooms []
 		}
 	}
 	naive := s.naiveZone()
+	type liveMark struct {
+		at    time.Time
+		id    string
+		stamp string
+	}
 	for _, guild := range guilds {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		marks := map[string]liveMark{}               // room → the newest live line before the scan
+		snapshot := map[string][]conversation.Line{} // room → its live lines then
+		for _, r := range rooms {
+			if r.guild != guild || r.kakao() {
+				continue
+			}
+			lines := s.liveLines(r.guild, r.channel)
+			snapshot[roomOf(r.guild, r.channel)] = lines
+			for _, l := range lines {
+				stamp := l.At.UTC().Format(time.RFC3339Nano) + "|" + l.ID
+				if m := marks[roomOf(r.guild, r.channel)]; stamp > m.stamp {
+					marks[roomOf(r.guild, r.channel)] = liveMark{at: l.At.UTC().Truncate(time.Microsecond), id: l.ID, stamp: stamp}
+				}
+			}
 		}
 		blocked := map[string]bool{}
 		doc := s.Doc()
@@ -472,16 +567,16 @@ func (s *Service) relationsFill(ctx context.Context, db *storage.Store, rooms []
 			}
 			type pair struct{ a, b string }
 			counts := map[pair]int{}
-			rows, err = tx.Query(`SELECT actor_account,content,parsed_time FROM memory_observations WHERE platform='discord' AND room LIKE ? AND record_kind=?
+			rows, err = tx.Query(`SELECT actor_account,content,parsed_time,room,COALESCE(native_message_id,'') FROM memory_observations WHERE platform='discord' AND room LIKE ? AND record_kind=?
 				AND deleted_at='' AND source_room=room AND actor_account<>'' AND content LIKE '%<@%'`, "discord:"+guild+":%", corpus.HumanText)
 			if err != nil {
 				return err
 			}
-			type line struct{ account, content, parsed string }
+			type line struct{ account, content, parsed, room, native string }
 			var lines []line
 			for rows.Next() {
 				var l line
-				if rows.Scan(&l.account, &l.content, &l.parsed) == nil {
+				if rows.Scan(&l.account, &l.content, &l.parsed, &l.room, &l.native) == nil {
 					lines = append(lines, l)
 				}
 			}
@@ -504,6 +599,9 @@ func (s *Service) relationsFill(ctx context.Context, db *storage.Store, rooms []
 				if !ok || bots[l.account] {
 					continue
 				}
+				if m, live := marks[l.room]; live && (t.UTC().After(m.at) || t.UTC().Equal(m.at) && l.native > m.id) {
+					continue // after the live cursor: the live counter counts it
+				}
 				at := t.UTC().Format(store.PersonClaimStamp)
 				from := personRef(l.account)
 				if isGone(from) || forgot[from] != "" && at <= forgot[from] {
@@ -516,6 +614,35 @@ func (s *Service) relationsFill(ctx context.Context, db *storage.Store, rooms []
 					}
 					a, b := relationKey(from, to)
 					counts[pair{a, b}]++
+				}
+			}
+			// a live line the cursor moves past but that is not stored yet (captured after the scan) is
+			// counted here, from the live window: the live counter will not see it again
+			for room, lines := range snapshot {
+				for _, l := range lines {
+					if l.Bot || l.AuthorID == "" || bots[l.AuthorID] || len(l.Mentions) == 0 {
+						continue
+					}
+					var stored bool
+					if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM memory_observations WHERE room=? AND native_message_id=?)`, room, l.ID).Scan(&stored); err != nil {
+						return err
+					}
+					if stored {
+						continue
+					}
+					at := l.At.UTC().Format(store.PersonClaimStamp)
+					from := personRef(l.AuthorID)
+					if isGone(from) || forgot[from] != "" && at <= forgot[from] {
+						continue
+					}
+					for _, m := range l.Mentions {
+						to := personRef(m)
+						if m == "" || m == l.AuthorID || bots[m] || isGone(to) || forgot[to] != "" && at <= forgot[to] {
+							continue
+						}
+						a, b := relationKey(from, to)
+						counts[pair{a, b}]++
+					}
 				}
 			}
 			now := s.Clock.Now().UTC().Format(time.RFC3339)
@@ -538,14 +665,8 @@ func (s *Service) relationsFill(ctx context.Context, db *storage.Store, rooms []
 			if r.guild != guild || r.kakao() {
 				continue
 			}
-			newest := ""
-			for _, l := range s.liveLines(r.guild, r.channel) {
-				if stamp := l.At.UTC().Format(time.RFC3339Nano) + "|" + l.ID; stamp > newest {
-					newest = stamp
-				}
-			}
-			if newest != "" {
-				if err := s.kvSet(relCursorKey(r.guild, r.channel), newest); err != nil {
+			if m := marks[roomOf(r.guild, r.channel)]; m.stamp != "" {
+				if err := s.kvSet(relCursorKey(r.guild, r.channel), m.stamp); err != nil {
 					return err
 				}
 			}

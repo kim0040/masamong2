@@ -334,11 +334,12 @@ func (s *Service) rememberFact(ctx context.Context, db *storage.Store, in ChatIn
 		key = key[:40]
 	}
 	// "remember this" about someone else is also what the speaker told about them (a told claim), when the
-	// message names exactly one other person and the server keeps hearsay
+	// message names exactly one other person. It is stored on a no_hearsay or own_card_only server too: the
+	// options hide it when it is read (contract §2.4), so turning them off later shows it.
 	var about turnPerson
-	if !self && s.Doc().Memory.PeopleOn() && !s.guildPrivacy(in.GuildID).NoHearsay {
+	if !self && s.Doc().Memory.PeopleOn() {
 		var others []turnPerson
-		for _, p := range s.targetPeople(db, in, nil) {
+		for _, p := range s.toldPeople(db, in) {
 			if !p.caller {
 				others = append(others, p)
 			}
@@ -389,6 +390,11 @@ func (s *Service) rememberFact(ctx context.Context, db *storage.Store, in ChatIn
 			}
 			rows.Close()
 			for _, oldID := range old { // the newer fact on the same topic replaces the older one
+				if newer, err := s.explicitNewer(tx, oldID, obs); err != nil {
+					return err
+				} else if newer {
+					continue // said after this one (this request finished later): it stays; reading supersedes by time
+				}
 				if err := deleteExplicitClaims(tx, oldID); err != nil {
 					return err
 				}
@@ -447,6 +453,39 @@ func (s *Service) rememberFact(ctx context.Context, db *storage.Store, in ChatIn
 		res.Data["about"] = "other"
 	}
 	return res
+}
+
+// explicitNewer reports whether a remembered fact's message (an explicit episode's evidence) was said
+// after the observation obs: supersession follows the order of the messages, not of the requests'
+// completion.
+func (s *Service) explicitNewer(tx *sql.Tx, episode, obs string) (bool, error) {
+	naive := s.naiveZone()
+	at := func(id string) (time.Time, bool) {
+		var parsed string
+		if tx.QueryRow(`SELECT parsed_time FROM memory_observations WHERE observation_id=?`, id).Scan(&parsed) != nil {
+			return time.Time{}, false
+		}
+		return s.obsTime(parsed, naive)
+	}
+	mine, ok := at(obs)
+	if !ok {
+		return false, nil
+	}
+	var seg string
+	if err := tx.QueryRow(`SELECT segment FROM channel_episode WHERE id=?`, episode).Scan(&seg); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
+	var ids []string
+	_ = json.Unmarshal([]byte(seg), &ids)
+	for _, id := range ids {
+		if t, ok := at(id); ok && t.After(mine) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // supersedeAutoFactsForExplicit hides active automatic facts that satisfy the shared exact-evidence,
@@ -793,7 +832,7 @@ func allForgetPlan(tx *sql.Tx, guild, ref string) forgetPlan {
 	}
 	rows, err := tx.Query(`SELECT 'episode',e.id,e.participants FROM channel_episode e WHERE e.guild_id=?1 AND EXISTS(SELECT 1 FROM json_each(e.participants) WHERE value=?2)
 		UNION ALL SELECT 'card',id,json_array(state,text,evidence,updated_at) FROM person_card_item WHERE guild_id=?1 AND person_ref=?2
-		UNION ALL SELECT 'claim',id,state FROM person_claim WHERE guild_id=?1 AND (subject_ref=?2 OR speaker_ref=?2)
+		UNION ALL SELECT 'claim',id,state FROM person_claim WHERE guild_id=?1 AND (subject_ref=?2 OR speaker_ref=?2 OR instr(text,'{@'||?2||'}')>0)
 		UNION ALL SELECT 'explicit',episode_id,key FROM memory_explicit WHERE guild_id=?1 AND person_ref=?2
 		UNION ALL SELECT 'relation',json_array(a_ref,b_ref),json_array(replies,mentions) FROM person_relation WHERE guild_id=?1 AND (a_ref=?2 OR b_ref=?2)
 		UNION ALL SELECT 'state',holder_id,'' FROM evidence_refs WHERE holder_kind=?3 AND source_id=?2 AND instr(holder_id,'state:'||?1||':')=1
@@ -987,8 +1026,10 @@ func (s *Service) mineAction(ctx context.Context, req action.Request) action.Res
 	}
 	in := inputMap(req)
 	guild, user := strVal(in, "guild_id", ""), strVal(in, "user_id", "")
+	member, channel := false, ""
 	if inv := req.Invoker; inv != nil && inv.UserID != "" && (inv.Via == "command" || inv.Via == "chat" || !s.IsOperator(inv.UserID)) {
 		guild, user = inv.GuildID, inv.UserID // a member only ever sees and forgets their own
+		member, channel = true, inv.ChannelID
 	}
 	if guild == "" || user == "" {
 		return action.Fail(req, errcode.InvalidInput, "memory.mine.server_only", s.msg(req, "memory.mine.server_only"), nil)
@@ -1031,7 +1072,7 @@ func (s *Service) mineAction(ctx context.Context, req action.Request) action.Res
 		var eps int
 		_ = db.Reader().QueryRow(`SELECT COUNT(DISTINCT e.id) FROM channel_episode e, json_each(e.participants) x WHERE e.guild_id=? AND x.value=?`, guild, ref).Scan(&eps)
 		// person memory: names come from each statement's own room
-		person, claims := s.personClaimsView(ctx, db, guild, ref, labelIn)
+		person, claims := s.personClaimsView(ctx, db, guild, ref, channel, !member, labelIn)
 		card := []string{} // the active statements as lines (older clients read person_card)
 		for i, c := range claims {
 			if c.state != store.PersonActive {
@@ -1155,7 +1196,9 @@ func (s *Service) mineCard(req action.Request, items []map[string]any, eps int, 
 
 func (s *Service) forgetCard(req action.Request, p forgetPlan, scope string, stale bool) action.Card {
 	c := action.Card{Title: s.msg(req, "memory.forget.title"), Ephemeral: true, Tone: "warn"}
-	if p.count == 0 && len(p.episodes) == 0 && p.cards == 0 && p.claims == 0 {
+	// forgetting everything is offered even with nothing stored: confirming it records the cutoff that a
+	// later extraction or backfill checks (person_memory_suppress)
+	if p.count == 0 && len(p.episodes) == 0 && p.cards == 0 && p.claims == 0 && scope != "all" {
 		c.Text, c.Tone = s.msg(req, "memory.forget.nothing"), "neutral"
 		return c
 	}

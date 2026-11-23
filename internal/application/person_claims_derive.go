@@ -19,6 +19,10 @@ import (
 //     by_refs: the speaker is the subject (self) or not (said). A moment gives only the self claims of
 //     its speakers. The claim's evidence is the item's evidence written by that speaker; a speaker who
 //     wrote none of it gives no claim.
+//   - A self claim (server-wide) needs the whole item to be the subject's own: it names nobody else, and
+//     the subject wrote every line of it. An item that also names someone else, or rests on another
+//     speaker's lines too, gives only what others said (hearsay, local to its channel group): its words
+//     may carry what someone else said.
 //   - Declarative: claims with source episode_item:<id> live as long as that item is active. A new item
 //     derives its claims in the transaction that saves it (insertItems); the room-memory pass walks every
 //     guild's items once with a kv cursor (people:derive:<guild>, the one-time pass for the items saved
@@ -56,7 +60,9 @@ func derivedClaims(guild string, it deriveItem, authors map[string]string) []sto
 		return nil
 	}
 	var subjects []string
+	named := 0 // people the text names (a self claim names only its subject)
 	for _, ref := range uniqueStrings(episodes.TextRefs(it.text)) {
+		named++
 		if !store.DiscordPersonRef(ref) {
 			continue
 		}
@@ -85,6 +91,9 @@ func derivedClaims(guild string, it deriveItem, authors map[string]string) []sto
 			}
 			link := store.LinkMention
 			if subject == speaker {
+				if named != 1 || len(uniqueStrings(ev)) != len(uniqueStrings(it.evidence)) {
+					continue // not all theirs: another person named, or another speaker's lines
+				}
 				link = store.LinkSelf
 			}
 			out = append(out, store.PersonClaim{GuildID: guild, SubjectRef: subject, SpeakerRef: speaker, Kind: derivedKind, Text: it.text,
@@ -343,7 +352,7 @@ func repointDerivedClaim(tx *sql.Tx, id, guild, evidence string) (bool, error) {
 			return false, err
 		}
 		for _, c := range derivedClaims(guild, it, authors) {
-			if store.PersonClaimID(c.GuildID, c.SubjectRef, c.SpeakerRef, c.Evidence) == id {
+			if store.PersonClaimID(c.GuildID, c.SubjectRef, c.SpeakerRef, c.Kind, c.Topic, c.Evidence) == id {
 				_, err := tx.Exec(`UPDATE person_claim SET text=?,source=? WHERE id=?`, c.Text, c.Source, id)
 				return err == nil, err
 			}
@@ -398,20 +407,38 @@ func (s *Service) classifyPending(ctx context.Context, db *storage.Store, guild 
 		return err
 	}
 	s.dropSensitive(ctx, want) // caches each verdict by text
+	// The verdicts are read before the write transaction: kvGet may query the database, and inside the
+	// writer that query would wait for the connection the transaction holds. Each change applies only
+	// to a row still pending with the text that was classified.
+	verdicts := map[string]bool{} // claim id → sensitive
+	for _, p := range list {
+		var sensitive bool
+		if ok, err := s.kvGet(sensitiveKey(p.text), &sensitive); err == nil && ok {
+			verdicts[p.id] = sensitive
+		}
+	}
+	if len(verdicts) == 0 {
+		return nil // nothing classified now: they wait
+	}
 	return db.WithWriterContext(ctx, func(tx *sql.Tx) error {
 		for _, p := range list {
-			var sensitive bool
-			ok, err := s.kvGet(sensitiveKey(p.text), &sensitive)
-			if err != nil || !ok {
-				continue // not classified now: it waits
+			sensitive, ok := verdicts[p.id]
+			if !ok {
+				continue
 			}
 			if sensitive {
-				if err := deletePersonClaimTx(tx, p.id); err != nil {
+				var still bool
+				if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM person_claim WHERE id=? AND state=? AND text=?)`, p.id, store.PersonPending, p.text).Scan(&still); err != nil {
 					return err
+				}
+				if still {
+					if err := deletePersonClaimTx(tx, p.id); err != nil {
+						return err
+					}
 				}
 				continue
 			}
-			if _, err := tx.Exec(`UPDATE person_claim SET state=? WHERE id=? AND state=?`, store.PersonActive, p.id, store.PersonPending); err != nil {
+			if _, err := tx.Exec(`UPDATE person_claim SET state=? WHERE id=? AND state=? AND text=?`, store.PersonActive, p.id, store.PersonPending, p.text); err != nil {
 				return err
 			}
 		}

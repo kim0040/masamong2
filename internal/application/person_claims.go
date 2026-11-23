@@ -37,14 +37,17 @@ func init() {
 //     (Lines) and not edited after it read it (ReadAt); all of it in one room;
 //   - people: no tombstone on the subject, the speaker or anyone the text names; the subject has not
 //     withdrawn profile, and none of them has withdrawn memory;
-//   - person_memory_suppress: no forget or hide marker matches (all, the claim, or for hearsay the topic)
-//     at or after the newest evidence time;
+//   - person_memory_suppress: no forget or hide marker matches at or after the newest evidence time: all
+//     (on the subject, the speaker or anyone the text names), the claim, the statement's text (another
+//     writer citing other lines), or for hearsay the topic;
+//   - no item a member corrected ("틀려": hidden in an episode never made again) rests on the same lines
+//     and names the subject, so a v1.6 correction is not undone by a derivation or the backfill;
 //   - an episode_item:<id> source is still an active item;
 //   - the evidence index is written with indexCopy(guard=true), after a check that no key is blocked.
 //
-// The id is recomputed from guild, subject, speaker and evidence, so the same statement written by two
-// paths is one row. An existing row keeps its state (a hidden claim stays hidden); a derived row
-// (episode_item:) is upgraded in place by a richer source with the same id.
+// The id is recomputed from guild, subject, speaker, kind, topic and evidence, so the same statement
+// written by two paths is one row. An existing row keeps its state (a hidden claim stays hidden); a
+// derived row (episode_item:) saying the same words on the same lines is taken over by a richer source.
 func (s *Service) savePersonClaims(ctx context.Context, tx *sql.Tx, claims []store.PersonClaim) (int, error) {
 	if len(claims) == 0 {
 		return 0, nil
@@ -102,6 +105,7 @@ func (s *Service) personClaimPasses(tx *sql.Tx, c *store.PersonClaim, memoryOut,
 	c.Text = strings.Join(strings.Fields(c.Text), " ")
 	c.Topic = store.PersonTopic(c.Topic)
 	c.Evidence = uniqueStrings(c.Evidence)
+	slices.Sort(c.Evidence) // stored in order: the same lines are the same JSON
 	switch {
 	case c.GuildID == "" || c.GuildID == "0" || !store.DiscordPersonRef(c.SubjectRef) || !store.DiscordPersonRef(c.SpeakerRef),
 		!slices.Contains(store.PersonKinds, c.Kind), c.Source == "", len(c.Evidence) == 0,
@@ -178,8 +182,11 @@ func (s *Service) personClaimPasses(tx *sql.Tx, c *store.PersonClaim, memoryOut,
 	}
 	c.RoomID = room
 	c.ObservedAt = newest.UTC().Format(store.PersonClaimStamp)
-	c.ID = store.PersonClaimID(c.GuildID, c.SubjectRef, c.SpeakerRef, c.Evidence)
+	c.ID = store.PersonClaimID(c.GuildID, c.SubjectRef, c.SpeakerRef, c.Kind, c.Topic, c.Evidence)
 	if suppressed, err := personSuppressed(tx, *c); err != nil || suppressed {
+		return false, err
+	}
+	if corrected, err := correctedLines(tx, c.SubjectRef, c.Evidence); err != nil || corrected {
 		return false, err
 	}
 	if item, ok := strings.CutPrefix(c.Source, "episode_item:"); ok {
@@ -201,24 +208,49 @@ func (s *Service) personClaimPasses(tx *sql.Tx, c *store.PersonClaim, memoryOut,
 	return true, nil
 }
 
-// personSuppressed reports whether a forget or hide marker covers the claim: a marker on the subject or
-// the speaker for everything or for this claim, or on the subject for this hearsay topic, set at or
-// after the claim's newest evidence.
+// personSuppressed reports whether a forget or hide marker covers the claim, set at or after the claim's
+// newest evidence (an empty ObservedAt matches every marker): everything about or by anyone the claim
+// names (subject, speaker, the people of its text), this claim, what it says (its text key) about the
+// subject, or the subject's hearsay topic.
 func personSuppressed(tx *sql.Tx, c store.PersonClaim) (bool, error) {
 	topic := ""
 	if !c.Direct() && c.Topic != "" {
 		topic = "topic:" + store.PersonTopicKey(c.Kind, c.Topic)
 	}
+	text := ""
+	if c.Text != "" {
+		text = "text:" + store.PersonTextKey(c.Text)
+	}
+	named, _ := json.Marshal(uniqueStrings(append([]string{c.SubjectRef, c.SpeakerRef}, episodes.TextRefs(c.Text)...)))
 	var hit bool
-	err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM person_memory_suppress WHERE guild_id=?1
-		AND ((person_ref=?2 AND role='subject') OR (person_ref=?3 AND role='speaker'))
-		AND (scope='all' OR scope=?4 OR (?5<>'' AND role='subject' AND scope=?5))
-		AND ?6<=before_ts)`, c.GuildID, c.SubjectRef, c.SpeakerRef, "claim:"+c.ID, topic, c.ObservedAt).Scan(&hit)
+	err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM person_memory_suppress WHERE guild_id=?1 AND ?6<=before_ts AND (
+		(scope='all' AND person_ref IN (SELECT value FROM json_each(?7)))
+		OR (person_ref=?2 AND role='subject' AND (scope=?3 OR (?4<>'' AND scope=?4) OR (?5<>'' AND scope=?5)))))`,
+		c.GuildID, c.SubjectRef, "claim:"+c.ID, topic, text, c.ObservedAt, string(named)).Scan(&hit)
 	return hit, err
 }
 
-// writePersonClaim inserts a claim that passed the gate, or upgrades a derived row with the same id, and
-// indexes its evidence. It returns 1 when a row was written.
+// correctedLines reports whether an item a member said is wrong rests on any of the lines and names the
+// subject: hidden, in an episode that is never made again from its lines (regen=3, explicit.go). v1.6
+// recorded corrections only this way, without person markers.
+func correctedLines(tx *sql.Tx, subject string, evidence []string) (bool, error) {
+	if len(evidence) == 0 || !tableExists(tx, "episode_item") {
+		return false, nil
+	}
+	raw, _ := json.Marshal(evidence)
+	var hit bool
+	err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM evidence_refs r JOIN episode_item i ON i.id=r.holder_id JOIN channel_episode e ON e.id=i.episode_id
+		WHERE r.holder_kind=? AND r.source_id IN (SELECT value FROM json_each(?)) AND i.state='hidden' AND e.regen=3 AND instr(i.text,?)>0)`,
+		store.HolderEpisodeItem, string(raw), "{@"+subject+"}").Scan(&hit)
+	return hit, err
+}
+
+// writePersonClaim inserts a claim that passed the gate, or hands a derived row with the same id to a
+// richer source, and indexes its evidence. It returns 1 when a row was written.
+//
+// A derived row and a richer one saying the same words on the same lines (an explicit fact and the item
+// it was saved as) are one statement: the richer one replaces the derived twin (a hidden twin stays
+// hidden), and a derived write is skipped while a richer twin exists.
 func writePersonClaim(tx *sql.Tx, c store.PersonClaim, now string) (int, error) {
 	refs := uniqueStrings(append([]string{c.SubjectRef, c.SpeakerRef}, episodes.TextRefs(c.Text)...))
 	keys, err := copySources(tx, c.Evidence, refs)
@@ -228,11 +260,32 @@ func writePersonClaim(tx *sql.Tx, c store.PersonClaim, now string) (int, error) 
 	if blocked, err := store.SourcesBlocked(tx, keys); err != nil || blocked {
 		return 0, err
 	}
-	var source string
-	err = tx.QueryRow(`SELECT source FROM person_claim WHERE id=?`, c.ID).Scan(&source)
+	derived := strings.HasPrefix(c.Source, "episode_item:")
+	ev, _ := json.Marshal(c.Evidence)
+	var source, state string
+	err = tx.QueryRow(`SELECT source,state FROM person_claim WHERE id=?`, c.ID).Scan(&source, &state)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		ev, _ := json.Marshal(c.Evidence)
+		twins, err := claimTwins(tx, c, string(ev))
+		if err != nil {
+			return 0, err
+		}
+		for _, t := range twins {
+			if derived && !t.derived {
+				return 0, nil // a richer source already holds the statement
+			}
+		}
+		for _, t := range twins {
+			if derived || !t.derived {
+				continue
+			}
+			if t.state == store.PersonHidden {
+				c.State = store.PersonHidden
+			}
+			if err := deletePersonClaimTx(tx, t.id); err != nil {
+				return 0, err
+			}
+		}
 		if _, err := tx.Exec(`INSERT INTO person_claim(id,guild_id,subject_ref,speaker_ref,kind,topic,text,evidence,observed_at,room_id,source,link,state,created_at)
 			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, c.ID, c.GuildID, c.SubjectRef, c.SpeakerRef, c.Kind, c.Topic, c.Text, string(ev), c.ObservedAt, c.RoomID,
 			c.Source, c.Link, c.State, now); err != nil {
@@ -240,9 +293,14 @@ func writePersonClaim(tx *sql.Tx, c store.PersonClaim, now string) (int, error) 
 		}
 	case err != nil:
 		return 0, err
-	case strings.HasPrefix(source, "episode_item:") && !strings.HasPrefix(c.Source, "episode_item:"):
-		// the same statement, now from a source that knows its kind and topic: it is no longer derived
-		if _, err := tx.Exec(`UPDATE person_claim SET kind=?,topic=?,text=?,source=?,link=? WHERE id=?`, c.Kind, c.Topic, c.Text, c.Source, c.Link, c.ID); err != nil {
+	case strings.HasPrefix(source, "episode_item:") && !derived:
+		// the same statement, now from a richer source: no longer derived. A row still waiting for the
+		// classifier takes the new source's state (an explicit fact was classified when it was asked for);
+		// a hidden row stays hidden.
+		if state == store.PersonPending {
+			state = c.State
+		}
+		if _, err := tx.Exec(`UPDATE person_claim SET source=?,link=?,state=? WHERE id=?`, c.Source, c.Link, state, c.ID); err != nil {
 			return 0, err
 		}
 	case strings.HasPrefix(source, "episode_item:") && strings.HasPrefix(c.Source, "episode_item:") && source != c.Source:
@@ -262,6 +320,33 @@ func writePersonClaim(tx *sql.Tx, c store.PersonClaim, now string) (int, error) 
 		return 0, err
 	}
 	return 1, nil
+}
+
+type claimTwin struct {
+	id, state string
+	derived   bool
+}
+
+// claimTwins are the other rows of the same speaker about the same subject with the same words on the
+// same lines.
+func claimTwins(tx *sql.Tx, c store.PersonClaim, evidence string) ([]claimTwin, error) {
+	rows, err := tx.Query(`SELECT id,state,source FROM person_claim WHERE guild_id=? AND subject_ref=? AND speaker_ref=? AND text=? AND evidence=? AND id<>?`,
+		c.GuildID, c.SubjectRef, c.SpeakerRef, c.Text, evidence, c.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []claimTwin
+	for rows.Next() {
+		var t claimTwin
+		var source string
+		if err := rows.Scan(&t.id, &t.state, &source); err != nil {
+			return nil, err
+		}
+		t.derived = strings.HasPrefix(source, "episode_item:")
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }
 
 // deletePersonClaimTx removes one claim and its evidence index.
@@ -285,12 +370,12 @@ func deleteClaimsCiting(tx *sql.Tx, keys []string) (int, error) {
 }
 
 // deleteClaimsOf deletes a person's claims in one server (every server when guild is ""): the ones
-// about them, and with speaker also the ones they said about others.
+// about them, and with speaker also the ones they said about others and the ones naming them in the text.
 func deleteClaimsOf(tx *sql.Tx, guild, ref string, speaker bool) (int, error) {
 	if ref == "" || !tableExists(tx, "person_claim") {
 		return 0, nil
 	}
-	q := `SELECT id FROM person_claim WHERE (subject_ref=?1 OR (?2 AND speaker_ref=?1))`
+	q := `SELECT id FROM person_claim WHERE (subject_ref=?1 OR (?2 AND (speaker_ref=?1 OR instr(text,'{@'||?1||'}')>0)))`
 	args := []any{ref, speaker}
 	if guild != "" {
 		q += ` AND guild_id=?3`

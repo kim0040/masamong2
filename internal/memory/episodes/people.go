@@ -151,6 +151,14 @@ func (p Prompt) validatePerson(rp rawPerson, instructionLike func(string) bool) 
 	if why != "" {
 		return f, why
 	}
+	// the write gate's rules, on the text as it is stored: tokens expanded to references, spaces
+	// collapsed, and the subject named in it
+	if utf8.RuneCountInString(strings.Join(strings.Fields(stored), " ")) > MaxPersonText {
+		return f, "text too long"
+	}
+	if !strings.Contains(stored, "{@"+f.About+"}") {
+		return f, "text does not name its subject"
+	}
 	f.Text = stored
 
 	if len(rp.Ev) == 0 {

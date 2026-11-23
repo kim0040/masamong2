@@ -229,9 +229,15 @@ func (s *Service) episodesForget(req action.Request, db *storage.Store, in map[s
 				return err
 			}
 			n = exists
+			if err := deleteEpisodeClaimsTx(tx, id); err != nil { // claims that follow no item go with it
+				return err
+			}
 			return deleteEpisodeTx(tx, id)
 		}
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM channel_episode WHERE room=?`, room).Scan(&n); err != nil {
+			return err
+		}
+		if err := deleteRoomClaimsTx(tx, room); err != nil {
 			return err
 		}
 		return store.DeleteRoomMemory(tx, room)

@@ -59,3 +59,18 @@ func (s *Service) SavePersonClaimsForTest(ctx context.Context, claims ...store.P
 	})
 	return n, err
 }
+
+// PersonStatementSuppressedForTest runs the backfill's check of a statement that is not stored
+// (personStatementSuppressedTx) in a read transaction.
+func (s *Service) PersonStatementSuppressedForTest(ctx context.Context, c store.PersonClaim) (bool, error) {
+	db, err := s.adminDB()
+	if err != nil {
+		return false, err
+	}
+	tx, err := db.Reader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	return s.personStatementSuppressedTx(tx, c)
+}
