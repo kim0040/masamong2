@@ -2546,7 +2546,10 @@ func TestPeopleBackfillReviewKeepsHiddenTopicHidden(t *testing.T) {
 // pilot reviewed: the run refuses with plan_changed (a new pilot is needed) and sends no batch, instead of
 // moving the pilot onto the changed plan and sending the window straight to a batch.
 func TestPeopleBackfillRejectsChangedPilotWithSameWindowID(t *testing.T) {
-	for _, how := range []string{"deleted", "edited"} {
+	// deleted: the plan's token changes. edited: an edit alone keeps the token, and the pilot is compared
+	// all the same. edited, plan changed: an edit and a line captured late outside the pilot (the pilot is
+	// moved onto the changed plan only when its windows are the ones reviewed).
+	for _, how := range []string{"deleted", "edited", "edited, plan changed"} {
 		t.Run(how, func(t *testing.T) {
 			h := newPBHost(t)
 			s := pbService(t, h, "anthropic")
@@ -2572,6 +2575,8 @@ func TestPeopleBackfillRejectsChangedPilotWithSameWindowID(t *testing.T) {
 				if _, err := s.Store.DB.Exec(`UPDATE memory_observations SET content='I really like editedtopic now', edited_at='2026-10-01T00:00:00Z' WHERE observation_id=?`, inside); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if how == "edited, plan changed" {
 				// and a line captured late outside the pilot, so the plan changes and the pilot is moved onto it
 				var outside store.BackfillWindow
 				all, _ := store.BackfillWindows(s.Store.Reader(), run.ID, false)
@@ -2589,7 +2594,11 @@ func TestPeopleBackfillRejectsChangedPilotWithSameWindowID(t *testing.T) {
 				}
 			}
 			dry := pbDry(t, s, nil)
-			if dry["token"] == token {
+			if how == "edited" {
+				if dry["token"] != token {
+					t.Fatal("an edit alone changed the plan's token")
+				}
+			} else if dry["token"] == token {
 				t.Fatal("the plan did not change")
 			}
 			ids := map[string]bool{}
@@ -2611,8 +2620,63 @@ func TestPeopleBackfillRejectsChangedPilotWithSameWindowID(t *testing.T) {
 			if kept.Token != token || kept.State != store.BackfillPiloted {
 				t.Fatalf("the pilot was moved onto the changed plan: %+v", kept)
 			}
+			if how != "edited" {
+				return
+			}
+			// the new pilot the refusal asks for can be made under the same token, and the run then starts
+			if res, out := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": token, "guild_id": "g1"}); !res.OK || out["pilot_windows"] == nil {
+				t.Fatalf("a new pilot of the same plan: %+v %v", res.Error, out)
+			}
+			again := pbWait(t, s, "pilot", pbState(store.BackfillPiloted))
+			if again.ID == run.ID {
+				t.Fatal("the changed pilot was reported again instead of a new one")
+			}
+			if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+				t.Fatalf("the run after the new pilot: %+v", res.Error)
+			}
+			pbWait(t, s, "run", pbState(store.BackfillDone))
 		})
 	}
+	// A run whose pilot answers are applied after an edit inside a pilot window (a run started before the
+	// edit, continued after it) applies none of them and sends none of the pilot windows in a batch.
+	t.Run("edited, at apply", func(t *testing.T) {
+		h := newPBHost(t)
+		s := pbService(t, h, "anthropic")
+		pbSeed(t, s, 70)
+		_, run := pbPiloted(t, s, nil)
+		pilots, _ := store.BackfillWindows(s.Store.Reader(), run.ID, true)
+		var w store.BackfillWindow
+		for _, p := range pilots {
+			if len(p.Obs) >= 3 {
+				w = p
+				break
+			}
+		}
+		if w.ID == "" {
+			t.Fatal("no pilot window with an inside line")
+		}
+		if _, err := s.Store.DB.Exec(`UPDATE memory_observations SET content='I really like editedtopic now', edited_at='2026-10-01T00:00:00Z' WHERE observation_id=?`, w.Obs[1]); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Store.DB.Exec(`UPDATE people_backfill_run SET model=? WHERE id=?`, string(peoplebackfill.ModelHaiku), run.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.pbApplyPilot(t.Context(), s.Store, run.ID); !errors.Is(err, errPilotChanged) {
+			t.Fatalf("the pilot answers were applied over a changed window: %v", err)
+		}
+		left, _ := store.BackfillWindows(s.Store.Reader(), run.ID, true, store.WindowQueued)
+		if len(left) != len(pilots) {
+			t.Fatalf("%d of %d pilot windows were settled", len(pilots)-len(left), len(pilots))
+		}
+		for _, p := range left {
+			if len(p.Result) == 0 && p.ID == w.ID {
+				t.Fatal("the changed window's stored answers were cleared, so it would go to a batch")
+			}
+		}
+		if n := pbCountClaims(t, s, "1=1"); n != 0 {
+			t.Fatalf("%d claims were applied from the pilot", n)
+		}
+	})
 }
 
 // The paid backfill writes through the same gate: a fact that writes out a known name of someone other

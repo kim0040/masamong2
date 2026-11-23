@@ -366,6 +366,12 @@ func (s *Service) pbStartPilot(ctx context.Context, req action.Request, db *stor
 	}
 	var resume *store.BackfillRun
 	now := s.Clock.Now().UTC().Format(time.RFC3339)
+	// a finished pilot of this plan whose answers no longer fit its windows (an edit keeps the token) is
+	// superseded below like an older plan's, so the new pilot the run's refusal asks for can be made
+	stale, err := s.pbPilotStale(db, plan)
+	if err != nil {
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
+	}
 	// a busy run refuses the pilot before anything is superseded
 	for _, r := range runs {
 		if ((r.State == store.BackfillPiloting || r.State == store.BackfillSubmitted) && pbLoops.m[s][r.ID] != nil) ||
@@ -377,7 +383,7 @@ func (s *Service) pbStartPilot(ctx context.Context, req action.Request, db *stor
 	for i := range runs {
 		r := runs[i]
 		switch {
-		case r.Token == plan.Token && r.PilotDone && (r.State == store.BackfillPiloted || r.State == store.BackfillStopped):
+		case r.Token == plan.Token && r.PilotDone && !stale[r.ID] && (r.State == store.BackfillPiloted || r.State == store.BackfillStopped):
 			// this plan's pilot is done: report it again, nothing is sent
 			return action.OK(req, map[string]any{"mode": "pilot", "run": pbRunJSON(db, r), "model_calls": 0})
 		case r.Token == plan.Token && !r.PilotDone && resume == nil && (r.State == store.BackfillPiloting || r.State == store.BackfillStopped):
@@ -1142,6 +1148,19 @@ func (s *Service) pbStartRun(ctx context.Context, req action.Request, db *storag
 			return *fail
 		}
 		plan = rebuilt
+		if !changed {
+			// an edit or a withdrawal inside a pilot window keeps the plan's token (its ids and counts), so
+			// the stored answers are compared with the prompts as they are now on every start, not only when
+			// the token changed (pbRebasePilot compares them then): a window that is not the one the operator
+			// reviewed needs a new pilot and never goes to a batch
+			stale, err := s.pbPilotStale(db, plan)
+			if err != nil {
+				return s.failErr(req, errcode.IO, "error.storage", err, nil)
+			}
+			if len(stale) > 0 {
+				return s.pbPlanChangedFail(req, db, plan)
+			}
+		}
 	}
 	// a purge a member's change could not run comes first; while it cannot run, the run does not start
 	if err := s.pbPurgePending(ctx, db, plan.Params.Guild); err != nil {
@@ -1344,6 +1363,47 @@ func (s *Service) pbPilotWindowChanged(db *storage.Store, guild string, w store.
 	return false, nil
 }
 
+// pbPilotStale are the finished, not yet started pilot runs of plan's token (by id) holding a pilot window
+// whose stored answers no longer fit the window as it is now (pbPilotWindowChanged).
+func (s *Service) pbPilotStale(db *storage.Store, plan pbPlan) (map[string]bool, error) {
+	runs, err := store.BackfillRuns(db.Reader(), plan.Params.Guild, store.BackfillPiloted, store.BackfillStopped)
+	if err != nil {
+		return nil, err
+	}
+	byID := map[string]pbWindow{}
+	for _, w := range plan.Windows {
+		byID[w.ID] = w
+	}
+	stale := map[string]bool{}
+	for _, r := range runs {
+		if r.Token != plan.Token || !r.PilotDone {
+			continue
+		}
+		pilots, err := store.BackfillWindows(db.Reader(), r.ID, true)
+		if err != nil {
+			return nil, err
+		}
+		for _, w := range pilots {
+			changed, err := s.pbPilotWindowChanged(db, r.GuildID, w, byID)
+			if err != nil {
+				return nil, err
+			}
+			if changed {
+				stale[r.ID] = true
+				break
+			}
+		}
+	}
+	return stale, nil
+}
+
+// pbPlanChangedFail is the plan_changed refusal with the plan's dry-run output: a new pilot is needed.
+func (s *Service) pbPlanChangedFail(req action.Request, db *storage.Store, plan pbPlan) action.Result {
+	spent, _ := pbGuildSpent(db.Reader(), plan.Params.Guild)
+	return action.Fail(req, errcode.StaleRevision, "people_backfill.plan_changed", s.msg(req, "people_backfill.plan_changed"),
+		map[string]any{"dry_run": s.pbDryRunOutput(plan, spent)})
+}
+
 // pbStartedPlan is the plan of a run that already started (a model chosen) whose token confirm names:
 // continuing it reads its own stored windows, so the plan is not built again (members delete and edit
 // messages during a long run, and each window is checked again when it is applied).
@@ -1379,6 +1439,11 @@ func (s *Service) pbRunLoop(ctx context.Context, runID string, a *openai.Adapter
 		if l.submit.Load() && !pilotDone {
 			if err := s.pbApplyPilot(ctx, db, runID); err != nil {
 				if ctx.Err() != nil {
+					return
+				}
+				if errors.Is(err, errPilotChanged) {
+					s.Log.Warn("people backfill: a pilot window changed since the pilot; the run stops for a new pilot", "run", runID)
+					s.pbStop(db, runID, l, "plan_changed")
 					return
 				}
 				s.Log.Warn("people backfill: pilot answers not applied", "run", runID, "err", err)
@@ -1849,6 +1914,9 @@ func (s *Service) pbApplyBatch(ctx context.Context, db *storage.Store, run store
 // pbApplyPilot applies the chosen model's stored pilot answers once a run starts, then drops every
 // stored answer (the review set is gone with them). A window whose prompt changed, or whose answer
 // failed, stays queued and goes out in a batch. The pilot's spend is already counted.
+// errPilotChanged: a pilot window's prompt is not the one its stored answers were given for.
+var errPilotChanged = errors.New("people backfill: a pilot window changed since the pilot")
+
 func (s *Service) pbApplyPilot(ctx context.Context, db *storage.Store, runID string) error {
 	run, ok, err := store.LoadBackfillRun(db.Reader(), runID)
 	if err != nil || !ok {
@@ -1861,6 +1929,29 @@ func (s *Service) pbApplyPilot(ctx context.Context, db *storage.Store, runID str
 	ws, err := store.BackfillWindows(db.Reader(), runID, true, store.WindowQueued)
 	if err != nil {
 		return err
+	}
+	// every answer is compared before any is applied: a window whose prompt changed since the pilot (an
+	// edit, a withdrawal) is not the one the operator reviewed, and neither its answer nor a batch is used
+	// for it; nothing is applied and the run stops for a new pilot
+	built := map[string]pbPrompt{}
+	for _, w := range ws {
+		have := pbAnswers(w.Result)
+		ans, ok := have[run.Model]
+		refused := false
+		for _, a := range have {
+			refused = refused || a.Refused
+		}
+		if refused || !ok || ans.Failed != "" || ans.Skipped {
+			continue
+		}
+		bp, berr := s.pbBuildPrompt(db, run.GuildID, w)
+		if berr != nil {
+			return berr
+		}
+		if !bp.ok || bp.hash != ans.Hash {
+			return errPilotChanged
+		}
+		built[w.ID] = bp
 	}
 	for _, w := range ws {
 		have := pbAnswers(w.Result)
@@ -1878,13 +1969,7 @@ func (s *Service) pbApplyPilot(ctx context.Context, db *storage.Store, runID str
 		case ans.Skipped:
 			err = s.pbSettleWindow(ctx, db, runID, w, store.WindowSkipped, 0, 0)
 		default:
-			bp, berr := s.pbBuildPrompt(db, run.GuildID, w)
-			if berr != nil {
-				return berr
-			}
-			if !bp.ok || bp.hash != ans.Hash {
-				continue
-			}
+			bp := built[w.ID]
 			w.Result = nil
 			err = s.pbApply(ctx, db, runID, run.GuildID, w, ans.Facts, ans.Rejected, bp, ans.ReadAt, 0, 0)
 		}
