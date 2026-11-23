@@ -329,7 +329,7 @@ func (s *Service) applyCandidate(req action.Request, candidate []byte, base int)
 func (s *Service) applyCandidateLocked(req action.Request, candidate []byte, base int) action.Result {
 	st, err := loadCASState(s.Store, s.CfgPath)
 	if err != nil {
-		return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+		return s.failErr(req, "IO", "config.failed", err, nil)
 	}
 	prep, err := config.BeginApply(st, base, candidate)
 	if err != nil {
@@ -344,7 +344,7 @@ func (s *Service) applyCandidateLocked(req action.Request, candidate []byte, bas
 			if _, perr := config.ValidateCandidate(candidate); directKeyOf(perr) != nil {
 				return s.configFail(req, code, perr, details)
 			}
-			return action.Fail(req, code, "generic.error", err.Error(), details)
+			return s.failErr(req, code, "config.invalid", err, details)
 		}
 		return action.Fail(req, code, "config.conflict", s.msg(req, "config.conflict"), details)
 	}
@@ -357,18 +357,18 @@ func (s *Service) applyCandidateLocked(req action.Request, candidate []byte, bas
 		return res
 	}
 	if err := persistRevisionAt(s.Store, prep, s.Clock.Now()); err != nil {
-		return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+		return s.failErr(req, "IO", "config.failed", err, nil)
 	}
 	if err := atomicWriteFile(s.CfgPath, candidate); err != nil {
-		return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+		return s.failErr(req, "IO", "config.failed", err, nil)
 	}
 	prep.Status = config.StatusCommitted
 	if err := persistRevisionAt(s.Store, prep, s.Clock.Now()); err != nil {
-		return action.Fail(req, "IO", "generic.error", err.Error(), nil)
+		return s.failErr(req, "IO", "config.failed", err, nil)
 	}
 	doc, err := config.Parse(candidate)
 	if err != nil {
-		return action.Fail(req, errcode.ConfigInvalid, "generic.error", err.Error(), nil)
+		return s.configFail(req, errcode.ConfigInvalid, err, nil)
 	}
 	s.setDoc(doc, prep.Revision)
 	s.emit("config", "", map[string]any{"revision": prep.Revision})
@@ -471,7 +471,7 @@ func (s *Service) configChangesAction(req action.Request) action.Result {
 	}
 	changes, err := configChanges(a, b)
 	if err != nil {
-		return action.Fail(req, errcode.ConfigInvalid, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.ConfigInvalid, "config.failed", err, nil)
 	}
 	return action.OK(req, map[string]any{"from": from, "to": to, "changes": changes})
 }

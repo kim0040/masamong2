@@ -132,7 +132,7 @@ func (s *Service) modelsEmbedWidth(req action.Request, in map[string]any) action
 		doc.Models["embed"] = next
 		raw, err := config.Marshal(doc)
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "config.failed", err, nil)
 		}
 		base := live.rev
 		if req.BaseRevision > 0 {
