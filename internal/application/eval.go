@@ -115,13 +115,13 @@ func (s *Service) evalCases(limit int) []evalCase {
 func (s *Service) evalAction(ctx context.Context, req action.Request) action.Result {
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	in := inputMap(req)
 	if req.Action == "eval.runs" {
 		rows, err := db.DB.Query(`SELECT id, at, params, summary FROM eval_runs ORDER BY at DESC LIMIT 50`)
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		defer rows.Close()
 		list := []map[string]any{}
@@ -180,11 +180,11 @@ func (s *Service) evalAction(ctx context.Context, req action.Request) action.Res
 	}
 	eng, err := s.MemoryEngine()
 	if err != nil {
-		return action.Fail(req, errcode.NotSetup, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.NotSetup, "memory.not_ready", err, nil)
 	}
 	if eng.Index() == nil {
 		if _, err := eng.Reload(); err != nil {
-			return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.InvalidInput, "memory.failed", err, nil)
 		}
 	}
 	started := s.Clock.Now()

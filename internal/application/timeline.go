@@ -35,7 +35,7 @@ func (s *Service) eventsTimeline(ctx context.Context, req action.Request) action
 	}
 	eng, err := s.MemoryEngine()
 	if err != nil {
-		return action.Fail(req, errcode.NotSetup, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.NotSetup, "memory.not_ready", err, nil)
 	}
 	labels := map[string]string{}
 	for _, b := range s.dbBlocks() {
@@ -48,7 +48,7 @@ func (s *Service) eventsTimeline(ctx context.Context, req action.Request) action
 		mode = "search"
 		entries, err = s.timelineSearch(ctx, eng, q, rooms, limit)
 		if err != nil {
-			return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.InvalidInput, "memory.failed", err, nil)
 		}
 	} else {
 		from, to := strVal(in, "from", ""), strVal(in, "to", "")
@@ -60,7 +60,7 @@ func (s *Service) eventsTimeline(ctx context.Context, req action.Request) action
 		}
 		list, err := eng.Store.Timeline(rooms, from, to, limit)
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		for _, e := range list {
 			entries = append(entries, timelineEntry(e.LeafID, e.Room, e.Time, e.Summary, e.Excerpt, e.Speakers))

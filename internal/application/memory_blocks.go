@@ -193,7 +193,7 @@ func batchPlanOf(eng *engine.Engine, room string) (engine.BatchPlanInfo, bool) {
 func (s *Service) prepareMemoryBlock(ctx context.Context, req action.Request, in map[string]any) action.Result {
 	eng, err := s.MemoryEngine()
 	if err != nil {
-		return action.Fail(req, errcode.NotSetup, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.NotSetup, "memory.not_ready", err, nil)
 	}
 	candidate, ok := s.resolveBlockRoom(in)
 	if !ok || candidate.SourceRoom == "" {
@@ -225,7 +225,7 @@ func (s *Service) prepareMemoryBlock(ctx context.Context, req action.Request, in
 	if boolVal(in, "dry_run") {
 		report, err := eng.IndexRooms(ctx, engine.IndexOptions{Rooms: []string{candidate.SourceRoom}, DryRun: true, Limit: limit}, nil)
 		if err != nil {
-			return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.InvalidInput, "memory.failed", err, nil)
 		}
 		if mode == prepareBatch && report.Estimate != nil {
 			est := eng.BatchEstimate(*report.Estimate)
@@ -254,7 +254,7 @@ func (s *Service) prepareMemoryBlock(ctx context.Context, req action.Request, in
 	if boolVal(in, "background") || mode == prepareBatch {
 		j, reused, err := s.startPrepareJob(payload)
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		if running, ok := decodePrepare(j); ok && running.SourceRoom != "" {
 			mode = running.mode() // a job already running keeps its own mode
@@ -272,11 +272,11 @@ func (s *Service) prepareMemoryBlock(ctx context.Context, req action.Request, in
 	}
 	prepared, report, err := s.prepareRoom(ctx, candidate, payload, nil, nil)
 	if err != nil {
-		code := errcode.InvalidInput
+		code, key := errcode.InvalidInput, "memory.failed"
 		if errors.Is(err, errProviderMissing) {
-			code = errcode.ProviderUnconfigured
+			code, key = errcode.ProviderUnconfigured, "memory.provider_missing"
 		}
-		return action.Fail(req, code, "generic.error", err.Error(), map[string]any{"block": prepared, "report": report})
+		return s.failErr(req, code, key, err, map[string]any{"block": prepared, "report": report})
 	}
 	return action.OK(req, map[string]any{"dry_run": false, "block": prepared, "report": report})
 }
@@ -1124,7 +1124,7 @@ func (s *Service) updateMemoryBlock(req action.Request, in map[string]any) actio
 	}
 	eng, err := s.MemoryEngine()
 	if err != nil {
-		return action.Fail(req, errcode.NotSetup, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.NotSetup, "memory.not_ready", err, nil)
 	}
 	changed := []string{}
 	if _, set := in["label"]; set {
@@ -1136,7 +1136,7 @@ func (s *Service) updateMemoryBlock(req action.Request, in map[string]any) actio
 			if errors.Is(err, store.ErrNoRoom) {
 				return action.Fail(req, errcode.InvalidInput, "generic.error", "this block has no stored messages yet; it takes the channel name", nil)
 			}
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		changed = append(changed, "label")
 	}
@@ -1187,7 +1187,7 @@ func (s *Service) updateMemoryBlock(req action.Request, in map[string]any) actio
 		err := s.discardBatch(dctx, eng, b.SourceRoom)
 		cancel()
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		changed = append(changed, "discard_batch")
 	}
@@ -1196,7 +1196,7 @@ func (s *Service) updateMemoryBlock(req action.Request, in map[string]any) actio
 	}
 	if metaChanged {
 		if err := s.kvSet(blockMetaKey(b.SourceRoom), meta); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 	}
 	s.emit("memory", b.ID, map[string]any{"source_room": b.SourceRoom, "changed": changed})
@@ -1232,7 +1232,7 @@ func (s *Service) deleteMemoryBlock(req action.Request, in map[string]any) actio
 	}
 	eng, err := s.MemoryEngine()
 	if err != nil {
-		return action.Fail(req, errcode.NotSetup, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.NotSetup, "memory.not_ready", err, nil)
 	}
 	// detach from every channel first, so no channel keeps a dangling reference
 	detached := 0
@@ -1260,7 +1260,7 @@ func (s *Service) deleteMemoryBlock(req action.Request, in map[string]any) actio
 	}
 	removed, err := eng.Store.DeleteRoom(b.SourceRoom)
 	if err != nil && !errors.Is(err, store.ErrNoRoom) {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	s.dropPreparedBlocks(b.SourceRoom)
 	_ = s.kvDelete(blockMetaKey(b.SourceRoom))

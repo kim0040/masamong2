@@ -115,7 +115,7 @@ func (s *Service) memoryActions(ctx context.Context, req action.Request) action.
 	in := inputMap(req)
 	eng, err := s.MemoryEngine()
 	if err != nil {
-		return action.Fail(req, errcode.NotSetup, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.NotSetup, "memory.not_ready", err, nil)
 	}
 	switch req.Action {
 	case "messages.search":
@@ -140,7 +140,7 @@ func (s *Service) memoryActions(ctx context.Context, req action.Request) action.
 		topK := min(100, max(1, intVal(in, "top_k", 20)))
 		found, err := eng.Store.SearchMessages(rooms, q, topK)
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		byRoom := map[string]blocks.Block{}
 		for _, b := range s.dbBlocks() {
@@ -172,7 +172,7 @@ func (s *Service) memoryActions(ctx context.Context, req action.Request) action.
 		}
 		if eng.Index() == nil {
 			if _, err := eng.Reload(); err != nil {
-				return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+				return s.failErr(req, errcode.InvalidInput, "memory.failed", err, nil)
 			}
 		}
 		mode := s.retrieveMode()
@@ -188,7 +188,7 @@ func (s *Service) memoryActions(ctx context.Context, req action.Request) action.
 		res, corrected, err := s.reviewedSearch(ctx, eng, engine.SearchRequest{Query: q, Intent: it, Rooms: rooms, Ranking: mode,
 			TopK: intVal(in, "top_k", 5), RemainingUSD: parseUSD(s.Doc().Memory.TurnBudgetUSD, 0.05)})
 		if err != nil {
-			return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.InvalidInput, "memory.failed", err, nil)
 		}
 		if corrected == nil {
 			corrected = map[string]memoryReview{}
@@ -203,7 +203,7 @@ func (s *Service) memoryActions(ctx context.Context, req action.Request) action.
 		}
 		path, err = s.importPath(path)
 		if err != nil {
-			return action.Fail(req, errcode.PermissionDenied, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.PermissionDenied, "import.path_denied", err, nil)
 		}
 		switch src {
 		case "raw":
@@ -245,7 +245,7 @@ func (s *Service) memoryActions(ctx context.Context, req action.Request) action.
 		defer s.flushMemoryLLMCalls(indexCtx)
 		rep, err := eng.IndexRooms(indexCtx, opts, nil)
 		if err != nil {
-			return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.InvalidInput, "memory.failed", err, nil)
 		}
 		out := map[string]any{"report": rep}
 		if len(rep.BatchWaiting) > 0 {
@@ -268,7 +268,7 @@ func (s *Service) memoryActions(ctx context.Context, req action.Request) action.
 		}
 		out, err := s.ChatTurn(ctx, ci)
 		if err != nil {
-			return action.Fail(req, errcode.InvalidInput, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.InvalidInput, "memory.failed", err, nil)
 		}
 		res := map[string]any{"answer": out.Answer, "rag_state": out.RagState, "hits": len(out.Hits),
 			"intent": out.Intent, "retrieval": out.Retrieve, "timing_ms": out.Timing, "cost_usd": out.CostUSD, "tools": out.Tools}
@@ -454,7 +454,7 @@ func (s *Service) usageReset(req action.Request) action.Result {
 	if boolVal(in, "undo") {
 		reset, _ := s.readSpendReset()
 		if err := s.kvDelete(spendResetKey); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		spent := "unknown"
 		if _, total, ok := s.monthSpend(); ok {
@@ -469,7 +469,7 @@ func (s *Service) usageReset(req action.Request) action.Result {
 
 	eng, err := s.MemoryEngine()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "memory.not_ready", err, nil)
 	}
 	now := s.Clock.Now().UTC()
 	month := now.Format("2006-01")
@@ -478,14 +478,14 @@ func (s *Service) usageReset(req action.Request) action.Result {
 	by, total, dayTotal := map[string]float64{}, 0.0, 0.0
 	rows, err := eng.Store.DB.Reader().Query(`SELECT day, kind, usd FROM memory_spend WHERE day>=?`, month+"-01")
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	for rows.Next() {
 		var d, kind string
 		var usd float64
 		if err := rows.Scan(&d, &kind, &usd); err != nil {
 			rows.Close()
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		by[kind] += usd
 		total += usd
@@ -496,11 +496,11 @@ func (s *Service) usageReset(req action.Request) action.Result {
 	err = rows.Err()
 	rows.Close()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	reset := spendResetSnapshot{Month: month, At: now.Format(time.RFC3339), ByKind: by, Total: total, Day: day, DayTotal: dayTotal}
 	if err := s.kvSet(spendResetKey, reset); err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	spent := "0.0000"
 	if _, total, ok := s.monthSpend(); ok {

@@ -294,11 +294,11 @@ func (s *Service) privacyConsentContext(ctx context.Context, req action.Request)
 		// because copies that kept only text are found by it
 		db, err := s.adminDB()
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), out)
+			return s.failErr(req, errcode.IO, "error.storage", err, out)
 		}
 		n, err := s.processWithdrawal(ctx, db, redactionJob{User: userID, Ref: personRef(userID), At: s.Clock.Now().UTC().Format(time.RFC3339Nano)})
 		if err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), out)
+			return s.failErr(req, errcode.IO, "error.storage", err, out)
 		}
 		out["removed_messages"] = n
 		card.Text = s.msg(req, "privacy.card.memory_removed", "n", n)
@@ -314,7 +314,7 @@ func (s *Service) privacyConsentContext(ctx context.Context, req action.Request)
 			}
 			return nil
 		}); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), out)
+			return s.failErr(req, errcode.IO, "error.storage", err, out)
 		}
 	}
 	if status == privacy.Withdrawn {

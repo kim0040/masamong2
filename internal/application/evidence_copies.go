@@ -316,5 +316,5 @@ func (s *Service) evidenceWriteError(req action.Request, err error) action.Resul
 	if errors.Is(err, errEvidenceDeleted) {
 		return action.Fail(req, errcode.InvalidInput, "privacy.evidence_changed", s.msg(req, "privacy.evidence_changed"), nil)
 	}
-	return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+	return s.failErr(req, errcode.IO, "error.storage", err, nil)
 }

@@ -705,7 +705,7 @@ func (s *Service) roomStyleAction(ctx context.Context, req action.Request) actio
 	}
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	switch req.Action {
 	case "room.style.show":
@@ -716,7 +716,7 @@ func (s *Service) roomStyleAction(ctx context.Context, req action.Request) actio
 			return action.Fail(req, errcode.BudgetExceeded, "generic.error", "the derived memory budget is used up this month", nil)
 		}
 		if err != nil {
-			return action.Fail(req, errcode.ProviderUnavailable, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.ProviderUnavailable, "feature.model_failed", err, nil)
 		}
 		return action.OK(req, out)
 	case "room.style.preview":
@@ -751,7 +751,7 @@ func (s *Service) roomStyleAction(ctx context.Context, req action.Request) actio
 			return err
 		})
 		if err != nil {
-			return action.Fail(req, errcode.StaleRevision, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.StaleRevision, "error.stale", err, nil)
 		}
 		if !found {
 			return action.Fail(req, errcode.InvalidInput, "generic.error", "no such version", nil)
@@ -847,11 +847,11 @@ func (s *Service) roomStylePreview(ctx context.Context, req action.Request, db *
 	}
 	plain, err := reply(pol.Rules)
 	if err != nil {
-		return action.Fail(req, errcode.ProviderUnavailable, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.ProviderUnavailable, "feature.model_failed", err, nil)
 	}
 	styled, err := reply(strings.TrimSpace(pol.Rules + "\n\n" + voice.Pack.Features.RoomStyleHeader + "\n" + note))
 	if err != nil {
-		return action.Fail(req, errcode.ProviderUnavailable, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.ProviderUnavailable, "feature.model_failed", err, nil)
 	}
 	return action.OK(req, map[string]any{"version": version, "plain": plain, "styled": styled})
 }
