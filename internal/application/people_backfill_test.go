@@ -45,6 +45,8 @@ type pbFakeHost struct {
 	fail500   int // the next chat requests are answered 500
 	// rewrite replaces the answer to a prompt (Messages and batch items): its text and stop reason
 	rewrite func(model, prompt string) (text, stop string, ok bool)
+	// onDelete sees a batch delete before it is done; false answers it 500 and keeps the batch
+	onDelete func(id string) bool
 }
 
 func newPBHost(t *testing.T) *pbFakeHost {
@@ -129,6 +131,13 @@ func (h *pbFakeHost) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewEncoder(w).Encode(h.batchJSON(id))
 	case r.Method == http.MethodDelete:
+		id := strings.TrimPrefix(path, "/v1/messages/batches/")
+		if h.onDelete != nil && !h.onDelete(id) {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"api_error","message":"internal"}}`))
+			return
+		}
+		delete(h.batches, id) // the host forgets it: a later poll is a 404
 		_, _ = w.Write([]byte(`{}`))
 	default:
 		w.WriteHeader(http.StatusNotFound)
@@ -1906,5 +1915,58 @@ func TestPeopleBackfillRequeuesEditBetweenReadAndApply(t *testing.T) {
 		if d := runAfter - runBefore; d < 0.0099 || d > 0.0101 || dayAfter-dayBefore < 0.0099 || dayAfter-dayBefore > 0.0101 || got.CostUSD < 0.0099 {
 			t.Fatalf("%s: charged run %v, day %v, window %v; want once", tc.name, d, dayAfter-dayBefore, got.CostUSD)
 		}
+	}
+}
+
+// The applied state of a batch is saved before the host's copy is deleted, so a restart after the delete
+// never polls a deleted batch; a failed delete does not stop the run, and leaves the batch marked
+// not cleaned.
+func TestPeopleBackfillRestartsAfterRemoteCleanup(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	token, run := pbPiloted(t, s, nil)
+	var states []string
+	h.mu.Lock()
+	h.onDelete = func(id string) bool {
+		// called with the host's lock held: read the stored state the way a restart would
+		r, _, _ := store.LoadBackfillRun(s.Store.Reader(), run.ID)
+		for _, b := range pbDecodeBatches(r.Batches) {
+			if b.Ref != nil && b.Ref.ID == id {
+				states = append(states, b.State)
+			}
+		}
+		return len(states) > 1 // the first delete fails
+	}
+	h.mu.Unlock()
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+		t.Fatal(res.Error)
+	}
+	done := pbWait(t, s, "run", pbState(store.BackfillDone))
+	h.mu.Lock()
+	got := slices.Clone(states)
+	h.mu.Unlock()
+	if len(got) == 0 || got[0] != pbBatchApplied {
+		t.Fatalf("the batch's state when the host deleted it: %v, want applied", got)
+	}
+	bs := pbDecodeBatches(done.Batches)
+	if len(bs) != 1 || bs[0].State != pbBatchApplied || bs[0].Cleaned {
+		t.Fatalf("a failed delete: %+v", bs)
+	}
+	// a restart polls nothing of it
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s2, err := ReopenForTest(s, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s2.Close() })
+	pbConfigure(s2, h, "anthropic")
+	requests := h.count()
+	s2.ResumeJobs(t.Context())
+	time.Sleep(100 * time.Millisecond)
+	if after, _, _ := store.LoadBackfillRun(s2.Store.Reader(), run.ID); after.State != store.BackfillDone || h.count() != requests {
+		t.Fatalf("after a restart: %s, %d requests", after.State, h.count()-requests)
 	}
 }

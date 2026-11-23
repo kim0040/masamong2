@@ -68,6 +68,9 @@ type pbBatch struct {
 	MaxUSD  float64          `json:"max_usd"` // the reserved maximum while it is in flight
 	Ref     *openai.BatchRef `json:"ref,omitempty"`
 	At      string           `json:"at"`
+	// Cleaned: the host's copy of an applied batch was deleted. The applied state is saved first; a
+	// failed delete is tried again on a later step.
+	Cleaned bool `json:"cleaned,omitempty"`
 }
 
 // pbHasInFlight reports whether a run has batches the host may still run.
@@ -1232,8 +1235,17 @@ func (s *Service) pbStep(ctx context.Context, db *storage.Store, runID string, a
 			if err := s.pbApplyBatch(ctx, db, run, b.Key, model, outs); err != nil {
 				return false, true, err
 			}
+			// the terminal state is saved before the host's copy is deleted: a crash in between leaves an
+			// applied batch whose delete is tried again, never a submitted reference to a deleted batch
 			b.State, changed = pbBatchApplied, true
-			_ = a.CleanupBatch(ctx, *b.Ref)
+			if err := s.pbSaveBatches(ctx, db, runID, batches, nil); err != nil {
+				return false, true, err
+			}
+			b.Cleaned = a.CleanupBatch(ctx, *b.Ref) == nil
+		case pbBatchApplied:
+			if !b.Cleaned && b.Ref != nil && a.CleanupBatch(ctx, *b.Ref) == nil {
+				b.Cleaned, changed = true, true
+			}
 		}
 	}
 	l.requeue.Store(false) // the operator's release covers the submissions unknown when it was given
