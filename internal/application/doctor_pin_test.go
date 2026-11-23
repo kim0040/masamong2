@@ -65,10 +65,7 @@ func TestDoctorReportPinned(t *testing.T) {
 	got := map[string]any{}
 	for _, sc := range scenarios {
 		t.Run(sc.name, func(t *testing.T) {
-			for k, v := range sc.env {
-				t.Setenv(k, v)
-			}
-			svc := setupSvc(t)
+			svc := setupSvcEnv(t, sc.env)
 			if sc.apply != nil {
 				applyDoc(t, svc, sc.apply)
 			}

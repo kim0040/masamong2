@@ -28,9 +28,12 @@ import (
 	"masamong/internal/tools"
 )
 
-func privacyService(t *testing.T) *Service {
+func privacyService(t *testing.T) *Service { return privacyServiceEnv(t, nil) }
+
+// privacyServiceEnv is privacyService for a service that has the variables of env from the start.
+func privacyServiceEnv(t *testing.T, env map[string]string) *Service {
 	t.Helper()
-	s, err := Open(t.TempDir(), nil, false)
+	s, err := OpenWithEnvForTest(t, t.TempDir(), env)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +202,6 @@ func TestHTTPToolScrubsReflectedCredentials(t *testing.T) {
 	secret := "synthetic/cred+\"\\line\nend"
 	quoted, _ := json.Marshal(secret)
 	forms := []string{secret, url.QueryEscape(secret), strings.ReplaceAll(url.QueryEscape(secret), "%2F", "%2f"), url.PathEscape(secret), base64.StdEncoding.EncodeToString([]byte(secret)), base64.RawURLEncoding.EncodeToString([]byte(secret)), string(quoted[1 : len(quoted)-1])}
-	t.Setenv("TOOL_TEST_CREDENTIAL", secret)
 	for _, format := range []string{"json", "text"} {
 		t.Run(format, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -211,6 +213,7 @@ func TestHTTPToolScrubsReflectedCredentials(t *testing.T) {
 			}))
 			defer srv.Close()
 			s := &Service{Log: slog.Default()}
+			s.SetEnvForTest(t, "TOOL_TEST_CREDENTIAL", secret)
 			h := &tools.HTTP{URL: srv.URL + "?key={credential}", CredentialRef: "env:TOOL_TEST_CREDENTIAL"}
 			if format == "json" {
 				h.Pick = []string{"keep"}

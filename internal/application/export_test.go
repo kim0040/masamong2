@@ -13,6 +13,7 @@ import (
 	"masamong/internal/config"
 	"masamong/internal/features/reminders"
 	"masamong/internal/lang"
+	"masamong/internal/providers"
 	"masamong/internal/providers/openai"
 	"masamong/internal/tools"
 )
@@ -34,6 +35,20 @@ func (c *credentialStandIns) setForTest(t testing.TB, name, value string) {
 	}
 	c.refs.Store("env:"+name, "file:"+path)
 }
+
+// OpenWithEnvForTest is Open for a service that has the variables of env from the start (SetEnvForTest
+// before the first configuration is built).
+func OpenWithEnvForTest(t testing.TB, dir string, env map[string]string) (*Service, error) {
+	t.Helper()
+	return openService(dir, nil, false, nil, func(h *serviceHooks) {
+		for name, value := range env {
+			h.credentials.setForTest(t, name, value)
+		}
+	})
+}
+
+// CredentialForTest reads a credential reference the way this service does (SetEnvForTest applies).
+func (s *Service) CredentialForTest(ref string) (providers.Credential, error) { return s.credential(ref) }
 
 // ReopenForTest opens prev's data root again the way a restart would: the environment's variables that
 // SetEnvForTest gave prev are still there.

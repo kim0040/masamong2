@@ -25,8 +25,20 @@ func setupSvc(t *testing.T) *application.Service {
 // afterwards races them).
 func setupSvcLog(t *testing.T, logger func(*application.Service) *slog.Logger) *application.Service {
 	t.Helper()
+	return setupSvcWith(t, logger, nil)
+}
+
+// setupSvcEnv is setupSvc for a service that has the variables of env from the start: the providers
+// it is set up with are built with their keys.
+func setupSvcEnv(t *testing.T, env map[string]string) *application.Service {
+	t.Helper()
+	return setupSvcWith(t, nil, env)
+}
+
+func setupSvcWith(t *testing.T, logger func(*application.Service) *slog.Logger, env map[string]string) *application.Service {
+	t.Helper()
 	dir := t.TempDir()
-	svc, err := application.Open(dir, nil, false)
+	svc, err := application.OpenWithEnvForTest(t, dir, env)
 	if err != nil {
 		t.Fatal(err)
 	}
