@@ -20,7 +20,7 @@ import (
 
 func TestMessageVectorDoctorShowsMixedAndShortProviderWidthWaits(t *testing.T) {
 	svc := setupSvc(t)
-	t.Setenv("MASAMONG_OPENROUTER_KEY", "synthetic-test-key")
+	svc.SetEnvForTest(t, "MASAMONG_OPENROUTER_KEY", "synthetic-test-key")
 	applyDoc(t, svc, func(d *config.Document) {
 		m := d.Models["embed"]
 		m.Model, m.Dimensions = "baai/bge-m3", 1024
@@ -49,8 +49,8 @@ func TestMessageVectorDoctorShowsMixedAndShortProviderWidthWaits(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv("MESSAGE_VECTOR_FAKE_KEY", "synthetic")
-	cred, err := providers.Resolve("env:MESSAGE_VECTOR_FAKE_KEY")
+	svc.SetEnvForTest(t, "MESSAGE_VECTOR_FAKE_KEY", "synthetic")
+	cred, err := svc.CredentialForTest("env:MESSAGE_VECTOR_FAKE_KEY")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,7 +255,7 @@ func TestMessageVectorNonMRLExplicitDimensionsAreWired(t *testing.T) {
 // line again.
 func TestMessageVectorsDoctorShowsPendingMessagesAfterUpgrade(t *testing.T) {
 	svc := setupSvc(t)
-	t.Setenv("MASAMONG_OPENROUTER_KEY", "or-key") // the embedding model's provider has its key
+	svc.SetEnvForTest(t, "MASAMONG_OPENROUTER_KEY", "or-key") // the embedding model's provider has its key
 	eng, err := svc.MemoryEngine()
 	if err != nil {
 		t.Fatal(err)
@@ -314,7 +314,7 @@ func TestMessageVectorsConfigPatch(t *testing.T) {
 // the background and a later list shows the new number.
 func TestMessageVectorsPendingCountIsCachedAndRefreshedInTheBackground(t *testing.T) {
 	svc := setupSvc(t)
-	t.Setenv("MASAMONG_OPENROUTER_KEY", "or-key")
+	svc.SetEnvForTest(t, "MASAMONG_OPENROUTER_KEY", "or-key")
 	eng, err := svc.MemoryEngine()
 	if err != nil {
 		t.Fatal(err)

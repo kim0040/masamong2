@@ -17,7 +17,7 @@ func residencyRow(t *testing.T, out map[string]any) map[string]any {
 // carries a per-room estimate. Neither names a room.
 func TestMemoryResidencyDoctorRowAndBlockEstimate(t *testing.T) {
 	svc := setupSvc(t)
-	t.Setenv("MASAMONG_OPENROUTER_KEY", "or-key")
+	svc.SetEnvForTest(t, "MASAMONG_OPENROUTER_KEY", "or-key")
 	eng, err := svc.MemoryEngine()
 	if err != nil {
 		t.Fatal(err)

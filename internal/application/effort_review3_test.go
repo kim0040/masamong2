@@ -67,12 +67,12 @@ func TestProviderEditsDropLearnedShapes(t *testing.T) {
 	h := &noThinkingHost{}
 	srv := h.start(t)
 	svc := setupSvc(t)
-	t.Setenv("FAKE_CLAUDE_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_CLAUDE_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["claude"] = config.Provider{Kind: config.KindOpenAI, API: "anthropic", BaseURL: srv.URL + "/v1", CredentialRef: "env:FAKE_CLAUDE_KEY"}
 		d.Models["planner"] = config.Model{Provider: "claude", Model: "claude-x"}
 	})
-	cred, _ := providers.Resolve("env:FAKE_CLAUDE_KEY")
+	cred, _ := svc.CredentialForTest("env:FAKE_CLAUDE_KEY")
 	client := providers.NewClient(5*time.Second, nil)
 	client.MaxRetries = 0
 	adapter := func() *openai.Adapter { // a turn's adapter: the provider's shared cache
@@ -129,7 +129,7 @@ func TestProviderTestSaysCapsPending(t *testing.T) {
 	h := &capsHost{}
 	srv := h.start(t)
 	svc := setupSvc(t)
-	t.Setenv("FAKE_CLAUDE_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_CLAUDE_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["claude"] = config.Provider{Kind: config.KindOpenAI, API: "anthropic", BaseURL: srv.URL + "/v1", CredentialRef: "env:FAKE_CLAUDE_KEY"}
 		d.Models["planner"] = config.Model{Provider: "claude", Model: "claude-x"}

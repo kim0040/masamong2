@@ -69,7 +69,7 @@ func TestAnthropicToolLoopKeepsToolsAndSystem(t *testing.T) {
 	f := &anthropicLoopHost{script: []string{`{"region":"부산"}`, `{"region":"서울"}`, `{"region":"대구"}`}}
 	srv := f.start(t)
 	svc := setupSvc(t)
-	t.Setenv("FAKE_CLAUDE_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_CLAUDE_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["claude"] = config.Provider{Kind: config.KindOpenAI, API: "anthropic", BaseURL: srv.URL + "/v1", CredentialRef: "env:FAKE_CLAUDE_KEY"}
 		d.Providers["openmeteo"] = config.Provider{Kind: config.KindOpenMeteo, Disabled: true} // the weather answers "unconfigured"
@@ -121,7 +121,7 @@ func TestAnthropicToolLoopKeepsToolsAndSystem(t *testing.T) {
 // width. Such an install keeps that width (its stored space): no new space, no embedding call.
 func TestMRLCatalogUpgradeKeepsStoredMessageWidth(t *testing.T) {
 	svc := setupSvc(t)
-	t.Setenv("MASAMONG_OPENROUTER_KEY", "synthetic-test-key")
+	svc.SetEnvForTest(t, "MASAMONG_OPENROUTER_KEY", "synthetic-test-key")
 	applyDoc(t, svc, func(d *config.Document) {
 		m := d.Models["embed"]
 		m.Model, m.Dimensions = "gemini-embedding-2", 0
@@ -143,8 +143,8 @@ func TestMRLCatalogUpgradeKeepsStoredMessageWidth(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv("MESSAGE_VECTOR_FAKE_KEY", "synthetic")
-	cred, err := providers.Resolve("env:MESSAGE_VECTOR_FAKE_KEY")
+	svc.SetEnvForTest(t, "MESSAGE_VECTOR_FAKE_KEY", "synthetic")
+	cred, err := svc.CredentialForTest("env:MESSAGE_VECTOR_FAKE_KEY")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestModelCapsComeFromListsAndTests(t *testing.T) {
 	h := &capsHost{}
 	srv := h.start(t)
 	svc := setupSvc(t)
-	t.Setenv("FAKE_CLAUDE_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_CLAUDE_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["claude"] = config.Provider{Kind: config.KindOpenAI, API: "anthropic", BaseURL: srv.URL + "/v1", CredentialRef: "env:FAKE_CLAUDE_KEY"}
 		d.Models["planner"] = config.Model{Provider: "claude", Model: "claude-x"}
@@ -344,7 +344,7 @@ func TestProviderTestDoesNotWaitForTheCapsLookup(t *testing.T) {
 	}
 	t.Cleanup(release) // before the server closes (cleanups run last first)
 	svc := setupSvc(t)
-	t.Setenv("FAKE_CLAUDE_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_CLAUDE_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["claude"] = config.Provider{Kind: config.KindOpenAI, API: "anthropic", BaseURL: srv.URL + "/v1", CredentialRef: "env:FAKE_CLAUDE_KEY"}
 		d.Models["planner"] = config.Model{Provider: "claude", Model: "claude-x"}

@@ -78,7 +78,7 @@ func TestEmbedWidthLowerKeepsBlockConnections(t *testing.T) {
 				_ = json.NewEncoder(w).Encode(map[string]any{"data": []any{map[string]any{"index": 0, "embedding": v}}, "usage": map[string]any{"total_tokens": 1}})
 			}))
 			defer srv.Close()
-			t.Setenv("WIDTH_FIXTURE_KEY", "fixture-only")
+			s.SetEnvForTest(t, "WIDTH_FIXTURE_KEY", "fixture-only")
 			res := s.mutateConfig(action.Request{}, func(d *config.Document) error {
 				p := d.Providers[d.Models["embed"].Provider]
 				p.BaseURL, p.CredentialRef = srv.URL, "env:WIDTH_FIXTURE_KEY"
@@ -249,7 +249,7 @@ func TestEmbedWidthAction(t *testing.T) {
 	})
 	t.Run("reindex-jobs", func(t *testing.T) {
 		s := privacyService(t)
-		t.Setenv("MASAMONG_OPENROUTER_KEY", "")
+		s.SetEnvForTest(t, "MASAMONG_OPENROUTER_KEY", "")
 		widthConfig(t, s, "qwen/qwen3-embedding-8b", 512)
 		widthRoom(t, s)
 		r := widthExecute(s, "models.embed_width", map[string]any{"dimensions": 1024, "include_embed": true, "reindex": true})

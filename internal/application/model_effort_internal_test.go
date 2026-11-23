@@ -53,8 +53,8 @@ func (h *effortHost) last() map[string]any {
 
 func effortService(t *testing.T, url string, edit func(d *config.Document)) *Service {
 	t.Helper()
-	t.Setenv("FAKE_EFFORT_KEY", "fixture-only")
 	s := privacyService(t)
+	s.SetEnvForTest(t, "FAKE_EFFORT_KEY", "fixture-only")
 	r := s.mutateConfig(action.Request{}, func(d *config.Document) error {
 		d.Providers["host"] = config.Provider{Kind: config.KindOpenAI, API: "compatible", BaseURL: url, CredentialRef: "env:FAKE_EFFORT_KEY"}
 		d.Providers["spare"] = config.Provider{Kind: config.KindOpenAI, API: "compatible", BaseURL: url + "/spare", CredentialRef: "env:FAKE_EFFORT_KEY"}
@@ -344,8 +344,8 @@ func TestAnthropicFormatHostWithoutModelList(t *testing.T) {
 		_, _ = w.Write([]byte(`<html>not here</html>`))
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv("FAKE_VENDOR_KEY", "fixture-only")
 	s := privacyService(t)
+	s.SetEnvForTest(t, "FAKE_VENDOR_KEY", "fixture-only")
 	if r := s.mutateConfig(action.Request{}, func(d *config.Document) error {
 		d.Providers["vendor"] = config.Provider{Kind: config.KindOpenAI, API: "anthropic", BaseURL: srv.URL + "/anthropic", CredentialRef: "env:FAKE_VENDOR_KEY"}
 		return nil
