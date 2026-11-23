@@ -79,6 +79,8 @@ var doctorChecks = []doctorCheck{
 	{"images", checkImages},
 	{"vision", checkVision},
 	{"memory", checkMemory},
+	{"message_vectors", checkMessageVectors},
+	{"residency", checkResidency},
 	{"participation", checkParticipation},
 	{"eval", checkEval},
 	{"data_folder", checkDataFolder},
@@ -440,8 +442,9 @@ func checkVision(r *doctorRun) {
 	}
 }
 
-// checkMemory reports memory, retrieval, identity and, when memory is usable, the message-vector
-// index and the resident-room measurements.
+// checkMemory reports memory, retrieval and identity. The message-vector index and the resident-room
+// measurements are the next two steps of the run: their own named steps, so a slow one is named in
+// the slow-request log instead of hiding inside "memory".
 func checkMemory(r *doctorRun) {
 	s := r.s
 	r.memStatus, r.memDetail = s.memoryDoctor()
@@ -456,15 +459,28 @@ func checkMemory(r *doctorRun) {
 	}
 	// identity: who is who, resolved from the same memory index
 	r.put("identity", r.memStatus, r.memDetail)
-	usable := r.memStatus == "ready" || r.memStatus == "pending_index"
-	if s.Doc().Memory.MessageVectorsOn() && usable {
+}
+
+// memoryUsable is whether the memory index can answer: the vector-index and residency steps skip
+// their lines otherwise, since memory's own line already says why not.
+func (r *doctorRun) memoryUsable() bool {
+	return r.memStatus == "ready" || r.memStatus == "pending_index"
+}
+
+func checkMessageVectors(r *doctorRun) {
+	s := r.s
+	if s.Doc().Memory.MessageVectorsOn() && r.memoryUsable() {
 		// listed while memory.message_vectors is on (the default) and memory is usable: memory's own line
 		// already says why it is not, and a second "unconfigured" line would be noise. pending_messages:<n>
 		// is the work an upgrade leaves behind until a pass or a reindex embeds it
 		status, reason := s.messageVectorDoctor(r.ctx, r.memStatus)
 		r.put("message_vectors", status, reason)
 	}
-	if usable {
+}
+
+func checkResidency(r *doctorRun) {
+	s := r.s
+	if r.memoryUsable() {
 		// measurement only (ADR-18 stage 0): how many rooms are resident, an estimate of their Go heap, the
 		// full-text pages and the last rebuild's stage-boundary heap samples; numbers, never names
 		s.putMemoryResidency(r.ctx, r.req, r.features, r.put)
