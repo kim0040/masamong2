@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,8 +15,10 @@ import (
 	"time"
 
 	"masamong/internal/action"
+	"masamong/internal/application"
 	"masamong/internal/config"
 	"masamong/internal/memory/store"
+	"masamong/internal/testutil"
 )
 
 // images.generate subjects (phase 3): the people drawn are resolved like a chat turn's targets, and only
@@ -257,5 +260,198 @@ func TestImageSubjectsRespectPrivacyAndSwitches(t *testing.T) {
 	applyDoc(t, f.Service, func(d *config.Document) { d.Memory.People = "off" })
 	if got := asked("303", "g"); strings.Contains(got, "Reference only") {
 		t.Errorf("memory.people off still drew on person memory:\n%s", got)
+	}
+}
+
+// memoryPictureGateway is a connected Discord that posts pictures (pictureGateway) and lists the channels
+// person memory may read from, so a drawing's subjects resolve.
+type memoryPictureGateway struct{ *pictureGateway }
+
+func (memoryPictureGateway) PersonMemoryChannels(string) map[string]bool {
+	return map[string]bool{"c": true, "other": true}
+}
+
+// gatedPictureSvc is pictureSvc whose image host records every request and holds its answer until open(),
+// with a connected Discord that takes the queued pictures of chat turns.
+func gatedPictureSvc(t *testing.T) (f reviewPerson, host *pictureHost, open func(), gw *pictureGateway) {
+	t.Helper()
+	s, m, e := memorySvc(t)
+	host = &pictureHost{}
+	gate := make(chan struct{})
+	var once sync.Once
+	open = func() { once.Do(func() { close(gate) }) }
+	png := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("\x89PNG fake"))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		host.mu.Lock()
+		host.bodies = append(host.bodies, string(body))
+		host.mu.Unlock()
+		select {
+		case <-gate:
+		case <-r.Context().Done():
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": "",
+			"images": []any{map[string]any{"type": "image_url", "image_url": map[string]any{"url": png}}}}}}, "usage": map[string]any{"cost": 0.01}})
+	}))
+	t.Cleanup(srv.Close)
+	t.Cleanup(open) // before srv.Close: a waiting handler must not hold it
+	s.SetEnvForTest(t, "FAKE_IMG_KEY", "k")
+	applyDoc(t, s, func(d *config.Document) {
+		d.Discord.Enabled = true
+		d.Providers["img"] = config.Provider{Kind: config.KindOpenAI, BaseURL: srv.URL, CredentialRef: "env:FAKE_IMG_KEY"}
+		d.Models["image"] = config.Model{Provider: "img", Model: "google/gemini-image"}
+	})
+	gw = &pictureGateway{guilds: []application.GuildInfo{{ID: "g"}}, perms: attachFiles}
+	s.SetDiscord(memoryPictureGateway{gw})
+	return reviewPerson{s, m, e, time.Now().UTC().Add(-3 * time.Hour)}, host, open, gw
+}
+
+func (h *pictureHost) count() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.bodies)
+}
+
+// A picture's reference is read when the picture is made, not when it is asked for. A picture waits behind
+// another one; meanwhile one of its subject's statements is hidden, the subject forgets everything, or the
+// line a statement rests on is deleted. The provider request then carries none of it, while a statement
+// the change does not touch (the same person's other one, another person's) still goes. The same holds for
+// a command that waits for the drawing slot.
+func TestQueuedImageRechecksSubjectClaimsAtSend(t *testing.T) {
+	t.Parallel()
+	const changed, same, other = "r5-changed-marker", "r5-same-person-marker", "r5-other-person-marker"
+	setup := func(t *testing.T) (reviewPerson, *pictureHost, func(), *pictureGateway) {
+		f, host, open, gw := gatedPictureSvc(t)
+		f.source(t, "g", "c", "img-label-101", "101", "민수", f.at)
+		f.source(t, "g", "c", "img-label-303", "303", "지수", f.at)
+		f.seed(t, 0, claimSeed{"101", "101", "appearance", "머리", "{@}는 " + changed + " 머리를 하고 있음", "", ""})
+		f.seed(t, 1, claimSeed{"101", "101", "like", "음식", "{@}는 " + same + " 음식을 좋아함", "", ""})
+		f.seed(t, 2, claimSeed{"303", "303", "appearance", "안경", "{@}는 " + other + " 안경을 씀", "", ""})
+		return f, host, open, gw
+	}
+	hide := func(t *testing.T, f reviewPerson) {
+		t.Helper()
+		var id string
+		if err := f.Store.DB.QueryRow(`SELECT id FROM person_claim WHERE instr(text,?)>0`, changed).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		if r := exec(f.Service, "memory.person.hide", map[string]any{"guild_id": "g", "user_id": "101", "claim_id": id}); !r.OK || r.Output["hidden"] != true {
+			t.Fatalf("hide: %+v", r)
+		}
+	}
+	forget := func(t *testing.T, f reviewPerson) {
+		t.Helper()
+		req := func(confirm any) map[string]any {
+			return map[string]any{"guild_id": "g", "user_id": "101", "scope": "all", "confirm": confirm}
+		}
+		p := exec(f.Service, "memory.mine.forget", req(""))
+		if !p.OK {
+			t.Fatalf("preview: %+v", p)
+		}
+		if r := exec(f.Service, "memory.mine.forget", req(p.Output["token"])); !r.OK || r.Output["applied"] != true {
+			t.Fatalf("forget: %+v", r)
+		}
+	}
+	deleteEvidence := func(t *testing.T, f reviewPerson) {
+		t.Helper()
+		if err := f.MessagesDeleted("g", "c", []string{"img-ev-0"}); err != nil { // the line the changed statement rests on
+			t.Fatal(err)
+		}
+	}
+	subjects := []any{"<@101>", "<@303>"}
+	check := func(t *testing.T, got string, gone ...string) {
+		t.Helper()
+		for _, marker := range []string{changed, same, other} {
+			if want := !slices.Contains(gone, marker); strings.Contains(got, marker) != want {
+				t.Errorf("%s: in the provider request %v, want %v:\n%s", marker, !want, want, got)
+			}
+		}
+	}
+	for name, tc := range map[string]struct {
+		change func(*testing.T, reviewPerson)
+		gone   []string
+	}{
+		"hide":             {hide, []string{changed}},
+		"forget":           {forget, []string{changed, same}},
+		"evidence deleted": {deleteEvidence, []string{changed}},
+	} {
+		t.Run("queued/"+name, func(t *testing.T) {
+			t.Parallel()
+			f, host, open, gw := setup(t)
+			// the first picture holds the drawing slot until the host answers
+			if res := drawFor(f.Service, "u-first", "m1", "첫 그림"); !res.OK || res.Status != "queued" {
+				t.Fatalf("first: %+v", res)
+			}
+			testutil.WaitFor(t, 5*time.Second, "the first draw to start", func() bool { return host.count() == 1 })
+			run := application.ChatToolForTest(f.Service, application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m2", Message: "초상화 그려줘", Speaker: "철수", SpeakerID: "404"})
+			if res := run(context.Background(), "images.generate", map[string]any{"prompt": "초상화", "subjects": subjects}); !res.OK || res.Status != "queued" {
+				t.Fatalf("second: %+v", res)
+			}
+			tc.change(t, f)
+			open()
+			testutil.WaitFor(t, 5*time.Second, "both pictures posted", func() bool { p, _ := gw.counts(); return p == 2 })
+			if host.count() != 2 {
+				t.Fatalf("provider requests = %d", host.count())
+			}
+			check(t, host.drawnPrompt(t), tc.gone...)
+		})
+	}
+	t.Run("command/hide", func(t *testing.T) {
+		t.Parallel()
+		f, host, open, _ := setup(t)
+		if res := drawFor(f.Service, "u-first", "m1", "첫 그림"); !res.OK || res.Status != "queued" {
+			t.Fatalf("first: %+v", res)
+		}
+		testutil.WaitFor(t, 5*time.Second, "the first draw to start", func() bool { return host.count() == 1 })
+		done := make(chan action.Result, 1)
+		go func() { done <- draw(f, "404", "g", map[string]any{"prompt": "초상화", "subjects": subjects}) }()
+		time.Sleep(300 * time.Millisecond) // the command is waiting for the slot (a read before the wait would be done by now)
+		hide(t, f)
+		open()
+		if r := <-done; !r.OK {
+			t.Fatalf("command: %+v", r)
+		}
+		check(t, host.drawnPrompt(t), changed)
+	})
+}
+
+// The 400-character limit is on the reference body as sent: its lines joined by newlines. Two people whose
+// lines are exactly 200 characters each do not both fit, since the newline between them makes 401.
+func TestImageSubjectsLimitIncludesLineSeparators(t *testing.T) {
+	t.Parallel()
+	f, host := pictureSvc(t)
+	f.source(t, "g", "c", "img-label-101", "101", "민수", f.at)
+	f.source(t, "g", "c", "img-label-202", "202", "영희", f.at)
+	// a line is "- 민수: " (6 runes), then statements joined by "; " (2), each rendered as "민수는 " (4) and
+	// its body: two bodies of 92 runes make exactly 200
+	body := func(r string) string { return strings.Repeat(r, 92) }
+	f.seed(t, 0, claimSeed{"101", "101", "appearance", "머리", "{@}는 " + body("가"), "", ""})
+	f.seed(t, 1, claimSeed{"101", "101", "appearance", "눈", "{@}는 " + body("다"), "", ""})
+	f.seed(t, 2, claimSeed{"202", "202", "appearance", "머리", "{@}는 " + body("나"), "", ""})
+	f.seed(t, 3, claimSeed{"202", "202", "appearance", "눈", "{@}는 " + body("라"), "", ""})
+	if r := draw(f, "303", "g", map[string]any{"prompt": "단체 사진", "subjects": []any{"<@101>", "<@202>"}}); !r.OK {
+		t.Fatalf("draw: %+v", r)
+	}
+	var req struct {
+		Messages []struct {
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal([]byte(host.last()), &req); err != nil || len(req.Messages) == 0 {
+		t.Fatalf("request: %v", err)
+	}
+	sent := req.Messages[len(req.Messages)-1].Content
+	var lines []string
+	for _, l := range strings.Split(sent, "\n") {
+		if strings.HasPrefix(l, "- 민수: ") || strings.HasPrefix(l, "- 영희: ") {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) == 0 || len([]rune(lines[0])) != 200 {
+		t.Fatalf("the fixture's first line is not 200 runes: %q", lines)
+	}
+	if joined := strings.Join(lines, "\n"); len([]rune(joined)) > 400 {
+		t.Errorf("the reference body is %d runes with its separators (%d lines)", len([]rune(joined)), len(lines))
 	}
 }

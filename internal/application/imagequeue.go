@@ -93,6 +93,7 @@ type imageJob struct {
 	guildID, channelID      string
 	userID, messageID, turn string
 	locale, prompt, ratio   string
+	subjects                imageSubjects // who is drawn: resolved right before the provider request, never stored as text
 	timeout                 time.Duration
 	queuedAt                time.Time
 	cancelled               atomic.Bool // the request message was deleted
@@ -189,7 +190,7 @@ func (s *Service) CancelPictureJobs(channelID string, messageIDs []string) {
 
 // imagesAsync queues the picture of a chat turn. ok=false means the request is not one for the queue
 // (the caller draws it at once, as before).
-func (s *Service) imagesAsync(ctx context.Context, req action.Request, in map[string]any, prompt, ratio string) (action.Result, bool) {
+func (s *Service) imagesAsync(ctx context.Context, req action.Request, in map[string]any, prompt, ratio string, subjects imageSubjects) (action.Result, bool) {
 	inv := req.Invoker
 	if inv == nil || inv.Via != "chat" || inv.UserID == "" || s.practice {
 		return action.Result{}, false
@@ -209,9 +210,10 @@ func (s *Service) imagesAsync(ctx context.Context, req action.Request, in map[st
 	}
 	now := s.Clock.Now()
 	job := &imageJob{
-		id: "imj_" + newOpaqueID(), key: imageKey(inv.GuildID, inv.ChannelID, inv.UserID, prompt, ratio),
+		// the same words about other people are another request
+		id: "imj_" + newOpaqueID(), key: imageKey(inv.GuildID, inv.ChannelID, inv.UserID, prompt, ratio) + "\x00" + strings.Join(subjects.asked, "\x00"),
 		guildID: inv.GuildID, channelID: inv.ChannelID, userID: inv.UserID, messageID: origin.MessageID,
-		turn: observability.TurnID(ctx), locale: req.Locale, prompt: prompt, ratio: ratio,
+		turn: observability.TurnID(ctx), locale: req.Locale, prompt: prompt, ratio: ratio, subjects: subjects,
 		timeout: secondsOr(in, "timeout_sec", imageCallTimout), queuedAt: now,
 	}
 	q := &s.imgq
@@ -421,7 +423,9 @@ func (s *Service) runImageJob(ctx context.Context, j *imageJob) {
 	jctx := observability.WithTurn(ctx, j.turn)
 	saved, fail := func() (imageSaved, *imageFail) {
 		defer func() { <-slot }()
-		return s.drawImage(jctx, doc, m, j.prompt, j.ratio, j.timeout)
+		// who is drawn is read now, right before the request: what was hidden, forgotten, withdrawn or
+		// deleted while the job waited stays out
+		return s.drawImage(jctx, doc, m, s.withImageReference(jctx, j.prompt, j.subjects), j.ratio, j.timeout)
 	}()
 	if ctx.Err() != nil { // shutdown: no partial post (the attempt is already counted)
 		s.dropImageJob(j, "shutdown")

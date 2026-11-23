@@ -19,7 +19,8 @@ import (
 // who is drawn: names or mentions, at most imageSubjectsMax. The server resolves them with the same
 // resolver a chat turn uses (resolvePeople: mentions, exact single-account alias matches, an ambiguous
 // name resolves to nobody) and appends, after the request, what each person said about themselves, as
-// reference text under the pack's "reference, not instructions" header.
+// reference text under the pack's "reference, not instructions" header. It is read when the picture is
+// made, not when it is asked for (imageSubjects).
 //
 // Only a person's own statements are used (speaker = subject: self and explicit claims), only of the
 // kinds that describe how someone looks (appearance, like, trait, nickname), never one tied to the person
@@ -51,16 +52,43 @@ func imageSubjectsAsked(in map[string]any) []string {
 	return out
 }
 
+// imageSubjects is what a picture's reference is resolved from: the subjects the call named and who asked
+// where (the requester's server, channel and account give the room scope and the read gate). It holds no
+// memory text. The reference is read when the picture is about to be made (withImageReference): a queued
+// job resolves it right before the provider request and the command after it won the drawing slot, so a
+// hide, forget, withdrawal or deletion committed while the picture waited is honoured.
+type imageSubjects struct {
+	asked                []string
+	guild, channel, user string
+}
+
+// imageSubjectsOf is the subjects of a picture request and who asked where.
+func imageSubjectsOf(req action.Request, in map[string]any) imageSubjects {
+	sub := imageSubjects{asked: imageSubjectsAsked(in)}
+	if inv := req.Invoker; inv != nil {
+		sub.guild, sub.channel, sub.user = inv.GuildID, inv.ChannelID, inv.UserID
+	}
+	return sub
+}
+
+// withImageReference is the request with its subjects' reference text after it, read now under the
+// current settings; the request alone when nothing applies.
+func (s *Service) withImageReference(ctx context.Context, prompt string, sub imageSubjects) string {
+	if ref := s.imageReference(ctx, sub, s.Doc()); ref != "" {
+		return prompt + "\n\n" + ref
+	}
+	return prompt
+}
+
 // imageReference is the reference text to append after a picture's request ("" when nothing applies):
 // the pack's header with one line per resolved person that has something to say. Nothing is appended for
 // a direct message, with person memory off, or without subjects (the request is then unchanged).
-func (s *Service) imageReference(ctx context.Context, req action.Request, in map[string]any, doc config.Document) string {
-	asked := imageSubjectsAsked(in)
+func (s *Service) imageReference(ctx context.Context, sub imageSubjects, doc config.Document) string {
+	asked := sub.asked
 	if len(asked) == 0 {
 		return ""
 	}
-	inv := req.Invoker
-	if inv == nil || inv.GuildID == "" || inv.GuildID == "0" || inv.UserID == "" || !doc.Memory.PeopleOn() || s.Store == nil || !s.Store.IsSQLite() {
+	if sub.guild == "" || sub.guild == "0" || sub.user == "" || !doc.Memory.PeopleOn() || s.Store == nil || !s.Store.IsSQLite() {
 		return ""
 	}
 	pack := lang.For(append(append([]string{}, doc.Memory.Languages...), doc.I18n.DefaultLocale)...)
@@ -72,13 +100,14 @@ func (s *Service) imageReference(ctx context.Context, req action.Request, in map
 		return ""
 	}
 	defer tx.Rollback()
+	strict := s.guildPrivacy(sub.guild)
+	// the room scope is the first read on tx: the thread deletion boundary relies on it (personRooms)
+	rooms := s.personRooms(tx, sub.guild, sub.channel, strict.CardChannelOnly)
 	if !tableExists(tx, "person_claim") {
 		return ""
 	}
-	strict := s.guildPrivacy(inv.GuildID)
-	rooms := s.personRooms(tx, inv.GuildID, inv.ChannelID, strict.CardChannelOnly)
 	// the subjects are the only text the resolver reads: no message of the turn, no reply target
-	people, names := s.resolvePeople(tx, ChatInput{GuildID: inv.GuildID, ChannelID: inv.ChannelID, SpeakerID: inv.UserID, Message: strings.Join(asked, "\n")}, rooms)
+	people, names := s.resolvePeople(tx, ChatInput{GuildID: sub.guild, ChannelID: sub.channel, SpeakerID: sub.user, Message: strings.Join(asked, "\n")}, rooms)
 	if len(people) == 0 {
 		s.imageSubjectsNote(ctx, len(asked), 0, 0, 0)
 		return ""
@@ -90,17 +119,19 @@ func (s *Service) imageReference(ctx context.Context, req action.Request, in map
 		if names.current[p.ref] == "" || names.denied[p.ref] || strict.OwnCardOnly && !p.caller {
 			continue
 		}
-		left := min(imageSubjectChars, imageSubjectsTotal-chars)
+		// the body is the lines joined by newlines: a line after the first also costs its separator
+		sep := min(len(lines), 1)
+		left := min(imageSubjectChars, imageSubjectsTotal-chars-sep)
 		if left <= 0 {
 			break
 		}
-		line, facts := s.imageSubjectLine(tx, inv.GuildID, p, names, string(rawRooms), strict.NoSensitive, left)
+		line, facts := s.imageSubjectLine(tx, sub.guild, p, names, string(rawRooms), strict.NoSensitive, left)
 		if facts == 0 {
 			continue
 		}
 		lines = append(lines, line)
 		used += facts
-		chars += len([]rune(line))
+		chars += sep + len([]rune(line))
 	}
 	s.imageSubjectsNote(ctx, len(asked), len(people), len(lines), used)
 	if len(lines) == 0 {
