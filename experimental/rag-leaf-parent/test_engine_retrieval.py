@@ -14,6 +14,7 @@ import os
 import random
 import tempfile
 import threading
+import time
 import unittest
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
@@ -28,6 +29,7 @@ from segment import slice_segments_per_room
 
 ROOM_OLD = "discord:1:100"  # ended ~200 days before ROOM_NEW
 ROOM_NEW = "discord:2:200"
+ROOM_KAKAO = "kakao:synth-k"  # naive times, as a Kakao export gives them
 DIM = 8
 LEAF = 4
 
@@ -74,7 +76,8 @@ def _messages() -> list[dict]:
     return rows
 
 
-def build_index(*, with_summaries: bool = True, seed: int = 0) -> E.IndexBundle:
+def build_index(*, with_summaries: bool = True, seed: int = 0, messages: list[dict] | None = None) -> E.IndexBundle:
+    messages = messages if messages is not None else _messages()
     cfg = {
         "lexical": "bigram",
         "rrf_weights": [1.0, 4.0],
@@ -89,10 +92,9 @@ def build_index(*, with_summaries: bool = True, seed: int = 0) -> E.IndexBundle:
         "summary_rrf_weight": 1.0,
         "recency_half_life_days": 40,
         "person_aliases": {"가명": ["김가명"], "김가명": ["김가명"]},
-        "rooms": [ROOM_OLD, ROOM_NEW],
+        "rooms": sorted({str(m["source_room_id"]) for m in messages}),
         "max_history_turns": 8,
     }
-    messages = _messages()
     leaves = slice_segments_per_room(
         messages, size=LEAF, overlap=0, limit=10_000, kind="leaf", with_prefix=True
     )
@@ -808,6 +810,63 @@ class ConfigEnvTests(unittest.TestCase):
                     os.environ.pop("MASAMONG_SANDBOX_CONFIG", None)
                 else:
                     os.environ["MASAMONG_SANDBOX_CONFIG"] = prev
+
+
+def _kakao_messages() -> list[dict]:
+    """One Kakao-style room: no offset on the times, one message an hour from 2026-01-10 20:00 to 2026-01-11 03:00."""
+
+    base = datetime(2026, 1, 10, 20, 0)
+    return [
+        {
+            "observation_id": f"{ROOM_KAKAO}:{i}",
+            "source_room_id": ROOM_KAKAO,
+            "source_room_original": ROOM_KAKAO,
+            "actor_label": "가명",
+            "actor_account": None,
+            "content": f"점심 뭐 먹을까 #{i}",
+            "parsed_time": (base + timedelta(hours=i)).isoformat(),
+            "index": i,
+        }
+        for i in range(8)
+    ]
+
+
+@unittest.skipUnless(hasattr(time, "tzset"), "switching this process's zone needs time.tzset (POSIX)")
+class EvidenceTimeFrameTests(unittest.TestCase):
+    """A hard range keeps the evidence messages that fall inside it in the declared zone of naive (Kakao) times,
+    whatever zone this computer is in. The Go port (search.TimeScope.ObservationStatus) never reads the host zone;
+    the sandbox used to read naive times in it, so `make parity` failed on a UTC CI runner and passed in Korea."""
+
+    KST = timezone(timedelta(hours=9))
+
+    def _visible(self, host_zone: str) -> list[list[str]]:
+        saved = os.environ.get("TZ")
+        os.environ["TZ"] = host_zone
+        time.tzset()
+        try:
+            index = build_index(messages=_kakao_messages())
+            reference = E.RetrievalTimeReference(
+                mode="replay", now=datetime(2026, 1, 24, 12, 0, tzinfo=self.KST), naive_tz=self.KST, source="test"
+            )
+            intent = {"recent": False, "intro": False, "politics": False, "prefer_missing_over_guess": False,
+                      "time": {"kind": "between", "from": "2026-01-10", "to": "2026-01-10"}}
+            q = _unit(1)
+            hits = E.retrieve(index, _FakeClient(q), "점심 뭐 먹을까", top_k=3, q_vec=q, ranking="hybrid", trace={},
+                              intent=intent, time_reference=reference)
+        finally:
+            if saved is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = saved
+            time.tzset()
+        return [list(hit["visible_observation_ids"]) for hit in hits]
+
+    def test_naive_times_are_read_in_the_declared_zone_not_the_hosts(self) -> None:
+        in_range = [f"{ROOM_KAKAO}:{i}" for i in range(4)]  # 20:00-23:00 on 2026-01-10 in +09:00
+        for host_zone in ("UTC0", "KST-9", "PST8PDT"):
+            visible = self._visible(host_zone)
+            self.assertIn(in_range, visible, host_zone)
+            self.assertTrue(all(set(v) <= set(in_range) for v in visible), (host_zone, visible))
 
 
 class SoftEventRetrievalTests(unittest.TestCase):

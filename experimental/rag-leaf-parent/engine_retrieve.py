@@ -16,7 +16,6 @@ from engine_index import (
     PlaygroundError,
     ThreadSafeLexicalIndex,
     _elapsed_ms,
-    _parse_ts,
     configured_models,
 )
 from engine_query import (
@@ -61,7 +60,6 @@ from rag_upgrade.rerank_client import (  # noqa: E402
     RerankError,
 )
 from evidence_packing import (  # noqa: E402
-    make_time_filter,
     pack_evidence_set,
 )
 from memory_blocks import (  # noqa: E402
@@ -1076,9 +1074,9 @@ def retrieve(
     )
     time_allows = None
     if time_scope.hard and (time_scope.lo is not None or time_scope.hi is not None):
-        lo_ts = time_scope.lo.timestamp() if time_scope.lo is not None else None
-        hi_ts = time_scope.hi.timestamp() if time_scope.hi is not None else None
-        time_allows = make_time_filter(lo_ts, hi_ts, ts_of=lambda row: _parse_ts(row.get("parsed_time")))
+        # Each message is placed in the scope's frame the way the leaf filter places it (a naive Kakao time in the
+        # declared naive_tz, none declared = left out), never in this computer's zone: Go's ObservationStatus == "in".
+        time_allows = lambda row: time_scope.observation_status(row.get("parsed_time")) == "in"  # noqa: E731
     allowed_rooms = None
     allowed_obs = None
     if source_room_id:
