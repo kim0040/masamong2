@@ -7,7 +7,9 @@ import (
 	"time"
 
 	"masamong/internal/action"
+	"masamong/internal/application"
 	"masamong/internal/config"
+	"masamong/internal/memory/engine"
 	"masamong/internal/memory/store"
 )
 
@@ -61,9 +63,9 @@ func TestLiveMixedEvidenceCannotBecomeSelfMemory(t *testing.T) {
 	}
 }
 
-// 민수 says something about 영희 and 영희 only
-// reacts. The fact the model cites from both lines is not stored as 영희's own statement, is not read in
-// #other, and nothing of it remains once 민수 deletes his line.
+// 민수 says something about 영희 and 영희 only reacts. The fact the model cites from both lines is not
+// stored as 영희's own statement, is not read in #other, and nothing of it remains once 민수 deletes his
+// line.
 func TestLiveSplitMakesHearsayASelfStatement(t *testing.T) {
 	t.Parallel()
 	s, m, e := memorySvc(t)
@@ -94,4 +96,61 @@ func TestLiveSplitMakesHearsayASelfStatement(t *testing.T) {
 	if n := personClaimCount(t, s, "instr(text,'r2-job-sentinel')>0"); n != 0 {
 		t.Errorf("after the line that said it was deleted, %d statement(s) remain", n)
 	}
+}
+
+// With memory.people off, or the old memory.cards: off, live extraction asks
+// nothing about people: no people-only call for a one-line statement made to the bot, no people section
+// in the episode prompt, no claim and no live_since. The ordinary episode still saves.
+func TestLiveExtractionHonorsPeopleOff(t *testing.T) {
+	t.Parallel()
+	for name, off := range map[string]func(*config.Document){
+		"people off":       func(d *config.Document) { d.Memory.People = "off" },
+		"legacy cards off": func(d *config.Document) { d.Memory.Cards = "off" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			svc, m, eng := roomSvc(t)
+			applyDoc(t, svc, off)
+			m.extract = func(prompt string) string {
+				if strings.Contains(prompt, `{"episodes":`) {
+					return peopleAnswer(hikePeople)
+				}
+				return `{"people":[{"about":"p1","kind":"status","topic":"residence","text":"{p1}는 광양에 산다","by":["p1"],"ev":["m1"]}]}`
+			}
+			oneLine(t, svc, eng, "6001", "나 광양에 살아 요즘", time.Now().Add(-8*time.Hour))
+			sayIn(eng, time.Now().Add(-2*time.Hour), hike...)
+			rep := svc.RunRoomMemory(context.Background())
+			if rep.PeopleCalls() != 0 || m.calls("episode") != 1 || rep.Episodes != 1 || rep.PeopleClaims() != 0 {
+				t.Fatalf("pass: %+v people calls=%d model calls=%d", rep, rep.PeopleCalls(), m.calls("episode"))
+			}
+			prompt := m.last("episode")
+			for _, bad := range []string{"{people_begin}", "relationship_status", `"people":[{`} {
+				if strings.Contains(prompt, bad) {
+					t.Errorf("the episode prompt carries the people section (%s):\n%s", bad, prompt)
+				}
+			}
+			if !strings.Contains(prompt, "토요일에 등산 갈래?") {
+				t.Errorf("the conversation was not asked about:\n%s", prompt)
+			}
+			if rows := peopleRows(t, svc); len(rows) != 0 {
+				t.Errorf("claims written with person memory off: %+v", rows)
+			}
+			if liveSince(t, svc, "g") != "" {
+				t.Error("live_since written with person memory off")
+			}
+			if l := episodeList(t, svc); len(l) != 1 {
+				t.Errorf("the ordinary episode was not saved: %+v", l)
+			}
+		})
+	}
+}
+
+// oneLine stores a line of 철수 (u1) in g/c that the bot answered (seen by the gateway only).
+func oneLine(t *testing.T, svc *application.Service, eng *engine.Engine, id, text string, at time.Time) {
+	t.Helper()
+	if ok, err := eng.Capture(engine.LiveMessage{GuildID: "g", ChannelID: "c", MessageID: id, AuthorID: "u1", AuthorName: "철수", Content: text, At: at}); err != nil || !ok {
+		t.Fatal(id, ok, err)
+	}
+	svc.Observe(application.ObservedMessage{GuildID: "g", ChannelID: "c", MessageID: id + "r", AuthorID: "bot", AuthorName: "마사몽", Content: "그렇구나",
+		FromBot: true, ReplyTo: id, At: at.Add(20 * time.Second)})
 }

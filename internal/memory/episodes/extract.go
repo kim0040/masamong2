@@ -73,6 +73,10 @@ type Input struct {
 	// Kakao marks a KakaoTalk segment: there is no person section in its prompt (FillExtract) and its
 	// people answer is discarded (ParsePeople). Mentioned is ignored.
 	Kakao bool
+	// NoPeople is person memory switched off (memory.people: off): as for Kakao, the prompt has no person
+	// section, the people answer is discarded and there is no people-only prompt (BuildPersonExtract).
+	// The lines are shown as with person memory on.
+	NoPeople bool
 }
 
 // Prompt is a built prompt plus the maps that turn the model's labels back into IDs and references.
@@ -92,9 +96,10 @@ type Prompt struct {
 	labelOf      func(string) string
 	prev         map[string]carried // t1/q1 -> earlier room-state entry (Previous)
 
-	linkOf map[string]string // ref -> "mention" | "name": how a person was tied without writing a line
-	botRef string
-	kakao  bool
+	linkOf   map[string]string // ref -> "mention" | "name": how a person was tied without writing a line
+	botRef   string
+	kakao    bool
+	noPeople bool // Input.NoPeople
 }
 
 // PersonRefs lists the references of the prompt's people in token order.
@@ -104,7 +109,7 @@ func (p Prompt) PersonRefs() []Person { return append([]Person(nil), p.people...
 // appearance. The model never sees platform IDs or stored references.
 func Build(in Input) Prompt {
 	p := Prompt{labels: map[string]string{}, byID: map[string]Message{}, byToken: map[string]Person{}, byRef: map[string]Person{}, plans: map[string]OpenPlan{}, refBySpeaker: map[string]string{},
-		linkOf: map[string]string{}, botRef: in.BotRef, kakao: in.Kakao}
+		linkOf: map[string]string{}, botRef: in.BotRef, kakao: in.Kakao, noPeople: in.NoPeople}
 	loc := in.Location
 	if loc == nil {
 		loc = time.UTC

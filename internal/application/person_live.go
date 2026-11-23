@@ -88,14 +88,20 @@ func liveSource(lines []roomLine) string {
 }
 
 // personBuild fills the person memory inputs of an episode prompt: whether the room is a Kakao one (no
-// people section), the bot's own reference, and the people the lines name without writing in them. A
-// failed read of the people leaves the list empty (the prompt is then the one before person memory).
+// people section), whether person memory is off (memory.people: off, or the old memory.cards: off: no
+// people section, no people answer, and the people named are not looked up), the bot's own reference,
+// and the people the lines name without writing in them. A failed read of the people leaves the list
+// empty (the prompt is then the one before person memory).
 func (s *Service) personBuild(db *storage.Store, r memRoom, in episodes.Input, lines []roomLine) episodes.Input {
 	if r.kakao() {
 		in.Kakao = true
 		return in
 	}
 	in.BotRef = s.liveBotRef(lines)
+	if !s.Doc().Memory.PeopleOn() {
+		in.NoPeople = true
+		return in
+	}
 	mentioned, err := s.mentionedPeople(db, r.guild, in.Lines, in.BotRef)
 	if err != nil {
 		s.Log.Warn("memory: people named in a conversation could not be read", "err", err)
@@ -121,9 +127,10 @@ func (s *Service) noteLiveSince(guild string) {
 }
 
 // savePeopleTx saves a segment's claims through the write gate inside the caller's transaction and
-// returns how many rows were written. A refused claim is only skipped.
+// returns how many rows were written. A refused claim is only skipped. Nothing is written once person
+// memory was switched off while the model answered.
 func (s *Service) savePeopleTx(ctx context.Context, tx *sql.Tx, claims []store.PersonClaim) (int, error) {
-	if len(claims) == 0 {
+	if len(claims) == 0 || !s.Doc().Memory.PeopleOn() {
 		return 0, nil
 	}
 	return s.savePersonClaims(ctx, tx, claims)
@@ -165,8 +172,8 @@ func (s *Service) selfStatement(r memRoom, lines []roomLine, bots []episodes.Mes
 // validate. It returns what it did (model calls made, 0 or 1; claims saved; facts skipped) and an error
 // that ends the pass (budget, provider); a bad answer is not one.
 func (s *Service) extractSelfStatement(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, bots []episodes.Message, pack *lang.Pack, botName string) (ps peopleStats, err error) {
-	if r.kakao() {
-		return ps, nil
+	if r.kakao() || !s.Doc().Memory.PeopleOn() {
+		return ps, nil // person memory off: the line costs nothing, as before person memory
 	}
 	botRef := s.liveBotRef(lines)
 	if !s.selfStatement(r, lines, bots, botRef) {
