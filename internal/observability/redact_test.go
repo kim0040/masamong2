@@ -14,6 +14,7 @@ func TestRedactDoesNotKeepToken(t *testing.T) {
 
 func TestRedactSecrets(t *testing.T) {
 	const discord = "MTIzNDU2Nzg5MDEyMzQ1Njc4OTA" + ".GabcDE." + "abcdefghijklmnopqrstuvwxyz0123456789" // fake; split so secret scanners do not flag it
+	const google = "AIza" + "SyA1234567890" + "abcdefghijklmnopqrstuv" // fake, split the same way
 	for _, c := range []struct{ in, secret string }{
 		{"password: hunter2", "hunter2"},
 		{"call failed Bearer abcdef0123456789.xyz", "abcdef0123456789"},
@@ -31,8 +32,8 @@ func TestRedactSecrets(t *testing.T) {
 		{"GET https://apihub.example/x?authKey=KMASECRET123&tm=1 failed", "KMASECRET123"},
 		{"GET https://x.example/y?serviceKey=SVCSECRET123 failed", "SVCSECRET123"},
 		{"tavily key tvly-dev-ABCDEFGHIJKLMNOPQRSTUV rejected", "ABCDEFGHIJKLMNOPQRSTUV"},
-		{"gemini key AIzaSyA1234567890abcdefghijklmnopqrstuv rejected", "SyA1234567890abcdefghijklmnopqrstuv"},
-		{"x-goog-api-key: AIzaSyA1234567890abcdefghijklmnopqrstuv", "SyA1234567890abcdefghijklmnopqrstuv"},
+		{"gemini key " + google + " rejected", google[4:]},
+		{"x-goog-api-key: " + google, google[4:]},
 		{"serviceKey: SVCSECRET123 refused", "SVCSECRET123"},
 		{"Authorization: Bearer abcdefghijklmnop12345", "abcdefghijklmnop12345"},
 	} {
