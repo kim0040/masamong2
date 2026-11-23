@@ -259,8 +259,10 @@ func (s *Service) personStatementSuppressedTx(tx *sql.Tx, c store.PersonClaim) (
 
 // deleteEpisodeClaimsTx deletes the claims resting on an episode an operator deletes: the ones its items
 // derive, for a remembered fact ("remember this", an explicit episode) the explicit claims on its message,
-// which follow no item, and the claims the same extraction saved live (extract:) on the lines the episode
-// was made from (its segment).
+// which follow no item, and the claims the same extraction saved live (extract:) on the episode's own lines.
+// Every episode one answer creates stores the whole segment, so its own lines are its items' evidence: a
+// line only another episode's items cite stays with that one. An episode with no item evidence falls back
+// to its segment, without a claim citing any line an item of another episode on that segment cites.
 func deleteEpisodeClaimsTx(tx *sql.Tx, episode string) error {
 	if !tableExists(tx, "person_claim") {
 		return nil
@@ -268,8 +270,20 @@ func deleteEpisodeClaimsTx(tx *sql.Tx, episode string) error {
 	if _, err := deleteClaimsWhere(tx, `SELECT c.id FROM episode_item i JOIN person_claim c ON c.source='episode_item:'||i.id WHERE i.episode_id=?`, episode); err != nil {
 		return err
 	}
-	if _, err := deleteClaimsWhere(tx, `SELECT c.id FROM person_claim c JOIN channel_episode e ON e.id=? WHERE c.source>=? AND c.source<? AND c.guild_id=e.guild_id
-		AND EXISTS(SELECT 1 FROM json_each(c.evidence) a JOIN json_each(e.segment) b ON a.value=b.value)`, episode, livePeoplePrefix, liveSourceEnd); err != nil {
+	var own bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM episode_item i, json_each(i.evidence) WHERE i.episode_id=?)`, episode).Scan(&own); err != nil {
+		return err
+	}
+	live := `SELECT c.id FROM person_claim c JOIN channel_episode e ON e.id=?1 WHERE c.source>=?2 AND c.source<?3 AND c.guild_id=e.guild_id
+		AND EXISTS(SELECT 1 FROM json_each(c.evidence) a JOIN episode_item i ON i.episode_id=e.id JOIN json_each(i.evidence) b ON a.value=b.value)`
+	if !own {
+		live = `SELECT c.id FROM person_claim c JOIN channel_episode e ON e.id=?1 WHERE c.source>=?2 AND c.source<?3 AND c.guild_id=e.guild_id
+		AND EXISTS(SELECT 1 FROM json_each(c.evidence) a JOIN json_each(e.segment) b ON a.value=b.value)
+		AND NOT EXISTS(SELECT 1 FROM json_each(c.evidence) a JOIN channel_episode o ON o.room=e.room AND o.id<>e.id
+			JOIN episode_item i ON i.episode_id=o.id JOIN json_each(i.evidence) b ON a.value=b.value
+			WHERE EXISTS(SELECT 1 FROM json_each(o.segment) x JOIN json_each(e.segment) y ON x.value=y.value))`
+	}
+	if _, err := deleteClaimsWhere(tx, live, episode, livePeoplePrefix, liveSourceEnd); err != nil {
 		return err
 	}
 	_, err := deleteClaimsWhere(tx, `SELECT c.id FROM person_claim c JOIN channel_episode e ON e.id=? WHERE e.source=? AND c.source=? AND c.guild_id=e.guild_id
