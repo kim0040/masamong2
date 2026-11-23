@@ -32,6 +32,12 @@ type Person struct {
 	Token string // p1, p2, ...
 	Ref   string // what is stored (store.PersonRef for Discord accounts, kakao:<room>:<label> for Kakao)
 	Label string
+	// ID and Link are only read from Input.Mentioned. ID is the platform account a <@ID> in a line names
+	// (it never reaches the prompt); empty for a person found by name. Link is how the person was tied to
+	// the segment: "mention" (a <@ID>) or "name" (an exact single-account alias match). Empty = "mention"
+	// when ID is set, "name" otherwise.
+	ID   string
+	Link string
 }
 
 // OpenPlan is an open or decided plan of the channel offered to the model as a link candidate.
@@ -57,6 +63,16 @@ type Input struct {
 	// LabelOf names a stored reference that is not among the lines (people of earlier plans or state).
 	LabelOf  func(ref string) string
 	MaxRunes int // per line; 0 = 400
+	// Mentioned are people the caller tied to the segment without their writing in it: accounts named by
+	// a <@id> in a line (shown as their label and pN token) and exact single-account alias matches
+	// (listed with their token, Link "name"). The package only renders what it is given. A person whose
+	// label is also another person's label gets no token (the model could not tell them apart).
+	Mentioned []Person
+	// BotRef is the bot's own stored reference: never a subject or a speaker of a person fact.
+	BotRef string
+	// Kakao marks a KakaoTalk segment: there is no person section in its prompt (FillExtract) and its
+	// people answer is discarded (ParsePeople). Mentioned is ignored.
+	Kakao bool
 }
 
 // Prompt is a built prompt plus the maps that turn the model's labels back into IDs and references.
@@ -75,6 +91,10 @@ type Prompt struct {
 	refBySpeaker map[string]string
 	labelOf      func(string) string
 	prev         map[string]carried // t1/q1 -> earlier room-state entry (Previous)
+
+	linkOf map[string]string // ref -> "mention" | "name": how a person was tied without writing a line
+	botRef string
+	kakao  bool
 }
 
 // PersonRefs lists the references of the prompt's people in token order.
@@ -83,7 +103,8 @@ func (p Prompt) PersonRefs() []Person { return append([]Person(nil), p.people...
 // Build lays out the lines as "[mN] Name(pN) ↩mK: text" and assigns person tokens in order of first
 // appearance. The model never sees platform IDs or stored references.
 func Build(in Input) Prompt {
-	p := Prompt{labels: map[string]string{}, byID: map[string]Message{}, byToken: map[string]Person{}, byRef: map[string]Person{}, plans: map[string]OpenPlan{}, refBySpeaker: map[string]string{}}
+	p := Prompt{labels: map[string]string{}, byID: map[string]Message{}, byToken: map[string]Person{}, byRef: map[string]Person{}, plans: map[string]OpenPlan{}, refBySpeaker: map[string]string{},
+		linkOf: map[string]string{}, botRef: in.BotRef, kakao: in.Kakao}
 	loc := in.Location
 	if loc == nil {
 		loc = time.UTC
@@ -93,6 +114,7 @@ func Build(in Input) Prompt {
 		maxRunes = 400
 	}
 	p.labelOf = in.LabelOf
+	mt := newMentions(in)
 	tokenOf := map[string]string{}
 	lines := make([]conversation.Line, 0, len(in.Lines))
 	for _, m := range in.Lines {
@@ -110,8 +132,9 @@ func Build(in Input) Prompt {
 			}
 			name = m.Author + "(" + tok + ")"
 		}
-		lines = append(lines, conversation.Line{ID: m.ID, Author: name, Bot: m.Bot, ReplyTo: m.ReplyTo, At: m.At, Text: m.Text})
+		lines = append(lines, conversation.Line{ID: m.ID, Author: name, Bot: m.Bot, ReplyTo: m.ReplyTo, At: m.At, Text: mt.render(&p, m.Text)})
 	}
+	mt.addNamed(&p)
 	text, ids := conversation.Numbered(lines, in.BotName, maxRunes)
 	p.Lines, p.labels = text, ids
 	plans := in.Plans

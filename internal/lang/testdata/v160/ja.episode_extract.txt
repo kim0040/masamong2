@@ -1,0 +1,23 @@
+基準時刻: {now}
+人(会話では 名前(pN) と表示):
+{people}
+
+この部屋の未完了の予定(同じ件なら link_to に番号を書く):
+{plans}
+
+会話区間(各行 [mN] 名前(pN) ↩返信先の行: 内容):
+{lines}
+
+この区間から、後でまた話題にする価値のあるものだけを操作として出してください。何もなければ {"episodes":[]}。
+- 1つのエピソードは1つの話題です。別の話は分けてください。
+- 上の未完了の予定と同じ件なら新しく作らず、op "update" と link_to(例: "e1")を使います。終わった・中止になった場合は op "close" と status "done" または "dropped" を使います。中止は誰かがはっきり中止と言ったときだけです。
+- 残すもの: 誰が何を提案し何が決まったか、日付、答えの出ていない質問と担当者、また話すと面白い瞬間。
+- 決定(kind "decision")は2人以上が同意したか、本人が自分のことを確定したものだけです。
+- 捨てるもの: あいさつ、単なる反応、その場限りの雑談、ボットの発言とエラー、健康・恋愛・お金に関するうわさ。
+- 人は名前ではなく {p1} のような pN トークンだけで書きます。言った人・決めた人は by に pN で書きます。
+- 文は会話の言語で、120文字以内で書きます。原文を長く写さないでください。
+- すべての項目に ev(根拠の行番号、例: "m3")が1つ以上必要です。ボットの行は根拠になりません。
+- 日付は基準時刻から計算して due に YYYY-MM-DD または YYYY-MM-DDTHH:MM で書き、元の表現は when_text に残します。確かでなければ due は null。
+- kind: plan(予定) | decision(決定) | event(あった出来事) | joke(ネタ・ミーム) | fact(部屋についての事実)。項目の kind: decision | proposal | open_question | moment | fact。status: open | decided | done | dropped。importance: 1〜5。
+出力形式:
+{"episodes":[{"op":"create","link_to":null,"kind":"plan","title":"","items":[{"kind":"proposal","text":"","by":["p1"],"ev":["m1"]}],"status":"open","due":null,"when_text":"","importance":3}]}

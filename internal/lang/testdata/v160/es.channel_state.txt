@@ -1,0 +1,17 @@
+Hora de referencia: {now}
+Personas (la conversación las muestra como nombre(pN)):
+{people}
+
+Estado anterior (temas como [tN], preguntas como [qN]):
+{previous}
+
+Conversación nueva (cada línea [mN] nombre(pN) ↩línea respondida: texto):
+{lines}
+
+Lee el estado anterior y la conversación nueva y escribe el estado actual de la sala. No escribas nada que no esté en la conversación.
+- Como máximo 4 temas en curso; separa las cosas distintas. Si un tema o una pregunta continúa uno anterior, pon su etiqueta en from (por ejemplo "t1", "q1"). Si la conversación nueva no lo menciona, su status es "cooling". Quita los temas que ya terminaron.
+- Preguntas sin respuesta, el ambiente (mood) y una broma en curso (banter) solo si los hay.
+- Escribe a las personas solo como pN, como {p1}. Escribe textos breves en el idioma de la conversación (label como máximo 40 caracteres, el resto como máximo 120).
+- Cada entrada necesita ev con etiquetas de línea de la conversación nueva. Una entrada que continúa otra anterior sin evidencia nueva puede dar solo from. Las líneas del bot no son evidencia.
+Formato de salida:
+{"threads":[{"from":null,"label":"","gist":"","who":["p1"],"status":"active","ev":["m1"]}],"open_questions":[{"from":null,"q":"","who":["p2"],"ev":["m2"]}],"mood":{"text":"","ev":[]},"banter":{"text":"","ev":[]}}

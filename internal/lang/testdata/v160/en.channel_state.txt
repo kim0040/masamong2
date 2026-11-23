@@ -1,0 +1,17 @@
+Reference time: {now}
+People (the conversation shows them as name(pN)):
+{people}
+
+Previous state (topics as [tN], questions as [qN]):
+{previous}
+
+New conversation (each line [mN] name(pN) ↩replied line: text):
+{lines}
+
+Read the previous state and the new conversation and write the room's state as it is now. Write nothing that is not in the conversation.
+- At most 4 topics in progress; keep different things apart. When a topic or question continues an earlier one, put its label in from (for example "t1", "q1"). When the new conversation does not mention it, its status is "cooling". Leave out topics that are over.
+- Unanswered questions, the mood and a running joke (banter) only when there are any.
+- Write people only as pN such as {p1}. Write short texts in the language of the conversation (label at most 40 characters, the rest at most 120).
+- Every entry needs ev with line labels from the new conversation. An entry that continues an earlier one without new evidence may give only from. The bot's lines are not evidence.
+Output format:
+{"threads":[{"from":null,"label":"","gist":"","who":["p1"],"status":"active","ev":["m1"]}],"open_questions":[{"from":null,"q":"","who":["p2"],"ev":["m2"]}],"mood":{"text":"","ev":[]},"banter":{"text":"","ev":[]}}

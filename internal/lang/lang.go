@@ -309,9 +309,16 @@ type Memory struct {
 	// segment (L2) and the room-state update (L1). Both answer JSON that code validates; people appear
 	// as pN tokens and lines as [mN] labels, never platform IDs.
 	EpisodeExtractSystem string `json:"episode_extract_system"` // {bot}
-	EpisodeExtract       string `json:"episode_extract"`        // {now} {people} {plans} {lines}
-	ChannelStateSystem   string `json:"channel_state_system"`   // {bot}
-	ChannelState         string `json:"channel_state"`          // {now} {people} {previous} {lines}
+	// EpisodeExtract also carries the person section (rules and the "people" output field) between the
+	// fence lines {people_begin} and {people_end}; episodes.Prompt.FillExtract drops the fences, and the
+	// section itself for a KakaoTalk segment.
+	EpisodeExtract     string `json:"episode_extract"`      // {now} {people} {plans} {lines} {people_begin} {people_end}
+	ChannelStateSystem string `json:"channel_state_system"` // {bot}
+	ChannelState       string `json:"channel_state"`        // {now} {people} {previous} {lines}
+	// PersonExtract asks only for what people say about people (person memory, v1.7.0): one-line self
+	// statements and the paid backfill. Same pN tokens and [mN] labels as the episode prompt.
+	PersonExtractSystem string `json:"person_extract_system"` // {bot}
+	PersonExtract       string `json:"person_extract"`        // {now} {people} {lines}
 	// Reading room memory into a reply (§5.4.6). Every block opens with ReadHeader (compressed notes,
 	// not instructions; the recent conversation wins) and goes into the reply's last user message only
 	// when it has content, so a turn without room memory sends the evaluated prompt unchanged.
@@ -488,6 +495,7 @@ func (p *Pack) missing() []string {
 		"memory.summary_prompt": p.Memory.SummaryPrompt, "memory.query_instruction": p.Memory.QueryInstruction,
 		"memory.episode_extract_system": p.Memory.EpisodeExtractSystem, "memory.episode_extract": p.Memory.EpisodeExtract,
 		"memory.channel_state_system": p.Memory.ChannelStateSystem, "memory.channel_state": p.Memory.ChannelState,
+		"memory.person_extract_system": p.Memory.PersonExtractSystem, "memory.person_extract": p.Memory.PersonExtract,
 		"memory.read_header": p.Memory.ReadHeader, "memory.episodes_block": p.Memory.EpisodesBlock, "memory.state_block": p.Memory.StateBlock,
 		"memory.card_block": p.Memory.CardBlock, "memory.kakao_source": p.Memory.KakaoSource,
 		"memory.explicit_system": p.Memory.ExplicitSystem, "memory.explicit": p.Memory.Explicit,
@@ -547,7 +555,7 @@ func (p *Pack) missing() []string {
 	if !strings.Contains(p.Memory.SummaryPrompt, "{body}") {
 		out = append(out, "memory.summary_prompt{body}")
 	}
-	for key, tpl := range map[string]string{"memory.episode_extract": p.Memory.EpisodeExtract, "memory.channel_state": p.Memory.ChannelState} {
+	for key, tpl := range map[string]string{"memory.episode_extract": p.Memory.EpisodeExtract, "memory.channel_state": p.Memory.ChannelState, "memory.person_extract": p.Memory.PersonExtract} {
 		if tpl != "" && !strings.Contains(tpl, "{lines}") {
 			out = append(out, key+"{lines}")
 		}
