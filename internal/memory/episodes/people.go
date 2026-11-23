@@ -220,7 +220,7 @@ func (p Prompt) linkFor(about string, by map[string]bool, ev []string) string {
 // mentions in the lines
 // ---------------------------------------------------------------------------
 
-var mentionRE = regexp.MustCompile(`<@!?([0-9A-Za-z_]+)>`)
+var mentionRE = regexp.MustCompile(`<@!?([^<>@&!\s]+)>`)
 
 type mentionSet struct {
 	active bool
