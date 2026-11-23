@@ -728,8 +728,9 @@ func (s *Service) pbFactPasses(tx *sql.Tx, guild, runID string, f episodes.Perso
 }
 
 // pbGateAnswers keeps, in place, the facts of a window's answers that pass pbFactPasses; changed reports
-// that one was dropped.
-func (s *Service) pbGateAnswers(tx *sql.Tx, guild, runID string, have map[string]pbAnswer, lines map[string]string) (changed bool, err error) {
+// that one was dropped. With only set, a fact it does not select is kept without a check.
+func (s *Service) pbGateAnswers(tx *sql.Tx, guild, runID string, have map[string]pbAnswer, lines map[string]string,
+	only ...func(episodes.PersonFact) bool) (changed bool, err error) {
 	memoryOut, err := withdrawnRefsTx(tx, privacy.Memory)
 	if err != nil {
 		return false, err
@@ -741,6 +742,10 @@ func (s *Service) pbGateAnswers(tx *sql.Tx, guild, runID string, have map[string
 	for m, ans := range have {
 		var kept []episodes.PersonFact
 		for _, f := range ans.Facts {
+			if len(only) > 0 && !only[0](f) {
+				kept = append(kept, f)
+				continue
+			}
 			ok, err := s.pbFactPasses(tx, guild, runID, f, ans.ReadAt, lines, memoryOut, profileOut)
 			if err != nil {
 				return false, err
@@ -760,14 +765,47 @@ func (s *Service) pbGateAnswers(tx *sql.Tx, guild, runID string, have map[string
 // pbRecheckPilotTx takes out of the stored pilot answers every fact that no longer passes the gate, so
 // the pilot's copy of what people said goes with a forget, a hide, a deletion or an edit of a line, and a
 // withdrawal of consent, as the claims do. It runs in the caller's transaction, after the caller wrote its
-// marker, tombstone, redaction or withdrawal (guild "" checks every server's runs).
+// marker, tombstone, redaction or withdrawal (guild "" checks every server's runs). This is the full pass,
+// for the rare member and operator controls (hide, forget); a deleted or edited line and a withdrawal,
+// which come often and wait for the writer, use pbRecheckLinesTx and pbRecheckPersonTx.
 func (s *Service) pbRecheckPilotTx(tx *sql.Tx, guild string) error {
+	return s.pbRecheckScopedTx(tx, guild, nil, "")
+}
+
+// pbRecheckLinesTx re-checks only the stored pilot windows that hold one of obs (lines just deleted or
+// edited): a fact rests on lines of its own window only, so no other window can change.
+func (s *Service) pbRecheckLinesTx(tx *sql.Tx, guild string, obs []string) error {
+	if len(obs) == 0 {
+		return nil // no stored line changed
+	}
+	return s.pbRecheckScopedTx(tx, guild, obs, "")
+}
+
+// pbRecheckPersonTx re-checks, in every server, only the stored pilot facts that name ref: about them, said
+// by them or naming them in the text. A withdrawal changes nothing for a fact that names someone else only
+// (its evidence lines are its speaker's own).
+func (s *Service) pbRecheckPersonTx(tx *sql.Tx, ref string) error {
+	if ref == "" {
+		return nil
+	}
+	return s.pbRecheckScopedTx(tx, "", nil, ref)
+}
+
+// pbRecheckScopedTx is the re-check over the windows of guild that hold one of obs (all when empty), and
+// over the facts that name person (all when "").
+func (s *Service) pbRecheckScopedTx(tx *sql.Tx, guild string, obs []string, person string) error {
 	if !tableExists(tx, "people_backfill_window") {
 		return nil
 	}
-	ws, err := store.BackfillAnswered(tx, guild)
+	ws, err := store.BackfillAnsweredFor(tx, guild, obs, person)
 	if err != nil {
 		return err
+	}
+	var only []func(episodes.PersonFact) bool
+	if person != "" {
+		only = append(only, func(f episodes.PersonFact) bool {
+			return f.About == person || slices.Contains(f.By, person) || slices.Contains(episodes.TextRefs(f.Text), person)
+		})
 	}
 	guilds := map[string]string{}
 	now := s.Clock.Now().UTC().Format(time.RFC3339)
@@ -784,7 +822,7 @@ func (s *Service) pbRecheckPilotTx(tx *sql.Tx, guild string) error {
 			guilds[w.RunID] = g
 		}
 		have := pbAnswers(w.Result)
-		changed, err := s.pbGateAnswers(tx, g, w.RunID, have, nil)
+		changed, err := s.pbGateAnswers(tx, g, w.RunID, have, nil, only...)
 		if err != nil {
 			return err
 		}
