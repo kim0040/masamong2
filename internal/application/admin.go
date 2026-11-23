@@ -276,6 +276,13 @@ func (c *kvCache) put(key string, e kvEntry) {
 	c.m[key] = e
 }
 
+// adminDBFail is the Action failure for an admin database that could not open: the cause goes to the
+// log, the caller sees the generic message.
+func (s *Service) adminDBFail(req action.Request, err error) action.Result {
+	s.Log.Error("admin database unavailable", "action", req.Action, "err", err)
+	return action.Fail(req, errcode.IO, "generic.error", s.msg(req, "generic.error"), nil)
+}
+
 func (s *Service) kvGet(key string, into any) (bool, error) {
 	if e, ok := s.kv.get(key); ok {
 		if !e.ok {
@@ -462,7 +469,11 @@ func (s *Service) pauseState() PauseState {
 	if s.Store == nil {
 		return st
 	}
-	_, _ = s.kvGet("runtime:pause", &st)
+	// A failed read leaves replies on: the caller needs a bool, and a broken admin store stops the
+	// turn's own writes anyway. Logged once, not on every message.
+	if _, err := s.kvGet("runtime:pause", &st); err != nil && s.loggedOnce.first("kv-read:runtime:pause") {
+		s.Log.Warn("pause state unreadable; replies stay on", "err", err)
+	}
 	return st
 }
 
@@ -734,7 +745,10 @@ func clip(s string, n int) string {
 }
 
 func (s *Service) turnsAction(req action.Request) action.Result {
-	db, _ := s.adminDB()
+	db, err := s.adminDB()
+	if err != nil {
+		return s.adminDBFail(req, err)
+	}
 	in := inputMap(req)
 	if req.Action == "turns.get" {
 		id := strVal(in, "id", "")
@@ -974,9 +988,12 @@ func (s *Service) audit(req action.Request, desc catalog.Descriptor, res action.
 	} else {
 		s.Log.Warn("change refused", "action", req.Action, "via", via, "code", code)
 	}
-	_, _ = db.DB.Exec(`INSERT INTO audit_log(at, action, via, ok, code, rev_before, rev_after, summary, actor, actor_id, guild_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+	// The action already ran, so a failed log row cannot undo it; it is reported, not dropped.
+	if _, err := db.DB.Exec(`INSERT INTO audit_log(at, action, via, ok, code, rev_before, rev_after, summary, actor, actor_id, guild_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 		s.Clock.Now().UTC().Format(time.RFC3339), req.Action, via, ok, code, revBefore, s.Revision(), clip(strings.Join(parts, " "), 900),
-		clip(actorName(req), 120), actorID(req), clip(guild, 60))
+		clip(actorName(req), 120), actorID(req), clip(guild, 60)); err != nil {
+		s.Log.Warn("change log row not written", "action", req.Action, "err", err)
+	}
 	s.emit("audit", req.Action, nil)
 }
 
@@ -1118,7 +1135,10 @@ func (s *Service) auditList(req action.Request) action.Result {
 // ---------------------------------------------------------------------------
 
 func (s *Service) statsSeries(req action.Request) action.Result {
-	db, _ := s.adminDB()
+	db, err := s.adminDB()
+	if err != nil {
+		return s.adminDBFail(req, err)
+	}
 	in := inputMap(req)
 	n := min(max(intVal(in, "days", 14), 1), 90)
 	loc := s.instanceZone()
@@ -1136,25 +1156,30 @@ func (s *Service) statsSeries(req action.Request) action.Result {
 	var latency = series()
 	var latencyN = series()
 	rows, err := db.DB.Query(`SELECT day, outcome, COUNT(*), SUM(latency_ms) FROM turn_log WHERE lab=0 AND day>=? GROUP BY day, outcome`, first)
-	if err == nil {
-		for rows.Next() {
-			var d, o string
-			var c int
-			var lat sql.NullFloat64
-			if rows.Scan(&d, &o, &c, &lat) == nil {
-				if i, ok := index[d]; ok {
-					if outcomes[o] == nil {
-						outcomes[o] = series()
-					}
-					outcomes[o][i] += float64(c)
-					if o == "answered" && lat.Valid {
-						latency[i] += lat.Float64
-						latencyN[i] += float64(c)
-					}
+	if err != nil {
+		return s.statsSeriesFail(req, "turns", err)
+	}
+	for rows.Next() {
+		var d, o string
+		var c int
+		var lat sql.NullFloat64
+		if rows.Scan(&d, &o, &c, &lat) == nil {
+			if i, ok := index[d]; ok {
+				if outcomes[o] == nil {
+					outcomes[o] = series()
+				}
+				outcomes[o][i] += float64(c)
+				if o == "answered" && lat.Valid {
+					latency[i] += lat.Float64
+					latencyN[i] += float64(c)
 				}
 			}
 		}
-		rows.Close()
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return s.statsSeriesFail(req, "turns", err)
 	}
 	for i := range latency {
 		if latencyN[i] > 0 {
@@ -1162,37 +1187,49 @@ func (s *Service) statsSeries(req action.Request) action.Result {
 		}
 	}
 	cost := map[string][]float64{}
-	if rows, err := db.DB.Query(`SELECT day, kind, usd FROM memory_spend WHERE day>=?`, first); err == nil {
-		for rows.Next() {
-			var d, k string
-			var usd float64
-			if rows.Scan(&d, &k, &usd) == nil {
-				if i, ok := index[d]; ok {
-					if cost[k] == nil {
-						cost[k] = series()
-					}
-					cost[k][i] += usd
+	rows, err = db.DB.Query(`SELECT day, kind, usd FROM memory_spend WHERE day>=?`, first)
+	if err != nil {
+		return s.statsSeriesFail(req, "cost", err)
+	}
+	for rows.Next() {
+		var d, k string
+		var usd float64
+		if rows.Scan(&d, &k, &usd) == nil {
+			if i, ok := index[d]; ok {
+				if cost[k] == nil {
+					cost[k] = series()
 				}
+				cost[k][i] += usd
 			}
 		}
-		rows.Close()
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return s.statsSeriesFail(req, "cost", err)
 	}
 	toolSeries := map[string][]float64{}
 	if u := s.toolUsage(); u != nil {
-		if rows, err := db.DB.Query(`SELECT day, tool, n FROM tool_usage WHERE scope='all' AND day>=?`, first); err == nil {
-			for rows.Next() {
-				var d, t string
-				var c int
-				if rows.Scan(&d, &t, &c) == nil {
-					if i, ok := index[d]; ok {
-						if toolSeries[t] == nil {
-							toolSeries[t] = series()
-						}
-						toolSeries[t][i] += float64(c)
+		rows, err = db.DB.Query(`SELECT day, tool, n FROM tool_usage WHERE scope='all' AND day>=?`, first)
+		if err != nil {
+			return s.statsSeriesFail(req, "tools", err)
+		}
+		for rows.Next() {
+			var d, t string
+			var c int
+			if rows.Scan(&d, &t, &c) == nil {
+				if i, ok := index[d]; ok {
+					if toolSeries[t] == nil {
+						toolSeries[t] = series()
 					}
+					toolSeries[t][i] += float64(c)
 				}
 			}
-			rows.Close()
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return s.statsSeriesFail(req, "tools", err)
 		}
 	}
 	// weekday × hour activity for the last 28 days (answered and silent turns)
@@ -1201,20 +1238,33 @@ func (s *Service) statsSeries(req action.Request) action.Result {
 		heat[i] = make([]int, 24)
 	}
 	since := today.AddDate(0, 0, -27).Format("2006-01-02")
-	if rows, err := db.DB.Query(`SELECT day, hour, COUNT(*) FROM turn_log WHERE lab=0 AND day>=? GROUP BY day, hour`, since); err == nil {
-		for rows.Next() {
-			var d string
-			var h, c int
-			if rows.Scan(&d, &h, &c) == nil {
-				if t, err := time.ParseInLocation("2006-01-02", d, loc); err == nil && h >= 0 && h < 24 {
-					heat[int(t.Weekday())][h] += c
-				}
+	rows, err = db.DB.Query(`SELECT day, hour, COUNT(*) FROM turn_log WHERE lab=0 AND day>=? GROUP BY day, hour`, since)
+	if err != nil {
+		return s.statsSeriesFail(req, "heatmap", err)
+	}
+	for rows.Next() {
+		var d string
+		var h, c int
+		if rows.Scan(&d, &h, &c) == nil {
+			if t, err := time.ParseInLocation("2006-01-02", d, loc); err == nil && h >= 0 && h < 24 {
+				heat[int(t.Weekday())][h] += c
 			}
 		}
-		rows.Close()
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return s.statsSeriesFail(req, "heatmap", err)
 	}
 	return action.OK(req, map[string]any{"days": days, "turns": outcomes, "latency_ms": latency, "cost_usd": cost,
 		"tools": toolSeries, "heatmap": heat, "timezone": loc.String()})
+}
+
+// statsSeriesFail reports a series that could not be read: a chart with a missing series would pass for
+// a quiet week.
+func (s *Service) statsSeriesFail(req action.Request, series string, err error) action.Result {
+	s.Log.Error("stats series unreadable", "series", series, "err", err)
+	return action.Fail(req, errcode.IO, "generic.error", s.msg(req, "generic.error"), nil)
 }
 
 // ---------------------------------------------------------------------------
@@ -1239,7 +1289,10 @@ type attention struct {
 }
 
 func (s *Service) dashboardOverview(ctx context.Context, req action.Request) action.Result {
-	db, _ := s.adminDB()
+	db, err := s.adminDB()
+	if err != nil {
+		return s.adminDBFail(req, err)
+	}
 	lap := s.laps(ctx, "dashboard")
 	defer lap.done()
 	doc := s.doctor(ctx, req)
@@ -1273,8 +1326,21 @@ func (s *Service) dashboardOverview(ctx context.Context, req action.Request) act
 	loc := s.instanceZone()
 	today := s.Clock.Now().In(loc).Format("2006-01-02")
 
+	// The dashboard still draws when a section's read fails, but the failure is shown as an attention
+	// row (below) instead of a count of zero that reads as a quiet day.
+	var readErr error
+	readFailed := func(section string, err error) {
+		if readErr == nil {
+			readErr = err
+		}
+		if s.loggedOnce.first("dashboard-read:" + section) {
+			s.Log.Warn("dashboard section unreadable", "section", section, "err", err)
+		}
+	}
 	counts := map[string]int{}
-	if rows, err := db.DB.Query(`SELECT outcome, COUNT(*) FROM turn_log WHERE lab=0 AND day=? GROUP BY outcome`, today); err == nil {
+	if rows, err := db.DB.Query(`SELECT outcome, COUNT(*) FROM turn_log WHERE lab=0 AND day=? GROUP BY outcome`, today); err != nil {
+		readFailed("turns", err)
+	} else {
 		for rows.Next() {
 			var o string
 			var c int
@@ -1282,18 +1348,26 @@ func (s *Service) dashboardOverview(ctx context.Context, req action.Request) act
 				counts[o] = c
 			}
 		}
+		if err := rows.Err(); err != nil {
+			readFailed("turns", err)
+		}
 		rows.Close()
 	}
+	// the third result only says whether a memory engine exists to count spend: without one nothing was spent
 	byKind, spent, _ := s.monthSpend()
 	var spentToday float64 // memory_spend days are UTC (store.AddSpend)
 	spendDay := s.Clock.Now().UTC().Format("2006-01-02")
-	_ = db.DB.QueryRow(`SELECT COALESCE(SUM(usd),0) FROM memory_spend WHERE day=?`, spendDay).Scan(&spentToday)
+	if err := db.DB.QueryRow(`SELECT COALESCE(SUM(usd),0) FROM memory_spend WHERE day=?`, spendDay).Scan(&spentToday); err != nil {
+		readFailed("spend", err)
+	}
 	spentToday = s.spendAfterResetDay(spendDay, spentToday)
 	budget := parseUSD(s.Doc().Limits.MonthlyBudgetUSD, 0)
 	lap.mark("turns_spend")
 
 	jobsRunning, jobsFailed := []map[string]any{}, 0
-	if rows, err := db.DB.Query(`SELECT id, type, status, checkpoint, updated_at FROM jobs WHERE status IN ('pending','retry_wait','running','leased','paused','failed') ORDER BY updated_at DESC LIMIT 20`); err == nil {
+	if rows, err := db.DB.Query(`SELECT id, type, status, checkpoint, updated_at FROM jobs WHERE status IN ('pending','retry_wait','running','leased','paused','failed') ORDER BY updated_at DESC LIMIT 20`); err != nil {
+		readFailed("jobs", err)
+	} else {
 		for rows.Next() {
 			var id, typ, st, upd string
 			var cp sql.NullString
@@ -1305,6 +1379,9 @@ func (s *Service) dashboardOverview(ctx context.Context, req action.Request) act
 				jobsRunning = append(jobsRunning, map[string]any{"id": id, "type": typ, "status": st, "progress": cp.String, "updated_at": upd})
 			}
 		}
+		if err := rows.Err(); err != nil {
+			readFailed("jobs", err)
+		}
 		rows.Close()
 	}
 
@@ -1315,12 +1392,17 @@ func (s *Service) dashboardOverview(ctx context.Context, req action.Request) act
 	topTools := []toolCount{}
 	if s.toolUsage() != nil {
 		day, _ := s.toolDay()
-		if rows, err := db.DB.Query(`SELECT tool, n FROM tool_usage WHERE day=? AND scope='all' ORDER BY n DESC LIMIT 6`, day); err == nil {
+		if rows, err := db.DB.Query(`SELECT tool, n FROM tool_usage WHERE day=? AND scope='all' ORDER BY n DESC LIMIT 6`, day); err != nil {
+			readFailed("tools", err)
+		} else {
 			for rows.Next() {
 				var tc toolCount
 				if rows.Scan(&tc.Tool, &tc.N) == nil {
 					topTools = append(topTools, tc)
 				}
+			}
+			if err := rows.Err(); err != nil {
+				readFailed("tools", err)
 			}
 			rows.Close()
 		}
@@ -1334,7 +1416,7 @@ func (s *Service) dashboardOverview(ctx context.Context, req action.Request) act
 	if pause.All {
 		att = append(att, attention{"warn", "paused", nil, "/"})
 	}
-	if pingErr != nil {
+	if pingErr != nil || readErr != nil {
 		att = append(att, attention{"danger", "db_error", nil, "/maintenance"})
 	}
 	if st, _ := status("llm")["status"].(string); st != "ready" {
@@ -1399,7 +1481,7 @@ func (s *Service) dashboardOverview(ctx context.Context, req action.Request) act
 			"jobs":    map[string]any{"status": ternary(jobsFailed > 0, "degraded", "ready"), "running": len(jobsRunning), "failed": jobsFailed},
 		},
 		"attention": att,
-		"checklist": s.checklist(counts2),
+		"checklist": s.checklist(db, counts2),
 		"today":     map[string]any{"day": today, "turns": counts, "cost_usd": spentToday},
 		"month":     monthView,
 		"jobs":      jobsRunning,
@@ -1417,10 +1499,10 @@ func ternary[T any](c bool, a, b T) T {
 }
 
 // checklist items are computed from real state, never from "the button was pressed".
-func (s *Service) checklist(memCounts map[string]int) []map[string]any {
-	db, _ := s.adminDB()
+func (s *Service) checklist(db *storage.Store, memCounts map[string]int) []map[string]any {
 	num := func(q string, args ...any) int {
 		var n int
+		// a failed count leaves the item unchecked; the dashboard's own reads report a broken database
 		_ = db.DB.QueryRow(q, args...).Scan(&n)
 		return n
 	}
@@ -1447,10 +1529,10 @@ func (s *Service) checklist(memCounts map[string]int) []map[string]any {
 			anyLimits = true
 		}
 	}
-	backups, _ := os.ReadDir(s.backupDir())
+	backups, _ := os.ReadDir(s.backupDir()) // no readable directory means no backup yet: the item stays unchecked
 	budgetReviewed := s.Doc().Limits.MonthlyBudgetUSD != config.Default("", "").Limits.MonthlyBudgetUSD
 	var ack map[string]bool
-	_, _ = s.kvGet("checklist:ack", &ack)
+	_, _ = s.kvGet("checklist:ack", &ack) // optional: without the acknowledgements those two items just stay unchecked
 	return []map[string]any{
 		{"id": "model_key", "done": llmReady, "route": "/connections"},
 		{"id": "discord", "done": s.Discord() != nil && s.Discord().Connected(), "route": "/connections"},
@@ -1469,7 +1551,10 @@ func (s *Service) checklist(memCounts map[string]int) []map[string]any {
 // ---------------------------------------------------------------------------
 
 func (s *Service) labReviews(req action.Request) action.Result {
-	db, _ := s.adminDB()
+	db, err := s.adminDB()
+	if err != nil {
+		return s.adminDBFail(req, err)
+	}
 	in := inputMap(req)
 	if req.Action == "lab.review" {
 		if id := strVal(in, "delete", ""); id != "" {

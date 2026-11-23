@@ -464,7 +464,18 @@ type extractStats struct{ segments, saved, failed int }
 func (s *Service) extractRoom(ctx context.Context, db *storage.Store, r memRoom, now time.Time, limit int) (extractStats, error) {
 	var st extractStats
 	var cur episodeCursor
-	_, _ = s.kvGet(cursorKey(r.room), &cur)
+	// A failed read must not look like a room never extracted: that would run every segment of the
+	// window through the model again.
+	if _, err := s.kvGet(cursorKey(r.room), &cur); err != nil {
+		var syntax *json.SyntaxError
+		var kind *json.UnmarshalTypeError
+		if !errors.As(err, &syntax) && !errors.As(err, &kind) {
+			return st, err
+		}
+		// a stored cursor that is not valid JSON would stall every room behind it: start this one over
+		s.Log.Warn("memory: a room cursor is unreadable; extraction starts over", "room", r.room, "err", err)
+		cur = episodeCursor{}
+	}
 	if cur.Replies == nil {
 		cur.Replies = map[string]string{}
 	}
@@ -1052,7 +1063,7 @@ func deleteEpisodeTx(tx *sql.Tx, id string) error {
 // expireEpisodes moves plans past their window to expired (the model never decides expiry).
 func (s *Service) expireEpisodes(db *storage.Store, now time.Time) int {
 	n := 0
-	_ = db.WithWriter(func(tx *sql.Tx) error {
+	err := db.WithWriter(func(tx *sql.Tx) error {
 		res, err := tx.Exec(`UPDATE channel_episode SET status='expired', expires_at='', updated_at=?, revision=revision+1
 			WHERE expires_at<>'' AND expires_at<=? AND status IN ('open','decided')`, now.UTC().Format(time.RFC3339), now.UTC().Format(time.RFC3339))
 		if err != nil {
@@ -1062,6 +1073,10 @@ func (s *Service) expireEpisodes(db *storage.Store, now time.Time) int {
 		n = int(c)
 		return nil
 	})
+	if err != nil {
+		s.Log.Warn("memory: expired episodes could not be saved", "err", err) // the next pass tries again
+		return 0
+	}
 	return n
 }
 
@@ -1089,7 +1104,14 @@ func (s *Service) regenerateEpisodes(ctx context.Context, db *storage.Store, now
 			return n, errRoomMemoryStop
 		}
 		var ids []string
-		_ = json.Unmarshal([]byte(j.seg), &ids)
+		if err := json.Unmarshal([]byte(j.seg), &ids); err != nil {
+			// no ids would look like a segment with no people and delete the episode: keep it as it is
+			s.Log.Warn("memory: an episode's segment is unreadable; it is kept", "id", j.id, "err", err)
+			if _, err := db.DB.Exec(`UPDATE channel_episode SET regen=2 WHERE id=? AND regen=1`, j.id); err != nil {
+				return n, err
+			}
+			continue
+		}
 		lines, err := s.linesByID(db, ids)
 		if err != nil {
 			return n, err
@@ -1128,7 +1150,9 @@ func (s *Service) regenerateEpisodes(ctx context.Context, db *storage.Store, now
 		case errors.Is(err, episodes.ErrParse) || errors.Is(err, errExtractInvalid):
 			s.Log.Warn("memory: an episode was not regenerated", "reason", err.Error())
 			// keep what is still valid; do not try again every pass
-			_, _ = db.DB.Exec(`UPDATE channel_episode SET regen=2 WHERE id=? AND regen=1`, j.id)
+			if _, err := db.DB.Exec(`UPDATE channel_episode SET regen=2 WHERE id=? AND regen=1`, j.id); err != nil {
+				return n, err // unmarked, the same answer would be asked for again every pass
+			}
 			continue
 		case err != nil:
 			return n, err
@@ -1201,6 +1225,7 @@ func (s *Service) updateRoomState(ctx context.Context, db *storage.Store, r memR
 	}
 	replies := map[string]string{}
 	var cur episodeCursor
+	// optional: the cursor only carries reply links that sharpen who a line answers; without them the state is built from the lines alone
 	if ok, _ := s.kvGet(cursorKey(r.room), &cur); ok && cur.Replies != nil {
 		replies = cur.Replies
 	}
@@ -1240,11 +1265,13 @@ func (s *Service) updateRoomState(ctx context.Context, db *storage.Store, r memR
 	if errors.Is(err, episodes.ErrParse) || errors.Is(err, errExtractInvalid) {
 		s.Log.Warn("memory: the channel state was not updated", "reason", err.Error())
 		// these messages are skipped; the state ages until the next update
-		_ = db.WithWriter(func(tx *sql.Tx) error {
+		if err := db.WithWriter(func(tx *sql.Tx) error {
 			_, err := tx.Exec(`UPDATE channel_state SET anchor_observation=?, anchor_time=? WHERE guild_id=? AND channel_id=? AND revision=?`,
 				last.ID, last.At.UTC().Format(time.RFC3339Nano), r.guild, r.channel, row.revision)
 			return err
-		})
+		}); err != nil {
+			return false, err // unmarked, the same lines would be sent to the model again
+		}
 		return false, nil
 	}
 	if err != nil {
@@ -1562,7 +1589,7 @@ const kakaoJobsKey = "episodes:kakao:jobs"
 
 func (s *Service) kakaoJobs() []string {
 	var rooms []string
-	_, _ = s.kvGet(kakaoJobsKey, &rooms)
+	_, _ = s.kvGet(kakaoJobsKey, &rooms) // optional: a failed read means no jobs this pass; the next pass lists them again
 	return rooms
 }
 
@@ -1571,7 +1598,7 @@ func (s *Service) continueKakaoExtractions(ctx context.Context, db *storage.Stor
 	var total extractStats
 	for _, room := range s.kakaoJobs() {
 		var job kakaoJob
-		if ok, _ := s.kvGet(kakaoJobKey(room), &job); !ok || job.Done {
+		if ok, _ := s.kvGet(kakaoJobKey(room), &job); !ok || job.Done { // unreadable counts as not started: retried next pass
 			continue
 		}
 		st, err := s.stepKakao(ctx, db, &job, now, kakaoSegments)
