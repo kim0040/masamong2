@@ -62,9 +62,10 @@ type rawPerson struct {
 // ParsePeople reads the "people" list of a model answer (the whole answer, code fences and a leading
 // sentence allowed) and validates it against the prompt. It returns the valid facts and how many entries
 // were dropped (no text is kept). It never fails: a missing list is no facts, a list that is not a list
-// counts as one rejected entry. Kakao prompts discard everything.
+// counts as one rejected entry. Kakao prompts, and prompts built with person memory off, discard
+// everything.
 func (p Prompt) ParsePeople(raw string, opt PeopleOptions) ([]PersonFact, int) {
-	if p.kakao {
+	if p.kakao || p.noPeople {
 		return nil, 0
 	}
 	obj, ok := JSONObject(raw)
@@ -82,7 +83,7 @@ func (p Prompt) ParsePeople(raw string, opt PeopleOptions) ([]PersonFact, int) {
 
 // ParsePeopleList is ParsePeople for the "people" value alone.
 func (p Prompt) ParsePeopleList(list json.RawMessage, opt PeopleOptions) ([]PersonFact, int) {
-	if p.kakao || len(list) == 0 || string(list) == "null" {
+	if p.kakao || p.noPeople || len(list) == 0 || string(list) == "null" {
 		return nil, 0
 	}
 	var entries []json.RawMessage
@@ -380,15 +381,16 @@ func stripPeopleSection(tpl string, drop bool) string {
 }
 
 // FillExtract fills the pack's memory.episode_extract template: the usual placeholders, and the people
-// section (rules and output field) kept, or dropped for a Kakao prompt. Use it instead of lang.Fill.
+// section (rules and output field) kept, or dropped for a Kakao prompt or with person memory off. Use it
+// instead of lang.Fill.
 func (p Prompt) FillExtract(tpl string) string {
-	return lang.Fill(stripPeopleSection(tpl, p.kakao), "now", p.Now, "people", p.People(), "plans", p.Plans, "lines", p.Lines)
+	return lang.Fill(stripPeopleSection(tpl, p.kakao || p.noPeople), "now", p.Now, "people", p.People(), "plans", p.Plans, "lines", p.Lines)
 }
 
 // BuildPersonExtract builds the input of the people-only prompt (memory.person_extract): a one-line self
 // statement, or a backfill window. The people, mentions, line labels and limits are exactly Build's; open
-// plans are not offered. ok is false when there is nothing to ask: a Kakao segment (no person memory)
-// or no human line.
+// plans are not offered. ok is false when there is nothing to ask: a Kakao segment (no person memory),
+// person memory switched off (Input.NoPeople) or no human line.
 func BuildPersonExtract(in Input) (Prompt, bool) {
 	in.Plans = nil
 	p := Build(in)
@@ -399,7 +401,7 @@ func BuildPersonExtract(in Input) (Prompt, bool) {
 			break
 		}
 	}
-	return p, human && !in.Kakao
+	return p, human && !in.Kakao && !in.NoPeople
 }
 
 // FillPersonExtract fills the pack's memory.person_extract template.

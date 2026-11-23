@@ -2,6 +2,7 @@ package application
 
 import (
 	"slices"
+	"strings"
 
 	"masamong/internal/lang"
 	"masamong/internal/memory/episodes"
@@ -24,8 +25,12 @@ func (s *Service) mentionedPeople(db *storage.Store, guild string, msgs []episod
 			authors[m.Account] = true
 		}
 	}
+	// the server's rooms, without deleted threads: their rows stay until removed, but a label only such a
+	// thread gave names nobody (its tombstone, or the deletion under way in memory)
+	prefix := "discord:" + guild + ":"
 	rooms := map[string]bool{}
-	rows, err := db.Reader().Query(`SELECT room FROM memory_rooms WHERE platform='discord' AND room LIKE ?`, "discord:"+guild+":%")
+	rows, err := db.Reader().Query(`SELECT room FROM memory_rooms WHERE platform='discord' AND room LIKE ?
+		AND substr(room, ?) NOT IN (SELECT thread_id FROM thread_tombstones)`, prefix+"%", len(prefix)+1)
 	if err != nil {
 		return nil, err
 	}
@@ -36,6 +41,14 @@ func (s *Service) mentionedPeople(db *storage.Store, guild string, msgs []episod
 		}
 	}
 	rows.Close()
+	t := s.threadsLoaded()
+	t.mu.Lock()
+	for room := range rooms {
+		if t.deleted[strings.TrimPrefix(room, prefix)] {
+			delete(rooms, room)
+		}
+	}
+	t.mu.Unlock()
 	tx, err := db.Reader().Begin()
 	if err != nil {
 		return nil, err

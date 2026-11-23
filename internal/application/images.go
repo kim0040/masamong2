@@ -163,12 +163,11 @@ func (s *Service) images(ctx context.Context, req action.Request) action.Result 
 	if boolVal(in, "dry_run") {
 		return action.OK(req, map[string]any{"status": "dry_run", "model": m.Model, "aspect_ratio": ar})
 	}
-	// who is drawn: what they said about themselves goes after the request, as reference (image_subjects.go)
-	if ref := s.imageReference(ctx, req, in, doc); ref != "" {
-		prompt += "\n\n" + ref
-	}
+	// who is drawn: what they said about themselves goes after the request, as reference, read when the
+	// picture is made (image_subjects.go)
+	subjects := imageSubjectsOf(req, in)
 	// asked for in a chat turn: drawn in the background, the turn answers at once (imagequeue.go)
-	if res, ok := s.imagesAsync(ctx, req, in, prompt, ar); ok {
+	if res, ok := s.imagesAsync(ctx, req, in, prompt, ar, subjects); ok {
 		return res
 	}
 	// one picture at a time: a request waits for the one being made, then gives up without counting
@@ -181,7 +180,8 @@ func (s *Service) images(ctx context.Context, req action.Request) action.Result 
 	case <-wait.Done():
 		return action.Fail(req, errcode.ProviderUnavailable, "image.busy", s.msg(req, "image.busy"), nil)
 	}
-	saved, fail := s.drawImage(ctx, doc, m, prompt, ar, secondsOr(in, "timeout_sec", imageCallTimout))
+	// the slot is won: the reference is read now, so what was hidden or forgotten while waiting stays out
+	saved, fail := s.drawImage(ctx, doc, m, s.withImageReference(ctx, prompt, subjects), ar, secondsOr(in, "timeout_sec", imageCallTimout))
 	if fail != nil {
 		switch fail.kind {
 		case imageFailSetup:
