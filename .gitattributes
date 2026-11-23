@@ -9,3 +9,7 @@ internal/transport/web/ui/dist/assets/*.js -whitespace
 # The generated code map is compared byte for byte (tools/codemap's staleness test), so a Windows
 # checkout must not turn its line endings into CRLF.
 docs/code-map/*.md text eol=lf
+
+# Release notes are compared byte for byte with their rendering (tools/relnotes), so a Windows checkout
+# must not turn their line endings into CRLF.
+release-notes/** -text
