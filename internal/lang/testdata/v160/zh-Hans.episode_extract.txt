@@ -1,0 +1,23 @@
+参考时间: {now}
+人物(对话中显示为 名字(pN)):
+{people}
+
+这个房间未完成的计划(如果是同一件事，在 link_to 中写上编号):
+{plans}
+
+对话片段(每行 [mN] 名字(pN) ↩所回复的行: 内容):
+{lines}
+
+只把这段对话中以后值得再提起的内容以操作的形式输出。如果没有，输出 {"episodes":[]}。
+- 一个片段记忆只对应一个话题。不同的事情要分开。
+- 如果和上面的未完成计划是同一件事，不要新建，使用 op "update" 和 link_to(例如 "e1")。如果已经结束或取消，使用 op "close" 和 status "done" 或 "dropped"。只有有人明确说取消时才算取消。
+- 要保留: 谁提议了什么、定下了什么、日期、没有答案的问题和负责人、以后再提会很好笑的时刻。
+- 决定(kind "decision")只限两人以上同意，或本人确认了自己的事。
+- 要舍弃: 打招呼、简单的反应、一次性的闲聊、机器人的话和错误、有关健康、恋爱、金钱的传闻。
+- 人物只用 {p1} 这样的 pN 标记书写，不写名字。说出或决定这件事的人用 pN 写在 by 中。
+- 用对话所用的语言书写，每段文字不超过 120 个字符。不要长篇照抄原文。
+- 每个条目都需要 ev(依据行的编号，例如 "m3")，至少一个。机器人的行不能作为依据。
+- 日期根据参考时间计算，在 due 中写成 YYYY-MM-DD 或 YYYY-MM-DDTHH:MM，原来的说法保留在 when_text 中。不确定时 due 为 null。
+- kind: plan(计划) | decision(决定) | event(发生过的事) | joke(梗、表情包) | fact(关于这个房间的事实)。条目 kind: decision | proposal | open_question | moment | fact。status: open | decided | done | dropped。importance: 1~5。
+输出格式:
+{"episodes":[{"op":"create","link_to":null,"kind":"plan","title":"","items":[{"kind":"proposal","text":"","by":["p1"],"ev":["m1"]}],"status":"open","due":null,"when_text":"","importance":3}]}

@@ -1,0 +1,23 @@
+Hora de referencia: {now}
+Personas (la conversación las muestra como nombre(pN)):
+{people}
+
+Planes abiertos de esta sala (pon la etiqueta en link_to si es lo mismo):
+{plans}
+
+Fragmento de conversación (cada línea [mN] nombre(pN) ↩línea respondida: texto):
+{lines}
+
+Devuelve como operaciones solo lo que valga la pena volver a sacar más adelante. Si no hay nada, devuelve {"episodes":[]}.
+- Un episodio es un tema. Separa las cosas distintas.
+- Si es lo mismo que un plan abierto de arriba, no crees uno nuevo: usa op "update" con link_to (por ejemplo "e1"). Si terminó o se canceló, usa op "close" con status "done" o "dropped". Solo está cancelado cuando alguien lo dice claramente.
+- Guarda: quién propuso qué y qué se acordó, fechas, preguntas abiertas y quién se encarga, momentos que serían graciosos de recordar.
+- Una decisión (kind "decision") requiere que dos o más personas estén de acuerdo, o que una persona confirme lo suyo.
+- Descarta: saludos, reacciones simples, charla de una sola vez, las líneas y errores del bot, rumores sobre salud, amores o dinero.
+- Escribe a las personas solo como fichas pN como {p1}, nunca por su nombre. Pon en by como pN a quien lo dijo o lo decidió.
+- Escribe en el idioma de la conversación, como máximo 120 caracteres por texto. No copies trozos largos de los mensajes.
+- Cada elemento necesita ev con al menos una etiqueta de línea (por ejemplo "m3"). Las líneas del bot no son evidencia.
+- Calcula las fechas a partir de la hora de referencia y ponlas en due como YYYY-MM-DD o YYYY-MM-DDTHH:MM; guarda la expresión original en when_text. Si no estás seguro, due es null.
+- kind: plan | decision | event (algo que pasó) | joke (una broma recurrente o meme) | fact (un dato de la sala). kind del elemento: decision | proposal | open_question | moment | fact. status: open | decided | done | dropped. importance: 1-5.
+Formato de salida:
+{"episodes":[{"op":"create","link_to":null,"kind":"plan","title":"","items":[{"kind":"proposal","text":"","by":["p1"],"ev":["m1"]}],"status":"open","due":null,"when_text":"","importance":3}]}
