@@ -197,6 +197,14 @@ func AddBackfillRunSpend(q backfillQuerier, id string, usd float64, at string) e
 	return err
 }
 
+// BackfillGuildSpent is what every run of one server spent, pilots included: the server's backfill cap
+// is a total across its runs.
+func BackfillGuildSpent(q backfillQuerier, guild string) (float64, error) {
+	var v float64
+	err := q.QueryRow(`SELECT COALESCE(SUM(spent_usd),0) FROM people_backfill_run WHERE guild_id=?`, guild).Scan(&v)
+	return v, err
+}
+
 // LoadBackfillRun reads one run; ok is false when there is none.
 func LoadBackfillRun(q backfillQuerier, id string) (BackfillRun, bool, error) {
 	r, err := scanBackfillRun(q.QueryRow(`SELECT `+backfillRunCols+` FROM people_backfill_run WHERE id=?`, id))

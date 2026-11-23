@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,7 +57,7 @@ const (
 	pbLiveSinceKey = "people:live_since:"    // + guild: when live extraction first saved (RFC 3339)
 
 	pbDefaultBudget = 3.0
-	pbMaxBudget     = 100.0
+	pbMaxBudget     = 6.0  // the owner's ceiling: $3 by default, Sonnet allowed up to about $6
 	pbPageLines     = 2000 // observations read per page
 	pbChunkMax      = 4 * pbPageLines
 	pbMaxBatch      = 1000 // windows per Message Batches job (contract §5)
@@ -262,11 +263,11 @@ func (s *Service) pbResolve(db *storage.Store, in map[string]any) (pbParams, map
 	if len(unknown) > 0 {
 		return pbParams{}, map[string]any{"field": "rooms", "unknown": len(unknown)}, nil
 	}
-	p := pbParams{Guild: guild, Rooms: rooms, BudgetUSD: parseUSD(strVal(in, "budget_usd", ""), pbDefaultBudget)}
-	if p.BudgetUSD <= 0 || p.BudgetUSD > pbMaxBudget {
-		return pbParams{}, map[string]any{"field": "budget_usd", "max": pbMaxBudget}, nil
+	budget, ok := pbBudgetIn(in)
+	if !ok {
+		return pbParams{}, map[string]any{"field": "budget_usd", "min_exclusive": 0, "max": pbMaxBudget}, nil
 	}
-	p.BudgetUSD = math.Round(p.BudgetUSD*100) / 100
+	p := pbParams{Guild: guild, Rooms: rooms, BudgetUSD: budget}
 	if v := strVal(in, "since", ""); v != "" {
 		t, ok := s.pbTime(v)
 		if !ok {
@@ -299,6 +300,26 @@ func (s *Service) pbResolve(db *storage.Store, in map[string]any) (pbParams, map
 		p.Until, p.UntilFrom = s.Clock.Now().UTC().Format(time.RFC3339), "now"
 	}
 	return p, nil, nil
+}
+
+// pbBudgetIn reads budget_usd, the server's cap: absent (or an empty string) is the default; anything
+// else must be a number above 0 and at most pbMaxBudget, kept to the cent below (never rounded up). A
+// malformed or out-of-range value is refused, never replaced by the default.
+func pbBudgetIn(in map[string]any) (float64, bool) {
+	v, present := in["budget_usd"]
+	if !present || v == nil {
+		return pbDefaultBudget, true
+	}
+	if str, ok := v.(string); ok && strings.TrimSpace(str) == "" {
+		return pbDefaultBudget, true
+	}
+	raw := strVal(in, "budget_usd", "")
+	f, err := strconv.ParseFloat(raw, 64)
+	if raw == "" || err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f <= 0 || f > pbMaxBudget {
+		return 0, false
+	}
+	f = math.Floor(f*100+1e-6) / 100
+	return f, f > 0
 }
 
 // pbPromptVersion identifies a pack's person_extract prompt: part of every window id, so an answer to
@@ -483,8 +504,9 @@ func pbPilotPick(ws []pbWindow) map[string]bool {
 
 func usd(v float64) float64 { return math.Round(v*1e6) / 1e6 }
 
-// pbDryRunOutput is what a dry run reports: counts and money, no text.
-func (s *Service) pbDryRunOutput(plan pbPlan) map[string]any {
+// pbDryRunOutput is what a dry run reports: counts and money, no text. spent is what the server's
+// backfill runs spent so far: the cap is a total across them.
+func (s *Service) pbDryRunOutput(plan pbPlan, spent float64) map[string]any {
 	var sendable, pilot, rest []pbWindow
 	picks := pbPilotPick(plan.Windows)
 	for _, w := range plan.Windows {
@@ -519,7 +541,7 @@ func (s *Service) pbDryRunOutput(plan pbPlan) map[string]any {
 		_, runHigh := pbEstimate(rest, m, peoplebackfill.ModeBatch)
 		per["run_after_pilot"] = map[string]float64{"high": usd(runHigh)}
 		cost[name] = per
-		within[name] = pilotHigh+runHigh <= plan.Params.BudgetUSD
+		within[name] = spent+pilotHigh+runHigh <= plan.Params.BudgetUSD
 	}
 	provider, ready := "", false
 	if id, _, err := s.pbAdapter(s.Doc(), ""); err == nil {
@@ -532,7 +554,7 @@ func (s *Service) pbDryRunOutput(plan pbPlan) map[string]any {
 		"lines": plan.Lines, "merged_lines": plan.MergedLines,
 		"tokens":     map[string]int{"input": tin, "output": tout},
 		"cost_usd":   cost,
-		"budget_usd": plan.Params.BudgetUSD, "within_budget": within,
+		"budget_usd": plan.Params.BudgetUSD, "spent_usd": usd(spent), "left_usd": usd(max(0, plan.Params.BudgetUSD-spent)), "within_budget": within,
 		"provider": provider, "provider_ready": ready,
 		"token": plan.Token, "model_calls": 0,
 	}
@@ -555,7 +577,11 @@ func (s *Service) pbDryRun(ctx context.Context, req action.Request, db *storage.
 	if err := s.kvSet(pbPlanKey+p.Guild, plan.Params); err != nil {
 		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
-	return action.OK(req, s.pbDryRunOutput(plan))
+	spent, err := store.BackfillGuildSpent(db.Reader(), p.Guild)
+	if err != nil {
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
+	}
+	return action.OK(req, s.pbDryRunOutput(plan, spent))
 }
 
 // pbConfirmedPlan is the plan a pilot or run confirms: the server's stored plan whose token is confirm,
@@ -591,8 +617,9 @@ func (s *Service) pbConfirmedPlan(ctx context.Context, req action.Request, db *s
 			res := s.failErr(req, errcode.IO, "error.storage", err, nil)
 			return pbPlan{}, &res
 		}
+		spent, _ := store.BackfillGuildSpent(db.Reader(), guild)
 		res := action.Fail(req, errcode.StaleRevision, "people_backfill.plan_changed", s.msg(req, "people_backfill.plan_changed"),
-			map[string]any{"dry_run": s.pbDryRunOutput(plan)})
+			map[string]any{"dry_run": s.pbDryRunOutput(plan, spent)})
 		return pbPlan{}, &res
 	}
 	plan.Params.CreatedAt = stored.CreatedAt
@@ -945,6 +972,9 @@ func pbRunJSON(db *storage.Store, run store.BackfillRun) map[string]any {
 		if json.Unmarshal(run.Pilot, &rep) == nil {
 			out["pilot"] = rep
 		}
+	}
+	if spent, err := store.BackfillGuildSpent(db.Reader(), run.GuildID); err == nil {
+		out["guild_spent_usd"] = usd(spent) // every run of the server, against the cap
 	}
 	inflight := 0
 	for _, b := range pbDecodeBatches(run.Batches) {

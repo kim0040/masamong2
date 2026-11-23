@@ -245,9 +245,13 @@ func (s *Service) pbStartPilot(ctx context.Context, req action.Request, db *stor
 		l, h := pbEstimate(pilot, m, peoplebackfill.ModeStandard)
 		low, high = low+l, high+h
 	}
-	if high > plan.Params.BudgetUSD {
+	spent, err := store.BackfillGuildSpent(db.Reader(), guild)
+	if err != nil {
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
+	}
+	if spent+high > plan.Params.BudgetUSD {
 		return action.Fail(req, errcode.BudgetExceeded, "people_backfill.over_budget", s.msg(req, "people_backfill.over_budget"),
-			map[string]any{"budget_usd": plan.Params.BudgetUSD, "pilot_high_usd": usd(high)})
+			map[string]any{"budget_usd": plan.Params.BudgetUSD, "spent_usd": usd(spent), "pilot_high_usd": usd(high)})
 	}
 	pbLoops.Lock()
 	defer pbLoops.Unlock()
@@ -353,7 +357,12 @@ func (s *Service) pbPilot(ctx context.Context, runID string, a *openai.Adapter) 
 			}
 		}
 	}
-	budget := &pbBudget{spent: run.SpentUSD, cap: run.BudgetUSD}
+	spent, err := store.BackfillGuildSpent(db.Reader(), run.GuildID)
+	if err != nil {
+		s.Log.Warn("people backfill: spend not read", "run", runID, "err", err)
+		return
+	}
+	budget := &pbBudget{spent: spent, cap: run.BudgetUSD} // the cap is the server's total across its runs
 	queue := make(chan job)
 	var wg sync.WaitGroup
 	for range pbPilotWorkers {
@@ -920,6 +929,10 @@ func (s *Service) pbSubmit(ctx context.Context, db *storage.Store, runID string,
 	if err != nil {
 		return false, true, err
 	}
+	spent, err := store.BackfillGuildSpent(db.Reader(), run.GuildID) // the cap is the server's total across its runs
+	if err != nil {
+		return false, true, err
+	}
 	if len(queued) == 0 {
 		if inflight {
 			return false, true, nil
@@ -959,7 +972,7 @@ func (s *Service) pbSubmit(ctx context.Context, db *storage.Store, runID string,
 			continue
 		}
 		v := pbMaxCost(bp, w.Lines, model, peoplebackfill.ModeBatch)
-		if !peoplebackfill.CanSubmit(run.SpentUSD, reserved, next+v, run.BudgetUSD) {
+		if !peoplebackfill.CanSubmit(spent, reserved, next+v, run.BudgetUSD) {
 			full = true
 			break
 		}

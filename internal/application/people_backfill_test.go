@@ -953,3 +953,69 @@ func TestPeopleBackfillNotStartedByPasses(t *testing.T) {
 		t.Fatalf("windows touched: %+v", c)
 	}
 }
+
+// budget_usd is the server's cap: $3 by default, at most $6, kept to the cent below; anything malformed,
+// zero, negative or over the ceiling is refused, never replaced by the default.
+func TestPeopleBackfillBudgetInput(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 4)
+	for _, c := range []struct {
+		in   any
+		want float64
+	}{{nil, 3}, {"", 3}, {"4", 4}, {5, 5}, {6.0, 6}, {"2.999", 2.99}, {"0.29", 0.29}, {"1", 1}} {
+		in := map[string]any{}
+		if c.in != nil {
+			in["budget_usd"] = c.in
+		}
+		if out := pbDry(t, s, in); out["budget_usd"].(float64) != c.want {
+			t.Fatalf("budget %v: %v", c.in, out["budget_usd"])
+		}
+	}
+	for _, bad := range []any{"7", 6.01, 100, "-1", -1, "0", 0, "abc", true, map[string]any{"usd": 1}, "NaN", "Inf", "0.001"} {
+		res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "dry_run", "budget_usd": bad})
+		if res.OK || res.Error.Code != errcode.InvalidInput || res.Error.Args["field"] != "budget_usd" {
+			t.Fatalf("budget %v: %+v", bad, res)
+		}
+	}
+	if h.count() != 0 {
+		t.Fatalf("host called %d times", h.count())
+	}
+}
+
+// The cap is a total across every run of the server: an earlier run's spend counts against a new plan's
+// pilot, and dry run and status show it next to the cap.
+func TestPeopleBackfillCapIsServerTotal(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	if err := store.InsertBackfillRun(s.Store.DB, store.BackfillRun{ID: "pb_old", GuildID: "g1", State: store.BackfillSuperseded, Token: "t", Params: []byte(`{}`),
+		Provider: "claude", BudgetUSD: 3, SpentUSD: 2.95, CreatedAt: "2026-11-01T00:00:00Z", UpdatedAt: "2026-11-01T00:00:00Z"}); err != nil {
+		t.Fatal(err)
+	}
+	dry := pbDry(t, s, nil)
+	if dry["spent_usd"].(float64) != 2.95 || dry["left_usd"].(float64) != 0.05 {
+		t.Fatalf("dry run spend: %v %v", dry["spent_usd"], dry["left_usd"])
+	}
+	if w := dry["within_budget"].(map[string]any); w["haiku"] != false || w["sonnet"] != false {
+		t.Fatalf("within budget with $0.05 left: %v", w)
+	}
+	res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": dry["token"]})
+	if res.OK || res.Error.Code != errcode.BudgetExceeded || res.Error.Args["spent_usd"].(float64) != 2.95 {
+		t.Fatalf("pilot over the server's total: %+v", res)
+	}
+	if h.count() != 0 {
+		t.Fatalf("host called %d times", h.count())
+	}
+	// a cap of $6 leaves room: the same server total is shown in status
+	dry = pbDry(t, s, map[string]any{"budget_usd": "6"})
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": dry["token"]}); !res.OK {
+		t.Fatalf("pilot with room: %+v", res.Error)
+	}
+	run := pbWait(t, s, "pilot", pbState(store.BackfillPiloted))
+	_, out := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "status", "guild_id": "g1"})
+	st := out["run"].(map[string]any)
+	if got := st["guild_spent_usd"].(float64); got < 2.95+run.SpentUSD-1e-6 || got > 2.95+run.SpentUSD+1e-6 {
+		t.Fatalf("status server total %v, run %v", got, run.SpentUSD)
+	}
+}
