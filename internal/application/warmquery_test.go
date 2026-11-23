@@ -22,6 +22,7 @@ type warmProvider struct {
 	plan     atomic.Pointer[string]
 	message  atomic.Pointer[string]
 	asked    atomic.Int32 // embeddings of the message
+	served   atomic.Int32 // embeddings of the message whose answer was written and flushed
 	holdPlan atomic.Bool
 	embeds   atomic.Int32 // every embedding request, of the message or not
 	chats    atomic.Int32 // every chat completion (summaries, planner, answers)
@@ -33,8 +34,10 @@ func (f *warmProvider) server(t *testing.T) *httptest.Server {
 		body, _ := io.ReadAll(r.Body)
 		switch r.URL.Path {
 		case "/embeddings":
+			ofMessage := false
 			if msg := f.message.Load(); msg != nil && strings.Contains(string(body), *msg) {
 				f.asked.Add(1)
+				ofMessage = true
 			}
 			var req struct {
 				Input []string `json:"input"`
@@ -47,11 +50,19 @@ func (f *warmProvider) server(t *testing.T) *httptest.Server {
 				data[i] = map[string]any{"index": i, "embedding": v}
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": data, "usage": map[string]any{"prompt_tokens": 8, "cost": 0.000001}})
+			if ofMessage {
+				if fl, ok := w.(http.Flusher); ok {
+					fl.Flush()
+				}
+				f.served.Add(1)
+			}
 		case "/chat/completions":
 			answer := "응"
 			if strings.Contains(string(body), "tool_plan") {
 				answer = *f.plan.Load()
-				for deadline := time.Now().Add(5 * time.Second); f.holdPlan.Load() && f.asked.Load() == 0 && time.Now().Before(deadline); {
+				// wait until the embedding's answer is out, not only asked for: a plan that searches nothing lets the
+				// turn end soon after, and an embedding still in flight then is cancelled and charged an estimate
+				for deadline := time.Now().Add(5 * time.Second); f.holdPlan.Load() && f.served.Load() == 0 && time.Now().Before(deadline); {
 					time.Sleep(5 * time.Millisecond)
 				}
 			}

@@ -387,6 +387,11 @@ func (s *Service) createBackupLockedContext(ctx context.Context, kind string) (s
 	if err := ctx.Err(); err != nil {
 		return fail(err)
 	}
+	// shutdown cancels ctx through context.AfterFunc, a moment after the service's own context ends:
+	// read that one too, so a backup that reaches this point during Close stops here every time
+	if err := s.lifeErr(); err != nil {
+		return fail(err)
+	}
 	cfg, revision, err := snapshotConfigContext(ctx, dbCopy, dbFile, true)
 	if err != nil {
 		return fail(err)

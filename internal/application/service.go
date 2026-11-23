@@ -433,6 +433,17 @@ func (s *Service) beginWork(parent context.Context) (context.Context, func(), bo
 	return ctx, func() { stop(); cancel(); s.workWG.Done() }, true
 }
 
+// lifeErr is the error of the service's lifetime context: context.Canceled once Close began.
+func (s *Service) lifeErr() error {
+	s.lifeMu.Lock()
+	life := s.lifeCtx
+	s.lifeMu.Unlock()
+	if life == nil {
+		return nil
+	}
+	return life.Err()
+}
+
 func (s *Service) ownedGo(name string, fn func(context.Context)) {
 	ctx, done, ok := s.beginWork(context.Background())
 	if !ok {

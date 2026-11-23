@@ -87,18 +87,25 @@ func TestChannelSummaryDropsWhatAnEditOrDeletionChanged(t *testing.T) {
 	if r := exec(svc, "summaries.channel", in); !r.OK || r.Output["cached"] == true {
 		t.Fatalf("first summary: %+v", r)
 	}
-	svc.MessageEdited("g", "c", "2002", "토요일 8시로 바꿈", time.Now())
-	if r := exec(svc, "summaries.channel", saved); r.Output["status"] != "none" {
-		t.Fatalf("an edit keeps the old summary: %+v", r)
+	// a busy writer moves the change to the event worker, which applies it a moment later: wait for it
+	dropped := func(what string) {
+		t.Helper()
+		var r action.Result
+		for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+			if r = exec(svc, "summaries.channel", saved); r.Output["status"] == "none" {
+				return
+			}
+		}
+		t.Fatalf("%s keeps the old summary: %+v", what, r)
 	}
+	svc.MessageEdited("g", "c", "2002", "토요일 8시로 바꿈", time.Now())
+	dropped("an edit")
 	before := calls.Load()
 	if r := exec(svc, "summaries.channel", in); r.Output["cached"] == true || r.Output["incremental"] != false || calls.Load() == before {
 		t.Fatalf("the summary after an edit is made again from the messages: %+v", r)
 	}
-	svc.MessagesDeleted("g", "c", []string{"2003"})
-	if r := exec(svc, "summaries.channel", saved); r.Output["status"] != "none" {
-		t.Fatalf("a deletion keeps the old summary: %+v", r)
-	}
+	_ = svc.MessagesDeleted("g", "c", []string{"2003"})
+	dropped("a deletion")
 	// another channel's summary stays
 	if r := exec(svc, "summaries.channel", in); !r.OK {
 		t.Fatal(r)
