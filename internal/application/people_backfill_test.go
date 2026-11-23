@@ -192,7 +192,10 @@ var pbLineRE = regexp.MustCompile(`(?m)^\[(m\d+)\] (?:\(\+\d+m\) )?[^\n]*?\((p\d
 
 // pbFakeAnswer answers a person_extract prompt: "I really like X" is a like of the speaker; "my friend
 // drinks X" is hearsay about the other person in Haiku's answer and about the speaker in Sonnet's (a
-// disagreement between the two).
+// disagreement between the two); "my buddy eats X" is about the other person in both. A prompt line can
+// hold several messages of one speaker (merged), so each phrase is found anywhere in it.
+var pbPhraseRE = regexp.MustCompile(`(I really like|my friend drinks|my buddy eats) (\S+)`)
+
 func pbFakeAnswer(model, prompt string) string {
 	lines := pbLineRE.FindAllStringSubmatch(prompt, -1)
 	var tokens []string
@@ -201,35 +204,34 @@ func pbFakeAnswer(model, prompt string) string {
 			tokens = append(tokens, m[2])
 		}
 	}
+	other := func(tok string) string {
+		for _, o := range tokens {
+			if o != tok {
+				return o
+			}
+		}
+		return tok
+	}
 	people := []map[string]any{}
 	for _, m := range lines {
-		label, tok, text := m[1], m[2], m[3]
-		if t, ok := strings.CutPrefix(text, "I really like "); ok {
-			topic := strings.Fields(t)[0]
-			people = append(people, map[string]any{"about": tok, "kind": "like", "topic": topic, "text": "{" + tok + "} likes " + topic,
-				"by": []string{tok}, "ev": []string{label}})
-		}
-		if t, ok := strings.CutPrefix(text, "my friend drinks "); ok {
-			topic := strings.Fields(t)[0]
-			about := tok
-			if strings.Contains(model, "haiku") {
-				for _, o := range tokens {
-					if o != tok {
-						about = o
-						break
-					}
+		label, tok := m[1], m[2]
+		for _, ph := range pbPhraseRE.FindAllStringSubmatch(m[3], -1) {
+			topic := ph[2]
+			switch ph[1] {
+			case "I really like":
+				people = append(people, map[string]any{"about": tok, "kind": "like", "topic": topic, "text": "{" + tok + "} likes " + topic,
+					"by": []string{tok}, "ev": []string{label}})
+			case "my friend drinks":
+				about := tok
+				if strings.Contains(model, "haiku") {
+					about = other(tok)
 				}
-			}
-			people = append(people, map[string]any{"about": about, "kind": "trait", "topic": topic, "text": "{" + about + "} drinks " + topic,
-				"by": []string{tok}, "ev": []string{label}})
-		}
-		if t, ok := strings.CutPrefix(text, "my buddy eats "); ok {
-			topic := strings.Fields(t)[0]
-			for _, o := range tokens {
-				if o != tok {
+				people = append(people, map[string]any{"about": about, "kind": "trait", "topic": topic, "text": "{" + about + "} drinks " + topic,
+					"by": []string{tok}, "ev": []string{label}})
+			case "my buddy eats":
+				if o := other(tok); o != tok {
 					people = append(people, map[string]any{"about": o, "kind": "like", "topic": topic, "text": "{" + o + "} eats " + topic,
 						"by": []string{tok}, "ev": []string{label}})
-					break
 				}
 			}
 		}
@@ -270,7 +272,8 @@ func pbService(t *testing.T, h *pbFakeHost, api string) *Service {
 }
 
 // pbSeed captures segments three hours apart: Mina and Joon each say what they like; every fifth has
-// a hearsay line the two models read differently, every sixth one they agree on, every seventh a bot line.
+// a hearsay line the two models read differently, every sixth one they agree on (both name the other
+// person by mention), every seventh a bot line.
 func pbSeed(t *testing.T, s *Service, segments int) {
 	t.Helper()
 	e, err := s.MemoryEngine()
@@ -286,11 +289,11 @@ func pbSeed(t *testing.T, s *Service, segments int) {
 		}
 		if i%5 == 0 {
 			msgs = append(msgs, engine.LiveMessage{MessageID: fmt.Sprintf("%d3", 1000+i), AuthorID: "102", AuthorName: "Joon",
-				Content: fmt.Sprintf("my friend drinks tea%d daily", i), At: at.Add(2 * time.Minute)})
+				Content: fmt.Sprintf("my friend drinks tea%d daily <@101>", i), At: at.Add(2 * time.Minute)})
 		}
 		if i%6 == 0 {
 			msgs = append(msgs, engine.LiveMessage{MessageID: fmt.Sprintf("%d5", 1000+i), AuthorID: "101", AuthorName: "Mina",
-				Content: fmt.Sprintf("my buddy eats snack%d often", i), At: at.Add(150 * time.Second)})
+				Content: fmt.Sprintf("my buddy eats snack%d often <@102>", i), At: at.Add(150 * time.Second)})
 		}
 		if i%7 == 0 {
 			msgs = append(msgs, engine.LiveMessage{MessageID: fmt.Sprintf("%d4", 1000+i), AuthorID: "999", AuthorName: "bot", Bot: true,
@@ -1478,5 +1481,174 @@ func TestPeopleBackfillDoesNotSendTombstonedText(t *testing.T) {
 	}
 	if len(h.creations()) == 0 || len(h.chats) == 0 {
 		t.Fatal("neither the pilot nor a batch was sent")
+	}
+}
+
+// pbSegment captures one more segment at seed slot i (three hours after slot i-1): each line one minute
+// after the last, as {author id, name, text}.
+func pbSegment(t *testing.T, s *Service, i int, lines ...[3]string) []string {
+	t.Helper()
+	e, err := s.MemoryEngine()
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 9, 1, 1, 0, 0, 0, time.UTC).Add(time.Duration(i) * 3 * time.Hour)
+	var ids []string
+	for k, l := range lines {
+		m := engine.LiveMessage{GuildID: "g1", ChannelID: "c1", MessageID: fmt.Sprintf("9%03d%02d", i, k), AuthorID: l[0], AuthorName: l[1], Content: l[2],
+			At: at.Add(time.Duration(k) * time.Minute)}
+		if ok, err := e.Capture(m); err != nil || !ok {
+			t.Fatal(ok, err)
+		}
+		ids = append(ids, corpus.DiscordLiveObservationID(engine.RoomKey("g1", "c1"), m.MessageID))
+	}
+	return ids
+}
+
+// requestTexts are the prompts the host received, one per Messages call or batch item.
+func (h *pbFakeHost) requestTexts() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	var out []string
+	add := func(v any) {
+		var all []string
+		pbStrings(v, "", &all)
+		out = append(out, strings.Join(all, "\n"))
+	}
+	for _, c := range h.chats {
+		add(c)
+	}
+	for _, c := range h.creates {
+		for _, it := range c["requests"].([]any) {
+			add(it.(map[string]any)["params"])
+		}
+	}
+	return out
+}
+
+// pbLineOf finds the prompt line holding text: its label and its speaker's token.
+func pbLineOf(prompt, text string) (label, token string) {
+	for _, m := range pbLineRE.FindAllStringSubmatch(prompt, -1) {
+		if strings.Contains(m[3], text) {
+			return m[1], m[2]
+		}
+	}
+	return "", ""
+}
+
+// The prompt carries the merged lines the plan counted: a burst of one speaker is one line (each message
+// clipped on its own), and two short messages that reach the meaningful-rune floor together are sent, not
+// skipped. A claim citing the merged line has every observation of it as evidence.
+func TestPeopleBackfillSendsPlannedMergedLines(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	burst := pbSegment(t, s, 70,
+		[3]string{"101", "Mina", "I really like hiking70 so much"}, [3]string{"101", "Mina", "burstword one here"},
+		[3]string{"101", "Mina", "burstword two here"}, [3]string{"101", "Mina", "burstword three here"},
+		[3]string{"101", "Mina", "burstword four here"}, [3]string{"102", "Joon", "I really like topic70b as well"},
+		[3]string{"101", "Mina", "and that is all from me"})
+	short := pbSegment(t, s, 71, [3]string{"102", "Joon", "gnu"}, [3]string{"102", "Joon", "yak"})
+	dry := pbDry(t, s, nil)
+	if dry["windows"].(float64) != 72 || dry["skipped_windows"].(float64) != 0 {
+		t.Fatalf("plan: %v windows, %v skipped", dry["windows"], dry["skipped_windows"])
+	}
+	token, run := pbPiloted(t, s, nil)
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+		t.Fatal(res.Error)
+	}
+	pbWait(t, s, "run", pbState(store.BackfillDone))
+	sawBurst, sawShort := false, false
+	for _, text := range h.requestTexts() {
+		if strings.Contains(text, "burstword") {
+			sawBurst = true
+			if n := len(regexp.MustCompile(`(?m)^\[m\d+\] `).FindAllString(text, -1)); n != 3 {
+				t.Fatalf("a burst, an answer and one more line are %d prompt lines, want 3:\n%s", n, text)
+			}
+		}
+		sawShort = sawShort || strings.Contains(text, "gnu yak")
+	}
+	if !sawBurst || !sawShort {
+		t.Fatalf("burst sent %v, short pair sent %v", sawBurst, sawShort)
+	}
+	ws, _ := store.BackfillWindows(s.Store.Reader(), run.ID, false)
+	for _, w := range ws {
+		if slices.Contains(w.Obs, short[0]) && w.State != store.WindowApplied {
+			t.Fatalf("the short pair's window: %s", w.State)
+		}
+	}
+	var ev string
+	if err := s.Store.Reader().QueryRow(`SELECT evidence FROM person_claim WHERE topic='hiking70'`).Scan(&ev); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	_ = json.Unmarshal([]byte(ev), &got)
+	slices.Sort(got)
+	want := slices.Clone(burst[:5])
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Fatalf("evidence of the merged line: %v, want %v", got, want)
+	}
+}
+
+// A fact cited from two people's lines is not attributable: Mina only asked, Joon said it. It does not
+// become Mina's self claim with her question as provenance, nor is it split into a claim of each.
+func TestPeopleBackfillMixedAuthorsDoNotBecomeSelf(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	pbSegment(t, s, 70, [3]string{"101", "Mina", "What?"}, [3]string{"102", "Joon", "Mina moved to sentinelcity last week"})
+	h.mu.Lock()
+	h.rewrite = func(model, prompt string) (string, string, bool) {
+		if !strings.Contains(prompt, "sentinelcity") {
+			return "", "", false
+		}
+		q, mina := pbLineOf(prompt, "What?")
+		a, joon := pbLineOf(prompt, "sentinelcity")
+		raw, _ := json.Marshal(map[string]any{"people": []any{map[string]any{"about": mina, "kind": "status", "topic": "home",
+			"text": "{" + mina + "} moved to sentinelcity", "by": []string{mina, joon}, "ev": []string{q, a}}}})
+		return string(raw), "end_turn", true
+	}
+	h.mu.Unlock()
+	token, _ := pbPiloted(t, s, nil)
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+		t.Fatal(res.Error)
+	}
+	pbWait(t, s, "run", pbState(store.BackfillDone))
+	if n := pbCountClaims(t, s, `text LIKE '%sentinelcity%' AND subject_ref=speaker_ref`); n != 0 {
+		t.Fatal("a fact Joon said became Mina's self claim")
+	}
+	if n := pbCountClaims(t, s, `text LIKE '%sentinelcity%'`); n != 0 {
+		t.Fatalf("a mixed-author fact was split into %d claims", n)
+	}
+}
+
+// The link comes from the lines a fact cites: Mina names Joon without a mention, and Joon (an author of
+// the window) only greets. The claim is a name link (reviewed in the pilot), not a mention.
+func TestPeopleBackfillNameLinkFromCitedLines(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	pbSegment(t, s, 70, [3]string{"101", "Mina", "Joon is into namehike these days"}, [3]string{"102", "Joon", "hello there everyone"})
+	h.mu.Lock()
+	h.rewrite = func(model, prompt string) (string, string, bool) {
+		if !strings.Contains(prompt, "namehike") {
+			return "", "", false
+		}
+		ev, mina := pbLineOf(prompt, "namehike")
+		_, joon := pbLineOf(prompt, "hello there")
+		raw, _ := json.Marshal(map[string]any{"people": []any{map[string]any{"about": joon, "kind": "like", "topic": "namehike",
+			"text": "{" + joon + "} likes namehike", "by": []string{mina}, "ev": []string{ev}}}})
+		return string(raw), "end_turn", true
+	}
+	h.mu.Unlock()
+	token, _ := pbPiloted(t, s, nil)
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+		t.Fatal(res.Error)
+	}
+	pbWait(t, s, "run", pbState(store.BackfillDone))
+	var link string
+	if err := s.Store.Reader().QueryRow(`SELECT link FROM person_claim WHERE topic='namehike'`).Scan(&link); err != nil || link != store.LinkName {
+		t.Fatalf("link %q (%v), want name", link, err)
 	}
 }

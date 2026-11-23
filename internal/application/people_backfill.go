@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"masamong/internal/action"
 	"masamong/internal/config"
@@ -737,11 +738,12 @@ func pbSettle(res *openai.ChatResult, model peoplebackfill.Model, mode peoplebac
 type pbPrompt struct {
 	p            episodes.Prompt
 	system, user string
-	hash         string            // of system and user: an answer applies only to the same prompt
-	text         map[string]string // human line id → the text the model read
-	author       map[string]string // human line id → its speaker reference
-	labels       map[string]string // person reference → the label the prompt showed
-	lines        map[string]string // every line the prompt carries (the bot's too) → its stored text
+	hash         string              // of system and user: an answer applies only to the same prompt
+	text         map[string]string   // human line id → the text the model read
+	author       map[string]string   // human line id → its speaker reference
+	labels       map[string]string   // person reference → the label the prompt showed
+	lines        map[string]string   // every line the prompt carries (the bot's too) → its stored text
+	parts        map[string][]string // a prompt line (its first observation) → the observations merged into it
 	readAt       string
 	ok           bool // a human line of at least the meaningful-rune floor is left
 }
@@ -750,7 +752,8 @@ type pbPrompt struct {
 // the process go in (pbSendable): deleted lines, lines with a deletion or edit pending, and the lines of
 // a person who withdrew or is blocked drop out.
 func (s *Service) pbBuildPrompt(db *storage.Store, guild string, w store.BackfillWindow) (pbPrompt, error) {
-	bp := pbPrompt{text: map[string]string{}, author: map[string]string{}, labels: map[string]string{}, lines: map[string]string{}}
+	bp := pbPrompt{text: map[string]string{}, author: map[string]string{}, labels: map[string]string{}, lines: map[string]string{},
+		parts: map[string][]string{}}
 	bp.readAt = s.Clock.Now().UTC().Format(time.RFC3339Nano)
 	r := pbRoomOf(w.Room)
 	lines, err := s.linesByID(db, w.Obs)
@@ -761,22 +764,40 @@ func (s *Service) pbBuildPrompt(db *storage.Store, guild string, w store.Backfil
 		return bp, err
 	}
 	pack, botName := s.roomVoice(r)
+	// Consecutive lines of one speaker are one line of the prompt, the unit the plan counted
+	// (peoplebackfill.BuildWindows): each keeps its own clip, and the merged line counts for the
+	// meaningful-rune floor as a whole, as in the plan. A claim cites every observation of a line it cites.
 	var msgs []episodes.Message
-	botAccount := ""
+	var speakers []string
+	merged := map[string]string{} // prompt line → its stored texts joined, for the floor
+	botAccount, longest := "", pbLineRunes
 	for _, l := range lines {
 		m := l.Message
-		msgs = append(msgs, m)
 		bp.lines[m.ID] = m.Text
+		speaker := ""
 		if m.Bot {
 			if botAccount == "" && m.Account != "" {
 				botAccount = m.Account
 			}
+		} else {
+			speaker = personRefOf(r, m)
+			bp.text[m.ID], bp.author[m.ID] = m.Text, speaker
+			bp.labels[speaker] = m.Author
+		}
+		if n := len(msgs); n > 0 && speakers[n-1] == speaker && msgs[n-1].Bot == m.Bot {
+			last := &msgs[n-1]
+			last.Text += "\n" + pbClip(m.Text)
+			bp.parts[last.ID] = append(bp.parts[last.ID], m.ID)
+			merged[last.ID] += "\n" + m.Text
+			longest = max(longest, utf8.RuneCountInString(last.Text))
 			continue
 		}
-		ref := personRefOf(r, m)
-		bp.text[m.ID], bp.author[m.ID] = m.Text, ref
-		bp.labels[ref] = m.Author
-		if search.MeaningfulRunes(m.Text) >= search.MinMessageRunes {
+		bp.parts[m.ID], merged[m.ID] = []string{m.ID}, m.Text
+		m.Text = pbClip(m.Text)
+		msgs, speakers = append(msgs, m), append(speakers, speaker)
+	}
+	for _, m := range msgs {
+		if !m.Bot && search.MeaningfulRunes(merged[m.ID]) >= search.MinMessageRunes {
 			bp.ok = true
 		}
 	}
@@ -800,7 +821,7 @@ func (s *Service) pbBuildPrompt(db *storage.Store, guild string, w store.Backfil
 		}
 	}
 	p, ok := episodes.BuildPersonExtract(episodes.Input{Lines: msgs, BotName: botName, Now: msgs[len(msgs)-1].At, Location: s.instanceZone(),
-		RefOf: func(m episodes.Message) string { return personRefOf(r, m) }, Mentioned: mentioned, BotRef: botRef})
+		RefOf: func(m episodes.Message) string { return personRefOf(r, m) }, Mentioned: mentioned, BotRef: botRef, MaxRunes: longest})
 	if !ok {
 		bp.ok = false
 		return bp, nil
@@ -811,6 +832,24 @@ func (s *Service) pbBuildPrompt(db *storage.Store, guild string, w store.Backfil
 	sum := sha256.Sum256([]byte(bp.system + "\x00" + bp.user))
 	bp.hash = hex.EncodeToString(sum[:16])
 	return bp, nil
+}
+
+// pbLineRunes is the clip of one message in the prompt (the episode prompt's default per line).
+const pbLineRunes = 400
+
+func pbClip(text string) string {
+	if utf8.RuneCountInString(text) <= pbLineRunes {
+		return text
+	}
+	return string([]rune(text)[:pbLineRunes]) + "…"
+}
+
+// pbPartsOf are the observations of the prompt line id stands for (id itself when it is not a line's first).
+func (bp pbPrompt) pbPartsOf(id string) []string {
+	if parts, ok := bp.parts[id]; ok {
+		return parts
+	}
+	return []string{id}
 }
 
 // pbSendable keeps the lines that may be sent to the provider: the stored line is current (not deleted,
@@ -976,34 +1015,81 @@ func (s *Service) pbMentioned(db *storage.Store, guild string, msgs []episodes.M
 	return out, nil
 }
 
-// pbClaims turns a window's validated facts into claims for the write gate: one claim per speaker, with
-// that speaker's own evidence lines only (the gate refuses evidence of another author), the text each
-// line had when the model read it, and the link (self only when the speaker is the subject).
+// pbAttribute ties a validated fact to the lines it cites, or drops it. Its evidence is every observation
+// of the prompt lines it cites. Those must all be one speaker's: a fact cited from two people's lines (a
+// question of one and the answer of another, or what one said and another acknowledged) cannot be
+// attributed to either, so it is dropped rather than split into a self claim with part of its provenance.
+// The link comes from the cited lines too: self when the speaker is the subject, mention when a cited line
+// names the subject by <@id>, otherwise name (the subject was found by a name: reviewed in the pilot).
+// It is idempotent: a stored pilot fact goes through it again when it is applied.
+func pbAttribute(f episodes.PersonFact, bp pbPrompt) (episodes.PersonFact, bool) {
+	var ev []string
+	authors := map[string]bool{}
+	for _, id := range f.Ev {
+		for _, part := range bp.pbPartsOf(id) {
+			if !slices.Contains(ev, part) {
+				ev = append(ev, part)
+			}
+			authors[bp.author[part]] = true
+		}
+	}
+	if len(ev) == 0 || len(authors) != 1 || len(f.By) != 1 || !authors[f.By[0]] {
+		return f, false
+	}
+	f.Ev = ev
+	switch {
+	case f.By[0] == f.About:
+		f.Link = episodes.LinkSelf
+	case f.Link == episodes.LinkReply:
+	case pbNamesByID(bp, ev, f.About):
+		f.Link = episodes.LinkMention
+	default:
+		f.Link = episodes.LinkName
+	}
+	return f, true
+}
+
+// pbNamesByID reports whether one of the lines names the person by an account mention (<@id>).
+func pbNamesByID(bp pbPrompt, ids []string, ref string) bool {
+	for _, id := range ids {
+		for _, sub := range mentionPattern.FindAllStringSubmatch(bp.text[id], -1) {
+			if personRef(sub[1]) == ref {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// pbFacts parses a window's answer into attributed facts; dropped facts count as rejected.
+func pbFacts(bp pbPrompt, content string) ([]episodes.PersonFact, int) {
+	facts, rejected := bp.p.ParsePeople(content, episodes.PeopleOptions{})
+	out := facts[:0:0]
+	for _, f := range facts {
+		if g, ok := pbAttribute(f, bp); ok {
+			out = append(out, g)
+		} else {
+			rejected++
+		}
+	}
+	return out, rejected
+}
+
+// pbClaims turns a window's facts into claims for the write gate: one speaker's claim per attributable
+// fact (pbAttribute), with the text each evidence line had when the model read it.
 func pbClaims(guild, runID string, facts []episodes.PersonFact, bp pbPrompt) (claims []store.PersonClaim, dropped int) {
 	for _, f := range facts {
-		for _, speaker := range f.By {
-			var ev []string
-			lines := map[string]string{}
-			for _, id := range f.Ev {
-				if bp.author[id] == speaker {
-					ev = append(ev, id)
-					lines[id] = bp.text[id]
-				}
-			}
-			if len(ev) == 0 {
-				dropped++
-				continue
-			}
-			link := f.Link
-			switch {
-			case speaker == f.About:
-				link = store.LinkSelf
-			case link == store.LinkSelf || link == "":
-				link = store.LinkMention // a participant the speaker named by token
-			}
-			claims = append(claims, store.PersonClaim{GuildID: guild, SubjectRef: f.About, SpeakerRef: speaker, Kind: f.Kind, Topic: f.Topic,
-				Text: f.Text, Evidence: ev, Source: "backfill:" + runID, Link: link, Lines: lines, ReadAt: bp.readAt})
+		f, ok := pbAttribute(f, bp)
+		if !ok {
+			dropped++
+			continue
 		}
+		lines := map[string]string{}
+		for _, id := range f.Ev {
+			lines[id] = bp.text[id]
+		}
+		claims = append(claims, store.PersonClaim{GuildID: guild, SubjectRef: f.About, SpeakerRef: f.By[0], Kind: f.Kind, Topic: f.Topic,
+			Text: f.Text, Evidence: f.Ev, Source: "backfill:" + runID, Link: f.Link, Lines: lines, ReadAt: bp.readAt})
 	}
 	return claims, dropped
 }

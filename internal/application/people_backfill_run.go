@@ -612,7 +612,7 @@ build:
 		case !pbComplete(res):
 			ans.Failed = pbIncompleteClass // cut at the output limit, or not the people list: charged, never coverage
 		default:
-			ans.Facts, ans.Rejected = bp.p.ParsePeople(res.Content, episodes.PeopleOptions{})
+			ans.Facts, ans.Rejected = pbFacts(bp, res.Content)
 		}
 	}
 	if err := s.pbPilotStore(db, run.ID, w.ID, model, ans, spent, held, calls); err != nil {
@@ -1377,7 +1377,7 @@ func (s *Service) pbApplyBatch(ctx context.Context, db *storage.Store, run store
 			case bp.hash != w.PromptHash:
 				err = s.pbRequeue(ctx, db, run.ID, w, spent, calls) // a line changed or went since it was sent
 			default:
-				facts, rejected := bp.p.ParsePeople(o.Chat.Content, episodes.PeopleOptions{})
+				facts, rejected := pbFacts(bp, o.Chat.Content)
 				err = s.pbApply(ctx, db, run.ID, run.GuildID, w, facts, rejected, bp, spent, calls)
 			}
 		}
