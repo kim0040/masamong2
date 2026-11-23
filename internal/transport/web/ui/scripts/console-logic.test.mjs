@@ -425,6 +425,37 @@ test("a person's memory: told items apart from the rest, and what forgetting rem
   assert.equal(forgetTotal(null), 0)
 })
 
+test('a person memory view: servers the person is in, the latest one by default, and the summary counts', async () => {
+  const { memberServers, pickServer, claimSummary, sortClaims, isDirect, personTotal, forgetTotal } = await load('personmemory.ts', [])
+  const groups = [
+    { guild_id: 'g1', name: 'Alpha', people: [{ user_id: 'u1', last_seen: '2026-11-01T10:00:00Z' }, { user_id: 'u2', last_seen: '2026-11-20T10:00:00Z' }] },
+    { guild_id: 'g2', name: '', people: [{ user_id: 'u1', last_seen: '2026-11-10T10:00:00Z' }] },
+    { guild_id: 'g3', name: 'Gamma', people: [{ user_id: 'u2', last_seen: '2026-11-22T10:00:00Z' }] },
+  ]
+  const servers = memberServers(groups, 'u1')
+  assert.deepEqual(servers.map((s) => [s.value, s.label]), [['g2', 'g2'], ['g1', 'Alpha']]) // g3 is not theirs; latest first
+  assert.equal(pickServer(servers, '', ''), 'g2') // not the first of the groups (g1), the one with the latest activity
+  assert.equal(pickServer(servers, '', 'g1'), 'g1') // opened from a server row
+  assert.equal(pickServer(servers, 'g1', 'g2'), 'g1') // the current one stays while the person is in it
+  assert.equal(pickServer(servers, 'g9', ''), 'g2')
+  assert.equal(pickServer([], 'g1', 'g1'), '')
+  assert.deepEqual(memberServers(null, 'u1'), [])
+
+  const claims = [
+    { id: 'a', origin: 'self', observed_at: '2026-11-01T00:00:00Z' },
+    { id: 'b', origin: 'said', observed_at: '2026-11-05T00:00:00Z' },
+    { id: 'c', origin: 'explicit', observed_at: '2026-11-03T00:00:00Z' },
+    { id: 'd', origin: 'told', observed_at: '2026-11-02T00:00:00Z' },
+    { id: 'e', origin: 'said', observed_at: '2026-11-04T00:00:00Z' },
+  ]
+  assert.deepEqual(claimSummary(claims), { own: 1, others: 2, told: 2, last: '2026-11-05T00:00:00Z' })
+  assert.deepEqual(claimSummary(null), { own: 0, others: 0, told: 0, last: '' })
+  assert.deepEqual(sortClaims(claims).map((c) => c.id), ['b', 'e', 'c', 'd', 'a'])
+  assert.deepEqual(claims.map(isDirect), [true, false, true, false, false])
+  assert.equal(personTotal({ cards: 1, person_items: 4 }), 5)
+  assert.equal(forgetTotal({ items: 0, episodes: 0, cards: 0, person_items: 2 }), 2) // only person statements: still something to confirm
+})
+
 test('the embedding switch refusal is recognised by its message key, not its English text', async () => {
   const { embedReindexAsk, EMBED_REINDEX_KEY } = await load('embedswitch.ts', [])
   assert.deepEqual(embedReindexAsk({ message_key: EMBED_REINDEX_KEY, args: { reindex: { rooms: 3, leaves: 120, tokens: 9000 } } }), { known: true, rooms: 3, leaves: 120, tokens: 9000 })
