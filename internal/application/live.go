@@ -150,7 +150,7 @@ func (s *Service) liveToBot(in ChatInput) (replyToBot bool) {
 		if lines[i].ID == in.MessageID {
 			replyToBot = lines[i].ReplyToBot
 		}
-		if !lines[i].Bot && !lines[i].RevisedAt.After(in.started) && (lines[i].ID == in.MessageID || slices.Contains(in.Fragments, lines[i].ID)) {
+		if !lines[i].Bot && !lines[i].RevisedAt.After(in.clockStart) && (lines[i].ID == in.MessageID || slices.Contains(in.Fragments, lines[i].ID)) {
 			lines[i].ToBot = true
 		}
 	}
