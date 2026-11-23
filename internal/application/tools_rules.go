@@ -427,3 +427,47 @@ func isZeroSettings(t tools.Settings) bool {
 	return t.Enabled == nil && t.Chat == nil && t.Commands == nil && len(t.Aliases) == 0 && t.Description == "" && t.Route == "" &&
 		len(t.Defaults) == 0 && len(t.Params) == 0 && t.Limits.Zero() && t.HTTP == nil
 }
+
+// toolSurfaceAllows is toolAllowedHere's decision once the channel's own switch for the tool is read
+// (override, has): a channel that turned the tool off refuses it, the planner and tasks use chat tools (or
+// one the channel turned on), Discord commands only command tools.
+func toolSurfaceAllows(r tools.Resolved, via string, override, has bool) (bool, string) {
+	if has && !override {
+		return false, "tool.channel_off"
+	}
+	switch via {
+	case viaChat, viaTask:
+		if !r.Chat && !(has && override) {
+			return false, "tool.not_for_surface"
+		}
+	case "command":
+		if !r.Commands {
+			return false, "tool.not_for_surface"
+		}
+	}
+	return true, ""
+}
+
+// fillToolDefaults sets each default the input does not set. A defaulted region is marked, so the
+// weather says it assumed the place.
+func fillToolDefaults(in map[string]any, defaults map[string]any) {
+	for k, v := range defaults {
+		if _, set := in[k]; !set {
+			in[k] = v
+			if k == "region" {
+				in["region_source"] = "default" // the weather says it assumed the place
+			}
+		}
+	}
+}
+
+// missingInputs are the required inputs that are not set (or empty), in the order required lists them.
+func missingInputs(in map[string]any, required []string) []string {
+	var missing []string
+	for _, p := range required {
+		if strVal(in, p, "") == "" {
+			missing = append(missing, p)
+		}
+	}
+	return missing
+}

@@ -95,20 +95,7 @@ func (s *Service) toolAllowedHere(r tools.Resolved, inv *action.Invoker) (bool, 
 	}
 	pol := s.channelPolicy(inv.GuildID, inv.ChannelID)
 	override, has := pol.Tools[r.ID]
-	if has && !override {
-		return false, "tool.channel_off"
-	}
-	switch inv.Via {
-	case viaChat, viaTask:
-		if !r.Chat && !(has && override) {
-			return false, "tool.not_for_surface"
-		}
-	case "command":
-		if !r.Commands {
-			return false, "tool.not_for_surface"
-		}
-	}
-	return true, ""
+	return toolSurfaceAllows(r, inv.Via, override, has)
 }
 
 // reserveTool applies r's limits for this caller and counts the call. nil = allowed.
@@ -163,14 +150,7 @@ func (s *Service) gateTool(req action.Request) (action.Request, *action.Result) 
 	}
 	if len(r.Defaults) > 0 {
 		in := inputMap(req)
-		for k, v := range r.Defaults {
-			if _, set := in[k]; !set {
-				in[k] = v
-				if k == "region" {
-					in["region_source"] = "default" // the weather says it assumed the place
-				}
-			}
-		}
+		fillToolDefaults(in, r.Defaults)
 		req.Input, _ = json.Marshal(in)
 	}
 	// The console listing polls or reading help is not tool use by the bot; it neither counts nor
@@ -210,13 +190,7 @@ var toolInputChecks = map[string]func(*Service, action.Request) *action.Result{
 func (s *Service) runHTTPTool(ctx context.Context, req action.Request, r tools.Resolved) action.Result {
 	h := r.HTTP
 	in := inputMap(req)
-	var missing []string
-	for _, p := range r.Required {
-		if strVal(in, p, "") == "" {
-			missing = append(missing, p)
-		}
-	}
-	if len(missing) > 0 {
+	if missing := missingInputs(in, r.Required); len(missing) > 0 {
 		return action.Fail(req, errcode.InvalidInput, "tool.missing_params", s.msg(req, "tool.missing_params", "tool", r.ID, "params", strings.Join(missing, ", ")), map[string]any{"missing": missing})
 	}
 	if err := tools.DirectSecret(r.ID, h); err != nil {
