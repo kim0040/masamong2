@@ -550,7 +550,7 @@ func writeAdminResult(act string, out map[string]any, opt Options, stdout, stder
 
 func WriteResult(w io.Writer, opt Options, res action.Result) int {
 	if opt.File != "" && res.OK && res.Action == "stats.export" {
-		res = writeStatsExportFile(opt.File, res)
+		res = writeStatsExportFile(opt.File, opt.Locale, res)
 	}
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)

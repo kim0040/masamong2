@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -197,8 +198,8 @@ func (s *Service) schedulesAction(ctx context.Context, req action.Request) actio
 			}
 			defer done()
 			st := s.runScheduledBackup(wctx)
-			if !st.OK {
-				return action.Fail(req, errcode.IO, "generic.error", st.Error, nil)
+			if !st.OK { // st.Error is the Go error's text: the person gets the sentence, the log has the text
+				return s.failErr(req, errcode.IO, "error.file", errors.New(st.Error), nil)
 			}
 			return action.OK(req, map[string]any{"state": st})
 		case "usage_gc":
@@ -216,7 +217,7 @@ func (s *Service) schedulesAction(ctx context.Context, req action.Request) actio
 			defer done()
 			st := s.runScheduledRetention(wctx)
 			if !st.OK {
-				return action.Fail(req, errcode.IO, "generic.error", st.Error, nil)
+				return s.failErr(req, errcode.IO, "error.storage", errors.New(st.Error), nil)
 			}
 			return action.OK(req, map[string]any{"state": st})
 		}

@@ -3,10 +3,12 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 
 	"masamong/internal/action"
 	"masamong/internal/errcode"
+	"masamong/internal/i18n"
 )
 
 // `masamong stats export --from DATE --to DATE --file PATH` writes the weekly statistics file the
@@ -30,9 +32,11 @@ func takeStatsFile(kv map[string]any, opt *Options) error {
 }
 
 // writeStatsExportFile writes the exported file to path and returns the short result printed instead.
-func writeStatsExportFile(path string, res action.Result) action.Result {
+// A failure says "a file could not be read or written" in locale; the Go error goes to the log.
+func writeStatsExportFile(path, locale string, res action.Result) action.Result {
 	fail := func(err error) action.Result {
-		return action.Fail(action.Request{Action: res.Action, RequestID: res.RequestID}, errcode.IO, "generic.error", err.Error(), nil)
+		slog.Warn("stats export file not written", "action", res.Action, "err", err)
+		return action.Fail(action.Request{Action: res.Action, RequestID: res.RequestID}, errcode.IO, "error.file", i18n.New().T(locale, "error.file"), nil)
 	}
 	file, ok := res.Output["file"]
 	if !ok {
