@@ -111,6 +111,29 @@ type pbAnswer struct {
 // pbUnknownClass is the Failed class of a send whose outcome is not known.
 const pbUnknownClass = "unknown"
 
+// pbIncompleteClass is the Failed class of an answer that is not a whole people list: cut at the output
+// limit, or text that holds no {"people": [...]} object. It is billed, and it never counts as a window
+// with nothing to say.
+const pbIncompleteClass = "incomplete"
+
+// pbComplete reports an answer the model finished (not cut at its output limit) that holds a JSON object
+// whose "people" value is a list (an empty list is a complete answer).
+func pbComplete(res openai.ChatResult) bool {
+	if res.FinishReason == "length" {
+		return false
+	}
+	obj, ok := episodes.JSONObject(res.Content)
+	if !ok {
+		return false
+	}
+	var doc map[string]json.RawMessage
+	if json.Unmarshal([]byte(obj), &doc) != nil {
+		return false
+	}
+	var list []json.RawMessage
+	return json.Unmarshal(doc["people"], &list) == nil && doc["people"] != nil
+}
+
 func pbAnswers(raw []byte) map[string]pbAnswer {
 	out := map[string]pbAnswer{}
 	if len(raw) > 0 {
@@ -454,19 +477,28 @@ func (s *Service) pbPilot(ctx context.Context, runID string, a *openai.Adapter) 
 		if err != nil || !ok {
 			return err
 		}
-		if budget.stopped() {
+		failed, err := pbPilotFailed(tx, runID)
+		if err != nil {
+			return err
+		}
+		switch {
+		case budget.stopped():
 			cur.State, cur.StoppedBy = store.BackfillStopped, "budget"
 			if budget.halted() {
 				cur.StoppedBy = "submit_unknown"
 			}
-		} else {
-			rep, err := pbPilotReport(tx, runID)
-			if err != nil {
-				return err
-			}
-			cur.Pilot, _ = json.Marshal(rep)
+		case failed > 0:
+			// a pilot with a failed or missing answer does not pass: the operator resumes it (pilot), which
+			// asks only those again
+			cur.State, cur.StoppedBy = store.BackfillStopped, "failed"
+		default:
 			cur.State, cur.PilotDone, cur.StoppedBy = store.BackfillPiloted, true, ""
 		}
+		rep, err := pbPilotReport(tx, runID)
+		if err != nil {
+			return err
+		}
+		cur.Pilot, _ = json.Marshal(rep) // counts only, also for a pilot that stopped
 		cur.UpdatedAt = now
 		return store.SaveBackfillRun(tx, cur, store.BackfillPiloting)
 	})
@@ -475,6 +507,26 @@ func (s *Service) pbPilot(ctx context.Context, runID string, a *openai.Adapter) 
 		return
 	}
 	s.Log.Info("people backfill: pilot ended", "run", runID, "budget_stop", budget.stopped())
+}
+
+// pbPilotFailed counts the pilot windows to send whose answer from either model is missing, failed or
+// unsettled: such a pilot is not finished.
+func pbPilotFailed(q *sql.Tx, runID string) (int, error) {
+	ws, err := store.BackfillWindows(q, runID, true, store.WindowQueued)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, w := range ws {
+		have := pbAnswers(w.Result)
+		for _, m := range pbPilotModels {
+			if a, ok := have[string(m)]; !ok || a.Failed != "" || a.Intent > 0 {
+				n++
+				break
+			}
+		}
+	}
+	return n, nil
 }
 
 // pbPilotOne sends one window to one model and stores the answer (validated facts, counts and cost).
@@ -523,6 +575,8 @@ func (s *Service) pbPilotOne(ctx context.Context, db *storage.Store, run store.B
 			ans.Failed = pbUnknownClass
 		case err != nil:
 			ans.Failed = string(errclass.Of(err))
+		case !pbComplete(res):
+			ans.Failed = pbIncompleteClass // cut at the output limit, or not the people list: charged, never coverage
 		default:
 			ans.Facts, ans.Rejected = bp.p.ParsePeople(res.Content, episodes.PeopleOptions{})
 		}
@@ -1227,7 +1281,9 @@ func (s *Service) pbApplyBatch(ctx context.Context, db *storage.Store, run store
 		switch {
 		case errors.Is(o.Err, openai.ErrRefused):
 			err = s.pbSettleWindow(ctx, db, run.ID, w, store.WindowRefused, spent, calls)
-		case o.Err != nil || o.Chat == nil:
+		case o.Err != nil || o.Chat == nil || !pbComplete(*o.Chat):
+			// an error, or an answer cut at its output limit or not the people list: billed, never coverage;
+			// sent again until pbMaxAttempts, then failed
 			err = s.pbRequeue(ctx, db, run.ID, w, spent, calls)
 		default:
 			bp, berr := s.pbBuildPrompt(db, run.GuildID, w)
@@ -1263,12 +1319,17 @@ func (s *Service) pbApplyPilot(ctx context.Context, db *storage.Store, runID str
 		return err
 	}
 	for _, w := range ws {
-		ans, ok := pbAnswers(w.Result)[run.Model]
-		if !ok || ans.Failed != "" {
+		have := pbAnswers(w.Result)
+		ans, ok := have[run.Model]
+		refused := false
+		for _, a := range have {
+			refused = refused || a.Refused // a refusal by either model is not applied through the other's answer
+		}
+		if !refused && (!ok || ans.Failed != "") {
 			continue
 		}
 		switch {
-		case ans.Refused:
+		case refused:
 			err = s.pbSettleWindow(ctx, db, runID, w, store.WindowRefused, 0, 0)
 		case ans.Skipped:
 			err = s.pbSettleWindow(ctx, db, runID, w, store.WindowSkipped, 0, 0)

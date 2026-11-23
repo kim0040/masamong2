@@ -41,6 +41,8 @@ type pbFakeHost struct {
 	refuse    map[string]bool
 	drop      int // the next chat requests are read and their connection closed without an answer
 	fail500   int // the next chat requests are answered 500
+	// rewrite replaces the answer to a prompt (Messages and batch items): its text and stop reason
+	rewrite func(model, prompt string) (text, stop string, ok bool)
 }
 
 func newPBHost(t *testing.T) *pbFakeHost {
@@ -155,6 +157,11 @@ func (h *pbFakeHost) message(req map[string]any, refuse bool) map[string]any {
 		in, write, out = 0, bytes+pbFraming, int(maxOut)
 	}
 	text, stop := pbFakeAnswer(model, strings.Join(all, "\n")), "end_turn"
+	if h.rewrite != nil {
+		if t, st, ok := h.rewrite(model, strings.Join(all, "\n")); ok {
+			text, stop = t, st
+		}
+	}
 	if refuse {
 		text, stop = "", "refusal"
 	}
@@ -1192,6 +1199,152 @@ func TestPeopleBackfillReservationIsAnUpperBound(t *testing.T) {
 			if settled := pbSettle(res, model, mode); settled > reserved {
 				t.Errorf("%s %s: settled %.6f > reserved %.6f (+%.0f%%)", model, mode, settled, reserved, (settled/reserved-1)*100)
 			}
+		}
+	}
+}
+
+// An answer cut at its output limit, a JSON object that is not the people list, or plain text is a
+// failed window (billed, sent again up to the attempt limit, then failed), never an applied window with
+// nothing to say; a complete empty list is.
+func TestPeopleBackfillRejectsIncompleteAnswer(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	token, run := pbPiloted(t, s, nil)
+	pbBatchOnly(t, s, run)
+	full := `{"people":[{"about":"p1","kind":"like","topic":"x","text":"{p1} likes x","by":["p1"],"ev":["m1"]}]}`
+	answers := map[string][2]string{
+		"topic3a today": {full[:len(full)-20], "max_tokens"},
+		"topic4a today": {`{"answer":"nothing here"}`, "end_turn"},
+		"topic8a today": {"I cannot find anything about people.", "end_turn"},
+		"topic9a today": {`{"people":[]}`, "end_turn"},
+	}
+	h.mu.Lock()
+	h.rewrite = func(_, prompt string) (string, string, bool) {
+		for k, v := range answers {
+			if strings.Contains(prompt, k) {
+				return v[0], v[1], true
+			}
+		}
+		return "", "", false
+	}
+	h.mu.Unlock()
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+		t.Fatal(res.Error)
+	}
+	done := pbWait(t, s, "run", pbState(store.BackfillDone))
+	ws, _ := store.BackfillWindows(s.Store.Reader(), done.ID, false)
+	for _, i := range []int{3, 4, 8} {
+		if w := ws[i]; w.State != store.WindowFailed || w.Attempts != pbMaxAttempts || w.Claims != 0 || w.CostUSD <= 0 {
+			t.Fatalf("window %d: %+v", i, w)
+		}
+	}
+	if w := ws[9]; w.State != store.WindowApplied || w.Claims != 0 || w.Attempts != 1 {
+		t.Fatalf("a complete empty answer: %+v", w)
+	}
+	c, _ := store.CountBackfillWindows(s.Store.Reader(), done.ID)
+	if c.States[store.WindowFailed] != 3 || c.States[store.WindowApplied] != 67 {
+		t.Fatalf("windows: %+v", c)
+	}
+}
+
+// A pilot with a failed answer does not pass the gate: it stops (failed) and the run is refused until a
+// resumed pilot has every answer; the cut answer is billed and counted, not taken as an empty window.
+func TestPeopleBackfillFailedPilotDoesNotPass(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	cut := true
+	h.mu.Lock()
+	h.rewrite = func(model, prompt string) (string, string, bool) {
+		if cut && strings.Contains(model, "haiku") && strings.Contains(prompt, "topic0a today") {
+			return `{"people":[{"about":"p1","kind":"li`, "max_tokens", true
+		}
+		return "", "", false
+	}
+	h.mu.Unlock()
+	dry := pbDry(t, s, nil)
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": dry["token"], "guild_id": "g1"}); !res.OK {
+		t.Fatal(res.Error)
+	}
+	stopped := pbWait(t, s, "failed pilot", pbState(store.BackfillStopped))
+	if stopped.StoppedBy != "failed" || stopped.PilotDone {
+		t.Fatalf("pilot with a cut answer: %+v", stopped)
+	}
+	var rep map[string]any
+	_ = json.Unmarshal(stopped.Pilot, &rep)
+	if haiku := rep["models"].(map[string]any)["haiku"].(map[string]any); haiku["failed"].(float64) != 1 || haiku["answered"].(float64) != peoplebackfill.PilotSize-1 {
+		t.Fatalf("report: %v", haiku)
+	}
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": dry["token"]}); res.OK || res.Error.MessageKey != "people_backfill.no_pilot" {
+		t.Fatalf("run after a failed pilot: %+v", res)
+	}
+	h.mu.Lock()
+	cut = false
+	before := len(h.chats)
+	h.mu.Unlock()
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": dry["token"], "guild_id": "g1"}); !res.OK {
+		t.Fatal(res.Error)
+	}
+	pbWait(t, s, "resumed pilot", pbState(store.BackfillPiloted))
+	h.mu.Lock()
+	after := len(h.chats)
+	h.mu.Unlock()
+	if after-before != 1 {
+		t.Fatalf("the resume asked %d calls, want the failed one", after-before)
+	}
+}
+
+// An all-error pilot (the host answers 500) passes nothing: each request is sent once (no client retry),
+// nothing is charged, and run is refused.
+func TestPeopleBackfillAllErrorPilot(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	h.mu.Lock()
+	h.fail500 = 1 << 20
+	h.mu.Unlock()
+	dry := pbDry(t, s, nil)
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": dry["token"], "guild_id": "g1"}); !res.OK {
+		t.Fatal(res.Error)
+	}
+	stopped := pbWait(t, s, "failed pilot", pbState(store.BackfillStopped))
+	h.mu.Lock()
+	chats := len(h.chats)
+	h.mu.Unlock()
+	if stopped.StoppedBy != "failed" || stopped.PilotDone || chats != 2*peoplebackfill.PilotSize || stopped.SpentUSD != 0 {
+		t.Fatalf("all-error pilot: %+v after %d calls", stopped, chats)
+	}
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": dry["token"]}); res.OK || res.Error.MessageKey != "people_backfill.no_pilot" {
+		t.Fatalf("run after an all-error pilot: %+v", res)
+	}
+}
+
+// A window one pilot model refused is refused, even when the run's model answered it.
+func TestPeopleBackfillPilotRefusalOfEitherModel(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	h.mu.Lock()
+	h.rewrite = func(model, prompt string) (string, string, bool) {
+		if strings.Contains(model, "sonnet") && strings.Contains(prompt, "topic0a today") {
+			return "", "refusal", true
+		}
+		return "", "", false
+	}
+	h.mu.Unlock()
+	token, run := pbPiloted(t, s, nil)
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+		t.Fatal(res.Error)
+	}
+	done := pbWait(t, s, "run", pbState(store.BackfillDone))
+	ws, _ := store.BackfillWindows(s.Store.Reader(), run.ID, false)
+	if w := ws[0]; w.State != store.WindowRefused || w.Claims != 0 {
+		t.Fatalf("a window Sonnet refused, run on Haiku: %+v", w)
+	}
+	for _, id := range ws[0].Obs {
+		if n := pbCountClaims(t, s, `source=? AND evidence LIKE ?`, "backfill:"+done.ID, "%"+id+"%"); n != 0 {
+			t.Fatalf("a claim from the refused window")
 		}
 	}
 }
