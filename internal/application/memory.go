@@ -16,6 +16,7 @@ import (
 	"masamong/internal/memory/engine"
 	"masamong/internal/memory/retrieval"
 	"masamong/internal/memory/search"
+	"masamong/internal/memory/store"
 )
 
 func parseUSD(s string, def float64) float64 {
@@ -427,9 +428,11 @@ func (s *Service) monthSpend() (map[string]float64, float64, bool) {
 	if err != nil {
 		return nil, 0, false
 	}
+	// the paid people backfill has its own cap per server (people_backfill_run): it is listed by kind but
+	// is not part of the total the monthly budget gates chat and features with
 	reset, ok := s.activeSpendReset(now)
 	if !ok {
-		return by, total, true
+		return by, total - by[store.SpendPeopleBackfill], true
 	}
 	effective := make(map[string]float64, len(by))
 	total = 0
@@ -439,7 +442,9 @@ func (s *Service) monthSpend() (map[string]float64, float64, bool) {
 			spent = 0
 		}
 		effective[kind] = spent
-		total += spent
+		if kind != store.SpendPeopleBackfill {
+			total += spent
+		}
 	}
 	return effective, total, true
 }

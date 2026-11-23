@@ -197,6 +197,14 @@ func AddBackfillRunSpend(q backfillQuerier, id string, usd float64, at string) e
 	return err
 }
 
+// BackfillGuildSpent is what every run of one server spent, pilots included: the server's backfill cap
+// is a total across its runs.
+func BackfillGuildSpent(q backfillQuerier, guild string) (float64, error) {
+	var v float64
+	err := q.QueryRow(`SELECT COALESCE(SUM(spent_usd),0) FROM people_backfill_run WHERE guild_id=?`, guild).Scan(&v)
+	return v, err
+}
+
 // LoadBackfillRun reads one run; ok is false when there is none.
 func LoadBackfillRun(q backfillQuerier, id string) (BackfillRun, bool, error) {
 	r, err := scanBackfillRun(q.QueryRow(`SELECT `+backfillRunCols+` FROM people_backfill_run WHERE id=?`, id))
@@ -284,6 +292,12 @@ func SaveBackfillWindow(q backfillQuerier, w BackfillWindow) error {
 	return err
 }
 
+// DeleteBackfillWindow removes one window of a run (a run moved onto a newer plan before it started).
+func DeleteBackfillWindow(q backfillQuerier, runID, id string) error {
+	_, err := q.Exec(`DELETE FROM people_backfill_window WHERE run_id=? AND id=?`, runID, id)
+	return err
+}
+
 // LoadBackfillWindow reads one window of a run; ok is false when there is none.
 func LoadBackfillWindow(q backfillQuerier, runID, id string) (BackfillWindow, bool, error) {
 	w, err := scanBackfillWindow(q.QueryRow(`SELECT `+backfillWindowCols+` FROM people_backfill_window WHERE run_id=? AND id=?`, runID, id))
@@ -317,6 +331,54 @@ func BackfillWindows(q backfillQuerier, runID string, pilotOnly bool, states ...
 			return nil, err
 		}
 		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// BackfillAnswered lists the pilot windows holding stored answers of the server's runs (every server's
+// when guild is "").
+func BackfillAnswered(q backfillQuerier, guild string) ([]BackfillWindow, error) {
+	rows, err := q.Query(`SELECT `+backfillWindowCols+` FROM people_backfill_window WHERE run_id IN (SELECT id FROM people_backfill_run WHERE ?='' OR guild_id=?)
+		AND pilot=1 AND result<>'' ORDER BY run_id, seq`, guild, guild)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BackfillWindow
+	for rows.Next() {
+		w, err := scanBackfillWindow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// BackfillCompleted maps each of ids that a run of the server completed (applied or refused) to the
+// observations that window held then.
+func BackfillCompleted(q backfillQuerier, guild string, ids []string) (map[string][]string, error) {
+	out := map[string][]string{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	raw, _ := json.Marshal(ids)
+	rows, err := q.Query(`SELECT id, obs FROM people_backfill_window WHERE id IN (SELECT value FROM json_each(?)) AND state IN (?,?)
+		AND run_id IN (SELECT id FROM people_backfill_run WHERE guild_id=?)`, string(raw), WindowApplied, WindowRefused, guild)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, obs string
+		if err := rows.Scan(&id, &obs); err != nil {
+			return nil, err
+		}
+		var list []string
+		if err := json.Unmarshal([]byte(obs), &list); err != nil {
+			return nil, err
+		}
+		out[id] = append(out[id], list...)
 	}
 	return out, rows.Err()
 }

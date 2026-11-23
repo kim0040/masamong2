@@ -749,11 +749,10 @@ type ChatRequest struct {
 	// one-line summary): Effort should be "none". When the role behind the adapter has an effort of its
 	// own (Adapter.RoleEffort), that level is asked instead, with output room for the thinking.
 	Quick bool
-	// EphemeralCache asks an Anthropic-format host to cache the request for reuse (a top-level
-	// cache_control {"type":"ephemeral"} in the Messages body, anthropic.go): the paid people
-	// backfill turns it on so the shared prompt is read from cache. Off by default — a request
-	// without it is sent exactly as before — and other host families never see it.
-	EphemeralCache bool
+	// Once sends the request one time: an answer cut at the output limit with no text comes back as it
+	// is (finish reason "length") instead of being asked again without thinking or with more room. For
+	// a caller that reserved the price of exactly one call (the paid people backfill).
+	Once bool
 	// thinkRoom adds thinkingHeadroom to the output limit (a Quick call asked to think)
 	thinkRoom bool
 	// bareToolTurn (Anthropic) marks a request whose last assistant turn calls a tool without a thinking
@@ -832,7 +831,7 @@ func (a *Adapter) chat(ctx context.Context, req ChatRequest) (ChatResult, error)
 		}
 	}
 	out, err := a.chatOnce(ctx, req, true)
-	if err != nil || !thoughtAway(out) || req.MaxTokens == 1 { // a 1-token probe (ProbeChat) wants no answer
+	if err != nil || req.Once || !thoughtAway(out) || req.MaxTokens == 1 { // a 1-token probe (ProbeChat) wants no answer
 		return out, err
 	}
 	// on Anthropic "minimal" already went out with thinking off, as "none" does (anthropic.go)

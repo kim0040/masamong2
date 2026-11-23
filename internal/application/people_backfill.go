@@ -9,10 +9,13 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"masamong/internal/action"
 	"masamong/internal/config"
@@ -55,12 +58,19 @@ const (
 	pbLiveSinceKey = "people:live_since:"    // + guild: when live extraction first saved (RFC 3339)
 
 	pbDefaultBudget = 3.0
-	pbMaxBudget     = 100.0
+	pbMaxBudget     = 6.0  // the owner's ceiling: $3 by default, Sonnet allowed up to about $6
 	pbPageLines     = 2000 // observations read per page
 	pbChunkMax      = 4 * pbPageLines
 	pbMaxBatch      = 1000 // windows per Message Batches job (contract §5)
-	pbMaxTokens     = 1400 // output limit of one window (the room-memory extraction's)
-	pbMaxAttempts   = 3    // sends of one window before it is failed
+	pbMaxTokens     = 1400 // output limit of one window's answer (the room-memory extraction's)
+	// pbThinkRoom is the output room the adapter adds on top of pbMaxTokens when the model may think at
+	// effort low (openai thinkingRoom, the thinking headroom, a manual thinking budget: all 1024), so
+	// pbWireOut is the most output tokens one request can be billed for.
+	pbThinkRoom = 1024
+	pbWireOut   = pbMaxTokens + pbThinkRoom
+	// pbFraming bounds the tokens the Messages format adds around the system and user text.
+	pbFraming       = 256
+	pbMaxAttempts   = 3 // sends of one window before it is failed
 	pbPilotWorkers  = 4
 	pbHearsaySample = 30
 	// pbHardGap is the segmenter's default hard cut (episodes.Options.HardGap): a page is cut only where
@@ -102,7 +112,8 @@ type pbWindow struct {
 	Obs     []string
 	First   time.Time
 	Last    time.Time
-	Skipped bool
+	Skipped bool // never sent: too thin, or covered
+	Covered bool // an earlier run of the server completed it with every line it has now
 }
 
 // pbPlan is a plan built from the stored observations.
@@ -112,7 +123,8 @@ type pbPlan struct {
 	Rooms       int // rooms with at least one window
 	Lines       int // observations read
 	MergedLines int
-	Skipped     int
+	Skipped     int // windows too thin to send
+	Covered     int // windows an earlier run completed (pbMarkCovered)
 	Token       string
 }
 
@@ -261,11 +273,11 @@ func (s *Service) pbResolve(db *storage.Store, in map[string]any) (pbParams, map
 	if len(unknown) > 0 {
 		return pbParams{}, map[string]any{"field": "rooms", "unknown": len(unknown)}, nil
 	}
-	p := pbParams{Guild: guild, Rooms: rooms, BudgetUSD: parseUSD(strVal(in, "budget_usd", ""), pbDefaultBudget)}
-	if p.BudgetUSD <= 0 || p.BudgetUSD > pbMaxBudget {
-		return pbParams{}, map[string]any{"field": "budget_usd", "max": pbMaxBudget}, nil
+	budget, ok := pbBudgetIn(in)
+	if !ok {
+		return pbParams{}, map[string]any{"field": "budget_usd", "min_exclusive": 0, "max": pbMaxBudget}, nil
 	}
-	p.BudgetUSD = math.Round(p.BudgetUSD*100) / 100
+	p := pbParams{Guild: guild, Rooms: rooms, BudgetUSD: budget}
 	if v := strVal(in, "since", ""); v != "" {
 		t, ok := s.pbTime(v)
 		if !ok {
@@ -298,6 +310,26 @@ func (s *Service) pbResolve(db *storage.Store, in map[string]any) (pbParams, map
 		p.Until, p.UntilFrom = s.Clock.Now().UTC().Format(time.RFC3339), "now"
 	}
 	return p, nil, nil
+}
+
+// pbBudgetIn reads budget_usd, the server's cap: absent (or an empty string) is the default; anything
+// else must be a number above 0 and at most pbMaxBudget, kept to the cent below (never rounded up). A
+// malformed or out-of-range value is refused, never replaced by the default.
+func pbBudgetIn(in map[string]any) (float64, bool) {
+	v, present := in["budget_usd"]
+	if !present || v == nil {
+		return pbDefaultBudget, true
+	}
+	if str, ok := v.(string); ok && strings.TrimSpace(str) == "" {
+		return pbDefaultBudget, true
+	}
+	raw := strVal(in, "budget_usd", "")
+	f, err := strconv.ParseFloat(raw, 64)
+	if raw == "" || err != nil || math.IsNaN(f) || math.IsInf(f, 0) || f <= 0 || f > pbMaxBudget {
+		return 0, false
+	}
+	f = math.Floor(f*100+1e-6) / 100
+	return f, f > 0
 }
 
 // pbPromptVersion identifies a pack's person_extract prompt: part of every window id, so an answer to
@@ -349,9 +381,45 @@ func (s *Service) pbBuildPlan(ctx context.Context, db *storage.Store, p pbParams
 			plan.Rooms++
 		}
 	}
+	if err := pbMarkCovered(db, &plan); err != nil {
+		return plan, err
+	}
 	plan.Token = pbToken(p, plan.Windows)
 	plan.Params.Token = plan.Token
 	return plan, nil
+}
+
+// pbMarkCovered marks the plan's windows that an earlier run of the server completed (applied or
+// refused), when that window held every line the plan's window holds now: they are never sent again, by
+// a pilot or a batch, whatever plan they come back in. A window with a line it did not have (a message
+// captured late) is new history and is sent.
+func pbMarkCovered(db *storage.Store, plan *pbPlan) error {
+	ids := make([]string, 0, len(plan.Windows))
+	for _, w := range plan.Windows {
+		if !w.Skipped {
+			ids = append(ids, w.ID)
+		}
+	}
+	done, err := store.BackfillCompleted(db.Reader(), plan.Params.Guild, ids)
+	if err != nil {
+		return err
+	}
+	for i := range plan.Windows {
+		w := &plan.Windows[i]
+		had, ok := done[w.ID]
+		if !ok || w.Skipped {
+			continue
+		}
+		covered := true
+		for _, id := range w.Obs {
+			covered = covered && slices.Contains(had, id)
+		}
+		if covered {
+			w.Skipped, w.Covered = true, true
+			plan.Covered++
+		}
+	}
+	return nil
 }
 
 // pbToken is the plan's fingerprint: its parameters and its windows with the lines each holds. Any
@@ -482,8 +550,9 @@ func pbPilotPick(ws []pbWindow) map[string]bool {
 
 func usd(v float64) float64 { return math.Round(v*1e6) / 1e6 }
 
-// pbDryRunOutput is what a dry run reports: counts and money, no text.
-func (s *Service) pbDryRunOutput(plan pbPlan) map[string]any {
+// pbDryRunOutput is what a dry run reports: counts and money, no text. spent is what the server's
+// backfill runs spent so far: the cap is a total across them.
+func (s *Service) pbDryRunOutput(plan pbPlan, spent float64) map[string]any {
 	var sendable, pilot, rest []pbWindow
 	picks := pbPilotPick(plan.Windows)
 	for _, w := range plan.Windows {
@@ -518,23 +587,29 @@ func (s *Service) pbDryRunOutput(plan pbPlan) map[string]any {
 		_, runHigh := pbEstimate(rest, m, peoplebackfill.ModeBatch)
 		per["run_after_pilot"] = map[string]float64{"high": usd(runHigh)}
 		cost[name] = per
-		within[name] = pilotHigh+runHigh <= plan.Params.BudgetUSD
+		within[name] = spent+pilotHigh+runHigh <= plan.Params.BudgetUSD
 	}
 	provider, ready := "", false
 	if id, _, err := s.pbAdapter(s.Doc(), ""); err == nil {
 		provider, ready = id, true
 	}
-	return map[string]any{
+	out := map[string]any{
 		"mode": "dry_run", "guild_id": plan.Params.Guild, "rooms": plan.Rooms, "rooms_asked": len(plan.Params.Rooms),
 		"since": plan.Params.Since, "until": plan.Params.Until, "until_from": plan.Params.UntilFrom,
-		"windows": len(plan.Windows), "sent_windows": len(sendable), "skipped_windows": plan.Skipped, "pilot_windows": len(pilot),
+		"windows": len(plan.Windows), "sent_windows": len(sendable), "skipped_windows": plan.Skipped, "covered_windows": plan.Covered, "pilot_windows": len(pilot),
 		"lines": plan.Lines, "merged_lines": plan.MergedLines,
 		"tokens":     map[string]int{"input": tin, "output": tout},
 		"cost_usd":   cost,
-		"budget_usd": plan.Params.BudgetUSD, "within_budget": within,
+		"budget_usd": plan.Params.BudgetUSD, "spent_usd": usd(spent), "left_usd": usd(max(0, plan.Params.BudgetUSD-spent)), "within_budget": within,
 		"provider": provider, "provider_ready": ready,
 		"token": plan.Token, "model_calls": 0,
 	}
+	if s.guildPrivacy(plan.Params.Guild).NoSensitive {
+		// the server keeps person memory only after the sensitive-topic check, which the backfill does not
+		// run: its claims are stored pending and are not read until something classifies them
+		out["warnings"] = []string{"no_sensitive_pending"}
+	}
+	return out
 }
 
 // pbDryRun is mode=dry_run: no model call. It keeps the plan's parameters for pilot and run.
@@ -554,63 +629,94 @@ func (s *Service) pbDryRun(ctx context.Context, req action.Request, db *storage.
 	if err := s.kvSet(pbPlanKey+p.Guild, plan.Params); err != nil {
 		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
-	return action.OK(req, s.pbDryRunOutput(plan))
+	spent, err := store.BackfillGuildSpent(db.Reader(), p.Guild)
+	if err != nil {
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
+	}
+	return action.OK(req, s.pbDryRunOutput(plan, spent))
 }
 
 // pbConfirmedPlan is the plan a pilot or run confirms: the server's stored plan whose token is confirm,
 // built again from the observations. A token that is not the stored one, or a plan that no longer gives
 // it, is refused with the current plan's dry-run output (and that plan is stored).
 func (s *Service) pbConfirmedPlan(ctx context.Context, req action.Request, db *storage.Store, in map[string]any) (pbPlan, *action.Result) {
+	plan, _, fail := s.pbCheckPlan(ctx, req, db, in)
+	return plan, fail
+}
+
+// pbCheckPlan is pbConfirmedPlan that also hands back the plan as it is now when it changed (changed:
+// the plan built again, with its new token stored, and the plan_changed failure).
+func (s *Service) pbCheckPlan(ctx context.Context, req action.Request, db *storage.Store, in map[string]any) (pbPlan, bool, *action.Result) {
 	confirm := strVal(in, "confirm", "")
 	guild, err := pbGuild(db, in)
 	if err != nil {
 		res := s.failErr(req, errcode.IO, "error.storage", err, nil)
-		return pbPlan{}, &res
+		return pbPlan{}, false, &res
 	}
 	var stored pbParams
 	ok, err := s.kvGet(pbPlanKey+guild, &stored)
 	if err != nil {
 		res := s.failErr(req, errcode.IO, "error.storage", err, nil)
-		return pbPlan{}, &res
+		return pbPlan{}, false, &res
 	}
 	if guild == "" || !ok || confirm == "" {
 		res := action.Fail(req, errcode.InvalidInput, "people_backfill.confirm_needed", s.msg(req, "people_backfill.confirm_needed"), map[string]any{"field": "confirm"})
-		return pbPlan{}, &res
+		return pbPlan{}, false, &res
 	}
 	params := stored
 	params.Token, params.CreatedAt = "", ""
 	plan, err := s.pbBuildPlan(ctx, db, params)
 	if err != nil {
 		res := s.failErr(req, errcode.IO, "error.storage", err, nil)
-		return pbPlan{}, &res
+		return pbPlan{}, false, &res
 	}
 	if plan.Token != confirm || stored.Token != confirm {
 		plan.Params.CreatedAt = s.Clock.Now().UTC().Format(time.RFC3339)
 		if err := s.kvSet(pbPlanKey+guild, plan.Params); err != nil {
 			res := s.failErr(req, errcode.IO, "error.storage", err, nil)
-			return pbPlan{}, &res
+			return pbPlan{}, false, &res
 		}
+		spent, _ := store.BackfillGuildSpent(db.Reader(), guild)
 		res := action.Fail(req, errcode.StaleRevision, "people_backfill.plan_changed", s.msg(req, "people_backfill.plan_changed"),
-			map[string]any{"dry_run": s.pbDryRunOutput(plan)})
-		return pbPlan{}, &res
+			map[string]any{"dry_run": s.pbDryRunOutput(plan, spent)})
+		return plan, true, &res
 	}
 	plan.Params.CreatedAt = stored.CreatedAt
-	return plan, nil
+	return plan, false, nil
 }
 
 // ---------------------------------------------------------------------------
 // the provider
 // ---------------------------------------------------------------------------
 
-// pbAdapter is the backfill's provider: a configured provider whose host family is native Anthropic,
-// with a key. want names one; without it there must be exactly one. Never OpenRouter or another family.
+// pbTestOrigin is the one non-Anthropic origin (scheme://host:port) the backfill may reach: set by tests
+// only, for their fake host. Nothing in config or input can set it.
+var pbTestOrigin string
+
+// pbNativeAnthropic reports whether a provider's base URL is Anthropic's own API: HTTPS to the host
+// api.anthropic.com (default port, no user info). The configured wire format (api: anthropic) is not
+// enough: a relay or reseller speaking the Messages format on another host is refused.
+func pbNativeAnthropic(baseURL string) bool {
+	u, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || u.User != nil {
+		return false
+	}
+	if pbTestOrigin != "" && strings.EqualFold(u.Scheme+"://"+u.Host, pbTestOrigin) {
+		return true
+	}
+	return u.Scheme == "https" && strings.EqualFold(u.Hostname(), "api.anthropic.com") && (u.Port() == "" || u.Port() == "443")
+}
+
+// pbAdapter is the backfill's provider: a configured provider whose destination is native Anthropic
+// (pbNativeAnthropic, checked on the base URL the adapter will call) in the Anthropic wire format, with a
+// key. want names one; without it there must be exactly one. Never OpenRouter, a relay or another family.
 func (s *Service) pbAdapter(doc config.Document, want string) (string, *openai.Adapter, error) {
 	if s.practice {
 		return "", nil, errPBNoAnthropic
 	}
 	var found []string
 	for id, p := range doc.Providers {
-		if p.Kind != config.KindOpenAI || p.Disabled || openai.ResolveAPI(p.API, p.BaseURL) != openai.APIAnthropic {
+		if p.Kind != config.KindOpenAI || p.Disabled || openai.ResolveAPI(p.API, p.BaseURL) != openai.APIAnthropic || !pbNativeAnthropic(p.BaseURL) {
 			continue
 		}
 		if want != "" && id != want {
@@ -633,7 +739,12 @@ func (s *Service) pbAdapter(doc config.Document, want string) (string, *openai.A
 	}
 	client := providers.NewClient(120*time.Second, s.Log)
 	client.MaxBody = 64 << 20
+	client.MaxRetries = 0 // a paid call is never sent again by the client: every send has its own reservation
+	client.HTTP.Transport = pbSendTracker{base: client.HTTP.Transport}
 	a := newLLMAdapter(client, p, cred)
+	if a.API != openai.APIAnthropic || !pbNativeAnthropic(a.BaseURL) {
+		return id, nil, errPBNoAnthropic // the resolved destination, checked again
+	}
 	a.Price, a.CachedPrice, a.ContextPrice = s.pricer(id), s.cachedPricer(id), s.contextPricer(id)
 	a.Gate = s.llmGate(id)
 	s.shareCaps(a, id, p)
@@ -648,9 +759,11 @@ func (s *Service) pbProviderFail(req action.Request, err error) action.Result {
 	return action.Fail(req, errcode.ProviderUnconfigured, "people_backfill.no_anthropic", s.msg(req, "people_backfill.no_anthropic"), nil)
 }
 
-// pbRequest is one window's request: no temperature, top-level ephemeral cache_control.
+// pbRequest is one window's request: no temperature, no cache_control (every window is unique, so a
+// cache breakpoint would only add the cache-write surcharge), thinking at effort low with its room, and
+// sent once (Once: an answer cut at the limit is not asked again; each send has its own reservation).
 func pbRequest(model peoplebackfill.Model, bp pbPrompt) openai.ChatRequest {
-	return openai.ChatRequest{Model: string(model), MaxTokens: pbMaxTokens, EphemeralCache: true,
+	return openai.ChatRequest{Model: string(model), MaxTokens: pbMaxTokens, Effort: "low", Once: true,
 		Messages: []openai.Message{{Role: "system", Content: bp.system}, {Role: "user", Content: bp.user}}}
 }
 
@@ -676,39 +789,66 @@ func pbSettle(res *openai.ChatResult, model peoplebackfill.Model, mode peoplebac
 type pbPrompt struct {
 	p            episodes.Prompt
 	system, user string
-	hash         string            // of system and user: an answer applies only to the same prompt
-	text         map[string]string // human line id → the text the model read
-	author       map[string]string // human line id → its speaker reference
-	labels       map[string]string // person reference → the label the prompt showed
+	hash         string              // of system and user: an answer applies only to the same prompt
+	text         map[string]string   // human line id → the text the model read
+	author       map[string]string   // human line id → its speaker reference
+	labels       map[string]string   // person reference → the label the prompt showed
+	lines        map[string]string   // every line the prompt carries (the bot's too) → its stored text
+	parts        map[string][]string // a prompt line (its first observation) → the observations merged into it
 	readAt       string
 	ok           bool // a human line of at least the meaningful-rune floor is left
 }
 
-// pbBuildPrompt reads a window's lines as they are now and builds its prompt. Deleted lines drop out.
+// pbBuildPrompt reads a window's lines as they are now and builds its prompt. Only lines that may leave
+// the process go in (pbSendable): deleted lines, lines with a deletion or edit pending, and the lines of
+// a person who withdrew or is blocked drop out.
 func (s *Service) pbBuildPrompt(db *storage.Store, guild string, w store.BackfillWindow) (pbPrompt, error) {
-	bp := pbPrompt{text: map[string]string{}, author: map[string]string{}, labels: map[string]string{}}
+	bp := pbPrompt{text: map[string]string{}, author: map[string]string{}, labels: map[string]string{}, lines: map[string]string{},
+		parts: map[string][]string{}}
 	bp.readAt = s.Clock.Now().UTC().Format(time.RFC3339Nano)
+	r := pbRoomOf(w.Room)
 	lines, err := s.linesByID(db, w.Obs)
+	if err == nil {
+		lines, err = s.pbSendable(db, guild, r, lines)
+	}
 	if err != nil {
 		return bp, err
 	}
-	r := pbRoomOf(w.Room)
 	pack, botName := s.roomVoice(r)
+	// Consecutive lines of one speaker are one line of the prompt, the unit the plan counted
+	// (peoplebackfill.BuildWindows): each keeps its own clip, and the merged line counts for the
+	// meaningful-rune floor as a whole, as in the plan. A claim cites every observation of a line it cites.
 	var msgs []episodes.Message
-	botAccount := ""
+	var speakers []string
+	merged := map[string]string{} // prompt line → its stored texts joined, for the floor
+	botAccount, longest := "", pbLineRunes
 	for _, l := range lines {
 		m := l.Message
-		msgs = append(msgs, m)
+		bp.lines[m.ID] = m.Text
+		speaker := ""
 		if m.Bot {
 			if botAccount == "" && m.Account != "" {
 				botAccount = m.Account
 			}
+		} else {
+			speaker = personRefOf(r, m)
+			bp.text[m.ID], bp.author[m.ID] = m.Text, speaker
+			bp.labels[speaker] = m.Author
+		}
+		if n := len(msgs); n > 0 && speakers[n-1] == speaker && msgs[n-1].Bot == m.Bot {
+			last := &msgs[n-1]
+			last.Text += "\n" + pbClip(m.Text)
+			bp.parts[last.ID] = append(bp.parts[last.ID], m.ID)
+			merged[last.ID] += "\n" + m.Text
+			longest = max(longest, utf8.RuneCountInString(last.Text))
 			continue
 		}
-		ref := personRefOf(r, m)
-		bp.text[m.ID], bp.author[m.ID] = m.Text, ref
-		bp.labels[ref] = m.Author
-		if search.MeaningfulRunes(m.Text) >= search.MinMessageRunes {
+		bp.parts[m.ID], merged[m.ID] = []string{m.ID}, m.Text
+		m.Text = pbClip(m.Text)
+		msgs, speakers = append(msgs, m), append(speakers, speaker)
+	}
+	for _, m := range msgs {
+		if !m.Bot && search.MeaningfulRunes(merged[m.ID]) >= search.MinMessageRunes {
 			bp.ok = true
 		}
 	}
@@ -732,7 +872,7 @@ func (s *Service) pbBuildPrompt(db *storage.Store, guild string, w store.Backfil
 		}
 	}
 	p, ok := episodes.BuildPersonExtract(episodes.Input{Lines: msgs, BotName: botName, Now: msgs[len(msgs)-1].At, Location: s.instanceZone(),
-		RefOf: func(m episodes.Message) string { return personRefOf(r, m) }, Mentioned: mentioned, BotRef: botRef})
+		RefOf: func(m episodes.Message) string { return personRefOf(r, m) }, Mentioned: mentioned, BotRef: botRef, MaxRunes: longest})
 	if !ok {
 		bp.ok = false
 		return bp, nil
@@ -743,6 +883,101 @@ func (s *Service) pbBuildPrompt(db *storage.Store, guild string, w store.Backfil
 	sum := sha256.Sum256([]byte(bp.system + "\x00" + bp.user))
 	bp.hash = hex.EncodeToString(sum[:16])
 	return bp, nil
+}
+
+// pbLineRunes is the clip of one message in the prompt (the episode prompt's default per line).
+const pbLineRunes = 400
+
+func pbClip(text string) string {
+	if utf8.RuneCountInString(text) <= pbLineRunes {
+		return text
+	}
+	return string([]rune(text)[:pbLineRunes]) + "…"
+}
+
+// pbPartsOf are the observations of the prompt line id stands for (id itself when it is not a line's first).
+func (bp pbPrompt) pbPartsOf(id string) []string {
+	if parts, ok := bp.parts[id]; ok {
+		return parts
+	}
+	return []string{id}
+}
+
+// pbSendable keeps the lines that may be sent to the provider: the stored line is current (not deleted,
+// no deletion or edit pending, its account not tombstoned) and a human author has not withdrawn memory
+// or profile consent, is not blocked, and has no person tombstone. One read transaction.
+func (s *Service) pbSendable(db *storage.Store, guild string, r memRoom, lines []roomLine) ([]roomLine, error) {
+	if len(lines) == 0 {
+		return nil, nil
+	}
+	tx, err := db.Reader().Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	denied, err := s.deniedPeople(tx, guild)
+	if err != nil {
+		return nil, err
+	}
+	out := lines[:0:0]
+	for _, l := range lines {
+		if ok, err := store.ObservationCurrent(tx, l.ID); err != nil || !ok {
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if !l.Bot {
+			ref := personRefOf(r, l.Message)
+			if denied[ref] {
+				continue
+			}
+			if blocked, err := store.SourceBlocked(tx, ref); err != nil || blocked {
+				if err != nil {
+					return nil, err
+				}
+				continue
+			}
+		}
+		out = append(out, l)
+	}
+	return out, nil
+}
+
+// pbPromptCurrent checks again, in the caller's transaction and just before a send, everything a prompt
+// carries: every line is still stored with the text it had, current, and no person the prompt shows
+// (author or mentioned) has withdrawn, been blocked or tombstoned since it was built. False means build
+// it again: nothing of it may leave.
+func (s *Service) pbPromptCurrent(tx *sql.Tx, guild string, bp pbPrompt) (bool, error) {
+	denied, err := s.deniedPeople(tx, guild)
+	if err != nil {
+		return false, err
+	}
+	for ref := range bp.labels {
+		if denied[ref] {
+			return false, nil
+		}
+		if blocked, err := store.SourceBlocked(tx, ref); err != nil || blocked {
+			return false, err
+		}
+	}
+	for id, text := range bp.lines {
+		var content, deleted string
+		err := tx.QueryRow(`SELECT content,deleted_at FROM memory_observations WHERE observation_id=?`, id).Scan(&content, &deleted)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		if deleted != "" || strings.TrimSpace(content) != text {
+			return false, nil
+		}
+		if ok, err := store.ObservationCurrent(tx, id); err != nil || !ok {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 // pbMentioned are the people a window names without writing in it: accounts of <@id> mentions (with
@@ -781,6 +1016,8 @@ func (s *Service) pbMentioned(db *storage.Store, guild string, msgs []episodes.M
 	}
 	var out []episodes.Person
 	seen := map[string]bool{}
+	// a person with a tombstone of their own is not shown either (pbPromptCurrent checks the same)
+	gone := func(ref string) (bool, error) { return store.SourceBlocked(tx, ref) }
 	for _, m := range msgs {
 		if m.Bot {
 			continue
@@ -789,6 +1026,12 @@ func (s *Service) pbMentioned(db *storage.Store, guild string, msgs []episodes.M
 			id := sub[1]
 			ref := personRef(id)
 			if authors[id] || seen[ref] || ref == botRef || base.denied[ref] {
+				continue
+			}
+			if blocked, err := gone(ref); err != nil || blocked {
+				if err != nil {
+					return nil, err
+				}
 				continue
 			}
 			if label := base.label(ref); label != "" {
@@ -808,6 +1051,12 @@ func (s *Service) pbMentioned(db *storage.Store, guild string, msgs []episodes.M
 			if seen[ref] || names.denied[ref] || ref == botRef || ref == personRef(m.Account) {
 				continue
 			}
+			if blocked, err := gone(ref); err != nil || blocked {
+				if err != nil {
+					return nil, err
+				}
+				continue
+			}
 			if label := base.label(ref); label != "" {
 				seen[ref] = true
 				out = append(out, episodes.Person{Ref: ref, Label: label, Link: episodes.LinkName})
@@ -817,44 +1066,110 @@ func (s *Service) pbMentioned(db *storage.Store, guild string, msgs []episodes.M
 	return out, nil
 }
 
-// pbClaims turns a window's validated facts into claims for the write gate: one claim per speaker, with
-// that speaker's own evidence lines only (the gate refuses evidence of another author), the text each
-// line had when the model read it, and the link (self only when the speaker is the subject).
+// pbAttribute ties a validated fact to the lines it cites, or drops it. Its evidence is every observation
+// of the prompt lines it cites. Those must all be one speaker's: a fact cited from two people's lines (a
+// question of one and the answer of another, or what one said and another acknowledged) cannot be
+// attributed to either, so it is dropped rather than split into a self claim with part of its provenance.
+// The link comes from the cited lines too: self when the speaker is the subject, mention when a cited line
+// names the subject by <@id>, otherwise name (the subject was found by a name: reviewed in the pilot).
+// It is idempotent: a stored pilot fact goes through it again when it is applied.
+func pbAttribute(f episodes.PersonFact, bp pbPrompt) (episodes.PersonFact, bool) {
+	var ev []string
+	authors := map[string]bool{}
+	for _, id := range f.Ev {
+		for _, part := range bp.pbPartsOf(id) {
+			if !slices.Contains(ev, part) {
+				ev = append(ev, part)
+			}
+			authors[bp.author[part]] = true
+		}
+	}
+	if len(ev) == 0 || len(authors) != 1 || len(f.By) != 1 || !authors[f.By[0]] {
+		return f, false
+	}
+	f.Ev = ev
+	switch {
+	case f.By[0] == f.About:
+		f.Link = episodes.LinkSelf
+	case f.Link == episodes.LinkReply:
+	case pbNamesByID(bp, ev, f.About):
+		f.Link = episodes.LinkMention
+	default:
+		f.Link = episodes.LinkName
+	}
+	return f, true
+}
+
+// pbNamesByID reports whether one of the lines names the person by an account mention (<@id>).
+func pbNamesByID(bp pbPrompt, ids []string, ref string) bool {
+	for _, id := range ids {
+		for _, sub := range mentionPattern.FindAllStringSubmatch(bp.text[id], -1) {
+			if personRef(sub[1]) == ref {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// pbFacts parses a window's answer into attributed facts; dropped facts count as rejected.
+func pbFacts(bp pbPrompt, content string) ([]episodes.PersonFact, int) {
+	facts, rejected := bp.p.ParsePeople(content, episodes.PeopleOptions{})
+	out := facts[:0:0]
+	for _, f := range facts {
+		if g, ok := pbAttribute(f, bp); ok {
+			out = append(out, g)
+		} else {
+			rejected++
+		}
+	}
+	return out, rejected
+}
+
+// pbClaims turns a window's facts into claims for the write gate: one speaker's claim per attributable
+// fact (pbAttribute), with the text each evidence line had when the model read it.
 func pbClaims(guild, runID string, facts []episodes.PersonFact, bp pbPrompt) (claims []store.PersonClaim, dropped int) {
 	for _, f := range facts {
-		for _, speaker := range f.By {
-			var ev []string
-			lines := map[string]string{}
-			for _, id := range f.Ev {
-				if bp.author[id] == speaker {
-					ev = append(ev, id)
-					lines[id] = bp.text[id]
-				}
-			}
-			if len(ev) == 0 {
-				dropped++
-				continue
-			}
-			link := f.Link
-			switch {
-			case speaker == f.About:
-				link = store.LinkSelf
-			case link == store.LinkSelf || link == "":
-				link = store.LinkMention // a participant the speaker named by token
-			}
-			claims = append(claims, store.PersonClaim{GuildID: guild, SubjectRef: f.About, SpeakerRef: speaker, Kind: f.Kind, Topic: f.Topic,
-				Text: f.Text, Evidence: ev, Source: "backfill:" + runID, Link: link, Lines: lines, ReadAt: bp.readAt})
+		f, ok := pbAttribute(f, bp)
+		if !ok {
+			dropped++
+			continue
 		}
+		lines := map[string]string{}
+		for _, id := range f.Ev {
+			lines[id] = bp.text[id]
+		}
+		claims = append(claims, store.PersonClaim{GuildID: guild, SubjectRef: f.About, SpeakerRef: f.By[0], Kind: f.Kind, Topic: f.Topic,
+			Text: f.Text, Evidence: f.Ev, Source: "backfill:" + runID, Link: f.Link, Lines: lines, ReadAt: bp.readAt})
 	}
 	return claims, dropped
 }
 
 // pbApply writes one window's claims and settles it, in one transaction: the claims through the write
-// gate, the window's state and counts, and the spend (run and memory_spend).
+// gate, the window's state and counts, and the spend (run and memory_spend). The same transaction checks
+// the whole window again (pbPromptCurrent): a line changed since bp was built (cited or only context),
+// or a person withdrew, sends the window back to the queue instead, charged once. readAt is when the
+// lines were read for the prompt the model answered; an edit after it refuses the claims citing it.
 func (s *Service) pbApply(ctx context.Context, db *storage.Store, runID, guild string, w store.BackfillWindow, facts []episodes.PersonFact, rejected int,
-	bp pbPrompt, spent float64, calls int) error {
+	bp pbPrompt, readAt string, spent float64, calls int) error {
 	now := s.Clock.Now().UTC()
 	return db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+		current, err := s.pbPromptCurrent(tx, guild, bp)
+		if err != nil {
+			return err
+		}
+		if !current {
+			w.State, w.Batch, w.Result = store.WindowQueued, "", nil
+			if w.Attempts >= pbMaxAttempts {
+				w.State = store.WindowFailed
+			}
+			w.CostUSD += spent
+			w.UpdatedAt = now.Format(time.RFC3339)
+			return pbSettleTx(tx, runID, w, spent, calls, now)
+		}
+		if readAt != "" {
+			bp.readAt = readAt
+		}
 		claims, dropped := pbClaims(guild, runID, facts, bp)
 		saved, err := s.savePersonClaims(ctx, tx, claims)
 		if err != nil {
@@ -922,6 +1237,14 @@ func pbRunJSON(db *storage.Store, run store.BackfillRun) map[string]any {
 		if json.Unmarshal(run.Pilot, &rep) == nil {
 			out["pilot"] = rep
 		}
+	}
+	if spent, err := store.BackfillGuildSpent(db.Reader(), run.GuildID); err == nil {
+		out["guild_spent_usd"] = usd(spent) // every run of the server, against the cap
+	}
+	var pending int // claims stored pending (a no_sensitive server): not read until classified
+	if db.Reader().QueryRow(`SELECT COUNT(*) FROM person_claim WHERE guild_id=? AND source=? AND state=?`, run.GuildID, "backfill:"+run.ID,
+		store.PersonPending).Scan(&pending) == nil {
+		out["claims_pending"] = pending
 	}
 	inflight := 0
 	for _, b := range pbDecodeBatches(run.Batches) {

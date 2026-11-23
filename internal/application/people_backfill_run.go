@@ -8,20 +8,24 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"unicode/utf8"
 
 	"masamong/internal/action"
 	"masamong/internal/errclass"
 	"masamong/internal/errcode"
+	"masamong/internal/features/privacy"
 	"masamong/internal/memory/episodes"
 	"masamong/internal/memory/peoplebackfill"
 	"masamong/internal/memory/store"
+	"masamong/internal/providers"
 	"masamong/internal/providers/openai"
 	"masamong/internal/storage"
 )
@@ -37,7 +41,11 @@ const (
 	pbBatchSubmitted  = "submitted"
 	pbBatchUnknown    = "unknown" // the create call ended without an answer; the host keeps no key to find it by
 	pbBatchApplied    = "applied"
-	pbBatchFailed     = "failed" // never ran (refused at create, failed at the host, or released by the operator)
+	pbBatchFailed     = "failed" // never ran (refused at create, failed at the host, or not found by reconciliation)
+	// released: an unknown batch the operator released (requeue_unknown) after checking the host's batch
+	// list. Its windows went back to the queue and its reserved maximum was charged to the run: it may have
+	// run and been billed all the same, and a later send of the same windows is a second charge.
+	pbBatchReleased = "released"
 )
 
 // pbStopFails is how many failed steps in a row stop a run (stopped_by error).
@@ -65,6 +73,9 @@ type pbBatch struct {
 	MaxUSD  float64          `json:"max_usd"` // the reserved maximum while it is in flight
 	Ref     *openai.BatchRef `json:"ref,omitempty"`
 	At      string           `json:"at"`
+	// Cleaned: the host's copy of an applied batch was deleted. The applied state is saved first; a
+	// failed delete is tried again on a later step.
+	Cleaned bool `json:"cleaned,omitempty"`
 }
 
 // pbHasInFlight reports whether a run has batches the host may still run.
@@ -99,6 +110,47 @@ type pbAnswer struct {
 	Failed   string                `json:"failed,omitempty"` // the error class; the window is sent again by the run
 	Skipped  bool                  `json:"skipped,omitempty"`
 	USD      float64               `json:"usd,omitempty"`
+	// Intent is the reserved maximum of a send in progress, written before the call: an answer still
+	// carrying it after a restart was sent and never settled, and is charged at that maximum.
+	Intent float64 `json:"intent,omitempty"`
+	// Unknown: the call may have been run and billed with no answer read; it was charged at its maximum.
+	Unknown bool `json:"unknown,omitempty"`
+}
+
+// pbUnknownClass is the Failed class of a send whose outcome is not known.
+const pbUnknownClass = "unknown"
+
+// pbIncompleteClass is the Failed class of an answer that is not a whole people list: cut at the output
+// limit, or text that holds no {"people": [...]} object. It is billed, and it never counts as a window
+// with nothing to say.
+const pbIncompleteClass = "incomplete"
+
+// pbChangedClass fails a pilot send whose prompt kept changing between its build and its send (a line
+// deleted, edited or withdrawn each time): nothing was sent.
+const pbChangedClass = "changed"
+
+// pbBuildTries is how many times a send builds its prompt again when it changed before the send.
+const pbBuildTries = 3
+
+// pbBuilt, when set (tests only), runs after a window's prompt is built and before it is checked and sent.
+var pbBuilt func(windowID string)
+
+// pbComplete reports an answer the model finished (not cut at its output limit) that holds a JSON object
+// whose "people" value is a list (an empty list is a complete answer).
+func pbComplete(res openai.ChatResult) bool {
+	if res.FinishReason == "length" {
+		return false
+	}
+	obj, ok := episodes.JSONObject(res.Content)
+	if !ok {
+		return false
+	}
+	var doc map[string]json.RawMessage
+	if json.Unmarshal([]byte(obj), &doc) != nil {
+		return false
+	}
+	var list []json.RawMessage
+	return json.Unmarshal(doc["people"], &list) == nil && doc["people"] != nil
 }
 
 func pbAnswers(raw []byte) map[string]pbAnswer {
@@ -170,16 +222,54 @@ func (s *Service) pbRelease(runID string, l *pbLoop) {
 // budget
 // ---------------------------------------------------------------------------
 
-// pbMaxCost is the most one window's request can cost: every prompt rune as one input token (no cache
-// discount) and the whole output limit. The budget check reserves it; the settlement uses the usage.
-func pbMaxCost(bp pbPrompt, lines int, model peoplebackfill.Model, mode peoplebackfill.Mode) float64 {
-	est, _ := peoplebackfill.EstimateTokens([]peoplebackfill.Window{{Lines: make([]peoplebackfill.MergedLine, lines)}})
-	in := max(est, utf8.RuneCountInString(bp.system)+utf8.RuneCountInString(bp.user)+64)
-	v, err := peoplebackfill.Settle(peoplebackfill.Usage{InputTokens: in, OutputTokens: pbMaxTokens}, model, mode)
+// pbMaxIn bounds a prompt's input tokens: a token covers at least one byte of text, so the prompt's UTF-8
+// length plus the format's framing is never exceeded, whatever the language or the tokenizer.
+func pbMaxIn(bp pbPrompt) int { return len(bp.system) + len(bp.user) + pbFraming }
+
+// pbMaxCost is the most one window's request can be billed: every input token at the cache-write price
+// (1.25 of the input price, the highest any input token is billed at) and every output token the request
+// allows on the wire (pbWireOut, thinking room included). The budget check reserves it; the settlement
+// uses the reported usage, which can never be higher.
+func pbMaxCost(bp pbPrompt, model peoplebackfill.Model, mode peoplebackfill.Mode) float64 {
+	in := pbMaxIn(bp)
+	in += (in + 3) / 4 // the cache-write surcharge, rounded up as pbSettle rounds it
+	v, err := peoplebackfill.Settle(peoplebackfill.Usage{InputTokens: in, OutputTokens: pbWireOut}, model, mode)
 	if err != nil {
 		return 0
 	}
 	return v
+}
+
+// pbSendTracker marks, through the request's context, that a Messages call reached the transport: a
+// failure after that may have been billed (pbSendUnknown).
+type pbSendTracker struct{ base http.RoundTripper }
+
+type pbSentKey struct{}
+
+func (t pbSendTracker) RoundTrip(r *http.Request) (*http.Response, error) {
+	if f, ok := r.Context().Value(pbSentKey{}).(*atomic.Bool); ok && r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/messages") {
+		f.Store(true)
+	}
+	return t.base.RoundTrip(r)
+}
+
+// pbSendUnknown reports a failed standard call that may have been run and billed: the request reached the
+// transport, and no answer came back (a timeout, a lost connection, a call cut by a shutdown, an answer
+// that could not be read). A host that answered with an error status, or a connection never made, ran
+// nothing.
+func pbSendUnknown(err error, sent bool) bool {
+	if err == nil || !sent || errors.Is(err, providers.ErrOffline) {
+		return false
+	}
+	var ae *openai.APIError
+	if errors.As(err, &ae) && ae.Status >= 400 {
+		return false
+	}
+	var pe *providers.Error
+	if errors.As(err, &pe) && (pe.NotSent || (pe.Kind == "status" && pe.Status >= 400)) {
+		return false
+	}
+	return true
 }
 
 // pbBudget is the pilot's running budget: spend settled plus the maxima of the requests in flight.
@@ -189,6 +279,7 @@ type pbBudget struct {
 	inflight float64
 	cap      float64
 	over     bool
+	unknown  bool // a send's outcome is not known: nothing more is sent until the operator goes on
 }
 
 func (b *pbBudget) reserve(v float64) bool {
@@ -212,7 +303,19 @@ func (b *pbBudget) settle(reserved, spent float64) {
 func (b *pbBudget) stopped() bool {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.over
+	return b.over || b.unknown
+}
+
+func (b *pbBudget) halt() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.unknown = true
+}
+
+func (b *pbBudget) halted() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.unknown
 }
 
 // ---------------------------------------------------------------------------
@@ -238,16 +341,21 @@ func (s *Service) pbStartPilot(ctx context.Context, req action.Request, db *stor
 		}
 	}
 	if len(pilot) == 0 {
-		return action.Fail(req, errcode.InvalidInput, "people_backfill.no_rooms", s.msg(req, "people_backfill.no_rooms"), map[string]any{"windows": len(plan.Windows)})
+		return action.Fail(req, errcode.InvalidInput, "people_backfill.no_rooms", s.msg(req, "people_backfill.no_rooms"),
+			map[string]any{"windows": len(plan.Windows), "covered_windows": plan.Covered})
 	}
 	low, high := 0.0, 0.0
 	for _, m := range pbPilotModels {
 		l, h := pbEstimate(pilot, m, peoplebackfill.ModeStandard)
 		low, high = low+l, high+h
 	}
-	if high > plan.Params.BudgetUSD {
+	spent, err := store.BackfillGuildSpent(db.Reader(), guild)
+	if err != nil {
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
+	}
+	if spent+high > plan.Params.BudgetUSD {
 		return action.Fail(req, errcode.BudgetExceeded, "people_backfill.over_budget", s.msg(req, "people_backfill.over_budget"),
-			map[string]any{"budget_usd": plan.Params.BudgetUSD, "pilot_high_usd": usd(high)})
+			map[string]any{"budget_usd": plan.Params.BudgetUSD, "spent_usd": usd(spent), "pilot_high_usd": usd(high)})
 	}
 	pbLoops.Lock()
 	defer pbLoops.Unlock()
@@ -257,14 +365,17 @@ func (s *Service) pbStartPilot(ctx context.Context, req action.Request, db *stor
 	}
 	var resume *store.BackfillRun
 	now := s.Clock.Now().UTC().Format(time.RFC3339)
+	// a busy run refuses the pilot before anything is superseded
+	for _, r := range runs {
+		if ((r.State == store.BackfillPiloting || r.State == store.BackfillSubmitted) && pbLoops.m[s][r.ID] != nil) ||
+			r.State == store.BackfillSubmitted || pbHasInFlight(r) {
+			// a worker on it, or sent batches no worker polls: the operator continues that run, never a second one beside it
+			return action.Fail(req, errcode.ConfigConflict, "people_backfill.busy", s.msg(req, "people_backfill.busy"), map[string]any{"run": pbRunJSON(db, r)})
+		}
+	}
 	for i := range runs {
 		r := runs[i]
 		switch {
-		case (r.State == store.BackfillPiloting || r.State == store.BackfillSubmitted) && pbLoops.m[s][r.ID] != nil:
-			return action.Fail(req, errcode.ConfigConflict, "people_backfill.busy", s.msg(req, "people_backfill.busy"), map[string]any{"run": pbRunJSON(db, r)})
-		case r.State == store.BackfillSubmitted || pbHasInFlight(r):
-			// sent batches no worker polls: the operator continues that run, never a second one beside it
-			return action.Fail(req, errcode.ConfigConflict, "people_backfill.busy", s.msg(req, "people_backfill.busy"), map[string]any{"run": pbRunJSON(db, r)})
 		case r.Token == plan.Token && r.PilotDone && (r.State == store.BackfillPiloted || r.State == store.BackfillStopped):
 			// this plan's pilot is done: report it again, nothing is sent
 			return action.OK(req, map[string]any{"mode": "pilot", "run": pbRunJSON(db, r), "model_calls": 0})
@@ -335,6 +446,10 @@ func (s *Service) pbPilot(ctx context.Context, runID string, a *openai.Adapter) 
 	if err != nil || !ok || run.State != store.BackfillPiloting {
 		return
 	}
+	if err := s.pbSettleLeftIntents(db, runID); err != nil {
+		s.Log.Warn("people backfill: unsettled pilot sends not charged", "run", runID, "err", err)
+		return
+	}
 	ws, err := store.BackfillWindows(db.Reader(), runID, true, store.WindowQueued)
 	if err != nil {
 		s.Log.Warn("people backfill: pilot windows not read", "run", runID, "err", err)
@@ -353,7 +468,12 @@ func (s *Service) pbPilot(ctx context.Context, runID string, a *openai.Adapter) 
 			}
 		}
 	}
-	budget := &pbBudget{spent: run.SpentUSD, cap: run.BudgetUSD}
+	spent, err := store.BackfillGuildSpent(db.Reader(), run.GuildID)
+	if err != nil {
+		s.Log.Warn("people backfill: spend not read", "run", runID, "err", err)
+		return
+	}
+	budget := &pbBudget{spent: spent, cap: run.BudgetUSD} // the cap is the server's total across its runs
 	queue := make(chan job)
 	var wg sync.WaitGroup
 	for range pbPilotWorkers {
@@ -380,16 +500,28 @@ func (s *Service) pbPilot(ctx context.Context, runID string, a *openai.Adapter) 
 		if err != nil || !ok {
 			return err
 		}
-		if budget.stopped() {
+		failed, err := pbPilotFailed(tx, runID)
+		if err != nil {
+			return err
+		}
+		switch {
+		case budget.stopped():
 			cur.State, cur.StoppedBy = store.BackfillStopped, "budget"
-		} else {
-			rep, err := pbPilotReport(tx, runID)
-			if err != nil {
-				return err
+			if budget.halted() {
+				cur.StoppedBy = "submit_unknown"
 			}
-			cur.Pilot, _ = json.Marshal(rep)
+		case failed > 0:
+			// a pilot with a failed or missing answer does not pass: the operator resumes it (pilot), which
+			// asks only those again
+			cur.State, cur.StoppedBy = store.BackfillStopped, "failed"
+		default:
 			cur.State, cur.PilotDone, cur.StoppedBy = store.BackfillPiloted, true, ""
 		}
+		rep, err := pbPilotReport(tx, runID)
+		if err != nil {
+			return err
+		}
+		cur.Pilot, _ = json.Marshal(rep) // counts only, also for a pilot that stopped
 		cur.UpdatedAt = now
 		return store.SaveBackfillRun(tx, cur, store.BackfillPiloting)
 	})
@@ -400,56 +532,297 @@ func (s *Service) pbPilot(ctx context.Context, runID string, a *openai.Adapter) 
 	s.Log.Info("people backfill: pilot ended", "run", runID, "budget_stop", budget.stopped())
 }
 
+// pbPilotFailed counts the pilot windows to send whose answer from either model is missing, failed or
+// unsettled: such a pilot is not finished.
+func pbPilotFailed(q *sql.Tx, runID string) (int, error) {
+	ws, err := store.BackfillWindows(q, runID, true, store.WindowQueued)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, w := range ws {
+		have := pbAnswers(w.Result)
+		for _, m := range pbPilotModels {
+			if a, ok := have[string(m)]; !ok || a.Failed != "" || a.Intent > 0 {
+				n++
+				break
+			}
+		}
+	}
+	return n, nil
+}
+
 // pbPilotOne sends one window to one model and stores the answer (validated facts, counts and cost).
+// The send's intent (its reserved maximum) is stored before the call, in the transaction that checks the
+// prompt is still current (pbPromptCurrent: a line deleted or withdrawn after the build is never sent; the
+// prompt is built again), so a send cut by a crash is charged at that maximum when the pilot is resumed,
+// and the call is made once: a send whose outcome is not known (it may have been run and billed with no
+// answer read) is charged at its maximum and stops the pilot.
 func (s *Service) pbPilotOne(ctx context.Context, db *storage.Store, run store.BackfillRun, a *openai.Adapter, w store.BackfillWindow,
 	model peoplebackfill.Model, budget *pbBudget) {
-	bp, err := s.pbBuildPrompt(db, run.GuildID, w)
 	ans := pbAnswer{}
-	spent, calls := 0.0, 0
-	switch {
-	case err != nil:
-		ans.Failed = string(errclass.Of(err))
-	case !bp.ok:
-		ans.Skipped = true
-	default:
-		reserved := pbMaxCost(bp, w.Lines, model, peoplebackfill.ModeStandard)
-		if !budget.reserve(reserved) {
-			return
+	spent, held, calls := 0.0, 0.0, 0
+	var bp pbPrompt
+	reserved, ready := 0.0, false
+build:
+	for try := 1; ; try++ {
+		var err error
+		bp, err = s.pbBuildPrompt(db, run.GuildID, w)
+		switch {
+		case err != nil:
+			ans.Failed = string(errclass.Of(err))
+		case !bp.ok:
+			ans.Skipped = true
+		default:
+			if pbBuilt != nil {
+				pbBuilt(w.ID)
+			}
+			reserved = pbMaxCost(bp, model, peoplebackfill.ModeStandard)
+			if !budget.reserve(reserved) {
+				return
+			}
+			current, err := s.pbPilotIntent(db, run, w.ID, model, bp, reserved)
+			if err != nil {
+				budget.settle(reserved, 0)
+				s.Log.Warn("people backfill: pilot send not recorded, not sent", "run", run.ID, "err", err)
+				return
+			}
+			if !current {
+				budget.settle(reserved, 0)
+				if try < pbBuildTries {
+					continue build
+				}
+				ans.Failed = pbChangedClass // the operator resumes the pilot, which builds it again
+				break build
+			}
+			ready = true
 		}
-		res, err := a.Chat(ctx, pbRequest(model, bp))
-		if err == nil || errors.Is(err, openai.ErrRefused) {
+		break
+	}
+	if ready {
+		sent := &atomic.Bool{}
+		res, err := a.Chat(context.WithValue(ctx, pbSentKey{}, sent), pbRequest(model, bp))
+		ans.Hash, ans.ReadAt = bp.hash, bp.readAt
+		switch {
+		case err == nil || errors.Is(err, openai.ErrRefused):
 			spent, calls = pbSettle(&res, model, peoplebackfill.ModeStandard), 1
+		case pbSendUnknown(err, sent.Load()):
+			held, calls = reserved, 1 // charged at its maximum: the host may have run it
+			ans.Unknown = true
+			budget.halt()
+		case res.PromptTokens+res.CompletionTokens > 0:
+			spent, calls = pbSettle(&res, model, peoplebackfill.ModeStandard), 1 // a failure inside an answer is still billed
 		}
-		budget.settle(reserved, spent)
-		ans.Hash, ans.ReadAt, ans.USD = bp.hash, bp.readAt, spent
+		budget.settle(reserved, spent+held)
+		ans.USD = spent + held
 		switch {
 		case errors.Is(err, openai.ErrRefused):
 			ans.Refused = true
+		case ans.Unknown:
+			ans.Failed = pbUnknownClass
 		case err != nil:
-			if ctx.Err() != nil {
-				return
-			}
 			ans.Failed = string(errclass.Of(err))
+		case !pbComplete(res):
+			ans.Failed = pbIncompleteClass // cut at the output limit, or not the people list: charged, never coverage
 		default:
-			ans.Facts, ans.Rejected = bp.p.ParsePeople(res.Content, episodes.PeopleOptions{})
+			ans.Facts, ans.Rejected = pbFacts(bp, res.Content)
 		}
 	}
+	if err := s.pbPilotStore(db, run, w.ID, model, ans, bp.text, spent, held, calls); err != nil {
+		s.Log.Warn("people backfill: pilot answer not stored", "run", run.ID, "err", err)
+	}
+}
+
+// pbPilotIntent stores a send's intent when the prompt is still current, in one transaction. False: the
+// prompt changed since it was built and nothing was stored.
+func (s *Service) pbPilotIntent(db *storage.Store, run store.BackfillRun, windowID string, model peoplebackfill.Model, bp pbPrompt, reserved float64) (bool, error) {
 	now := s.Clock.Now().UTC()
-	err = db.WithWriterContext(context.Background(), func(tx *sql.Tx) error {
-		cur, ok, err := store.LoadBackfillWindow(tx, run.ID, w.ID)
+	current := false
+	err := db.WithWriterContext(context.Background(), func(tx *sql.Tx) error {
+		ok, err := s.pbPromptCurrent(tx, run.GuildID, bp)
 		if err != nil || !ok {
 			return err
 		}
-		have := pbAnswers(cur.Result)
-		have[string(model)] = ans
-		cur.Result, _ = json.Marshal(have)
-		cur.CostUSD += spent
-		cur.UpdatedAt = now.Format(time.RFC3339)
-		return pbSettleTx(tx, run.ID, cur, spent, calls, now)
+		current = true
+		return s.pbPilotStoreTx(tx, run, windowID, model, pbAnswer{Hash: bp.hash, ReadAt: bp.readAt, Intent: reserved}, nil, 0, 0, 0, now)
 	})
-	if err != nil {
-		s.Log.Warn("people backfill: pilot answer not stored", "run", run.ID, "err", err)
+	return current && err == nil, err
+}
+
+// pbPilotStore writes one model's answer to a pilot window with its spend, in one transaction. held is a
+// send charged at its maximum: it counts against the cap (the run's spend) but is not reported usage
+// (memory_spend). Only facts that pass the gate are stored (pbFactPasses, in the same transaction): an
+// answer arriving after a forget, a deletion or a withdrawal keeps nothing it covers; lines are the texts
+// the model read.
+func (s *Service) pbPilotStore(db *storage.Store, run store.BackfillRun, windowID string, model peoplebackfill.Model, ans pbAnswer, lines map[string]string,
+	spent, held float64, calls int) error {
+	now := s.Clock.Now().UTC()
+	return db.WithWriterContext(context.Background(), func(tx *sql.Tx) error {
+		return s.pbPilotStoreTx(tx, run, windowID, model, ans, lines, spent, held, calls, now)
+	})
+}
+
+func (s *Service) pbPilotStoreTx(tx *sql.Tx, run store.BackfillRun, windowID string, model peoplebackfill.Model, ans pbAnswer, lines map[string]string,
+	spent, held float64, calls int, now time.Time) error {
+	runID := run.ID
+	cur, ok, err := store.LoadBackfillWindow(tx, runID, windowID)
+	if err != nil || !ok {
+		return err
 	}
+	if len(ans.Facts) > 0 {
+		one := map[string]pbAnswer{string(model): ans}
+		if _, err := s.pbGateAnswers(tx, run.GuildID, runID, one, lines); err != nil {
+			return err
+		}
+		ans = one[string(model)]
+	}
+	have := pbAnswers(cur.Result)
+	have[string(model)] = ans
+	cur.Result, _ = json.Marshal(have)
+	cur.CostUSD += spent + held
+	cur.UpdatedAt = now.Format(time.RFC3339)
+	if err := pbSettleTx(tx, runID, cur, spent, calls, now); err != nil {
+		return err
+	}
+	if held > 0 {
+		return store.AddBackfillRunSpend(tx, runID, held, now.Format(time.RFC3339))
+	}
+	return nil
+}
+
+// pbFactPasses applies the write gate, read-only, to a stored pilot fact: what a claim of it would face
+// when written (evidence current and the speaker's own, read before any edit, consent, tombstones of
+// every person the text names, the suppress markers), plus the statement-level forget and hide check.
+// The pilot keeps, and its review shows, only facts that pass. lines (may be nil) are the texts the model read.
+func (s *Service) pbFactPasses(tx *sql.Tx, guild, runID string, f episodes.PersonFact, readAt string, lines map[string]string,
+	memoryOut, profileOut map[string]bool) (bool, error) {
+	if len(f.By) != 1 {
+		return false, nil
+	}
+	c := store.PersonClaim{GuildID: guild, SubjectRef: f.About, SpeakerRef: f.By[0], Kind: f.Kind, Topic: f.Topic, Text: f.Text,
+		Evidence: f.Ev, Source: "backfill:" + runID, Link: f.Link, ReadAt: readAt}
+	if lines != nil {
+		c.Lines = map[string]string{}
+		for _, id := range f.Ev {
+			c.Lines[id] = lines[id]
+		}
+	}
+	ok, err := s.personClaimPasses(tx, &c, memoryOut, profileOut, s.naiveZone())
+	if err != nil || !ok {
+		return false, err
+	}
+	suppressed, err := s.personStatementSuppressedTx(tx, c)
+	return err == nil && !suppressed, err
+}
+
+// pbGateAnswers keeps, in place, the facts of a window's answers that pass pbFactPasses; changed reports
+// that one was dropped.
+func (s *Service) pbGateAnswers(tx *sql.Tx, guild, runID string, have map[string]pbAnswer, lines map[string]string) (changed bool, err error) {
+	memoryOut, err := withdrawnRefsTx(tx, privacy.Memory)
+	if err != nil {
+		return false, err
+	}
+	profileOut, err := withdrawnRefsTx(tx, privacy.Profile)
+	if err != nil {
+		return false, err
+	}
+	for m, ans := range have {
+		var kept []episodes.PersonFact
+		for _, f := range ans.Facts {
+			ok, err := s.pbFactPasses(tx, guild, runID, f, ans.ReadAt, lines, memoryOut, profileOut)
+			if err != nil {
+				return false, err
+			}
+			if ok {
+				kept = append(kept, f)
+			}
+		}
+		if len(kept) != len(ans.Facts) {
+			ans.Facts, changed = kept, true
+			have[m] = ans
+		}
+	}
+	return changed, nil
+}
+
+// pbRecheckPilotTx takes out of the stored pilot answers every fact that no longer passes the gate, so
+// the pilot's copy of what people said goes with a forget, a hide, a deletion or an edit of a line, and a
+// withdrawal of consent, as the claims do. It runs in the caller's transaction, after the caller wrote its
+// marker, tombstone, redaction or withdrawal (guild "" checks every server's runs).
+func (s *Service) pbRecheckPilotTx(tx *sql.Tx, guild string) error {
+	if !tableExists(tx, "people_backfill_window") {
+		return nil
+	}
+	ws, err := store.BackfillAnswered(tx, guild)
+	if err != nil {
+		return err
+	}
+	guilds := map[string]string{}
+	now := s.Clock.Now().UTC().Format(time.RFC3339)
+	for _, w := range ws {
+		g, ok := guilds[w.RunID]
+		if !ok {
+			run, found, err := store.LoadBackfillRun(tx, w.RunID)
+			if err != nil {
+				return err
+			}
+			if found {
+				g = run.GuildID
+			}
+			guilds[w.RunID] = g
+		}
+		have := pbAnswers(w.Result)
+		changed, err := s.pbGateAnswers(tx, g, w.RunID, have, nil)
+		if err != nil {
+			return err
+		}
+		if !changed {
+			continue
+		}
+		w.Result, _ = json.Marshal(have)
+		w.UpdatedAt = now
+		if err := store.SaveBackfillWindow(tx, w); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pbSettleLeftIntents charges the pilot sends a crash or a restart cut between their intent and their
+// answer at their reserved maximum (the host may have run them) and marks them unknown, so the pilot asks
+// them again only under a new reservation.
+func (s *Service) pbSettleLeftIntents(db *storage.Store, runID string) error {
+	now := s.Clock.Now().UTC()
+	return db.WithWriterContext(context.Background(), func(tx *sql.Tx) error {
+		ws, err := store.BackfillWindows(tx, runID, true)
+		if err != nil {
+			return err
+		}
+		for _, w := range ws {
+			have := pbAnswers(w.Result)
+			held := 0.0
+			for m, ans := range have {
+				if ans.Intent <= 0 {
+					continue
+				}
+				held += ans.Intent
+				have[m] = pbAnswer{Hash: ans.Hash, ReadAt: ans.ReadAt, Failed: pbUnknownClass, Unknown: true, USD: ans.Intent}
+			}
+			if held == 0 {
+				continue
+			}
+			w.Result, _ = json.Marshal(have)
+			w.CostUSD += held
+			w.UpdatedAt = now.Format(time.RFC3339)
+			if err := store.SaveBackfillWindow(tx, w); err != nil {
+				return err
+			}
+			if err := store.AddBackfillRunSpend(tx, runID, held, now.Format(time.RFC3339)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // pbReviewItem is one claim of the pilot review set (ids only; the text is read when shown).
@@ -461,8 +834,11 @@ type pbReviewItem struct {
 }
 
 // pbReviewSet is the pilot's review set: every link=name fact, every fact the other model gave about
-// another person (a fact of the other model sharing an evidence line, none about the same person), and
-// a sample of at most pbHearsaySample hearsay facts spread by a hash (the same set every time).
+// another person, and a sample of at most pbHearsaySample hearsay facts spread by a hash (the same set
+// every time). The other model's corresponding fact is the one on the same evidence with the same kind and
+// topic; it disagrees when none of those is about the same person, so two facts of one line given to
+// opposite people are caught. A fact with no such counterpart disagrees when no fact of the other model
+// sharing an evidence line is about the same person.
 func pbReviewSet(ws []store.BackfillWindow) (items []pbReviewItem, names, disagreements, hearsay int) {
 	type cand struct {
 		item pbReviewItem
@@ -484,14 +860,19 @@ func pbReviewSet(ws []store.BackfillWindow) (items []pbReviewItem, names, disagr
 					if o == m {
 						continue
 					}
-					overlap, same := false, false
+					overlap, same, matched, matchedSame := false, false, false, false
 					for _, g := range ans[o].Facts {
-						if pbOverlap(f.Ev, g.Ev) {
-							overlap = true
-							same = same || g.About == f.About
+						if !pbOverlap(f.Ev, g.Ev) {
+							continue
+						}
+						overlap = true
+						same = same || g.About == f.About
+						if store.PersonTopicKey(g.Kind, g.Topic) == store.PersonTopicKey(f.Kind, f.Topic) {
+							matched = true
+							matchedSame = matchedSame || g.About == f.About
 						}
 					}
-					disagree = disagree || (overlap && !same)
+					disagree = disagree || (matched && !matchedSame) || (!matched && overlap && !same)
 				}
 				self := false
 				for _, by := range f.By {
@@ -605,10 +986,22 @@ func (s *Service) pbStartRun(ctx context.Context, req action.Request, db *storag
 		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	if !started {
-		var fail *action.Result
-		if plan, fail = s.pbConfirmedPlan(ctx, req, db, in); fail != nil {
+		rebuilt, changed, fail := s.pbCheckPlan(ctx, req, db, in)
+		if changed {
+			// a finished pilot goes on when only windows outside it changed (a message deleted or captured
+			// while the operator read the pilot): the paid answers are kept
+			var ok bool
+			if rebuilt, ok, err = s.pbRebasePilot(ctx, db, strVal(in, "confirm", ""), rebuilt); err != nil {
+				return s.failErr(req, errcode.IO, "error.storage", err, nil)
+			}
+			if ok {
+				fail = nil
+			}
+		}
+		if fail != nil {
 			return *fail
 		}
+		plan = rebuilt
 	}
 	model, ok := pbModels[strVal(in, "model", "")]
 	if !ok {
@@ -674,6 +1067,100 @@ func (s *Service) pbStartRun(ctx context.Context, req action.Request, db *storag
 	}
 	s.Log.Info("people backfill: run started", "run", runID, "model", string(model))
 	return action.OK(req, map[string]any{"mode": "run", "run": pbRunJSON(db, *run)})
+}
+
+// pbRebasePilot moves the finished, not yet started pilot run of token confirm onto plan, the plan as it
+// is now, when plan still holds every pilot window: windows outside the pilot are replaced by the plan's,
+// the pilot windows keep their stored answers (an answer whose prompt changed is not applied, and the
+// window goes out in a batch). The run takes the plan's token. False: no such run, or a pilot window is
+// gone (a new pilot is needed).
+func (s *Service) pbRebasePilot(ctx context.Context, db *storage.Store, confirm string, plan pbPlan) (pbPlan, bool, error) {
+	pbLoops.Lock()
+	defer pbLoops.Unlock()
+	runs, err := store.BackfillRuns(db.Reader(), plan.Params.Guild, store.BackfillPiloted, store.BackfillStopped)
+	if err != nil || confirm == "" {
+		return plan, false, err
+	}
+	var run *store.BackfillRun
+	for i, r := range runs {
+		var was pbParams
+		// the same plan (server, rooms, range and cap), changed only in its lines
+		same := json.Unmarshal(r.Params, &was) == nil && was.Guild == plan.Params.Guild && slices.Equal(was.Rooms, plan.Params.Rooms) &&
+			was.Since == plan.Params.Since && was.Until == plan.Params.Until && was.BudgetUSD == plan.Params.BudgetUSD
+		if same && r.Token == confirm && r.PilotDone && r.Model == "" && pbLoops.m[s][r.ID] == nil && !pbHasInFlight(r) {
+			run = &runs[i]
+			break
+		}
+	}
+	if run == nil {
+		return plan, false, nil
+	}
+	byID := map[string]pbWindow{}
+	for _, w := range plan.Windows {
+		byID[w.ID] = w
+	}
+	now := s.Clock.Now().UTC().Format(time.RFC3339)
+	ok := true
+	err = db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+		have, err := store.BackfillWindows(tx, run.ID, false)
+		if err != nil {
+			return err
+		}
+		kept := map[string]bool{}
+		for _, w := range have {
+			if w.Pilot {
+				if _, in := byID[w.ID]; !in {
+					ok = false
+					return nil
+				}
+			}
+		}
+		for _, w := range have {
+			pw, in := byID[w.ID]
+			if !in {
+				if err := store.DeleteBackfillWindow(tx, run.ID, w.ID); err != nil {
+					return err
+				}
+				continue
+			}
+			kept[w.ID] = true
+			w.Seq, w.Lines, w.Obs, w.UpdatedAt = pw.Seq, pw.Lines, pw.Obs, now
+			w.FirstAt, w.LastAt = pw.First.UTC().Format(time.RFC3339Nano), pw.Last.UTC().Format(time.RFC3339Nano)
+			if w.State == store.WindowQueued || w.State == store.WindowSkipped {
+				w.State = store.WindowQueued
+				if pw.Skipped {
+					w.State = store.WindowSkipped
+				}
+			}
+			if err := store.SaveBackfillWindow(tx, w); err != nil {
+				return err
+			}
+		}
+		var add []store.BackfillWindow
+		for _, w := range plan.Windows {
+			if kept[w.ID] {
+				continue
+			}
+			state := store.WindowQueued
+			if w.Skipped {
+				state = store.WindowSkipped
+			}
+			add = append(add, store.BackfillWindow{RunID: run.ID, ID: w.ID, Room: w.Room, Seq: w.Seq, Lines: w.Lines, Obs: w.Obs,
+				FirstAt: w.First.UTC().Format(time.RFC3339Nano), LastAt: w.Last.UTC().Format(time.RFC3339Nano), State: state, UpdatedAt: now})
+		}
+		if err := store.InsertBackfillWindows(tx, add); err != nil {
+			return err
+		}
+		from := run.State
+		run.Token, run.Windows, run.UpdatedAt = plan.Token, len(plan.Windows), now
+		run.Params, _ = json.Marshal(plan.Params)
+		return store.SaveBackfillRun(tx, *run, from)
+	})
+	if err != nil || !ok {
+		return plan, false, err
+	}
+	s.Log.Info("people backfill: pilot kept for a changed plan", "run", run.ID, "windows", len(plan.Windows))
+	return plan, true, nil
 }
 
 // pbStartedPlan is the plan of a run that already started (a model chosen) whose token confirm names:
@@ -811,11 +1298,11 @@ func (s *Service) pbStep(ctx context.Context, db *storage.Store, runID string, a
 		switch b.State {
 		case pbBatchSubmitting, pbBatchUnknown:
 			if b.State == pbBatchUnknown && l.requeue.Load() {
-				// the operator checked the host's batch list: it never ran
-				if err := s.pbRequeueBatch(ctx, db, runID, b.Key); err != nil {
+				// the operator checked the host's batch list and found it did not run; that is not proof, so
+				// its reserved maximum stays charged
+				if err := s.pbReleaseBatch(ctx, db, runID, batches, i); err != nil {
 					return false, true, err
 				}
-				b.State, changed = pbBatchFailed, true
 				continue
 			}
 			ref := openai.BatchRef{API: a.API, BaseURL: a.BaseURL, Kind: openai.BatchChat, Model: b.Model, Count: b.Windows, SubmitKey: b.Key}
@@ -830,7 +1317,7 @@ func (s *Service) pbStep(ctx context.Context, db *storage.Store, runID string, a
 			case err == nil:
 				b.Ref, b.State, changed, inflight = &found, pbBatchSubmitted, true, true
 			case errors.Is(err, openai.ErrBatchNotSubmitted):
-				if err := s.pbRequeueBatch(ctx, db, runID, b.Key); err != nil {
+				if err := s.pbRequeueBatch(ctx, db, runID, b.Key, false); err != nil {
 					return false, true, err
 				}
 				b.State, changed = pbBatchFailed, true
@@ -850,7 +1337,7 @@ func (s *Service) pbStep(ctx context.Context, db *storage.Store, runID string, a
 				continue
 			}
 			if st.State == openai.BatchFailed {
-				if err := s.pbRequeueBatch(ctx, db, runID, b.Key); err != nil {
+				if err := s.pbRequeueBatch(ctx, db, runID, b.Key, false); err != nil {
 					return false, true, err
 				}
 				b.State, changed = pbBatchFailed, true
@@ -863,8 +1350,17 @@ func (s *Service) pbStep(ctx context.Context, db *storage.Store, runID string, a
 			if err := s.pbApplyBatch(ctx, db, run, b.Key, model, outs); err != nil {
 				return false, true, err
 			}
+			// the terminal state is saved before the host's copy is deleted: a crash in between leaves an
+			// applied batch whose delete is tried again, never a submitted reference to a deleted batch
 			b.State, changed = pbBatchApplied, true
-			_ = a.CleanupBatch(ctx, *b.Ref)
+			if err := s.pbSaveBatches(ctx, db, runID, batches, nil); err != nil {
+				return false, true, err
+			}
+			b.Cleaned = a.CleanupBatch(ctx, *b.Ref) == nil
+		case pbBatchApplied:
+			if !b.Cleaned && b.Ref != nil && a.CleanupBatch(ctx, *b.Ref) == nil {
+				b.Cleaned, changed = true, true
+			}
 		}
 	}
 	l.requeue.Store(false) // the operator's release covers the submissions unknown when it was given
@@ -920,6 +1416,10 @@ func (s *Service) pbSubmit(ctx context.Context, db *storage.Store, runID string,
 	if err != nil {
 		return false, true, err
 	}
+	spent, err := store.BackfillGuildSpent(db.Reader(), run.GuildID) // the cap is the server's total across its runs
+	if err != nil {
+		return false, true, err
+	}
 	if len(queued) == 0 {
 		if inflight {
 			return false, true, nil
@@ -941,8 +1441,10 @@ func (s *Service) pbSubmit(ctx context.Context, db *storage.Store, runID string,
 		return true, false, nil
 	}
 	type sent struct {
-		w  store.BackfillWindow
-		bp pbPrompt
+		w    store.BackfillWindow
+		bp   pbPrompt
+		item openai.BatchItem
+		max  float64
 	}
 	var items []openai.BatchItem
 	var picked []sent
@@ -958,15 +1460,18 @@ func (s *Service) pbSubmit(ctx context.Context, db *storage.Store, runID string,
 			skipped = append(skipped, w)
 			continue
 		}
-		v := pbMaxCost(bp, w.Lines, model, peoplebackfill.ModeBatch)
-		if !peoplebackfill.CanSubmit(run.SpentUSD, reserved, next+v, run.BudgetUSD) {
+		if pbBuilt != nil {
+			pbBuilt(w.ID)
+		}
+		v := pbMaxCost(bp, model, peoplebackfill.ModeBatch)
+		if !peoplebackfill.CanSubmit(spent, reserved, next+v, run.BudgetUSD) {
 			full = true
 			break
 		}
 		next += v
 		r := pbRequest(model, bp)
 		items = append(items, openai.BatchItem{ID: w.ID, Chat: &r})
-		picked = append(picked, sent{w, bp})
+		picked = append(picked, sent{w, bp, items[len(items)-1], v})
 	}
 	for _, w := range skipped {
 		if err := s.pbSettleWindow(ctx, db, runID, w, store.WindowSkipped, 0, 0); err != nil {
@@ -988,11 +1493,31 @@ func (s *Service) pbSubmit(ctx context.Context, db *storage.Store, runID string,
 	var kb [8]byte
 	_, _ = rand.Read(kb[:])
 	now := s.Clock.Now().UTC()
-	b := pbBatch{Key: "pbb_" + hex.EncodeToString(kb[:]), State: pbBatchSubmitting, Model: string(model), Windows: len(items), MaxUSD: next,
-		At: now.Format(time.RFC3339Nano)}
-	batches = append(batches, b)
-	// the intent first: after a crash between this and the create call the batch is reconciled, never sent twice
+	b := pbBatch{Key: "pbb_" + hex.EncodeToString(kb[:]), State: pbBatchSubmitting, Model: string(model), At: now.Format(time.RFC3339Nano)}
+	// the intent first: after a crash between this and the create call the batch is reconciled, never sent
+	// twice. The same transaction checks each prompt is still current (pbPromptCurrent): a window whose
+	// line was deleted, edited or withdrawn since its build stays queued and is built again.
 	err = db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+		var keep []sent
+		for _, p := range picked {
+			ok, err := s.pbPromptCurrent(tx, run.GuildID, p.bp)
+			if err != nil {
+				return err
+			}
+			if ok {
+				keep = append(keep, p)
+			}
+		}
+		picked, items = keep, nil
+		for _, p := range picked {
+			items = append(items, p.item)
+			b.MaxUSD += p.max
+		}
+		if len(items) == 0 {
+			return nil
+		}
+		b.Windows = len(items)
+		batches = append(batches, b)
 		for _, p := range picked {
 			w := p.w
 			w.State, w.Batch, w.PromptHash, w.ReadAt, w.UpdatedAt = store.WindowSubmitted, b.Key, p.bp.hash, p.bp.readAt, now.Format(time.RFC3339)
@@ -1005,6 +1530,9 @@ func (s *Service) pbSubmit(ctx context.Context, db *storage.Store, runID string,
 	})
 	if err != nil {
 		return false, true, err
+	}
+	if len(items) == 0 {
+		return false, false, nil // every prompt changed since its build: the next step builds them again
 	}
 	// a shutdown does not cut the create call: a cut call leaves a batch the host may run and bill whose
 	// results nobody can read (Anthropic keeps no key to find it by); Close waits for it, bounded
@@ -1036,15 +1564,43 @@ func (s *Service) pbSubmit(ctx context.Context, db *storage.Store, runID string,
 	return false, false, nil
 }
 
-// pbRequeueBatch sends a batch's unsettled windows back to the queue (unsent=true: they never left, so
-// the send is not counted).
-func (s *Service) pbRequeueBatch(ctx context.Context, db *storage.Store, runID, key string, unsent ...bool) error {
+// pbReleaseBatch releases the unknown batch batches[i] in one transaction: its windows go back to the
+// queue, its reserved maximum is charged to the run (not to memory_spend: no usage was reported), and the
+// batch list is saved with it released.
+func (s *Service) pbReleaseBatch(ctx context.Context, db *storage.Store, runID string, batches []pbBatch, i int) error {
+	b := &batches[i]
+	now := s.Clock.Now().UTC()
+	b.State = pbBatchReleased
+	return db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+		ws, err := store.BackfillBatchWindows(tx, runID, b.Key)
+		if err != nil {
+			return err
+		}
+		for _, w := range ws {
+			w.State, w.Batch, w.UpdatedAt = store.WindowQueued, "", now.Format(time.RFC3339)
+			if w.Attempts >= pbMaxAttempts {
+				w.State = store.WindowFailed
+			}
+			if err := store.SaveBackfillWindow(tx, w); err != nil {
+				return err
+			}
+		}
+		if err := store.AddBackfillRunSpend(tx, runID, b.MaxUSD, now.Format(time.RFC3339)); err != nil {
+			return err
+		}
+		return s.pbSaveBatches(ctx, db, runID, batches, tx)
+	})
+}
+
+// pbRequeueBatch sends a batch's unsettled windows back to the queue (unsent: they never left, so the
+// send is not counted).
+func (s *Service) pbRequeueBatch(ctx context.Context, db *storage.Store, runID, key string, unsent bool) error {
 	ws, err := store.BackfillBatchWindows(db.Reader(), runID, key)
 	if err != nil {
 		return err
 	}
 	for _, w := range ws {
-		if len(unsent) > 0 && unsent[0] {
+		if unsent {
 			w.Attempts = max(0, w.Attempts-1)
 		}
 		if err := s.pbRequeue(ctx, db, runID, w, 0, 0); err != nil {
@@ -1081,7 +1637,9 @@ func (s *Service) pbApplyBatch(ctx context.Context, db *storage.Store, run store
 		switch {
 		case errors.Is(o.Err, openai.ErrRefused):
 			err = s.pbSettleWindow(ctx, db, run.ID, w, store.WindowRefused, spent, calls)
-		case o.Err != nil || o.Chat == nil:
+		case o.Err != nil || o.Chat == nil || !pbComplete(*o.Chat):
+			// an error, or an answer cut at its output limit or not the people list: billed, never coverage;
+			// sent again until pbMaxAttempts, then failed
 			err = s.pbRequeue(ctx, db, run.ID, w, spent, calls)
 		default:
 			bp, berr := s.pbBuildPrompt(db, run.GuildID, w)
@@ -1093,8 +1651,8 @@ func (s *Service) pbApplyBatch(ctx context.Context, db *storage.Store, run store
 			case bp.hash != w.PromptHash:
 				err = s.pbRequeue(ctx, db, run.ID, w, spent, calls) // a line changed or went since it was sent
 			default:
-				facts, rejected := bp.p.ParsePeople(o.Chat.Content, episodes.PeopleOptions{})
-				err = s.pbApply(ctx, db, run.ID, run.GuildID, w, facts, rejected, bp, spent, calls)
+				facts, rejected := pbFacts(bp, o.Chat.Content)
+				err = s.pbApply(ctx, db, run.ID, run.GuildID, w, facts, rejected, bp, w.ReadAt, spent, calls)
 			}
 		}
 		if err != nil {
@@ -1117,12 +1675,17 @@ func (s *Service) pbApplyPilot(ctx context.Context, db *storage.Store, runID str
 		return err
 	}
 	for _, w := range ws {
-		ans, ok := pbAnswers(w.Result)[run.Model]
-		if !ok || ans.Failed != "" {
+		have := pbAnswers(w.Result)
+		ans, ok := have[run.Model]
+		refused := false
+		for _, a := range have {
+			refused = refused || a.Refused // a refusal by either model is not applied through the other's answer
+		}
+		if !refused && (!ok || ans.Failed != "") {
 			continue
 		}
 		switch {
-		case ans.Refused:
+		case refused:
 			err = s.pbSettleWindow(ctx, db, runID, w, store.WindowRefused, 0, 0)
 		case ans.Skipped:
 			err = s.pbSettleWindow(ctx, db, runID, w, store.WindowSkipped, 0, 0)
@@ -1135,7 +1698,7 @@ func (s *Service) pbApplyPilot(ctx context.Context, db *storage.Store, runID str
 				continue
 			}
 			w.Result = nil
-			err = s.pbApply(ctx, db, runID, run.GuildID, w, ans.Facts, ans.Rejected, bp, 0, 0)
+			err = s.pbApply(ctx, db, runID, run.GuildID, w, ans.Facts, ans.Rejected, bp, ans.ReadAt, 0, 0)
 		}
 		if err != nil {
 			return err
@@ -1198,7 +1761,8 @@ var pbRefPattern = regexp.MustCompile(`\{@([^{}]+)\}`)
 
 // peopleBackfillReview is memory.people.backfill.review: the pilot's review set, rendered for the
 // console with the labels the prompt showed. It is never logged. Each item is checked again: a window
-// whose lines changed, or a person who withdrew consent, is left out (counted in dropped).
+// whose lines changed, or a fact the write gate refuses now (a withdrawal, a tombstone, a forget or hide
+// marker), is left out (counted in dropped).
 func (s *Service) peopleBackfillReview(ctx context.Context, req action.Request, db *storage.Store, in map[string]any) action.Result {
 	run, ok, err := s.pbFindRun(db, in)
 	if err != nil {
@@ -1221,17 +1785,14 @@ func (s *Service) peopleBackfillReview(ctx context.Context, req action.Request, 
 	for _, w := range ws {
 		byID[w.ID] = w
 	}
-	tx, err := db.Reader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return s.failErr(req, errcode.IO, "error.storage", err, nil)
-	}
-	denied, err := s.deniedPeople(tx, run.GuildID)
-	_ = tx.Rollback()
-	if err != nil {
-		return s.failErr(req, errcode.IO, "error.storage", err, nil)
+	type candidate struct {
+		it  pbReviewItem
+		f   episodes.PersonFact
+		ans pbAnswer
+		bp  pbPrompt
 	}
 	prompts := map[string]pbPrompt{}
-	var shown []map[string]any
+	var cands []candidate
 	dropped := 0
 	for _, it := range items {
 		w := byID[it.Window]
@@ -1240,7 +1801,6 @@ func (s *Service) peopleBackfillReview(ctx context.Context, req action.Request, 
 			dropped++
 			continue
 		}
-		f := ans.Facts[it.Index]
 		bp, seen := prompts[w.ID]
 		if !seen {
 			bp, err = s.pbBuildPrompt(db, run.GuildID, w)
@@ -1249,19 +1809,47 @@ func (s *Service) peopleBackfillReview(ctx context.Context, req action.Request, 
 			}
 			prompts[w.ID] = bp
 		}
-		if !bp.ok || bp.hash != ans.Hash || denied[f.About] {
+		if !bp.ok || bp.hash != ans.Hash {
 			dropped++
 			continue
 		}
+		cands = append(cands, candidate{it, ans.Facts[it.Index], ans, bp})
+	}
+	// every fact through the write gate (consent, tombstones, the suppress markers and the statement's
+	// forget or hide), read-only, before it is shown
+	tx, err := db.Reader().BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
+	}
+	defer tx.Rollback()
+	memoryOut, err := withdrawnRefsTx(tx, privacy.Memory)
+	if err == nil {
+		var profileOut map[string]bool
+		profileOut, err = withdrawnRefsTx(tx, privacy.Profile)
+		kept := cands[:0]
+		for _, c := range cands {
+			if err != nil {
+				break
+			}
+			var ok bool
+			ok, err = s.pbFactPasses(tx, run.GuildID, run.ID, c.f, c.ans.ReadAt, c.bp.text, memoryOut, profileOut)
+			if ok {
+				kept = append(kept, c)
+			} else {
+				dropped++
+			}
+		}
+		cands = kept
+	}
+	if err != nil {
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
+	}
+	var shown []map[string]any
+	for _, c := range cands {
+		it, f, bp := c.it, c.f, c.bp
 		var speakers []string
-		gone := false
 		for _, by := range f.By {
-			gone = gone || denied[by]
 			speakers = append(speakers, pbLabel(bp, by))
-		}
-		if gone {
-			dropped++
-			continue
 		}
 		text := pbRefPattern.ReplaceAllStringFunc(f.Text, func(m string) string { return pbLabel(bp, m[2:len(m)-1]) })
 		shown = append(shown, map[string]any{"part": it.Part, "window_id": it.Window, "model": it.Model, "kind": f.Kind, "topic": f.Topic,
