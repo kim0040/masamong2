@@ -593,7 +593,7 @@ func (s *Service) pbDryRunOutput(plan pbPlan, spent float64) map[string]any {
 	if id, _, err := s.pbAdapter(s.Doc(), ""); err == nil {
 		provider, ready = id, true
 	}
-	return map[string]any{
+	out := map[string]any{
 		"mode": "dry_run", "guild_id": plan.Params.Guild, "rooms": plan.Rooms, "rooms_asked": len(plan.Params.Rooms),
 		"since": plan.Params.Since, "until": plan.Params.Until, "until_from": plan.Params.UntilFrom,
 		"windows": len(plan.Windows), "sent_windows": len(sendable), "skipped_windows": plan.Skipped, "covered_windows": plan.Covered, "pilot_windows": len(pilot),
@@ -604,6 +604,12 @@ func (s *Service) pbDryRunOutput(plan pbPlan, spent float64) map[string]any {
 		"provider": provider, "provider_ready": ready,
 		"token": plan.Token, "model_calls": 0,
 	}
+	if s.guildPrivacy(plan.Params.Guild).NoSensitive {
+		// the server keeps person memory only after the sensitive-topic check, which the backfill does not
+		// run: its claims are stored pending and are not read until something classifies them
+		out["warnings"] = []string{"no_sensitive_pending"}
+	}
+	return out
 }
 
 // pbDryRun is mode=dry_run: no model call. It keeps the plan's parameters for pilot and run.
@@ -1234,6 +1240,11 @@ func pbRunJSON(db *storage.Store, run store.BackfillRun) map[string]any {
 	}
 	if spent, err := store.BackfillGuildSpent(db.Reader(), run.GuildID); err == nil {
 		out["guild_spent_usd"] = usd(spent) // every run of the server, against the cap
+	}
+	var pending int // claims stored pending (a no_sensitive server): not read until classified
+	if db.Reader().QueryRow(`SELECT COUNT(*) FROM person_claim WHERE guild_id=? AND source=? AND state=?`, run.GuildID, "backfill:"+run.ID,
+		store.PersonPending).Scan(&pending) == nil {
+		out["claims_pending"] = pending
 	}
 	inflight := 0
 	for _, b := range pbDecodeBatches(run.Batches) {

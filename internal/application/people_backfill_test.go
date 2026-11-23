@@ -2183,3 +2183,33 @@ func TestPeopleBackfillBusyRefusesBeforeSupersede(t *testing.T) {
 		t.Fatalf("the refused pilot superseded the older plan's run: %s", kept.State)
 	}
 }
+
+// On a no_sensitive server the backfill's claims are stored pending (nothing in the backfill runs the
+// sensitive-topic check): the dry run says so before anything is paid, and status counts them.
+func TestPeopleBackfillNoSensitiveWarns(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	if _, ok := pbDry(t, s, nil)["warnings"]; ok {
+		t.Fatal("a warning on an ordinary server")
+	}
+	d := s.Doc()
+	g := d.Guilds["g1"]
+	g.Privacy.NoSensitive = true
+	d.Guilds = map[string]config.GuildSettings{"g1": g}
+	s.setDoc(d, s.Revision())
+	dry := pbDry(t, s, nil)
+	if w, _ := dry["warnings"].([]any); len(w) != 1 || w[0] != "no_sensitive_pending" {
+		t.Fatalf("dry run warnings on a no_sensitive server: %v", dry["warnings"])
+	}
+	token, _ := pbPiloted(t, s, nil)
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+		t.Fatal(res.Error)
+	}
+	pbWait(t, s, "run", pbState(store.BackfillDone))
+	_, out := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "status", "guild_id": "g1"})
+	run := out["run"].(map[string]any)
+	if n, _ := run["claims_pending"].(float64); n == 0 || n != run["claims"].(float64) {
+		t.Fatalf("pending claims in status: %v of %v", run["claims_pending"], run["claims"])
+	}
+}
