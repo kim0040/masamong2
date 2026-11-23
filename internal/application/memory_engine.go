@@ -37,7 +37,7 @@ type memoryState struct {
 // memoryConfigKey is everything MemoryEngine builds the engine from. A config change that leaves it
 // the same (a channel's rules, a tool limit, a persona...) keeps the engine and its loaded index; with
 // a long history a rebuild takes seconds and briefly holds a second copy of the index in memory.
-func memoryConfigKey(doc config.Document) string {
+func (s *Service) memoryConfigKey(doc config.Document) string {
 	used := map[string]config.Provider{}
 	keys := map[string]string{}
 	for _, m := range doc.Models {
@@ -45,7 +45,7 @@ func memoryConfigKey(doc config.Document) string {
 			used[m.Provider] = p
 			// a key replaced under the same reference (keychain:/file:) must reach the engine's adapter;
 			// only a hash of it goes into the comparison
-			if cred, err := providers.Resolve(p.CredentialRef); err == nil && cred.Present() {
+			if cred, err := s.credential(p.CredentialRef); err == nil && cred.Present() {
 				sum := sha256.Sum256([]byte(cred.Value()))
 				keys[m.Provider] = hex.EncodeToString(sum[:8])
 			}
@@ -121,7 +121,7 @@ func (s *Service) llmAdapterFor(doc config.Document, role string) (*openai.Adapt
 	if !ok || p.Kind != config.KindOpenAI {
 		return nil, fmt.Errorf("models.%s.provider %q is not an openai_compat provider", role, m.Provider)
 	}
-	cred, err := providers.Resolve(p.CredentialRef)
+	cred, err := s.credential(p.CredentialRef)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +165,7 @@ func (s *Service) batchResolver(doc config.Document, eng *engine.Engine) engine.
 		case cp.Kind != config.KindOpenAI || s.practice:
 			return nil, fmt.Errorf("provider %q is not an openai_compat provider any more", p.ID)
 		}
-		cred, err := providers.Resolve(cp.CredentialRef)
+		cred, err := s.credential(cp.CredentialRef)
 		if err != nil {
 			return nil, fmt.Errorf("provider %q: %w", p.ID, err)
 		}
@@ -207,7 +207,7 @@ func (s *Service) failoverFor(doc config.Document, role string, m config.Model) 
 		if !ok || p.Kind != config.KindOpenAI || p.Disabled {
 			continue
 		}
-		cred, err := providers.Resolve(p.CredentialRef)
+		cred, err := s.credential(p.CredentialRef)
 		if err != nil || !cred.Present() {
 			continue
 		}
@@ -289,7 +289,7 @@ func (s *Service) MemoryEngine() (*engine.Engine, error) {
 		return st.eng, nil
 	}
 	doc := live.doc
-	key := memoryConfigKey(doc)
+	key := s.memoryConfigKey(doc)
 	if st.eng != nil && st.key == key {
 		st.rev = live.rev // nothing the engine uses changed
 		return st.eng, nil

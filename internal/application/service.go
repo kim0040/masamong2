@@ -303,7 +303,7 @@ func openService(dataRoot string, clk clock.Clock, webBuild bool, log *slog.Logg
 	if log != nil {
 		s.Log = s.CaptureLogs(log)
 	}
-	reg := buildRegistry(config.Default("", dataRoot), s.Log, s.Clock.Now)
+	reg := buildRegistryWith(config.Default("", dataRoot), s.Log, s.Clock.Now, s.credential)
 	reg.hooks = &s.hooks
 	s.cfg.Store(&configSnapshot{doc: config.Document{}, reg: reg})
 	opened := false
@@ -510,7 +510,7 @@ func (s *Service) setDoc(doc config.Document, rev int) {
 		regDoc = offlineProviders(doc)
 	}
 	// Provider governors outlive this registry: requests on the old snapshot still hold their slots.
-	reg := buildRegistry(regDoc, s.Log, s.Clock.Now)
+	reg := buildRegistryWith(regDoc, s.Log, s.Clock.Now, s.credential)
 	reg.hooks = &s.hooks
 	if !s.practice {
 		reg.addBuiltinOpenMeteo() // worldwide weather needs no key

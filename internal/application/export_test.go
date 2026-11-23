@@ -3,7 +3,9 @@ package application
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"testing"
 	"time"
 
 	"masamong/internal/chat"
@@ -13,6 +15,24 @@ import (
 	"masamong/internal/providers/openai"
 	"masamong/internal/tools"
 )
+
+// SetEnvForTest gives this service the value an environment variable would give it, for the
+// credential references "env:NAME" it resolves, without touching the process environment (a test
+// that sets that cannot run in parallel). An empty value is a variable that is not set. Set it before
+// the configuration that uses the reference is applied: a registry is built from what it resolves then.
+func (s *Service) SetEnvForTest(t testing.TB, name, value string) {
+	t.Helper()
+	s.hooks.credentials.setForTest(t, name, value)
+}
+
+func (c *credentialStandIns) setForTest(t testing.TB, name, value string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "secret")
+	if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c.refs.Store("env:"+name, "file:"+path)
+}
 
 // SetDocForTest swaps the live configuration without the apply flow (no revision, no audit), for
 // tests that need a shape config.apply would refuse.

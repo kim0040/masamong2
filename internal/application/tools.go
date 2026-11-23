@@ -200,7 +200,7 @@ func (s *Service) runHTTPTool(ctx context.Context, req action.Request, r tools.R
 	}
 	secret := ""
 	if h.CredentialRef != "" {
-		cred, err := providers.Resolve(h.CredentialRef)
+		cred, err := s.credential(h.CredentialRef)
 		if err != nil || !cred.Present() {
 			return action.OK(req, map[string]any{"status": "unconfigured", "live": false, "tool": r.ID,
 				"message": s.msg(req, "provider.unconfigured", "provider", r.ID)})

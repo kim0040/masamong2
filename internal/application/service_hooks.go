@@ -2,10 +2,13 @@ package application
 
 import (
 	"context"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	"masamong/internal/memory/engine"
+	"masamong/internal/providers"
 )
 
 // serviceHooks are what a test injects into one service: shorter intervals, a function run at a point
@@ -49,6 +52,30 @@ type serviceHooks struct {
 	redirectHost atomic.Pointer[func(host string) bool]
 	// oldEditsAtOnce settles old edits at the first idle pass instead of oldEditsDelay after the start.
 	oldEditsAtOnce bool
+	// credentials stand in for the process environment's variables (credential below).
+	credentials credentialStandIns
+}
+
+// credentialStandIns point a credential reference at another one, per service: a test gives its
+// service the key an environment variable would give it without touching the process environment,
+// which every parallel test shares. Empty in production.
+type credentialStandIns struct {
+	refs sync.Map // reference as configured ("env:NAME") → reference to read instead ("file:PATH")
+}
+
+// credential reads the secret behind ref: the stand-in a test set for it, else the reference itself.
+func (s *Service) credential(ref string) (providers.Credential, error) {
+	return s.hooks.credentials.resolve(ref)
+}
+
+func (c *credentialStandIns) resolve(ref string) (providers.Credential, error) {
+	asked := strings.TrimSpace(ref)
+	if to, ok := c.refs.Load(asked); ok {
+		cred, err := providers.Resolve(to.(string))
+		cred.Ref = asked // callers see the reference that is configured
+		return cred, err
+	}
+	return providers.Resolve(ref)
 }
 
 // durationOr is d, or def when d is zero (an interval a test did not shrink).

@@ -22,7 +22,6 @@ import (
 	"masamong/internal/errcode"
 	"masamong/internal/memory/blocks"
 	"masamong/internal/memory/engine"
-	"masamong/internal/providers"
 )
 
 func (s *Service) channels(req action.Request) action.Result {
@@ -108,7 +107,7 @@ func (s *Service) channelsList(req action.Request) action.Result {
 	}
 	// whether a bot token can be read now, so the console asks Discord about it only when there is one
 	tokenSaved := false
-	if cred, err := providers.Resolve(s.Doc().Discord.TokenRef); err == nil {
+	if cred, err := s.credential(s.Doc().Discord.TokenRef); err == nil {
 		tokenSaved = cred.Present()
 	}
 	out := map[string]any{
