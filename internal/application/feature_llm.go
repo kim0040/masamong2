@@ -3,6 +3,7 @@ package application
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -16,6 +17,20 @@ import (
 // digests). A missing role uses the response model. It respects the monthly model budget and records
 // what it spent under kind, like chat turns do.
 func (s *Service) featureText(ctx context.Context, role, kind, system, prompt string, maxTokens int, temperature float64) (string, float64, error) {
+	return s.featureAsk(ctx, role, kind, system, prompt, maxTokens, temperature, false)
+}
+
+// errNoText is an answer with no text: a call that was made and charged.
+var errNoText = errors.New("returned no text")
+
+// featureTextOnce is featureText sent once to each model it asks (openai.ChatRequest.Once, as the paid
+// people backfill sends): an answer cut at the output limit with no text is not asked again without
+// thinking or with more room, and comes back as errNoText.
+func (s *Service) featureTextOnce(ctx context.Context, role, kind, system, prompt string, maxTokens int, temperature float64) (string, float64, error) {
+	return s.featureAsk(ctx, role, kind, system, prompt, maxTokens, temperature, true)
+}
+
+func (s *Service) featureAsk(ctx context.Context, role, kind, system, prompt string, maxTokens int, temperature float64, once bool) (string, float64, error) {
 	if budget := parseUSD(s.Doc().Limits.MonthlyBudgetUSD, 0); budget > 0 {
 		if _, spent, ok := s.monthSpend(); ok && spent >= budget {
 			return "", 0, ErrChatBudget
@@ -63,7 +78,7 @@ func (s *Service) featureText(ctx context.Context, role, kind, system, prompt st
 		}
 	}
 	began := time.Now()
-	res, err := a.Chat(ctx, openai.ChatRequest{Model: m.Model, Messages: msgs, MaxTokens: maxTokens, Temperature: &t, Effort: effort, Quick: quick})
+	res, err := a.Chat(ctx, openai.ChatRequest{Model: m.Model, Messages: msgs, MaxTokens: maxTokens, Temperature: &t, Effort: effort, Quick: quick, Once: once})
 	cost := 0.0
 	if res.CostUSD != nil {
 		cost = *res.CostUSD
@@ -75,7 +90,7 @@ func (s *Service) featureText(ctx context.Context, role, kind, system, prompt st
 	s.noteProvider(m.Provider, err)
 	class := errclass.Of(err)
 	if err == nil && strings.TrimSpace(res.Content) == "" {
-		err = fmt.Errorf("%s model returned no text (finish_reason=%s)", src, res.FinishReason)
+		err = fmt.Errorf("%s model %w (finish_reason=%s)", src, errNoText, res.FinishReason)
 		class = errclass.Empty
 	}
 	// the role is the feature (summary, fortune, notice digest), so the ledger shows what the call was for

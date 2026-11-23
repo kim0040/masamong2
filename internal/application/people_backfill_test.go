@@ -2413,6 +2413,63 @@ func TestPeopleBackfillDoesNotSendDeletedThread(t *testing.T) {
 			}
 		}
 	})
+	// A window of an ordinary room shows a mentioned person's label that only the thread gave. The thread
+	// is deleted between that window's build and its send: the check before the send refuses it, the
+	// window is built again without the label, and its lines still go (Joon's line is the control).
+	t.Run("pilot label", func(t *testing.T) {
+		h := newPBHost(t)
+		s := pbService(t, h, "anthropic")
+		pbSeed(t, s, 70)
+		pbThreadLabelSeed(t, s)
+		var armed atomic.Bool
+		armed.Store(true)
+		hit := pbDeleteThreadOnMention(t, s, &armed)
+		pbPiloted(t, s, nil)
+		if !hit.Load() {
+			t.Fatal("no window that mentions the person was built in the pilot")
+		}
+		sent := h.bodies()
+		if strings.Contains(sent, pbLabelSentinel) {
+			t.Fatal("the label only the deleted thread gave left the process")
+		}
+		if !strings.Contains(sent, "mentionctl") || !strings.Contains(sent, "mentionday") {
+			t.Fatal("control: the lines of the windows that mention the person were not sent")
+		}
+	})
+	t.Run("run label", func(t *testing.T) {
+		h := newPBHost(t)
+		s := pbService(t, h, "anthropic")
+		pbSeed(t, s, 70)
+		pbThreadLabelSeed(t, s)
+		var armed atomic.Bool
+		hit := pbDeleteThreadOnMention(t, s, &armed)
+		token, run := pbPiloted(t, s, nil)
+		if bp := pbMentionWindowPrompt(t, s, run.ID); !strings.Contains(bp.user, pbLabelSentinel) {
+			t.Fatal("control: while the thread lives, a window that mentions the person does not show its label")
+		}
+		h.mu.Lock()
+		creates := len(h.creates)
+		h.mu.Unlock()
+		armed.Store(true)
+		if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+			t.Fatal(res.Error)
+		}
+		pbWait(t, s, "run", pbState(store.BackfillDone))
+		if !hit.Load() {
+			t.Fatal("no window that mentions the person was built in the run")
+		}
+		var all []string
+		for _, c := range h.creations()[creates:] {
+			pbStrings(c, "", &all)
+		}
+		batches := strings.Join(all, "\n")
+		if strings.Contains(batches, pbLabelSentinel) {
+			t.Fatal("the label only the deleted thread gave went out in a batch")
+		}
+		if !strings.Contains(batches, "mentionctl") || !strings.Contains(batches, "mentionday") {
+			t.Fatal("control: the lines of the windows that mention the person were not sent in a batch")
+		}
+	})
 }
 
 // The pilot review follows chat's hidden-topic rule: once hearsay on a topic about a person was hidden,
@@ -2489,7 +2546,10 @@ func TestPeopleBackfillReviewKeepsHiddenTopicHidden(t *testing.T) {
 // pilot reviewed: the run refuses with plan_changed (a new pilot is needed) and sends no batch, instead of
 // moving the pilot onto the changed plan and sending the window straight to a batch.
 func TestPeopleBackfillRejectsChangedPilotWithSameWindowID(t *testing.T) {
-	for _, how := range []string{"deleted", "edited"} {
+	// deleted: the plan's token changes. edited: an edit alone keeps the token, and the pilot is compared
+	// all the same. edited, plan changed: an edit and a line captured late outside the pilot (the pilot is
+	// moved onto the changed plan only when its windows are the ones reviewed).
+	for _, how := range []string{"deleted", "edited", "edited, plan changed"} {
 		t.Run(how, func(t *testing.T) {
 			h := newPBHost(t)
 			s := pbService(t, h, "anthropic")
@@ -2515,6 +2575,8 @@ func TestPeopleBackfillRejectsChangedPilotWithSameWindowID(t *testing.T) {
 				if _, err := s.Store.DB.Exec(`UPDATE memory_observations SET content='I really like editedtopic now', edited_at='2026-10-01T00:00:00Z' WHERE observation_id=?`, inside); err != nil {
 					t.Fatal(err)
 				}
+			}
+			if how == "edited, plan changed" {
 				// and a line captured late outside the pilot, so the plan changes and the pilot is moved onto it
 				var outside store.BackfillWindow
 				all, _ := store.BackfillWindows(s.Store.Reader(), run.ID, false)
@@ -2532,7 +2594,11 @@ func TestPeopleBackfillRejectsChangedPilotWithSameWindowID(t *testing.T) {
 				}
 			}
 			dry := pbDry(t, s, nil)
-			if dry["token"] == token {
+			if how == "edited" {
+				if dry["token"] != token {
+					t.Fatal("an edit alone changed the plan's token")
+				}
+			} else if dry["token"] == token {
 				t.Fatal("the plan did not change")
 			}
 			ids := map[string]bool{}
@@ -2554,6 +2620,131 @@ func TestPeopleBackfillRejectsChangedPilotWithSameWindowID(t *testing.T) {
 			if kept.Token != token || kept.State != store.BackfillPiloted {
 				t.Fatalf("the pilot was moved onto the changed plan: %+v", kept)
 			}
+			if how != "edited" {
+				return
+			}
+			// the new pilot the refusal asks for can be made under the same token, and the run then starts
+			if res, out := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "pilot", "confirm": token, "guild_id": "g1"}); !res.OK || out["pilot_windows"] == nil {
+				t.Fatalf("a new pilot of the same plan: %+v %v", res.Error, out)
+			}
+			again := pbWait(t, s, "pilot", pbState(store.BackfillPiloted))
+			if again.ID == run.ID {
+				t.Fatal("the changed pilot was reported again instead of a new one")
+			}
+			if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+				t.Fatalf("the run after the new pilot: %+v", res.Error)
+			}
+			pbWait(t, s, "run", pbState(store.BackfillDone))
 		})
+	}
+	// A run whose pilot answers are applied after an edit inside a pilot window (a run started before the
+	// edit, continued after it) applies none of them and sends none of the pilot windows in a batch.
+	t.Run("edited, at apply", func(t *testing.T) {
+		h := newPBHost(t)
+		s := pbService(t, h, "anthropic")
+		pbSeed(t, s, 70)
+		_, run := pbPiloted(t, s, nil)
+		pilots, _ := store.BackfillWindows(s.Store.Reader(), run.ID, true)
+		var w store.BackfillWindow
+		for _, p := range pilots {
+			if len(p.Obs) >= 3 {
+				w = p
+				break
+			}
+		}
+		if w.ID == "" {
+			t.Fatal("no pilot window with an inside line")
+		}
+		if _, err := s.Store.DB.Exec(`UPDATE memory_observations SET content='I really like editedtopic now', edited_at='2026-10-01T00:00:00Z' WHERE observation_id=?`, w.Obs[1]); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Store.DB.Exec(`UPDATE people_backfill_run SET model=? WHERE id=?`, string(peoplebackfill.ModelHaiku), run.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.pbApplyPilot(t.Context(), s.Store, run.ID); !errors.Is(err, errPilotChanged) {
+			t.Fatalf("the pilot answers were applied over a changed window: %v", err)
+		}
+		left, _ := store.BackfillWindows(s.Store.Reader(), run.ID, true, store.WindowQueued)
+		if len(left) != len(pilots) {
+			t.Fatalf("%d of %d pilot windows were settled", len(pilots)-len(left), len(pilots))
+		}
+		for _, p := range left {
+			if len(p.Result) == 0 && p.ID == w.ID {
+				t.Fatal("the changed window's stored answers were cleared, so it would go to a batch")
+			}
+		}
+		if n := pbCountClaims(t, s, "1=1"); n != 0 {
+			t.Fatalf("%d claims were applied from the pilot", n)
+		}
+		// the run stopped there: continuing it is refused for a new pilot, nothing is batched
+		if _, err := s.Store.DB.Exec(`UPDATE people_backfill_run SET state=? WHERE id=?`, store.BackfillStopped, run.ID); err != nil {
+			t.Fatal(err)
+		}
+		res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": run.Token})
+		if res.OK || res.Error.MessageKey != "people_backfill.plan_changed" {
+			t.Fatalf("continuing a run whose pilot window changed: %+v", res)
+		}
+		time.Sleep(100 * time.Millisecond)
+		if n := len(h.creations()); n != 0 {
+			t.Fatalf("%d batches were sent", n)
+		}
+	})
+}
+
+// The paid backfill writes through the same gate: a fact that writes out a known name of someone other
+// than its subject is not stored, as hearsay (Mina says Joon practises with Charlie) or as a statement of
+// one's own (Mina says Joon moved). Charlie's forget-all then has nothing to miss. The control: the
+// plain facts of the same run are stored.
+func TestPeopleBackfillRefusesLiteralKnownName(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	pbSegment(t, s, 70, [3]string{"101", "Mina", "Joon practices kn-practice with Charlie every week"},
+		[3]string{"102", "Joon", "yes we do it every single week"}, [3]string{"103", "Charlie", "see you all there next time"})
+	pbSegment(t, s, 71, [3]string{"101", "Mina", "Joon moved to kn-sentinelcity, I heard"}, [3]string{"102", "Joon", "anyway see you tomorrow then"})
+	h.mu.Lock()
+	h.rewrite = func(model, prompt string) (string, string, bool) {
+		switch {
+		case strings.Contains(prompt, "kn-practice"):
+			ev, mina := pbLineOf(prompt, "kn-practice")
+			_, joon := pbLineOf(prompt, "yes we do")
+			raw, _ := json.Marshal(map[string]any{"people": []any{map[string]any{"about": joon, "kind": "other", "topic": "practice",
+				"text": "{" + joon + "} practices kn-practice with Charlie", "by": []string{mina}, "ev": []string{ev}}}})
+			return string(raw), "end_turn", true
+		case strings.Contains(prompt, "kn-sentinelcity"):
+			ev, mina := pbLineOf(prompt, "kn-sentinelcity")
+			raw, _ := json.Marshal(map[string]any{"people": []any{map[string]any{"about": mina, "kind": "other", "topic": "news",
+				"text": "{" + mina + "} says Joon moved to kn-sentinelcity", "by": []string{mina}, "ev": []string{ev}}}})
+			return string(raw), "end_turn", true
+		}
+		return "", "", false
+	}
+	h.mu.Unlock()
+	token, _ := pbPiloted(t, s, nil)
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+		t.Fatal(res.Error)
+	}
+	pbWait(t, s, "run", pbState(store.BackfillDone))
+	if n := pbCountClaims(t, s, `text LIKE '% likes %'`); n == 0 {
+		t.Fatal("control: the run stored no plain fact")
+	}
+	if n := pbCountClaims(t, s, `text LIKE '%kn-practice%'`); n != 0 {
+		t.Errorf("hearsay writing out Charlie's name was stored: %d", n)
+	}
+	if n := pbCountClaims(t, s, `text LIKE '%kn-sentinelcity%'`); n != 0 {
+		t.Errorf("a statement of Mina's own writing out Joon's name was stored: %d", n)
+	}
+	req := func(confirm any) map[string]any {
+		return map[string]any{"guild_id": "g1", "user_id": "103", "scope": "all", "confirm": confirm}
+	}
+	prev, out := pbExec(t, s, "memory.mine.forget", req(""))
+	if !prev.OK {
+		t.Fatalf("preview: %+v", prev.Error)
+	}
+	if done, _ := pbExec(t, s, "memory.mine.forget", req(out["token"])); !done.OK {
+		t.Fatalf("forget: %+v", done.Error)
+	}
+	if n := pbCountClaims(t, s, `text LIKE '%Charlie%'`); n != 0 {
+		t.Errorf("after Charlie's forget-all, %d claim(s) naming him by label remain", n)
 	}
 }

@@ -8,11 +8,14 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"masamong/internal/features/privacy"
+	"masamong/internal/lang"
 	"masamong/internal/memory/corpus"
 	"masamong/internal/memory/episodes"
+	"masamong/internal/memory/search"
 	"masamong/internal/memory/store"
 )
 
@@ -34,6 +37,9 @@ func init() {
 //     subject's {@ref} in a text of at most 120 runes, a topic of at most 20, at least one evidence id;
 //   - a direct claim (subject = speaker) names nobody but its subject: one naming another person is what
 //     the speaker said about them, never the speaker's own statement;
+//   - the text writes out no known name of anyone but the subject (knownNames: every label person_alias
+//     holds for the server, old ones included), outside its {@ref} tokens: such a person's forget, which
+//     finds them by reference, would not reach it;
 //   - evidence: every observation is a live human Discord line of this server, current (no pending
 //     deletion or edit: store.ObservationCurrent), written by the speaker, with the text the writer read
 //     (Lines) and not edited after it read it (ReadAt); all of it in one room;
@@ -41,9 +47,10 @@ func init() {
 //     withdrawn profile, and none of them has withdrawn memory;
 //   - person_memory_suppress: no forget or hide marker matches at or after the newest evidence time: all
 //     (on the subject, the speaker or anyone the text names), the claim, the statement's text (another
-//     writer citing other lines), or for hearsay the topic;
+//     writer citing other lines), for hearsay the topic, or a line the subject corrected an item of;
 //   - no item a member corrected ("틀려": hidden in an episode never made again) rests on the same lines
-//     and names the subject, so a v1.6 correction is not undone by a derivation or the backfill;
+//     and names the subject (the line rule, whatever the words), so a v1.6 correction is not undone by a
+//     derivation or the backfill;
 //   - an episode_item:<id> source is still an active item;
 //   - the evidence index is written with indexCopy(guard=true), after a check that no key is blocked.
 //
@@ -67,12 +74,13 @@ func (s *Service) savePersonClaims(ctx context.Context, tx *sql.Tx, claims []sto
 	}
 	now := s.Clock.Now().UTC().Format(time.RFC3339)
 	naive := s.naiveZone()
+	names := s.knownNames()
 	saved := 0
 	for _, c := range claims {
 		if err := ctx.Err(); err != nil {
 			return saved, err
 		}
-		ok, err := s.personClaimPasses(tx, &c, memoryOut, profileOut, naive)
+		ok, err := s.personClaimPasses(tx, &c, memoryOut, profileOut, naive, names)
 		if err != nil {
 			return saved, err
 		}
@@ -102,8 +110,9 @@ func withdrawnRefsTx(tx *sql.Tx, scope string) (map[string]bool, error) {
 }
 
 // personClaimPasses applies the gate to one claim and fills its computed fields (id, normalized topic,
-// observed_at, room, state). False means skip it.
-func (s *Service) personClaimPasses(tx *sql.Tx, c *store.PersonClaim, memoryOut, profileOut map[string]bool, naive *time.Location) (bool, error) {
+// observed_at, room, state). False means skip it. names are the server's known names (knownNames, one
+// per write call).
+func (s *Service) personClaimPasses(tx *sql.Tx, c *store.PersonClaim, memoryOut, profileOut map[string]bool, naive *time.Location, names *knownNames) (bool, error) {
 	c.Text = strings.Join(strings.Fields(c.Text), " ")
 	c.Topic = store.PersonTopic(c.Topic)
 	c.Evidence = uniqueStrings(c.Evidence)
@@ -128,6 +137,11 @@ func (s *Service) personClaimPasses(tx *sql.Tx, c *store.PersonClaim, memoryOut,
 		// a statement of one's own names only its subject: "{p1}가 전하길 {p2}는 …" filed under its speaker
 		// is hearsay about p2, and as a direct claim it would be read server-wide as p1's own words
 		return false, nil
+	}
+	if other, err := names.namesOther(tx, c.GuildID, c.SubjectRef, c.Text); err != nil || other {
+		// a known name of someone else written out (not as a token): that person's forget would not reach
+		// it, whoever wrote it (a renamed account's old label included)
+		return false, err
 	}
 	people := uniqueStrings(append([]string{c.SubjectRef, c.SpeakerRef}, named...))
 	for _, ref := range people {
@@ -194,7 +208,7 @@ func (s *Service) personClaimPasses(tx *sql.Tx, c *store.PersonClaim, memoryOut,
 	if suppressed, err := personSuppressed(tx, *c); err != nil || suppressed {
 		return false, err
 	}
-	if corrected, err := correctedLines(tx, c.SubjectRef, c.Text, c.Evidence); err != nil || corrected {
+	if corrected, err := correctedLines(tx, c.SubjectRef, c.Evidence); err != nil || corrected {
 		return false, err
 	}
 	if item, ok := strings.CutPrefix(c.Source, "episode_item:"); ok {
@@ -219,7 +233,8 @@ func (s *Service) personClaimPasses(tx *sql.Tx, c *store.PersonClaim, memoryOut,
 // personSuppressed reports whether a forget or hide marker covers the claim, set at or after the claim's
 // newest evidence (an empty ObservedAt matches every marker): everything about or by anyone the claim
 // names (subject, speaker, the people of its text), this claim, what it says (its text key) about the
-// subject, or the subject's hearsay topic.
+// subject, the subject's hearsay topic, or a line of its evidence the subject corrected or forgot an item
+// of (the line rule, lineScope).
 func personSuppressed(tx *sql.Tx, c store.PersonClaim) (bool, error) {
 	topic := ""
 	if !c.Direct() && c.Topic != "" {
@@ -230,41 +245,35 @@ func personSuppressed(tx *sql.Tx, c store.PersonClaim) (bool, error) {
 		text = "text:" + store.PersonTextKey(c.Text)
 	}
 	named, _ := json.Marshal(uniqueStrings(append([]string{c.SubjectRef, c.SpeakerRef}, episodes.TextRefs(c.Text)...)))
+	lines := make([]string, 0, len(c.Evidence))
+	for _, id := range uniqueStrings(c.Evidence) {
+		lines = append(lines, lineScope(id))
+	}
+	scopes, _ := json.Marshal(lines)
 	var hit bool
 	err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM person_memory_suppress WHERE guild_id=?1 AND ?6<=before_ts AND (
 		(scope='all' AND person_ref IN (SELECT value FROM json_each(?7)))
-		OR (person_ref=?2 AND role='subject' AND (scope=?3 OR (?4<>'' AND scope=?4) OR (?5<>'' AND scope=?5)))))`,
-		c.GuildID, c.SubjectRef, "claim:"+c.ID, topic, text, c.ObservedAt, string(named)).Scan(&hit)
+		OR (person_ref=?2 AND role='subject' AND (scope=?3 OR (?4<>'' AND scope=?4) OR (?5<>'' AND scope=?5)
+			OR scope IN (SELECT value FROM json_each(?8))))))`,
+		c.GuildID, c.SubjectRef, "claim:"+c.ID, topic, text, c.ObservedAt, string(named), string(scopes)).Scan(&hit)
 	return hit, err
 }
 
-// correctedLines reports whether a statement is one a member said is wrong: an item hidden in an episode
-// that is never made again from its lines (regen=3, explicit.go), resting on any of the lines, naming the
-// subject and saying the same (the text key, as a hide marker). v1.6 recorded corrections only this way,
-// without person markers; another statement of the same lines (a second fact of one message) is not the
-// corrected one and passes.
-func correctedLines(tx *sql.Tx, subject, text string, evidence []string) (bool, error) {
+// correctedLines reports whether a member said an item about the subject on any of the lines is wrong:
+// hidden, in an episode that is never made again from its lines (regen=3, explicit.go). v1.6 recorded
+// corrections only this way, without person markers. The line rule: every statement about the subject
+// from those lines is refused, whatever its words (a correction said in other words is the same fact).
+// Known limit: a second fact of the same message is refused with it.
+func correctedLines(tx *sql.Tx, subject string, evidence []string) (bool, error) {
 	if len(evidence) == 0 || !tableExists(tx, "episode_item") {
 		return false, nil
 	}
 	raw, _ := json.Marshal(evidence)
-	rows, err := tx.Query(`SELECT DISTINCT i.text FROM evidence_refs r JOIN episode_item i ON i.id=r.holder_id JOIN channel_episode e ON e.id=i.episode_id
-		WHERE r.holder_kind=? AND r.source_id IN (SELECT value FROM json_each(?)) AND i.state='hidden' AND e.regen=3 AND instr(i.text,?)>0`,
-		store.HolderEpisodeItem, string(raw), "{@"+subject+"}")
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	key := store.PersonTextKey(strings.Join(strings.Fields(text), " "))
-	hit := false
-	for rows.Next() {
-		var itemText string
-		if err := rows.Scan(&itemText); err != nil {
-			return false, err
-		}
-		hit = hit || store.PersonTextKey(strings.Join(strings.Fields(itemText), " ")) == key
-	}
-	return hit, rows.Err()
+	var hit bool
+	err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM evidence_refs r JOIN episode_item i ON i.id=r.holder_id JOIN channel_episode e ON e.id=i.episode_id
+		WHERE r.holder_kind=? AND r.source_id IN (SELECT value FROM json_each(?)) AND i.state='hidden' AND e.regen=3 AND instr(i.text,?)>0)`,
+		store.HolderEpisodeItem, string(raw), "{@"+subject+"}").Scan(&hit)
+	return hit, err
 }
 
 // writePersonClaim inserts a claim that passed the gate, or hands a derived row with the same id to a
@@ -432,4 +441,96 @@ func deleteClaimsWhere(tx *sql.Tx, query string, args ...any) (int, error) {
 		}
 	}
 	return len(ids), nil
+}
+
+// knownNames are the names people of servers were seen under, read from person_alias once per server and
+// write call (every label of every room, a renamed account's old labels included): the write gate refuses
+// a claim whose text writes out, outside its {@ref} tokens, the name of anyone but its subject. A name is
+// matched as a chat turn matches it (search.NameMatcher: a whole word, or the word plus a particle or an
+// honorific), case-folded.
+type knownNames struct {
+	matches func(string, string) bool
+	guilds  map[string]*guildNames
+}
+
+type guildNames struct {
+	refs map[string]map[string]bool // folded label → the people seen under it
+}
+
+// knownNames starts the per-call cache of known names.
+func (s *Service) knownNames() *knownNames {
+	doc := s.Doc()
+	return &knownNames{matches: search.NameMatcher(lang.MergeSearch(append(slices.Clone(doc.Memory.Languages), "ko", "ja"), doc.BotNames())),
+		guilds: map[string]*guildNames{}}
+}
+
+// load reads the server's labels once.
+func (k *knownNames) load(tx *sql.Tx, guild string) (*guildNames, error) {
+	if g, ok := k.guilds[guild]; ok {
+		return g, nil
+	}
+	g := &guildNames{refs: map[string]map[string]bool{}}
+	if tableExists(tx, "person_alias") {
+		rows, err := tx.Query(`SELECT DISTINCT person_ref,folded FROM person_alias WHERE guild_id=?`, guild)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var ref, label string
+			if err := rows.Scan(&ref, &label); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			if label = strings.TrimSpace(label); label == "" || utf8.RuneCountInString(label) > maxNameRunes {
+				continue // never matched by a chat turn either
+			}
+			if g.refs[label] == nil {
+				g.refs[label] = map[string]bool{}
+			}
+			g.refs[label][ref] = true
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	k.guilds[guild] = g
+	return g, nil
+}
+
+// namesOther reports whether text writes out, outside its {@ref} tokens, a known name of a person other
+// than subject (a name the subject shares with someone else counts: whose it is cannot be told). A nil
+// cache checks nothing.
+func (k *knownNames) namesOther(tx *sql.Tx, guild, subject, text string) (bool, error) {
+	if k == nil || text == "" {
+		return false, nil
+	}
+	g, err := k.load(tx, guild)
+	if err != nil || len(g.refs) == 0 {
+		return false, err
+	}
+	lower := strings.ToLower(text)
+	runes := []rune(lower)
+	offsets := make([]int, 0, len(runes)+1) // byte offset of each rune, and the end
+	for i := range lower {
+		offsets = append(offsets, i)
+	}
+	offsets = append(offsets, len(lower))
+	for i := range runes {
+		if i > 0 && (unicode.IsLetter(runes[i-1]) || unicode.IsDigit(runes[i-1])) {
+			continue // a name starts a word
+		}
+		for j := i + 2; j <= min(len(runes), i+maxNameRunes); j++ {
+			label := lower[offsets[i]:offsets[j]]
+			who := g.refs[label]
+			if len(who) == 0 || (len(who) == 1 && who[subject]) {
+				continue
+			}
+			if literalName(lower, label, offsets[i], k.matches) == offsets[i] {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }

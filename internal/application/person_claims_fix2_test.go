@@ -11,11 +11,13 @@ import (
 
 // Round-2 review fixes of person memory v1.7.0 (forget and correction paths).
 
-// One message gives two statements about a person (where they live, what they drink).
-// Marking the residence item wrong, or forgetting it, removes the residence statement only: the other
-// statement resting on the same line stays. The same holds for a correction kept from v1.6 (a hidden item
-// in an episode never made again): it refuses its own statement, not every statement of that line.
-func TestCorrectionKeepsOtherClaimsFromSharedEvidence(t *testing.T) {
+// One message gives two statements about a person (where they live, what they drink). Marking the
+// residence item wrong, or forgetting it, follows the line rule: every statement about the person resting
+// on the corrected line goes, the drink statement too (known limit: recall only, the member can say it
+// again), and nothing about them from that line is written again. A statement on another line stays. The
+// same holds for a correction kept from v1.6 (a hidden item in an episode never made again): it refuses
+// every statement about the person from its line, and passes one from another line.
+func TestCorrectionTakesEveryStatementOfItsLines(t *testing.T) {
 	t.Parallel()
 	for _, how := range []string{"wrong", "forget", "v16"} {
 		t.Run(how, func(t *testing.T) {
@@ -24,10 +26,14 @@ func TestCorrectionKeepsOtherClaimsFromSharedEvidence(t *testing.T) {
 			f := reviewPerson{s, m, e, time.Now().UTC().Add(-time.Hour)}
 			a := store.PersonRef("101")
 			line := f.source(t, "g", "c", "shared-line", "101", "민수", f.at)
+			otherLine := f.source(t, "g", "c", "kept-line", "101", "민수", f.at.Add(time.Minute))
 			residence := "{@" + a + "}는 shared-city-sentinel에 삶"
 			tea := store.PersonClaim{GuildID: "g", SubjectRef: a, SpeakerRef: a, Kind: "like", Topic: "음료", Text: "{@" + a + "}는 shared-tea-sentinel을 좋아함",
 				Evidence: []string{line}, Source: "extract:seg-shared", Link: store.LinkSelf}
 			teaID := claimID("g", a, a, "like", "음료", line)
+			noodle := tea
+			noodle.Topic, noodle.Text, noodle.Evidence = "음식", "{@"+a+"}는 kept-noodle-sentinel을 좋아함", []string{otherLine}
+			noodleID := claimID("g", a, a, "like", "음식", otherLine)
 			if how == "v16" {
 				for _, q := range []struct {
 					sql  string
@@ -48,16 +54,21 @@ func TestCorrectionKeepsOtherClaimsFromSharedEvidence(t *testing.T) {
 				if n, err := s.SavePersonClaimsForTest(t.Context(), corrected); err != nil || n != 0 {
 					t.Errorf("the statement corrected in v1.6 was written again: %d (%v)", n, err)
 				}
-				if n, err := s.SavePersonClaimsForTest(t.Context(), tea); err != nil || n != 1 {
-					t.Errorf("another statement of the corrected line was refused: %d (%v)", n, err)
+				if n, err := s.SavePersonClaimsForTest(t.Context(), tea); err != nil || n != 0 {
+					t.Errorf("another statement about the person from the corrected line was written: %d (%v)", n, err)
+				}
+				if n, err := s.SavePersonClaimsForTest(t.Context(), noodle); err != nil || n != 1 {
+					t.Errorf("control: a statement from another line was refused: %d (%v)", n, err)
 				}
 				return
 			}
 			if n := f.item(t, "c", "res-item", residence, []string{"101"}, line); n != 1 {
 				t.Fatalf("the residence item gave %d claims", n)
 			}
-			if n, err := s.SavePersonClaimsForTest(t.Context(), tea); err != nil || n != 1 {
-				t.Fatalf("the tea statement: %d (%v)", n, err)
+			for _, c := range []store.PersonClaim{tea, noodle} {
+				if n, err := s.SavePersonClaimsForTest(t.Context(), c); err != nil || n != 1 {
+					t.Fatalf("the %s statement: %d (%v)", c.Topic, n, err)
+				}
 			}
 			if how == "wrong" {
 				m.explicitAnswer(`{"intent":"wrong","target":["i1"]}`)
@@ -79,8 +90,16 @@ func TestCorrectionKeepsOtherClaimsFromSharedEvidence(t *testing.T) {
 			if n := personClaimCount(t, s, "source=? AND state<>?", "episode_item:res-item", store.PersonHidden); n != 0 { // wrong hides, forget deletes
 				t.Errorf("the corrected statement is left: %d", n)
 			}
-			if n := personClaimCount(t, s, "id=? AND state=?", teaID, store.PersonActive); n != 1 {
-				t.Errorf("the other statement of the same line went with the correction: %d", n)
+			if n := personClaimCount(t, s, "id=? AND state=?", teaID, store.PersonActive); n != 0 {
+				t.Errorf("another statement about the person on the corrected line stayed: %d", n)
+			}
+			if n := personClaimCount(t, s, "id=? AND state=?", noodleID, store.PersonActive); n != 1 {
+				t.Errorf("control: a statement on another line went with the correction: %d", n)
+			}
+			again := tea // the corrected fact in other words, from a later writer
+			again.Kind, again.Topic, again.Text, again.Source = "status", "residence", "{@"+a+"}는 shared-city-sentinel 거주", "backfill:pb_test"
+			if n, err := s.SavePersonClaimsForTest(t.Context(), again); err != nil || n != 0 {
+				t.Errorf("a later writer stated something about the person from the corrected line again: %d (%v)", n, err)
 			}
 		})
 	}
@@ -188,6 +207,66 @@ func TestEpisodeForgetRemovesLiveClaims(t *testing.T) {
 			}
 			if n := personClaimCount(t, s, "instr(text,'same-room-sentinel')>0"); n != want {
 				t.Errorf("a live statement of the same room outside the episode: %d, want %d", n, want)
+			}
+		})
+	}
+	// One answer creates two episodes from one segment: A rests on m1, B on m3, and each line has a live
+	// statement. Forgetting A by its id takes A's live statement and keeps B with its own. Without item
+	// evidence (no items) A falls back to the segment, minus the lines B's items cite: the statement on m2,
+	// which no episode cites, goes then, and B's stays.
+	for _, items := range []bool{true, false} {
+		t.Run(map[bool]string{true: "id with a sibling", false: "id with a sibling, no items"}[items], func(t *testing.T) {
+			t.Parallel()
+			s, m, e := memorySvc(t)
+			m.extract = func(string) string {
+				return `{"episodes":[
+				 {"op":"create","link_to":null,"kind":"event","title":"이사","items":[{"kind":"fact","text":"{p1}가 move-sentinel로 이사함","by":["p1"],"ev":["m1"]}],"status":"done","importance":3},
+				 {"op":"create","link_to":null,"kind":"event","title":"집들이","items":[{"kind":"fact","text":"{p1}가 party-sentinel 집들이를 함","by":["p1"],"ev":["m3"]}],"status":"done","importance":3}],
+				 "people":[{"about":"p1","kind":"status","topic":"residence","text":"{p1}는 live-a-sentinel에 산다","by":["p1"],"ev":["m1"]},
+				  {"about":"p2","kind":"like","topic":"congrats","text":"{p2}는 live-c-sentinel 축하를 좋아함","by":["p2"],"ev":["m2"]},
+				  {"about":"p1","kind":"like","topic":"party","text":"{p1}는 live-b-sentinel 파티를 좋아함","by":["p1"],"ev":["m3"]}]}`
+			}
+			at := time.Now().Add(-3 * time.Hour)
+			sayIn(e, at,
+				said{"9211", "101", "민수", "나 새 동네로 이사했어 지난주에"}, said{"9212", "202", "영희", "오 정말? 축하해 이사"},
+				said{"9213", "101", "민수", "응 고마워 집들이 할게"}, said{"9214", "202", "영희", "좋아 꼭 불러줘 집들이"})
+			if rep := s.RunRoomMemory(t.Context()); rep.Episodes != 2 || rep.PeopleClaims() != 3 {
+				t.Fatalf("control: two episodes and three live statements: %+v", rep)
+			}
+			var a, b string
+			if err := s.Store.DB.QueryRow(`SELECT id FROM channel_episode WHERE title='이사'`).Scan(&a); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Store.DB.QueryRow(`SELECT id FROM channel_episode WHERE title='집들이'`).Scan(&b); err != nil {
+				t.Fatal(err)
+			}
+			if !items {
+				if _, err := s.Store.DB.Exec(`DELETE FROM episode_item WHERE episode_id=?`, a); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if r := exec(s, "memory.episodes.forget", map[string]any{"id": a}); !r.OK {
+				t.Fatalf("forget: %+v", r)
+			}
+			if n := personClaimCount(t, s, "instr(text,'live-a-sentinel')>0"); n != 0 {
+				t.Errorf("the forgotten episode's live statement remains: %d", n)
+			}
+			var left int
+			if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM channel_episode WHERE id=?`, b).Scan(&left); err != nil || left != 1 {
+				t.Fatalf("the sibling episode went with it: %d %v", left, err)
+			}
+			if n := personClaimCount(t, s, "instr(text,'party-sentinel')>0"); n != 1 {
+				t.Errorf("the sibling's derived statement: %d, want 1", n)
+			}
+			if n := personClaimCount(t, s, "instr(text,'live-b-sentinel')>0"); n != 1 {
+				t.Errorf("the sibling's live statement went with the forget: %d", n)
+			}
+			want := 1 // a line no episode cites is not the forgotten episode's own
+			if !items {
+				want = 0 // the segment fallback: a line no sibling cites goes
+			}
+			if n := personClaimCount(t, s, "instr(text,'live-c-sentinel')>0"); n != want {
+				t.Errorf("the live statement on a line no episode cites: %d, want %d", n, want)
 			}
 		})
 	}

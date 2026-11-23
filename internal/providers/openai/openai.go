@@ -750,8 +750,9 @@ type ChatRequest struct {
 	// own (Adapter.RoleEffort), that level is asked instead, with output room for the thinking.
 	Quick bool
 	// Once sends the request one time: an answer cut at the output limit with no text comes back as it
-	// is (finish reason "length") instead of being asked again without thinking or with more room. For
-	// a caller that reserved the price of exactly one call (the paid people backfill).
+	// is (finish reason "length") instead of being asked again without thinking or with more room, or of
+	// a fallback model (failover.go). For a caller that reserved the price of exactly one call (the paid
+	// people backfill) or that may send a text only once (live extraction's one-line request).
 	Once bool
 	// thinkRoom adds thinkingHeadroom to the output limit (a Quick call asked to think)
 	thinkRoom bool

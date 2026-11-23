@@ -195,6 +195,8 @@ func (s *Service) deriveGuild(ctx context.Context, db *storage.Store, guild stri
 			break
 		}
 		err = db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+			// one gate call per batch: the gate reads consent and the server's known names once per call
+			var claims []store.PersonClaim
 			for _, it := range items {
 				if it.kind != "fact" && it.kind != "moment" {
 					continue
@@ -203,13 +205,11 @@ func (s *Service) deriveGuild(ctx context.Context, db *storage.Store, guild stri
 				if err != nil {
 					return err
 				}
-				n, err := s.savePersonClaims(ctx, tx, derivedClaims(guild, it, authors))
-				if err != nil {
-					return err
-				}
-				saved += n
+				claims = append(claims, derivedClaims(guild, it, authors)...)
 			}
-			return nil
+			n, err := s.savePersonClaims(ctx, tx, claims)
+			saved += n
+			return err
 		})
 		if err != nil {
 			return saved, err

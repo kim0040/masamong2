@@ -50,6 +50,10 @@ func claimMarkers(guild, subject, speaker, kind, topic, text, id, by, at, now st
 	return out
 }
 
+// lineScope is the marker scope of one corrected line of a person (a member's "wrong" or item forget):
+// nothing about the person resting on that line is written again (the line rule).
+func lineScope(obs string) string { return "line:" + obs }
+
 // hideClaimTx hides one claim and writes its markers. False when there is no such claim.
 func (s *Service) hideClaimTx(tx *sql.Tx, id, by string) (bool, error) {
 	var guild, subject, speaker, kind, topic, text string
@@ -78,11 +82,13 @@ func (s *Service) hideClaimTx(tx *sql.Tx, id, by string) (bool, error) {
 
 // itemClaimsTx handles the statements about people that episode items give, when a member said the
 // items are wrong (hide) or forgot them: each gets its markers, and its row is hidden or deleted. The
-// statements are the item's own: the ones it derives, the claims resting on its lines that say the same
-// about someone it names (the same text key, from another writer), and for a remembered fact (an item of
-// an explicit episode, one per message) the claims it was saved as (a told claim names its person only
-// by label). Another statement of the same lines (a second fact of one message) is not the item's and
-// stays. It returns how many rows changed.
+// line rule: the statements are the ones the item derives, every claim resting on its lines about someone
+// it names (whatever its words: one answer writes the same fact as an item and as a people entry, in two
+// wordings), and for a remembered fact (an item of an explicit episode, one per message) the claims it was
+// saved as (a told claim names its person only by label). Each of those people also gets a line marker on
+// each of the item's lines, so no later writer (and no stored pilot answer) states anything about them
+// from those lines again. Known limit: a second fact of the same message goes too (recall only; the member
+// can say it again). It returns how many rows changed.
 func (s *Service) itemClaimsTx(tx *sql.Tx, items []string, hide bool, by string) (int, error) {
 	if len(items) == 0 || !tableExists(tx, "person_claim") {
 		return 0, nil
@@ -109,17 +115,21 @@ func (s *Service) itemClaimsTx(tx *sql.Tx, items []string, hide bool, by string)
 		if err != nil {
 			return 0, err
 		}
-		for _, c := range derivedClaims(guild, it, authors) {
+		derived := derivedClaims(guild, it, authors)
+		for _, c := range derived {
 			id := store.PersonClaimID(c.GuildID, c.SubjectRef, c.SpeakerRef, c.Kind, c.Topic, uniqueStrings(c.Evidence))
 			ids[id] = true
 			marks = append(marks, claimMarkers(c.GuildID, c.SubjectRef, c.SpeakerRef, c.Kind, c.Topic, c.Text, id, by, stamp, now)...)
 		}
 		lines, _ := json.Marshal(uniqueStrings(it.evidence))
-		named, _ := json.Marshal(uniqueStrings(episodes.TextRefs(it.text)))
+		people := episodes.TextRefs(it.text)
+		named, _ := json.Marshal(uniqueStrings(people))
+		for _, c := range derived {
+			people = append(people, c.SubjectRef)
+		}
 		explicitItem := episodeSource == explicitSource
-		itemKey := store.PersonTextKey(strings.Join(strings.Fields(it.text), " "))
-		rows, err := tx.Query(`SELECT id,guild_id,subject_ref,speaker_ref,kind,topic,text,source FROM person_claim WHERE source=?1
-			UNION SELECT c.id,c.guild_id,c.subject_ref,c.speaker_ref,c.kind,c.topic,c.text,c.source FROM evidence_refs r JOIN person_claim c ON c.id=r.holder_id
+		rows, err := tx.Query(`SELECT id,guild_id,subject_ref,speaker_ref,kind,topic,text FROM person_claim WHERE source=?1
+			UNION SELECT c.id,c.guild_id,c.subject_ref,c.speaker_ref,c.kind,c.topic,c.text FROM evidence_refs r JOIN person_claim c ON c.id=r.holder_id
 			WHERE r.holder_kind=?2 AND r.source_id IN (SELECT value FROM json_each(?3)) AND c.guild_id=?4
 			AND ((?7 AND c.source=?5) OR c.subject_ref IN (SELECT value FROM json_each(?6)))`,
 			"episode_item:"+item, store.HolderPersonClaim, string(lines), guild, store.SourceExplicit, string(named), explicitItem)
@@ -127,22 +137,28 @@ func (s *Service) itemClaimsTx(tx *sql.Tx, items []string, hide bool, by string)
 			return 0, err
 		}
 		for rows.Next() {
-			var id, g, subject, speaker, kind, topic, text, source string
-			if err := rows.Scan(&id, &g, &subject, &speaker, &kind, &topic, &text, &source); err != nil {
+			var id, g, subject, speaker, kind, topic, text string
+			if err := rows.Scan(&id, &g, &subject, &speaker, &kind, &topic, &text); err != nil {
 				rows.Close()
 				return 0, err
 			}
-			own := source == "episode_item:"+item || (explicitItem && source == store.SourceExplicit) || store.PersonTextKey(text) == itemKey
-			if !own {
-				continue // another statement of the same lines
-			}
 			ids[id] = true
 			marks = append(marks, claimMarkers(g, subject, speaker, kind, topic, text, id, by, stamp, now)...)
+			people = append(people, subject)
 		}
 		err = rows.Err()
 		rows.Close()
 		if err != nil {
 			return 0, err
+		}
+		for _, ref := range uniqueStrings(people) {
+			if !store.DiscordPersonRef(ref) {
+				continue
+			}
+			for _, line := range uniqueStrings(it.evidence) {
+				marks = append(marks, store.PersonSuppress{GuildID: guild, PersonRef: ref, Role: store.SuppressSubject,
+					Scope: lineScope(line), BeforeTS: stamp, By: by, CreatedAt: now})
+			}
 		}
 	}
 	for _, m := range marks {
@@ -150,9 +166,11 @@ func (s *Service) itemClaimsTx(tx *sql.Tx, items []string, hide bool, by string)
 			return 0, err
 		}
 	}
-	// the paid backfill's stored pilot answers are another copy: the new markers purge them too
+	// the paid backfill's stored pilot answers are another copy: the new markers purge them too. A failure
+	// there never holds back the member's correction or forget: the purge is flagged and runs before the
+	// pilot is read, applied or a consent granted again (pbRecheckSoftTx)
 	for g := range guilds {
-		if err := s.pbRecheckPilotTx(tx, g); err != nil {
+		if err := s.pbRecheckSoftTx(tx, g, "correction", len(items), func() error { return s.pbRecheckPilotTx(tx, g) }); err != nil {
 			return 0, err
 		}
 	}
@@ -236,13 +254,15 @@ func (s *Service) personStatementSuppressedTx(tx *sql.Tx, c store.PersonClaim) (
 	if hit, err := personSuppressed(tx, c); err != nil || hit {
 		return hit, err
 	}
-	return correctedLines(tx, c.SubjectRef, c.Text, c.Evidence)
+	return correctedLines(tx, c.SubjectRef, c.Evidence)
 }
 
 // deleteEpisodeClaimsTx deletes the claims resting on an episode an operator deletes: the ones its items
 // derive, for a remembered fact ("remember this", an explicit episode) the explicit claims on its message,
-// which follow no item, and the claims the same extraction saved live (extract:) on the lines the episode
-// was made from (its segment).
+// which follow no item, and the claims the same extraction saved live (extract:) on the episode's own lines.
+// Every episode one answer creates stores the whole segment, so its own lines are its items' evidence: a
+// line only another episode's items cite stays with that one. An episode with no item evidence falls back
+// to its segment, without a claim citing any line an item of another episode on that segment cites.
 func deleteEpisodeClaimsTx(tx *sql.Tx, episode string) error {
 	if !tableExists(tx, "person_claim") {
 		return nil
@@ -250,8 +270,20 @@ func deleteEpisodeClaimsTx(tx *sql.Tx, episode string) error {
 	if _, err := deleteClaimsWhere(tx, `SELECT c.id FROM episode_item i JOIN person_claim c ON c.source='episode_item:'||i.id WHERE i.episode_id=?`, episode); err != nil {
 		return err
 	}
-	if _, err := deleteClaimsWhere(tx, `SELECT c.id FROM person_claim c JOIN channel_episode e ON e.id=? WHERE c.source>=? AND c.source<? AND c.guild_id=e.guild_id
-		AND EXISTS(SELECT 1 FROM json_each(c.evidence) a JOIN json_each(e.segment) b ON a.value=b.value)`, episode, livePeoplePrefix, liveSourceEnd); err != nil {
+	var own bool
+	if err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM episode_item i, json_each(i.evidence) WHERE i.episode_id=?)`, episode).Scan(&own); err != nil {
+		return err
+	}
+	live := `SELECT c.id FROM person_claim c JOIN channel_episode e ON e.id=?1 WHERE c.source>=?2 AND c.source<?3 AND c.guild_id=e.guild_id
+		AND EXISTS(SELECT 1 FROM json_each(c.evidence) a JOIN episode_item i ON i.episode_id=e.id JOIN json_each(i.evidence) b ON a.value=b.value)`
+	if !own {
+		live = `SELECT c.id FROM person_claim c JOIN channel_episode e ON e.id=?1 WHERE c.source>=?2 AND c.source<?3 AND c.guild_id=e.guild_id
+		AND EXISTS(SELECT 1 FROM json_each(c.evidence) a JOIN json_each(e.segment) b ON a.value=b.value)
+		AND NOT EXISTS(SELECT 1 FROM json_each(c.evidence) a JOIN channel_episode o ON o.room=e.room AND o.id<>e.id
+			JOIN episode_item i ON i.episode_id=o.id JOIN json_each(i.evidence) b ON a.value=b.value
+			WHERE EXISTS(SELECT 1 FROM json_each(o.segment) x JOIN json_each(e.segment) y ON x.value=y.value))`
+	}
+	if _, err := deleteClaimsWhere(tx, live, episode, livePeoplePrefix, liveSourceEnd); err != nil {
 		return err
 	}
 	_, err := deleteClaimsWhere(tx, `SELECT c.id FROM person_claim c JOIN channel_episode e ON e.id=? WHERE e.source=? AND c.source=? AND c.guild_id=e.guild_id

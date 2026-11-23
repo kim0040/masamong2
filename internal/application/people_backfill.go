@@ -802,7 +802,8 @@ type pbPrompt struct {
 	lines        map[string]string   // every line the prompt carries (the bot's too) → its stored text
 	parts        map[string][]string // a prompt line (its first observation) → the observations merged into it
 	readAt       string
-	ok           bool // a human line of at least the meaningful-rune floor is left
+	ok           bool            // a human line of at least the meaningful-rune floor is left
+	gone         map[string]bool // the server's deleted threads before the build read any label (pbGoneThreads)
 }
 
 // pbBuildPrompt reads a window's lines as they are now and builds its prompt. Only lines that may leave
@@ -813,6 +814,12 @@ func (s *Service) pbBuildPrompt(db *storage.Store, guild string, w store.Backfil
 		parts: map[string][]string{}}
 	bp.readAt, bp.room = s.Clock.Now().UTC().Format(time.RFC3339Nano), w.Room
 	r := pbRoomOf(w.Room)
+	// before any label is read: a thread deleted after this is caught before the send (pbPromptCurrent)
+	gone, err := s.pbGoneThreads(db.Reader(), guild)
+	if err != nil {
+		return bp, err
+	}
+	bp.gone = gone
 	lines, err := s.linesByID(db, w.Obs)
 	if err == nil {
 		lines, err = s.pbSendable(db, guild, r, lines)
@@ -978,6 +985,42 @@ func (s *Service) pbThreadDeleted(q interface {
 	return gone, err
 }
 
+// pbGoneThreads are the threads of a server's memory rooms that were deleted: the deletion pending in
+// memory, its tombstone, or the closed row's reason (the rooms mentionedPeople reads no label from).
+func (s *Service) pbGoneThreads(q interface {
+	Query(string, ...any) (*sql.Rows, error)
+}, guild string) (map[string]bool, error) {
+	prefix := "discord:" + guild + ":"
+	rows, err := q.Query(`SELECT substr(room, ?2), substr(room, ?2) IN (SELECT thread_id FROM thread_tombstones)
+		OR substr(room, ?2) IN (SELECT thread_id FROM channel_threads WHERE close_reason='deleted')
+		FROM memory_rooms WHERE platform='discord' AND room LIKE ?1`, prefix+"%", len(prefix)+1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	gone, stored := map[string]bool{}, map[string]bool{}
+	for rows.Next() {
+		var id string
+		var tomb bool
+		if err := rows.Scan(&id, &tomb); err != nil {
+			return nil, err
+		}
+		stored[id] = tomb
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	t := &s.threads // as pbThreadDeleted: a pending deletion is in memory whether the table was loaded or not
+	t.mu.Lock()
+	for id, tomb := range stored {
+		if tomb || t.deleted[id] {
+			gone[id] = true
+		}
+	}
+	t.mu.Unlock()
+	return gone, nil
+}
+
 // pbPromptCurrent checks again, in the caller's transaction and just before a send, everything a prompt
 // carries: its room is not a deleted thread, every line is still stored with the text it had, current, and
 // no person the prompt shows (author or mentioned) has withdrawn, been blocked or tombstoned since it was
@@ -985,6 +1028,17 @@ func (s *Service) pbThreadDeleted(q interface {
 func (s *Service) pbPromptCurrent(tx *sql.Tx, guild string, bp pbPrompt) (bool, error) {
 	if gone, err := s.pbThreadDeleted(tx, bp.room); err != nil || gone {
 		return false, err
+	}
+	// a thread of the server deleted since the build: a label the prompt shows for a mentioned person may
+	// be one only that thread gave (mentionedPeople leaves those out), so the prompt is built again
+	gone, err := s.pbGoneThreads(tx, guild)
+	if err != nil {
+		return false, err
+	}
+	for id := range gone {
+		if !bp.gone[id] {
+			return false, nil
+		}
 	}
 	denied, err := s.deniedPeople(tx, guild)
 	if err != nil {
