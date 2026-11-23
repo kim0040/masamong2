@@ -711,8 +711,11 @@ type pbReviewItem struct {
 }
 
 // pbReviewSet is the pilot's review set: every link=name fact, every fact the other model gave about
-// another person (a fact of the other model sharing an evidence line, none about the same person), and
-// a sample of at most pbHearsaySample hearsay facts spread by a hash (the same set every time).
+// another person, and a sample of at most pbHearsaySample hearsay facts spread by a hash (the same set
+// every time). The other model's corresponding fact is the one on the same evidence with the same kind and
+// topic; it disagrees when none of those is about the same person, so two facts of one line given to
+// opposite people are caught. A fact with no such counterpart disagrees when no fact of the other model
+// sharing an evidence line is about the same person.
 func pbReviewSet(ws []store.BackfillWindow) (items []pbReviewItem, names, disagreements, hearsay int) {
 	type cand struct {
 		item pbReviewItem
@@ -734,14 +737,19 @@ func pbReviewSet(ws []store.BackfillWindow) (items []pbReviewItem, names, disagr
 					if o == m {
 						continue
 					}
-					overlap, same := false, false
+					overlap, same, matched, matchedSame := false, false, false, false
 					for _, g := range ans[o].Facts {
-						if pbOverlap(f.Ev, g.Ev) {
-							overlap = true
-							same = same || g.About == f.About
+						if !pbOverlap(f.Ev, g.Ev) {
+							continue
+						}
+						overlap = true
+						same = same || g.About == f.About
+						if store.PersonTopicKey(g.Kind, g.Topic) == store.PersonTopicKey(f.Kind, f.Topic) {
+							matched = true
+							matchedSame = matchedSame || g.About == f.About
 						}
 					}
-					disagree = disagree || (overlap && !same)
+					disagree = disagree || (matched && !matchedSame) || (!matched && overlap && !same)
 				}
 				self := false
 				for _, by := range f.By {

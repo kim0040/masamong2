@@ -21,6 +21,7 @@ import (
 	"masamong/internal/errcode"
 	"masamong/internal/memory/corpus"
 	"masamong/internal/memory/engine"
+	"masamong/internal/memory/episodes"
 	"masamong/internal/memory/peoplebackfill"
 	"masamong/internal/memory/store"
 	"masamong/internal/providers/openai"
@@ -1650,5 +1651,35 @@ func TestPeopleBackfillNameLinkFromCitedLines(t *testing.T) {
 	var link string
 	if err := s.Store.Reader().QueryRow(`SELECT link FROM person_claim WHERE topic='namehike'`).Scan(&link); err != nil || link != store.LinkName {
 		t.Fatalf("link %q (%v), want name", link, err)
+	}
+}
+
+// Two facts of one line, given to opposite people by the two pilot models, are both disagreements: the
+// counterpart of a fact is the other model's fact on the same evidence with the same kind and topic.
+func TestPeopleBackfillPilotDetectsSwappedSubjects(t *testing.T) {
+	fact := func(about, kind, topic string) episodes.PersonFact {
+		link := episodes.LinkMention
+		if about == "b" {
+			link = episodes.LinkSelf
+		}
+		return episodes.PersonFact{About: about, Kind: kind, Topic: topic, Text: "{@" + about + "} " + topic, By: []string{"b"}, Ev: []string{"o1"}, Link: link}
+	}
+	review := func(haiku, sonnet []episodes.PersonFact) int {
+		raw, _ := json.Marshal(map[string]pbAnswer{string(peoplebackfill.ModelHaiku): {Facts: haiku}, string(peoplebackfill.ModelSonnet): {Facts: sonnet}})
+		_, _, disagreements, _ := pbReviewSet([]store.BackfillWindow{{ID: "w1", Result: raw}})
+		return disagreements
+	}
+	agreed := []episodes.PersonFact{fact("a", "trait", "tea"), fact("b", "like", "rice")}
+	if n := review(agreed, agreed); n != 0 {
+		t.Fatalf("the same answer: %d disagreements", n)
+	}
+	swapped := []episodes.PersonFact{fact("b", "trait", "tea"), fact("a", "like", "rice")}
+	if n := review(agreed, swapped); n != 4 {
+		t.Fatalf("swapped subjects: %d disagreements, want every fact of both models", n)
+	}
+	// worded apart (no counterpart by topic): a fact disagrees only when no shared line is about its person
+	worded := []episodes.PersonFact{fact("a", "trait", "green tea"), fact("b", "like", "white rice")}
+	if n := review(agreed, worded); n != 0 {
+		t.Fatalf("other words, same people: %d disagreements", n)
 	}
 }
