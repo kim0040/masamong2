@@ -13,10 +13,10 @@ import (
 // read and written under it, so a slow store holds up no channel's decisions (fix plan R03, code standard
 // R20). What reading under the lock gave is kept: a message moves the room on before its reads
 // (arriveObserved), and reads are made again when what they depend on changed before the lock was taken
-// (lockCandidate).
+// (lockObserved, lockCandidate).
 
-// partRereads bounds how often a decision reads again because the configuration changed before it took the
-// lock; one that keeps changing gets the last read.
+// partRereads bounds how often a decision reads again because the configuration changed (or, for Observe,
+// collected rows began waiting) before it took the lock; one that keeps changing gets the last read.
 const partRereads = 3
 
 // observeArrival is what Observe's first step leaves for the rest.
@@ -32,7 +32,7 @@ type observeArrival struct {
 // message counts as said, so a draft in flight fails its final check (stillCurrent), and a waiting
 // candidate it answers leaves the wait, so it is not judged while the reads run (Sol review of E8, finding
 // 3). Observe logs that candidate's cancellation unless a quiet cue drops it; the bot's own message, which
-// goes no further, logs it here. The entry's mute is restored later (lockPartChannel).
+// goes no further, logs it here. The entry's mute is restored later (lockObserved).
 func (s *Service) arriveObserved(key string, m ObservedMessage) observeArrival {
 	s.part.mu.Lock()
 	defer s.part.mu.Unlock()
@@ -156,6 +156,8 @@ func (s *Service) lockPartChannel(key string) *partChannel {
 // needless.
 type observeRead struct {
 	mode     string                // the channel's participation mode
+	pack     *lang.Pack            // the channel's language pack (its quiet and chime-off cues)
+	counted  *bool                 // whether the author may be counted for the collected rows waiting (nil: not read)
 	nameSaid bool                  // a name said in collect mode that this message records (not nameCallGate)
 	nameSkip string                // collectSkip for it ("" = record it)
 	sig      participation.Signals // what the message asks of the room (empty: nothing to take up)
@@ -168,6 +170,7 @@ func (s *Service) observeReads(m ObservedMessage) observeRead {
 		return r
 	}
 	pol := s.channelPolicy(m.GuildID, m.ChannelID)
+	r.pack = s.voiceFor(m.GuildID, pol).Pack
 	if r.mode == "collect" && m.BotCall == "name" && !(pol.Respond == "mention" && pol.NameCall == "addressed") {
 		r.nameSaid = true
 		r.nameSkip = s.collectSkip(m.GuildID, m.ChannelID, m.AuthorID)
@@ -175,7 +178,7 @@ func (s *Service) observeReads(m ObservedMessage) observeRead {
 	if m.Addressed || m.ToSomeone {
 		return r
 	}
-	pack := lang.For(s.voiceFor(m.GuildID, pol).Pack.Tag, s.Doc().I18n.DefaultLocale)
+	pack := lang.For(r.pack.Tag, s.Doc().I18n.DefaultLocale)
 	r.sig = participation.Read(m.Content, m.At, s.instanceZone(), pack.Time)
 	if r.sig.Kind() == "" {
 		return r
@@ -193,6 +196,28 @@ func (s *Service) observeReads(m ObservedMessage) observeRead {
 		r.filter = "opted_out"
 	}
 	return r
+}
+
+// lockObserved reads what Observe asks the store (observeReads, and whether the author may be counted when
+// collected rows wait), then takes s.part.mu and returns the message's entry; the caller unlocks. When the
+// configuration changed while the reads ran (the new entry's mute restore included) or collected rows began
+// waiting, they are made again, so the decision uses what reading under the lock gave (Sol review of E8,
+// findings 4 and 5).
+func (s *Service) lockObserved(key string, m ObservedMessage, watched bool) (*partChannel, observeRead) {
+	for try := 1; ; try++ {
+		cfg := s.cfg.Load()
+		r := s.observeReads(m)
+		if watched {
+			ok := s.authorCounted(m)
+			r.counted = &ok
+		}
+		c := s.lockPartChannel(key)
+		watched = len(c.watches) > 0
+		if try == partRereads || s.cfg.Load() == cfg && (r.counted != nil || !watched) {
+			return c, r
+		}
+		s.part.mu.Unlock()
+	}
 }
 
 // candidateRead is what considerCandidate asks the store when a candidate's wait ends.

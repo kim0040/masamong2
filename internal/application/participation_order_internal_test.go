@@ -10,8 +10,9 @@ import (
 )
 
 // Observe and considerCandidate read the store before they take part.mu (fix plan R03). These tests pin
-// what reading under the lock gave and the reads must not lose, and that no read waits under the lock
-// (Sol review of E8).
+// what reading under the lock gave and the reads must not lose: a message makes the room move on before
+// its reads, the mode and the author's consent are what they are once the lock is taken, and no read waits
+// under the lock (Sol review of E8, findings 3, 4, 5 and 7).
 
 const partQuestion = "누가 텐트 챙기기로 했지?"
 
@@ -145,6 +146,73 @@ func TestObserveDecidesInTheOrderMessagesCame(t *testing.T) {
 	}
 	if n := countWhere(t, s, `SELECT COUNT(*) FROM participation_log WHERE message_id='m1' AND state=? AND reason='people_answered'`, partCancelled); n != 1 {
 		t.Fatalf("the earlier question's cancellation: %d rows, want 1", n)
+	}
+}
+
+// The back-off uses the mode current once the new entry's mute is restored: a switch to a speaking mode
+// while the restore waits still starts the pause after a call to the bot.
+func TestObserveUsesTheModeCurrentAfterTheMuteRestore(t *testing.T) {
+	s, clk, drain := partOrderService(t, "off")
+	s.Paused("g", "a") // the thread lookup is warm: only the mute restore reads the store
+	release := holdReaders(t, s)
+	called := make(chan struct{})
+	go func() {
+		defer close(called)
+		s.Observe(ObservedMessage{GuildID: "g", ChannelID: "a", MessageID: "m1", AuthorID: "u1", AuthorName: "u1",
+			Content: "마사몽 이거 알아?", At: clk.t, Addressed: true, BotCall: "mention"})
+	}()
+	waitsInStore(t, "(*Service).Observe(")
+	doc := s.Doc()
+	doc.Guilds["g"].Channels["a"] = config.ChannelPolicy{Respond: "mention", Participation: "conservative"}
+	s.setDoc(doc, s.Revision())
+	release()
+	<-called
+	s.Observe(ObservedMessage{GuildID: "g", ChannelID: "a", MessageID: "m2", AuthorID: "u2", AuthorName: "u2", Content: partQuestion, At: clk.t})
+	drain()
+	s.part.mu.Lock()
+	c := s.part.chans["g:a"]
+	afterCall, pending := c.filtered["after_call"], c.pending != nil
+	s.part.mu.Unlock()
+	if afterCall != 1 || pending {
+		t.Fatalf("question right after a call: after_call %d, candidate %v; want filtered as after_call", afterCall, pending)
+	}
+}
+
+// A collected row that began waiting while a message's reads ran is settled by that message, with the
+// author's consent read for it.
+func TestObserveSettlesAWatchThatBeganWhileItRead(t *testing.T) {
+	s, clk, drain := partOrderService(t, "collect")
+	db, err := s.adminDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.DB.Exec(`INSERT INTO participation_log(id, guild_id, channel_id, message_id, created_at, mode, kind, state, reason, score,
+		message, draft, features, cost_usd, author_ref, evidence_state) VALUES('pl_seed','g','a','src',?,'collect','question',?,'unanswered',0,'','','{"kind":"question"}',0,?,1)`,
+		clk.t.UTC().Format(time.RFC3339), partCollected, personRef("u1")); err != nil {
+		t.Fatal(err)
+	}
+	s.Paused("g", "a") // the thread lookup is warm: only the new entry's mute restore reads the store
+	release := holdReaders(t, s)
+	answered := make(chan struct{})
+	go func() {
+		defer close(answered)
+		s.Observe(ObservedMessage{GuildID: "g", ChannelID: "a", MessageID: "m2", AuthorID: "u2", AuthorName: "u2",
+			Content: "도윤이가 챙긴대", At: clk.t, ReplyTo: "src", ReplyAuthorID: "u1", ToSomeone: true})
+	}()
+	waitsInStore(t, "(*Service).Observe(")
+	s.part.mu.Lock()
+	c := s.partChannel("g:a")
+	c.watches = append(c.watches, nextWatch{row: "pl_seed", msg: "src", author: "u1", until: clk.t.Add(collectNextWindow)})
+	s.part.mu.Unlock()
+	release()
+	<-answered
+	drain()
+	var next string
+	if err := db.DB.QueryRow(`SELECT COALESCE(json_extract(features,'$.next'),'') FROM participation_log WHERE id='pl_seed'`).Scan(&next); err != nil {
+		t.Fatal(err)
+	}
+	if next != "answered" {
+		t.Fatalf("features.next = %q, want answered", next)
 	}
 }
 

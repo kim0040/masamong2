@@ -311,26 +311,18 @@ func (s *Service) Observe(m ObservedMessage) {
 	if m.FromBot {
 		return
 	}
-	// the author's consent is read before the lock is taken, and only when a collected row waits for it
-	var counted *bool
-	if arrived.watched {
-		ok := s.authorCounted(m)
-		counted = &ok
-	}
-	r := s.observeReads(m)
-	c := s.lockPartChannel(key)
+	c, r := s.lockObserved(key, m, arrived.watched)
 	defer s.part.mu.Unlock()
 	startWork := s.partWork()
 	quietCue := false
 	if r.mode == "shadow" || r.mode == "conservative" {
-		pack := s.voiceFor(m.GuildID, s.channelPolicy(m.GuildID, m.ChannelID)).Pack
-		if react, logged := s.backoffObserve(c, m, pack); logged != "" {
+		if react, logged := s.backoffObserve(c, m, r.pack); logged != "" {
 			startWork("participation back-off", func(_ context.Context) { s.backoffAfter(m, react, logged) })
 			quietCue = logged == "quiet_cue"
 		}
 	}
 	// what happened after the collected moments of this channel
-	if done := s.advanceWatches(c, m, counted); len(done) > 0 {
+	if done := s.advanceWatches(c, m, r.counted); len(done) > 0 {
 		startWork("participation next", func(_ context.Context) { s.writeNext(done) })
 	}
 	if !quietCue { // a quiet cue drops the candidate it answers with no log entry (backoffObserve)
@@ -762,9 +754,9 @@ func (s *Service) collectMention(in ChatInput) {
 // source message replied to by someone else, or the same author speaking again. Watches past their window
 // end as silent. It returns the rows to write (the caller holds s.part.mu and writes them after).
 //
-// Whether the author may be counted is the same for every watch; the caller reads it before taking the lock
-// when rows were waiting. nil means none was waiting then: a row collected since is newer than this message,
-// which settles it only when its window has ended (the store is not asked under the lock).
+// Whether the author may be counted is the same for every watch; Observe reads it before taking the lock
+// whenever rows wait (lockObserved). nil means it was not read: the message settles only the rows whose
+// window ended (the store is not asked under the lock).
 func (s *Service) advanceWatches(c *partChannel, m ObservedMessage, counted *bool) []nextResult {
 	if len(c.watches) == 0 || m.FromBot {
 		return nil
