@@ -170,6 +170,13 @@ go test -c -o /tmp/app.test ./internal/application
 #   MASAMONG_LOOP_FINAL=off|tools|search 로 chat.loop_final을 바꿔 라운드 수와 통과 수를 비교한다
 ```
 
+**application 패키지를 나누는 작업의 가드**(E7). 코드를 옮기는 커밋은 옮기기만 하고, 아래로 그것을 확인한다.
+- `go run ./tools/movecheck -mode R|A|B -base <옮기기 전 커밋> [-head HEAD]` — 세 가지 커밋만 있다. R(이름 바꾸기): `-rename old=new`를 적용하면 모든 선언이 같다. A(리홈): `-retype Service=fortuneSvc -feature fortune`, 받는 타입과 인자 타입만 바뀌고 다른 본문은 `s.X`가 `s.fortune.X`로만 바뀐다. B(옮기기): `-to <새 폴더>`, 패키지에서 나간 선언(함수, 메서드, 타입과 필드·태그, 상수, 변수)이 새 폴더에 그대로 있다. 이름이 바뀌는 타입은 `-rename`에 적는다. `*_shims.go`와 `hosts_*.go`는 같은 이름의 메서드로 자기 인자를 순서대로 넘기는 한 줄 전달 함수만 가진다. 빌드 태그와 상관없이 모든 `.go` 파일을 읽고, `internal/application`과 `tools/codemap` 밖의 파일이 바뀌어도 실패한다.
+- `make testnames` — `internal/application/...`의 테스트 이름이 하나도 사라지지 않았는지 `internal/application/testdata/testnames.golden`과 비교한다(새 테스트는 괜찮다). 일부러 지웠을 때만 `make testnames-update`.
+- `go test ./internal/application -run 'TestLayer|TestApplicationPackage|TestApplicationDoesNot'` — 어느 패키지가 application을 가져오고 application이 무엇을 가져오는지 못박는다. 하위 패키지는 application, connectors, transport를 가져오지 못한다.
+- `go test ./internal/application -run 'TestExportedSurface|TestSchema'` — 밖으로 보이는 이름과 메서드 집합(`testdata/exported_surface.golden`), 표 목록 순서와 `sqlite_master`, 옛 모양에서의 업그레이드(`testdata/schema*.golden`)를 못박는다. 의도한 변경이면 diff를 읽고 같은 명령에 `-update`를 붙여 다시 쓴다.
+- `TestCloseOrder…`(작업 대기, 원장 비우기, 통계 비우기, 저장소 닫기 순서)와 `TestServiceIsBuiltOnlyWhereTheListSays`(`Service`를 손으로 만드는 곳 목록)도 같은 묶음이다.
+
 **기억 품질 측정**(실제 기록, 비공개 데이터 필요)은 `tools/evaluation/memory_dims/`(러너와 `run_sweep.sh`, `agg.py`)로 한다.
 - 데이터 루트 사본은 `.masamong-scratch/`에만 둔다.
 - 평가 루트는 설정을 DB에 저장한다. 그래서 `config.yaml`을 고쳐도 반영되지 않는다. 러너의 `config.patch` 경로를 쓴다.
