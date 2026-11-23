@@ -304,11 +304,9 @@ func (s *Service) storeBanterChannel(db *storage.Store, guildID, channelID strin
 	}
 }
 
-// banterTurnSlack is how far in the future a stored banter turn may lie and still be taken for one noted
-// while the turns are read: a later one was written before the clock went back and is deleted.
-const banterTurnSlack = time.Minute
-
-// loadBanterTurns reads the stored banter turns of the last day once, before banter.mu is taken.
+// loadBanterTurns reads the stored banter turns of the last day once, before banter.mu is taken. Rows dated
+// after the read began were written before the clock went back and are deleted, except the turns noted
+// while this reads: a turn is in memory before its row is written, so memory tells them apart.
 func (s *Service) loadBanterTurns() {
 	b := &s.banter
 	b.mu.Lock()
@@ -322,12 +320,44 @@ func (s *Service) loadBanterTurns() {
 		return
 	}
 	now := s.Clock.Now().UTC()
+	read, future, ok := readBanterTurns(db, now)
+	if !ok {
+		return
+	}
+	b.mu.Lock()
+	if !b.turnsLoaded {
+		if b.turns == nil {
+			b.turns = map[string]banterTurn{}
+		}
+		for id, t := range read {
+			if _, noted := b.turns[id]; !noted { // a turn noted meanwhile is the newer one
+				b.turns[id] = t
+			}
+		}
+		b.turnsLoaded = true
+		s.pruneBanterTurnsLocked(s.Clock.Now().UTC()) // not now: a turn noted meanwhile is later than it
+	}
+	for id := range future {
+		if _, noted := b.turns[id]; noted {
+			delete(future, id)
+		}
+	}
+	b.mu.Unlock()
+	_, _ = db.DB.Exec(`DELETE FROM banter_turns WHERE created_at<?`, banterStamp(now.Add(-24*time.Hour))) // tidying: the read skips them
+	for id, stamp := range future {
+		_, _ = db.DB.Exec(`DELETE FROM banter_turns WHERE turn_id=? AND created_at=?`, id, stamp) // tidying: the read skips them
+	}
+}
+
+// readBanterTurns reads the stored banter turns of the day before now, and the turn IDs (with their stamps)
+// dated after it; ok is false when the store could not be read.
+func readBanterTurns(db *storage.Store, now time.Time) (read map[string]banterTurn, future map[string]string, ok bool) {
 	rows, err := db.Reader().Query(`SELECT turn_id,guild_id,channel_id,created_at FROM banter_turns WHERE created_at>=? AND created_at<=? ORDER BY created_at DESC LIMIT 200`,
 		banterStamp(now.Add(-24*time.Hour)), banterStamp(now))
 	if err != nil {
-		return
+		return nil, nil, false
 	}
-	read := map[string]banterTurn{}
+	read = map[string]banterTurn{}
 	for rows.Next() {
 		var id, guildID, channelID, stamp string
 		if rows.Scan(&id, &guildID, &channelID, &stamp) != nil {
@@ -339,20 +369,19 @@ func (s *Service) loadBanterTurns() {
 		}
 	}
 	_ = rows.Close()
-	_, _ = db.DB.Exec(`DELETE FROM banter_turns WHERE created_at<? OR created_at>?`, banterStamp(now.Add(-24*time.Hour)), banterStamp(now.Add(banterTurnSlack)))
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.turnsLoaded {
-		return
+	rows, err = db.Reader().Query(`SELECT turn_id,created_at FROM banter_turns WHERE created_at>?`, banterStamp(now))
+	if err != nil {
+		return nil, nil, false
 	}
-	if b.turns == nil {
-		b.turns = map[string]banterTurn{}
+	defer rows.Close()
+	future = map[string]string{}
+	for rows.Next() {
+		var id, stamp string
+		if rows.Scan(&id, &stamp) == nil {
+			future[id] = stamp
+		}
 	}
-	for id, t := range read {
-		b.turns[id] = t
-	}
-	b.turnsLoaded = true
-	s.pruneBanterTurnsLocked(now)
+	return read, future, true
 }
 
 func (s *Service) pruneBanterTurnsLocked(now time.Time) {
