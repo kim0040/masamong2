@@ -214,18 +214,12 @@ func TestStatsDimsCanonical(t *testing.T) {
 	}
 }
 
-// withStatsTestCounter declares a counter with values and a histogram for the length of a test (the
-// shipped counter has neither).
-func withStatsTestCounter(t *testing.T) {
+// withStatsTestCounter declares a counter with values and a histogram on s alone (the shipped counter
+// has neither).
+func withStatsTestCounter(t *testing.T, s *Service) {
 	t.Helper()
-	saved := statsRegistry
-	statsRegistry = append(slices.Clone(statsRegistry), statsMetric{Name: "actions.test", Group: statsGroupActions, Kind: statsCounter,
+	s.hooks.statsMetrics.Store("actions.test", &statsMetric{Name: "actions.test", Group: statsGroupActions, Kind: statsCounter,
 		Doc: "test", Dims: []statsDim{closedDim("via", statsVias, nil)}, Vals: []string{"cost_usd"}, Hist: true})
-	statsByName["actions.test"] = &statsRegistry[len(statsRegistry)-1]
-	t.Cleanup(func() {
-		statsRegistry = saved
-		delete(statsByName, "actions.test")
-	})
 }
 
 func statsRead(t *testing.T, s *Service, day, metric, dims string) (int64, map[string]float64, []int64) {
@@ -245,7 +239,7 @@ func statsRead(t *testing.T, s *Service, day, metric, dims string) (int64, map[s
 
 func TestStatsAddIsAdditive(t *testing.T) {
 	s, _ := deliveryService(t)
-	withStatsTestCounter(t)
+	withStatsTestCounter(t, s)
 	ctx := context.Background()
 	h := statsHistAdd(nil, 120)
 	add := func() {

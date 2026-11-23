@@ -52,6 +52,8 @@ type serviceHooks struct {
 	redirectHost atomic.Pointer[func(host string) bool]
 	// oldEditsAtOnce settles old edits at the first idle pass instead of oldEditsDelay after the start.
 	oldEditsAtOnce bool
+	// statsMetrics are metrics a test declared for this service only (name → *statsMetric, stats_registry.go).
+	statsMetrics sync.Map
 	// credentials stand in for the process environment's variables (credential below).
 	credentials credentialStandIns
 }
