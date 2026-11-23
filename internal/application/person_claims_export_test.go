@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+
+	"masamong/internal/memory/store"
 )
 
 // DerivePersonItemForTest derives the person claims of an episode item a test inserted with SQL, as
@@ -40,4 +42,20 @@ func (s *Service) PeoplePassForTest(ctx context.Context) {
 		return
 	}
 	s.peopleClaimsPass(ctx, db)
+}
+
+// SavePersonClaimsForTest writes claims through the write gate (savePersonClaims) in one transaction, as
+// live extraction or the backfill would, and returns how many rows it wrote.
+func (s *Service) SavePersonClaimsForTest(ctx context.Context, claims ...store.PersonClaim) (int, error) {
+	db, err := s.adminDB()
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	err = db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+		var err error
+		n, err = s.savePersonClaims(ctx, tx, claims)
+		return err
+	})
+	return n, err
 }
