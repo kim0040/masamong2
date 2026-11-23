@@ -2218,7 +2218,7 @@ func TestPeopleBackfillNoSensitiveWarns(t *testing.T) {
 	}
 }
 
-// Sol High 5, Astra High 4: a pilot cut by a crash between a send's stored intent and its answer may have
+// A pilot cut by a crash between a send's stored intent and its answer may have
 // been billed. Confirming a different plan supersedes that run and drops its stored answers, intent
 // included; the possibly billed maximum must stay counted in the server's total, before the new plan is
 // admitted and after the old run is superseded.
@@ -2340,7 +2340,7 @@ func pbTombstoneThreadOnBuild(t *testing.T, s *Service, armed *atomic.Bool) *ato
 	return &done
 }
 
-// Astra High 6, Sol H4: a deleted thread keeps its stored observations (its tombstone is written apart),
+// A deleted thread keeps its stored observations (its tombstone is written apart),
 // and nothing of it may leave the process: a thread deleted after a window's build is caught by the
 // check made just before the send, on the pilot's standard calls and in a batch, and the dry run plans no
 // window of a deleted thread. The ordinary channel's lines are the control.

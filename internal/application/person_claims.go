@@ -186,7 +186,7 @@ func (s *Service) personClaimPasses(tx *sql.Tx, c *store.PersonClaim, memoryOut,
 	if suppressed, err := personSuppressed(tx, *c); err != nil || suppressed {
 		return false, err
 	}
-	if corrected, err := correctedLines(tx, c.SubjectRef, c.Evidence); err != nil || corrected {
+	if corrected, err := correctedLines(tx, c.SubjectRef, c.Text, c.Evidence); err != nil || corrected {
 		return false, err
 	}
 	if item, ok := strings.CutPrefix(c.Source, "episode_item:"); ok {
@@ -230,19 +230,33 @@ func personSuppressed(tx *sql.Tx, c store.PersonClaim) (bool, error) {
 	return hit, err
 }
 
-// correctedLines reports whether an item a member said is wrong rests on any of the lines and names the
-// subject: hidden, in an episode that is never made again from its lines (regen=3, explicit.go). v1.6
-// recorded corrections only this way, without person markers.
-func correctedLines(tx *sql.Tx, subject string, evidence []string) (bool, error) {
+// correctedLines reports whether a statement is one a member said is wrong: an item hidden in an episode
+// that is never made again from its lines (regen=3, explicit.go), resting on any of the lines, naming the
+// subject and saying the same (the text key, as a hide marker). v1.6 recorded corrections only this way,
+// without person markers; another statement of the same lines (a second fact of one message) is not the
+// corrected one and passes.
+func correctedLines(tx *sql.Tx, subject, text string, evidence []string) (bool, error) {
 	if len(evidence) == 0 || !tableExists(tx, "episode_item") {
 		return false, nil
 	}
 	raw, _ := json.Marshal(evidence)
-	var hit bool
-	err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM evidence_refs r JOIN episode_item i ON i.id=r.holder_id JOIN channel_episode e ON e.id=i.episode_id
-		WHERE r.holder_kind=? AND r.source_id IN (SELECT value FROM json_each(?)) AND i.state='hidden' AND e.regen=3 AND instr(i.text,?)>0)`,
-		store.HolderEpisodeItem, string(raw), "{@"+subject+"}").Scan(&hit)
-	return hit, err
+	rows, err := tx.Query(`SELECT DISTINCT i.text FROM evidence_refs r JOIN episode_item i ON i.id=r.holder_id JOIN channel_episode e ON e.id=i.episode_id
+		WHERE r.holder_kind=? AND r.source_id IN (SELECT value FROM json_each(?)) AND i.state='hidden' AND e.regen=3 AND instr(i.text,?)>0`,
+		store.HolderEpisodeItem, string(raw), "{@"+subject+"}")
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	key := store.PersonTextKey(strings.Join(strings.Fields(text), " "))
+	hit := false
+	for rows.Next() {
+		var itemText string
+		if err := rows.Scan(&itemText); err != nil {
+			return false, err
+		}
+		hit = hit || store.PersonTextKey(strings.Join(strings.Fields(itemText), " ")) == key
+	}
+	return hit, rows.Err()
 }
 
 // writePersonClaim inserts a claim that passed the gate, or hands a derived row with the same id to a
