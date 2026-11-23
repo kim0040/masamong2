@@ -1086,6 +1086,7 @@ func (s *Service) ResumeJobs(ctx context.Context) {
 			s.Log.Warn("memory: stored batch not resumed", "room", room, "err", err)
 		}
 	}
+	s.resumePeopleBackfill(ctx) // polls only the batches of people backfill runs an operator started
 }
 
 // retriedJob starts a job that jobs.retry put back to pending.

@@ -1391,5 +1391,14 @@
   "updates.announce.dm_footer": "详情：`/更新` · 停止这些私信：`/更新 取消`",
   "access.news": "更新通知",
   "discord.command.admin.choice.op.news": "更新通知",
-  "discord.command.admin.verb.news": "通知,更新通知"
+  "discord.command.admin.verb.news": "通知,更新通知",
+  "people_backfill.no_anthropic": "人物记忆回填只能在使用 Anthropic 原生 API 且已配置密钥的提供商上运行。请先在“连接”中添加。",
+  "people_backfill.provider_ambiguous": "已配置多个 Anthropic 提供商。请指定要使用的那个(provider)。",
+  "people_backfill.confirm_needed": "请先进行试运行,再用它的计划令牌确认。",
+  "people_backfill.plan_changed": "试运行之后已保存的对话有变化。请查看新的估算并用新令牌确认。",
+  "people_backfill.no_pilot": "完整运行前请先完成此计划的试点。",
+  "people_backfill.over_budget": "估算超出了支出上限。请提高上限,或缩小房间或日期范围。",
+  "people_backfill.busy": "此服务器上已有人物记忆回填在进行。",
+  "people_backfill.no_rooms": "此范围内没有可读取的已保存对话。",
+  "people_backfill.unavailable": "此处无法使用人物记忆回填:需要 SQLite 存储和正在运行的服务。"
 }

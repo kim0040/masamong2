@@ -1392,5 +1392,14 @@
   "updates.announce.dm_footer": "詳しくは `/アップデート` · この DM を止める: `/アップデート 解除`",
   "access.news": "更新のお知らせ",
   "discord.command.admin.choice.op.news": "更新のお知らせ",
-  "discord.command.admin.verb.news": "お知らせ,更新通知"
+  "discord.command.admin.verb.news": "お知らせ,更新通知",
+  "people_backfill.no_anthropic": "人物メモリーの埋め戻しは、Anthropic ネイティブ API の提供元(キーあり)でのみ実行できます。先に「接続」で追加してください。",
+  "people_backfill.provider_ambiguous": "Anthropic の提供元が複数あります。使うもの(provider)を指定してください。",
+  "people_backfill.confirm_needed": "先にドライランを実行し、その計画トークンで確認してください。",
+  "people_backfill.plan_changed": "ドライランの後に保存済みの会話が変わりました。新しい見積もりを確認し、そのトークンで確認してください。",
+  "people_backfill.no_pilot": "本実行の前に、この計画の試験実行を終えてください。",
+  "people_backfill.over_budget": "見積もりが支出上限を超えています。上限を上げるか、部屋や期間を絞ってください。",
+  "people_backfill.busy": "このサーバーでは人物メモリーの埋め戻しがすでに実行中です。",
+  "people_backfill.no_rooms": "この範囲に読み込める保存済みの会話はありません。",
+  "people_backfill.unavailable": "ここでは人物メモリーの埋め戻しを使えません。SQLite ストレージと実行中のサービスが必要です。"
 }

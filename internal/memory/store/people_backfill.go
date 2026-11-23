@@ -321,6 +321,43 @@ func BackfillWindows(q backfillQuerier, runID string, pilotOnly bool, states ...
 	return out, rows.Err()
 }
 
+// BackfillQueue is the first limit queued windows of a run, in plan order (a run never reads its whole
+// queue at once).
+func BackfillQueue(q backfillQuerier, runID string, limit int) ([]BackfillWindow, error) {
+	rows, err := q.Query(`SELECT `+backfillWindowCols+` FROM people_backfill_window WHERE run_id=? AND state=? ORDER BY seq LIMIT ?`, runID, WindowQueued, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BackfillWindow
+	for rows.Next() {
+		w, err := scanBackfillWindow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
+// BackfillBatchWindows are the windows sent in one batch (by its key) and not settled yet.
+func BackfillBatchWindows(q backfillQuerier, runID, batch string) ([]BackfillWindow, error) {
+	rows, err := q.Query(`SELECT `+backfillWindowCols+` FROM people_backfill_window WHERE run_id=? AND batch=? AND state=? ORDER BY seq`, runID, batch, WindowSubmitted)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BackfillWindow
+	for rows.Next() {
+		w, err := scanBackfillWindow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, w)
+	}
+	return out, rows.Err()
+}
+
 // BackfillCounts are a run's window counts by state and what applying them saved.
 type BackfillCounts struct {
 	States   map[string]int

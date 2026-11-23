@@ -1391,5 +1391,14 @@
   "updates.announce.dm_footer": "Details: `/updates` · Stop these DMs: `/updates unsubscribe`",
   "access.news": "Update news",
   "discord.command.admin.choice.op.news": "update news",
-  "discord.command.admin.verb.news": "news,updates"
+  "discord.command.admin.verb.news": "news,updates",
+  "people_backfill.no_anthropic": "The people backfill runs only on a provider with the native Anthropic API and a key. Add one in Connections first.",
+  "people_backfill.provider_ambiguous": "Several Anthropic providers are set up. Name the one to use (provider).",
+  "people_backfill.confirm_needed": "Run a dry run first, then confirm with its plan token.",
+  "people_backfill.plan_changed": "The stored conversations changed since the dry run. Check the new estimate and confirm with its token.",
+  "people_backfill.no_pilot": "Finish a pilot of this plan before the full run.",
+  "people_backfill.over_budget": "The estimate is over the spending cap. Raise the cap, or narrow the rooms or dates.",
+  "people_backfill.busy": "A people backfill is already running on this server.",
+  "people_backfill.no_rooms": "There are no stored conversations to read in this range.",
+  "people_backfill.unavailable": "The people backfill is not available here: it needs SQLite storage and a running service."
 }

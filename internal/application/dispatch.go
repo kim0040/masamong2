@@ -87,6 +87,7 @@ func buildActionTable() map[string]actionHandler {
 	register((*Service).importsPreview, "imports.preview")
 	register((*Service).memoryActions, "messages.search", "memory.search", "imports.start", "memory.reindex", "chat.respond")
 	register((*Service).memoryBackfill, "memory.backfill")
+	register((*Service).peopleBackfillAction, "memory.people.backfill", "memory.people.backfill.review")
 	register((*Service).summariesChannel, "summaries.channel")
 	register((*Service).eventsTimeline, "events.timeline")
 	register(plainHandler((*Service).personas), "personas.list", "personas.apply")
