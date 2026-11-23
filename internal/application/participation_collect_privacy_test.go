@@ -3,12 +3,14 @@ package application_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"masamong/internal/application"
 	"masamong/internal/config"
+	"masamong/internal/testutil"
 )
 
 // Collect mode keeps no text, follows the privacy rules, and records what happened next.
@@ -48,16 +50,12 @@ func featuresOf(t *testing.T, r plRow) map[string]any {
 // waitRows waits until the log has n rows (the write is asynchronous after a cancellation).
 func waitRows(t *testing.T, svc *application.Service, n int) []plRow {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if rows := plRows(t, svc); len(rows) >= n {
-			return rows
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("waited for %d rows, have %+v", n, plRows(t, svc))
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	var rows []plRow
+	testutil.WaitFor(t, 5*time.Second, fmt.Sprintf("%d participation rows", n), func() bool {
+		rows = plRows(t, svc)
+		return len(rows) >= n
+	})
+	return rows
 }
 
 func nextNow(t *testing.T, svc *application.Service, id string) string {
@@ -72,28 +70,20 @@ func nextNow(t *testing.T, svc *application.Service, id string) string {
 // waitNext waits until a row's features.next is set and returns it.
 func waitNext(t *testing.T, svc *application.Service, id string) string {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if next := nextNow(t, svc, id); next != "" {
-			return next
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("features.next of %s never set", id)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	var next string
+	testutil.WaitFor(t, 5*time.Second, "features.next of "+id, func() bool {
+		next = nextNow(t, svc, id)
+		return next != ""
+	})
+	return next
 }
 
 // waitWatching waits for the number of collected rows that still wait for what happens next.
 func waitWatching(t *testing.T, svc *application.Service, n int) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for application.CollectWatching(svc) != n {
-		if time.Now().After(deadline) {
-			t.Fatalf("watches: %d, want %d", application.CollectWatching(svc), n)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	testutil.WaitFor(t, 5*time.Second, fmt.Sprintf("%d watches", n), func() bool {
+		return application.CollectWatching(svc) == n
+	})
 }
 
 func observe(svc *application.Service, m application.ObservedMessage) {
@@ -230,22 +220,20 @@ func TestCollectSkipsWhatIsNotAllowed(t *testing.T) {
 			}
 		}},
 	}
-	filteredOf := func(svc *application.Service) map[string]int {
-		r := exec(svc, "participation.mode", map[string]any{"guild_id": "g", "channel_id": "c"})
-		out, _ := r.Output["filtered"].(map[string]int)
-		return out
-	}
 	for _, tc := range cases {
 		t.Run(tc.name+"/question", func(t *testing.T) {
 			svc, _, _ := partSvc(t, "collect")
 			tc.setup(t, svc)
 			say(svc, "m1", "u1", "누가 텐트 챙기기로 했지?")
-			time.Sleep(200 * time.Millisecond)
+			// a filtered message is counted in Observe before it returns; nothing else can come of it
+			testutil.WaitFor(t, 5*time.Second, "the filter to count "+tc.reason, func() bool {
+				return filteredOf(t, svc)[tc.reason] == 1
+			})
 			if rows := plRows(t, svc); len(rows) != 0 {
 				t.Fatalf("recorded: %+v", rows)
 			}
-			if got := filteredOf(svc)[tc.reason]; got != 1 {
-				t.Fatalf("filtered %s: %v", tc.reason, filteredOf(svc))
+			if got := filteredOf(t, svc)[tc.reason]; got != 1 {
+				t.Fatalf("filtered %s: %v", tc.reason, filteredOf(t, svc))
 			}
 		})
 		t.Run(tc.name+"/name mention", func(t *testing.T) {
@@ -253,13 +241,18 @@ func TestCollectSkipsWhatIsNotAllowed(t *testing.T) {
 			nameCallRoom(t, svc, js)
 			tc.setup(t, svc)
 			sayName(svc, "m9", "u1")
-			time.Sleep(100 * time.Millisecond)
+			// a paused channel never reaches the name-call check, so nothing is counted there; the turn's
+			// return ends every other case (the mention is counted synchronously in it)
+			if tc.reason != "paused" {
+				testutil.WaitFor(t, 5*time.Second, "the filter to count "+tc.reason, func() bool {
+					return filteredOf(t, svc)[tc.reason] == 1
+				})
+			}
 			if rows := plRows(t, svc); len(rows) != 0 {
 				t.Fatalf("recorded: %+v", rows)
 			}
-			// a paused channel never reaches the name-call check, so nothing is counted there
-			if got := filteredOf(svc)[tc.reason]; got != 1 && tc.reason != "paused" {
-				t.Fatalf("filtered %s: %v", tc.reason, filteredOf(svc))
+			if got := filteredOf(t, svc)[tc.reason]; got != 1 && tc.reason != "paused" {
+				t.Fatalf("filtered %s: %v", tc.reason, filteredOf(t, svc))
 			}
 		})
 	}
@@ -280,7 +273,9 @@ func TestCollectIgnoresQuietHours(t *testing.T) {
 	svc, _, js := partSvc(t, "shadow")
 	applyDoc(t, svc, quiet)
 	say(svc, "m1", "u1", "누가 텐트 챙기기로 했지?")
-	time.Sleep(200 * time.Millisecond)
+	testutil.WaitFor(t, 5*time.Second, "the filter to count quiet_hours", func() bool {
+		return filteredOf(t, svc)["quiet_hours"] == 1
+	})
 	if len(plRows(t, svc)) != 0 || js.judged.Load() != 0 {
 		t.Fatal("shadow must stay quiet in quiet hours")
 	}
@@ -308,13 +303,14 @@ func TestCollectRecordsNamedBotWhereNoCheckRuns(t *testing.T) {
 		want              int
 	}{{"off", "mention", 1}, {"always", "mention", 1}, {"addressed", "always", 1}, {"addressed", "mention", 0}} {
 		svc, _, js := partSvc(t, "collect")
+		_, drain := application.ManualParticipationForTest(svc)
 		applyDoc(t, svc, func(d *config.Document) {
 			p := d.Guilds["g"].Channels["c"]
 			p.NameCall, p.Respond = tc.nameCall, tc.respond
 			d.Guilds["g"].Channels["c"] = p
 		})
 		observe(svc, application.ObservedMessage{MessageID: "m1", AuthorID: "u1", Content: "마사몽 오늘 좀 웃기네 ㅋㅋ", BotCall: "name", Addressed: tc.respond == "always"})
-		time.Sleep(200 * time.Millisecond)
+		drain() // the queued mention write, if any
 		rows := plRows(t, svc)
 		if len(rows) != tc.want {
 			t.Fatalf("name_call %s, respond %s: %+v", tc.nameCall, tc.respond, rows)
@@ -328,8 +324,9 @@ func TestCollectRecordsNamedBotWhereNoCheckRuns(t *testing.T) {
 	}
 	// a mention or a reply to the bot is a call, not a name said
 	svc, _, _ := partSvc(t, "collect")
+	_, drain := application.ManualParticipationForTest(svc)
 	observe(svc, application.ObservedMessage{MessageID: "m1", AuthorID: "u1", Content: "안녕", BotCall: "mention"})
-	time.Sleep(150 * time.Millisecond)
+	drain()
 	if rows := plRows(t, svc); len(rows) != 0 {
 		t.Fatalf("a call was recorded as a name: %+v", rows)
 	}
@@ -562,7 +559,9 @@ func TestCollectedRowsAreDeleted(t *testing.T) {
 		onlySecond(t, svc)
 		// and nothing new is recorded about them
 		say(svc, "m3", "u1", "누가 간식 사 오기로 했지?")
-		time.Sleep(150 * time.Millisecond)
+		testutil.WaitFor(t, 5*time.Second, "the filter to count opted_out", func() bool {
+			return filteredOf(t, svc)["opted_out"] == 1
+		})
 		onlySecond(t, svc)
 	})
 	t.Run("other modes keep the row and lose the text", func(t *testing.T) {
@@ -615,9 +614,12 @@ func TestCollectedLabelsStayOutOfTheGate(t *testing.T) {
 func TestCollectModeSwitchWhilePending(t *testing.T) {
 	// collect -> shadow: the moment is judged like any shadow candidate and logged as one
 	svc, _, js := partSvc(t, "collect")
-	application.SetParticipationWait(svc, 250*time.Millisecond)
+	finishWait, _ := application.ManualParticipationForTest(svc)
 	say(svc, "m1", "u1", "누가 텐트 챙기기로 했지?")
 	switchMode(t, svc, "shadow")
+	if !finishWait("g", "c") {
+		t.Fatal("candidate missing")
+	}
 	rows := waitRows(t, svc, 1)
 	if rows[0].State != "shadow" || rows[0].Mode != "shadow" || js.judged.Load() != 1 {
 		t.Fatalf("after collect -> shadow: %+v judged=%d", rows, js.judged.Load())
@@ -625,10 +627,12 @@ func TestCollectModeSwitchWhilePending(t *testing.T) {
 
 	// collect -> off: nothing is recorded
 	svc, _, js = partSvc(t, "collect")
-	application.SetParticipationWait(svc, 150*time.Millisecond)
+	finishWait, _ = application.ManualParticipationForTest(svc)
 	say(svc, "m1", "u1", "누가 텐트 챙기기로 했지?")
 	applyDoc(t, svc, func(d *config.Document) { d.Participation.Enabled = false })
-	time.Sleep(350 * time.Millisecond)
+	if !finishWait("g", "c") {
+		t.Fatal("candidate missing")
+	}
 	if rows := plRows(t, svc); len(rows) != 0 || js.judged.Load() != 0 {
 		t.Fatalf("after collect -> off: %+v", rows)
 	}
@@ -636,15 +640,21 @@ func TestCollectModeSwitchWhilePending(t *testing.T) {
 	// collect -> conservative right after the bot spoke: the moment, which no cooldown was checked for,
 	// is held to the cooldown now and not said
 	svc, gw, js := partSvc(t, "conservative")
+	finishWait, _ = application.ManualParticipationForTest(svc)
 	say(svc, "m1", "u1", "누가 텐트 챙기기로 했지?")
+	if !finishWait("g", "c") {
+		t.Fatal("candidate missing")
+	}
 	partLog(t, svc, 1)
 	if gw.postCount() != 1 {
 		t.Fatalf("posts: %d", gw.postCount())
 	}
 	switchMode(t, svc, "collect")
-	application.SetParticipationWait(svc, 250*time.Millisecond)
 	say(svc, "m2", "u2", "누가 보드게임 가져오기로 했지?")
 	switchMode(t, svc, "conservative")
+	if !finishWait("g", "c") {
+		t.Fatal("candidate missing")
+	}
 	rows = waitRows(t, svc, 2)
 	last := rows[len(rows)-1]
 	if last.MessageID != "m2" || last.State != "cancelled" || last.Reason != "cooldown" || last.Mode != "conservative" {
@@ -656,12 +666,16 @@ func TestCollectModeSwitchWhilePending(t *testing.T) {
 
 	// a collected row waiting for what comes next stops being followed when collect ends
 	svc, _, _ = partSvc(t, "collect")
+	finishWait, drain := application.ManualParticipationForTest(svc)
 	say(svc, "m1", "u1", "누가 텐트 챙기기로 했지?")
+	if !finishWait("g", "c") {
+		t.Fatal("candidate missing")
+	}
 	row := waitRows(t, svc, 1)[0]
 	waitWatching(t, svc, 1)
 	switchMode(t, svc, "shadow")
 	observe(svc, application.ObservedMessage{MessageID: "m2", AuthorID: "u1", Content: "음"})
-	time.Sleep(150 * time.Millisecond)
+	drain() // the queued follow-up write, if any
 	if got := nextNow(t, svc, row.ID); got != "" {
 		t.Fatalf("next recorded after the mode left collect: %q", got)
 	}
@@ -673,12 +687,12 @@ func TestCollectModeSwitchWhilePending(t *testing.T) {
 func TestCollectDropsMomentsOfDeletedMessages(t *testing.T) {
 	t.Run("deleted while it waits", func(t *testing.T) {
 		svc, _, _ := partSvc(t, "collect")
-		application.SetParticipationWait(svc, 250*time.Millisecond)
+		_, drain := application.ManualParticipationForTest(svc)
 		say(svc, "m1", "u1", "누가 텐트 챙기기로 했지?")
 		if err := svc.MessagesDeleted("g", "c", []string{"m1"}); err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(450 * time.Millisecond)
+		drain() // anything the deletion queued has run; the dropped candidate writes nothing
 		if rows := plRows(t, svc); len(rows) != 0 {
 			t.Fatalf("a deleted message was collected: %+v", rows)
 		}
@@ -688,12 +702,14 @@ func TestCollectDropsMomentsOfDeletedMessages(t *testing.T) {
 	})
 	t.Run("only the tombstone exists when the wait ends", func(t *testing.T) {
 		svc, _, _ := partSvc(t, "collect")
-		application.SetParticipationWait(svc, 250*time.Millisecond)
+		finishWait, _ := application.ManualParticipationForTest(svc)
 		say(svc, "m1", "u1", "누가 텐트 챙기기로 했지?")
 		if _, err := svc.Store.DB.Exec(`INSERT INTO privacy_tombstones(kind,source_id,at) VALUES('message','m1',?)`, time.Now().UTC().Format(time.RFC3339)); err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(450 * time.Millisecond)
+		if !finishWait("g", "c") {
+			t.Fatal("candidate missing")
+		}
 		if rows := plRows(t, svc); len(rows) != 0 {
 			t.Fatalf("a deleted message was collected: %+v", rows)
 		}
@@ -710,11 +726,12 @@ func TestCollectDropsMomentsOfDeletedMessages(t *testing.T) {
 	})
 	t.Run("a name said in a message that is already gone", func(t *testing.T) {
 		svc, _, _ := partSvc(t, "collect")
+		_, drain := application.ManualParticipationForTest(svc)
 		if err := svc.MessagesDeleted("g", "c", []string{"m1"}); err != nil {
 			t.Fatal(err)
 		}
 		observe(svc, application.ObservedMessage{MessageID: "m1", AuthorID: "u1", Content: "마사몽 오늘 좀 웃기네 ㅋㅋ", BotCall: "name"})
-		time.Sleep(200 * time.Millisecond)
+		drain() // the queued mention write skips the tombstoned message
 		if rows := plRows(t, svc); len(rows) != 0 {
 			t.Fatalf("recorded: %+v", rows)
 		}
@@ -725,13 +742,13 @@ func TestCollectDropsMomentsOfDeletedMessages(t *testing.T) {
 // and no cancelled one either.
 func TestCollectWithdrawnWhileWaitingLeavesNoRow(t *testing.T) {
 	svc, _, _ := partSvc(t, "collect")
-	application.SetParticipationWait(svc, 300*time.Millisecond)
+	_, drain := application.ManualParticipationForTest(svc)
 	say(svc, "m1", "u1", "누가 텐트 챙기기로 했지?")
 	if r := as(svc, "privacy.consent", map[string]any{"scope": "participation", "decision": "withdraw"}, inChannel("u1")); !r.OK {
 		t.Fatal(r.Error)
 	}
 	say(svc, "m2", "u2", "내가 가져갈게") // would cancel the moment as handled
-	time.Sleep(500 * time.Millisecond)
+	drain()                         // the queued cancellation write leaves no row for a person who withdrew
 	if rows := plRows(t, svc); len(rows) != 0 {
 		t.Fatalf("rows about a person who withdrew: %+v", rows)
 	}
