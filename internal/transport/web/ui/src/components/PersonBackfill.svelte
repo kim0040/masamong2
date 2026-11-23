@@ -210,7 +210,7 @@
           {#if pilotModels.length}
             <div class="tbl"><table class="table">
               <caption class="sr-only">{t('pb.pilot_results')}</caption>
-              <thead><tr><th>{t('pb.col.model')}</th><th class="r">{t('pb.col.answered')}</th><th class="r">{t('pb.col.facts')}</th><th class="r">{t('pb.col.rejects')}</th><th class="r">{t('pb.col.refused')}</th><th class="r">{t('pb.col.cost')}</th></tr></thead>
+              <thead><tr><th>{t('pb.col.model')}</th><th class="r">{t('pb.col.answered')}</th><th class="r">{t('pb.col.facts')}</th><th class="r">{t('pb.col.rejects')}</th><th class="r">{t('pb.col.refused')}</th><th class="r">{t('pb.col.spent')}</th></tr></thead>
               <tbody>
                 {#each pilotModels as m (m.model)}
                   <tr><td>{modelName(m.model)}</td><td class="r num">{num(m.answered)}/{num(run.pilot?.windows)}</td><td class="r num">{num(m.facts)}</td><td class="r num">{num(m.rejected)} ({pct(m.reject_rate ?? 0)})</td><td class="r num">{num(m.refused)}</td><td class="r num">{usd(m.cost_usd)}</td></tr>
@@ -244,6 +244,7 @@
         {/if}
         {#if run && ph !== 'none' && ph !== 'piloted' && ph !== 'piloting' && run.windows}
           <div class="prog" aria-live="polite">
+            <p class="small">{t('pb.progress_n', { done: num(prog.done), total: num(prog.total) })}</p>
             <Progress value={prog.done} max={prog.total || 1} label={t('pb.progress')} tone={ph === 'done' ? 'ok' : ph === 'stopped' ? 'warn' : 'accent'} />
             <KeyValue items={[
               { k: t('pb.w.applied'), v: num(run.windows.applied) },
@@ -307,8 +308,10 @@
   .budget :global(.field) {
     flex: 0 1 260px;
   }
-  .budget :global(.btn) {
-    margin-top: 26px;
+  @media (min-width: 640px) {
+    .budget :global(.btn) {
+      margin-top: 26px; /* level with the input, under the label */
+    }
   }
   .row {
     display: flex;
