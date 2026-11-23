@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 import threading
 import time
@@ -179,7 +180,13 @@ def print_cli(payload: dict[str, Any]) -> None:
         extra.append(f"${float(payload['cost_usd']):.4f}")
     if extra:
         line = f"{line} · {' · '.join(extra)}"
-    print(line, flush=True)
+    try:
+        print(line, flush=True)
+    except UnicodeEncodeError:
+        # a console that cannot show Korean (a Windows code page such as cp1252): show what it can
+        # rather than stop the preparation over a progress line
+        enc = getattr(sys.stdout, "encoding", None) or "ascii"
+        print(line.encode(enc, "replace").decode(enc), flush=True)
 
 
 def mark_phase_start(phase: str, already: int = 0) -> None:
