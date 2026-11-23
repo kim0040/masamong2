@@ -145,7 +145,9 @@ func (g *pictureGateway) counts() (pictures, lines int) {
 // idle waits until the picture queue has nothing waiting and nothing being drawn.
 func idle(t *testing.T, svc *application.Service) {
 	t.Helper()
-	testutil.WaitFor(t, 5*time.Second, "the picture queue to go idle", func() bool {
+	// generous: under -race on a loaded runner a failed upload's retry and its failure line took about 9 s
+	// (release run of v1.6.0); the wait ends as soon as the queue is idle, so a pass costs nothing extra
+	testutil.WaitFor(t, 30*time.Second, "the picture queue to go idle", func() bool {
 		waiting, running := application.ImageQueueStateForTest(svc)
 		return waiting == 0 && !running
 	})
