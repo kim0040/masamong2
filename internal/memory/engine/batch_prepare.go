@@ -311,7 +311,11 @@ func (e *Engine) submitChunk(ctx context.Context, sub *batchSubmit, w batchWork,
 	ref, err := client.SubmitBatch(ctx, kind, w.model, reqs, key)
 	switch {
 	case err == nil:
+		submittedAt := g.Ref.SubmittedAt
 		g.Ref, g.Submit, g.State = ref, "", openai.BatchPending
+		if !submittedAt.IsZero() {
+			g.Ref.SubmittedAt = submittedAt // keep the intent's stamp: the adapter's ref is wall time
+		}
 		if g.Ref.SubmitKey == "" {
 			g.Ref.SubmitKey = key
 		}
