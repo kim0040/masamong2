@@ -46,7 +46,8 @@ type pbFakeHost struct {
 	// rewrite replaces the answer to a prompt (Messages and batch items): its text and stop reason
 	rewrite func(model, prompt string) (text, stop string, ok bool)
 	// onDelete sees a batch delete before it is done; false answers it 500 and keeps the batch
-	onDelete func(id string) bool
+	onDelete   func(id string) bool
+	failCreate int // the next batch creates are read and answered 500: the outcome is unknown
 }
 
 func newPBHost(t *testing.T) *pbFakeHost {
@@ -105,6 +106,12 @@ func (h *pbFakeHost) serve(w http.ResponseWriter, r *http.Request) {
 		var raw map[string]any
 		_ = json.Unmarshal(body, &raw)
 		h.creates = append(h.creates, raw)
+		if h.failCreate > 0 {
+			h.failCreate--
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"type":"error","error":{"type":"api_error","message":"internal"}}`))
+			return
+		}
 		id := fmt.Sprintf("msgbatch_%d", len(h.creates))
 		var rows []string
 		for _, it := range req.Requests {
@@ -1968,5 +1975,44 @@ func TestPeopleBackfillRestartsAfterRemoteCleanup(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if after, _, _ := store.LoadBackfillRun(s2.Store.Reader(), run.ID); after.State != store.BackfillDone || h.count() != requests {
 		t.Fatalf("after a restart: %s, %d requests", after.State, h.count()-requests)
+	}
+}
+
+// A batch whose create call ended without an answer may have run. When the operator releases it
+// (requeue_unknown), its windows go out again and its reserved maximum stays charged against the cap.
+func TestPeopleBackfillUnknownSubmissionKeepsReservation(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	token, run := pbPiloted(t, s, nil)
+	pbBatchOnly(t, s, run)
+	h.mu.Lock()
+	h.failCreate = 1
+	h.mu.Unlock()
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token}); !res.OK {
+		t.Fatal(res.Error)
+	}
+	stopped := pbWait(t, s, "unknown batch", pbState(store.BackfillStopped))
+	bs := pbDecodeBatches(stopped.Batches)
+	if stopped.StoppedBy != "submit_unknown" || len(bs) != 1 || bs[0].State != pbBatchUnknown || bs[0].MaxUSD <= 0 {
+		t.Fatalf("an unanswered create: %+v %+v", stopped, bs)
+	}
+	held := bs[0].MaxUSD
+	if res, _ := pbExec(t, s, "memory.people.backfill", map[string]any{"mode": "run", "model": "haiku", "confirm": token, "requeue_unknown": true}); !res.OK {
+		t.Fatal(res.Error)
+	}
+	done := pbWait(t, s, "released run", pbState(store.BackfillDone))
+	bs = pbDecodeBatches(done.Batches)
+	if len(bs) != 2 || bs[0].State != pbBatchReleased || bs[1].State != pbBatchApplied {
+		t.Fatalf("batches: %+v", bs)
+	}
+	var settled float64 // the new batch's reported usage (memory_spend), the pilot's left out
+	_ = s.Store.Reader().QueryRow(`SELECT COALESCE(SUM(usd),0) FROM memory_spend WHERE kind=?`, store.SpendPeopleBackfill).Scan(&settled)
+	settled -= stopped.SpentUSD
+	if settled <= 0 || done.SpentUSD < stopped.SpentUSD+held+settled-1e-9 {
+		t.Fatalf("run spend %v, want the pilot's %v + the released maximum %v + the new batch %v", done.SpentUSD, stopped.SpentUSD, held, settled)
+	}
+	if spent, _ := store.BackfillGuildSpent(s.Store.Reader(), "g1"); spent < done.SpentUSD-1e-9 {
+		t.Fatalf("the cap's total %v leaves out the released batch", spent)
 	}
 }

@@ -40,7 +40,11 @@ const (
 	pbBatchSubmitted  = "submitted"
 	pbBatchUnknown    = "unknown" // the create call ended without an answer; the host keeps no key to find it by
 	pbBatchApplied    = "applied"
-	pbBatchFailed     = "failed" // never ran (refused at create, failed at the host, or released by the operator)
+	pbBatchFailed     = "failed" // never ran (refused at create, failed at the host, or not found by reconciliation)
+	// released: an unknown batch the operator released (requeue_unknown) after checking the host's batch
+	// list. Its windows went back to the queue and its reserved maximum was charged to the run: it may have
+	// run and been billed all the same, and a later send of the same windows is a second charge.
+	pbBatchReleased = "released"
 )
 
 // pbStopFails is how many failed steps in a row stop a run (stopped_by error).
@@ -1183,11 +1187,11 @@ func (s *Service) pbStep(ctx context.Context, db *storage.Store, runID string, a
 		switch b.State {
 		case pbBatchSubmitting, pbBatchUnknown:
 			if b.State == pbBatchUnknown && l.requeue.Load() {
-				// the operator checked the host's batch list: it never ran
-				if err := s.pbRequeueBatch(ctx, db, runID, b.Key); err != nil {
+				// the operator checked the host's batch list and found it did not run; that is not proof, so
+				// its reserved maximum stays charged
+				if err := s.pbReleaseBatch(ctx, db, runID, batches, i); err != nil {
 					return false, true, err
 				}
-				b.State, changed = pbBatchFailed, true
 				continue
 			}
 			ref := openai.BatchRef{API: a.API, BaseURL: a.BaseURL, Kind: openai.BatchChat, Model: b.Model, Count: b.Windows, SubmitKey: b.Key}
@@ -1202,7 +1206,7 @@ func (s *Service) pbStep(ctx context.Context, db *storage.Store, runID string, a
 			case err == nil:
 				b.Ref, b.State, changed, inflight = &found, pbBatchSubmitted, true, true
 			case errors.Is(err, openai.ErrBatchNotSubmitted):
-				if err := s.pbRequeueBatch(ctx, db, runID, b.Key); err != nil {
+				if err := s.pbRequeueBatch(ctx, db, runID, b.Key, false); err != nil {
 					return false, true, err
 				}
 				b.State, changed = pbBatchFailed, true
@@ -1222,7 +1226,7 @@ func (s *Service) pbStep(ctx context.Context, db *storage.Store, runID string, a
 				continue
 			}
 			if st.State == openai.BatchFailed {
-				if err := s.pbRequeueBatch(ctx, db, runID, b.Key); err != nil {
+				if err := s.pbRequeueBatch(ctx, db, runID, b.Key, false); err != nil {
 					return false, true, err
 				}
 				b.State, changed = pbBatchFailed, true
@@ -1449,15 +1453,43 @@ func (s *Service) pbSubmit(ctx context.Context, db *storage.Store, runID string,
 	return false, false, nil
 }
 
-// pbRequeueBatch sends a batch's unsettled windows back to the queue (unsent=true: they never left, so
-// the send is not counted).
-func (s *Service) pbRequeueBatch(ctx context.Context, db *storage.Store, runID, key string, unsent ...bool) error {
+// pbReleaseBatch releases the unknown batch batches[i] in one transaction: its windows go back to the
+// queue, its reserved maximum is charged to the run (not to memory_spend: no usage was reported), and the
+// batch list is saved with it released.
+func (s *Service) pbReleaseBatch(ctx context.Context, db *storage.Store, runID string, batches []pbBatch, i int) error {
+	b := &batches[i]
+	now := s.Clock.Now().UTC()
+	b.State = pbBatchReleased
+	return db.WithWriterContext(ctx, func(tx *sql.Tx) error {
+		ws, err := store.BackfillBatchWindows(tx, runID, b.Key)
+		if err != nil {
+			return err
+		}
+		for _, w := range ws {
+			w.State, w.Batch, w.UpdatedAt = store.WindowQueued, "", now.Format(time.RFC3339)
+			if w.Attempts >= pbMaxAttempts {
+				w.State = store.WindowFailed
+			}
+			if err := store.SaveBackfillWindow(tx, w); err != nil {
+				return err
+			}
+		}
+		if err := store.AddBackfillRunSpend(tx, runID, b.MaxUSD, now.Format(time.RFC3339)); err != nil {
+			return err
+		}
+		return s.pbSaveBatches(ctx, db, runID, batches, tx)
+	})
+}
+
+// pbRequeueBatch sends a batch's unsettled windows back to the queue (unsent: they never left, so the
+// send is not counted).
+func (s *Service) pbRequeueBatch(ctx context.Context, db *storage.Store, runID, key string, unsent bool) error {
 	ws, err := store.BackfillBatchWindows(db.Reader(), runID, key)
 	if err != nil {
 		return err
 	}
 	for _, w := range ws {
-		if len(unsent) > 0 && unsent[0] {
+		if unsent {
 			w.Attempts = max(0, w.Attempts-1)
 		}
 		if err := s.pbRequeue(ctx, db, runID, w, 0, 0); err != nil {
