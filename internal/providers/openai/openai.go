@@ -749,6 +749,11 @@ type ChatRequest struct {
 	// one-line summary): Effort should be "none". When the role behind the adapter has an effort of its
 	// own (Adapter.RoleEffort), that level is asked instead, with output room for the thinking.
 	Quick bool
+	// EphemeralCache asks an Anthropic-format host to cache the request for reuse (a top-level
+	// cache_control {"type":"ephemeral"} in the Messages body, anthropic.go): the paid people
+	// backfill turns it on so the shared prompt is read from cache. Off by default — a request
+	// without it is sent exactly as before — and other host families never see it.
+	EphemeralCache bool
 	// thinkRoom adds thinkingHeadroom to the output limit (a Quick call asked to think)
 	thinkRoom bool
 	// bareToolTurn (Anthropic) marks a request whose last assistant turn calls a tool without a thinking
