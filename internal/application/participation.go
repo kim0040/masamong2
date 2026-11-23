@@ -1004,7 +1004,7 @@ func (s *Service) participationMode(req action.Request) action.Result {
 	in := inputMap(req)
 	db, err := s.adminDB()
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	if id := strVal(in, "review", ""); id != "" {
 		v := strVal(in, "verdict", "")
@@ -1012,7 +1012,7 @@ func (s *Service) participationMode(req action.Request) action.Result {
 			return action.Fail(req, errcode.InvalidInput, "generic.error", "verdict must be good, bad or empty", nil)
 		}
 		if _, err := db.DB.Exec(`UPDATE participation_log SET verdict=? WHERE id=?`, v, id); err != nil {
-			return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+			return s.failErr(req, errcode.IO, "error.storage", err, nil)
 		}
 		return action.OK(req, map[string]any{"id": id, "verdict": v})
 	}
@@ -1051,7 +1051,7 @@ func (s *Service) participationMode(req action.Request) action.Result {
 		COALESCE(json_extract(features,'$.next'),'')
 		FROM participation_log`+cond+` ORDER BY created_at DESC LIMIT ?`, append(args, min(200, max(1, intVal(in, "limit", 40))))...)
 	if err != nil {
-		return action.Fail(req, errcode.IO, "generic.error", err.Error(), nil)
+		return s.failErr(req, errcode.IO, "error.storage", err, nil)
 	}
 	log := []map[string]any{}
 	for rows.Next() {
