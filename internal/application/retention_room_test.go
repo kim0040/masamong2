@@ -50,6 +50,7 @@ func turnState(t *testing.T, svc *application.Service, id string) (exists, textK
 // Every config written before the setting was wired carries retain_days: 30. With the global setting
 // at -1 (an install that keeps everything), that stored 30 and an unset room must strip nothing.
 func TestRoomRetainDaysOldDefaultFollowsGlobalForever(t *testing.T) {
+	t.Parallel()
 	svc := roomRetentionSvc(t, -1, map[string]int{"legacy": 30, "unset": 0})
 	ids := []string{seedRoomTurn(t, svc, "legacy", 200), seedRoomTurn(t, svc, "unset", 200), seedRoomTurn(t, svc, "unlisted", 200)}
 	if _, err := svc.RunRetentionForTest(context.Background()); err != nil {
@@ -64,6 +65,7 @@ func TestRoomRetainDaysOldDefaultFollowsGlobalForever(t *testing.T) {
 
 // A room value shortens the text of that room only; its rows and every other room stay.
 func TestRoomRetainDaysShortensOnlyThatRoomsText(t *testing.T) {
+	t.Parallel()
 	svc := roomRetentionSvc(t, -1, map[string]int{"short": 7, "other": 0})
 	oldShort, newShort := seedRoomTurn(t, svc, "short", 10), seedRoomTurn(t, svc, "short", 3)
 	oldOther, unlisted := seedRoomTurn(t, svc, "other", 10), seedRoomTurn(t, svc, "unlisted", 10)
@@ -86,6 +88,7 @@ func TestRoomRetainDaysShortensOnlyThatRoomsText(t *testing.T) {
 
 // A room never keeps text longer than the global setting: 200 days in the room, 90 globally.
 func TestRoomRetainDaysNeverKeepsLongerThanGlobal(t *testing.T) {
+	t.Parallel()
 	svc := roomRetentionSvc(t, 90, map[string]int{"long": 200, "short": 20})
 	long100, short30, short5 := seedRoomTurn(t, svc, "long", 100), seedRoomTurn(t, svc, "short", 30), seedRoomTurn(t, svc, "short", 5)
 	long50 := seedRoomTurn(t, svc, "long", 50)
@@ -102,6 +105,7 @@ func TestRoomRetainDaysNeverKeepsLongerThanGlobal(t *testing.T) {
 // A person's own deletion still wins: their text is gone before and after a room's pass, an old row
 // stays blank, and the room pass never brings anything back.
 func TestRoomRetainDaysDoesNotUndoAPersonsDeletion(t *testing.T) {
+	t.Parallel()
 	svc := roomRetentionSvc(t, -1, map[string]int{"c": 7})
 	if _, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", Message: "synthetic question", Speaker: "u", SpeakerID: "u1"}); err != nil {
 		t.Fatal(err)

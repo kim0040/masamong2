@@ -50,7 +50,7 @@ func slowChatSvc(t *testing.T, delay time.Duration, edit func(d *config.Document
 	svc := setupSvc(t)
 	f := &slowLLM{delay: delay}
 	srv := f.server(t)
-	t.Setenv("FAKE_OR_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_OR_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["openrouter"] = config.Provider{Kind: config.KindOpenAI, BaseURL: srv.URL, CredentialRef: "env:FAKE_OR_KEY"}
 		d.Providers["openmeteo"] = config.Provider{Kind: config.KindOpenMeteo, Disabled: true}
@@ -90,6 +90,7 @@ func turnsAt(svc *application.Service, channels []string) []error {
 }
 
 func TestChatTurnsInDifferentChannelsRunInParallel(t *testing.T) {
+	t.Parallel()
 	const delay = 150 * time.Millisecond
 	svc, f := slowChatSvc(t, delay, nil)
 	channels := []string{"a", "b", "c", "d", "e", "f"}
@@ -104,6 +105,7 @@ func TestChatTurnsInDifferentChannelsRunInParallel(t *testing.T) {
 }
 
 func TestChatTurnsInOneChannelRunOneAtATime(t *testing.T) {
+	t.Parallel()
 	svc, f := slowChatSvc(t, 40*time.Millisecond, nil)
 	channels := []string{"room", "room", "room", "room", "room"}
 	for i, err := range turnsAt(svc, channels) {
@@ -122,6 +124,7 @@ func TestChatTurnsInOneChannelRunOneAtATime(t *testing.T) {
 }
 
 func TestMaxConcurrentTurnsBoundsModelCalls(t *testing.T) {
+	t.Parallel()
 	svc, f := slowChatSvc(t, 60*time.Millisecond, func(d *config.Document) { d.Limits.MaxConcurrentTurns = 2 })
 	channels := []string{"a", "b", "c", "d", "e", "f", "g", "h"}
 	for i, err := range turnsAt(svc, channels) {
@@ -135,6 +138,7 @@ func TestMaxConcurrentTurnsBoundsModelCalls(t *testing.T) {
 }
 
 func TestChannelBacklogRefusesInsteadOfQueueingForever(t *testing.T) {
+	t.Parallel()
 	svc, _ := slowChatSvc(t, 150*time.Millisecond, nil)
 	channels := make([]string, 9)
 	for i := range channels {
@@ -158,6 +162,7 @@ func TestChannelBacklogRefusesInsteadOfQueueingForever(t *testing.T) {
 }
 
 func TestChatTurnsWhileConfigChanges(t *testing.T) {
+	t.Parallel()
 	svc, _ := slowChatSvc(t, 20*time.Millisecond, nil)
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
@@ -192,6 +197,7 @@ func TestChatTurnsWhileConfigChanges(t *testing.T) {
 }
 
 func TestConcurrentPollVotesAreNeverLost(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	created := exec(svc, "polls.create", map[string]any{"question": "q", "options": []string{"a", "b"}, "scope": "discord:c"})
 	if !created.OK {
@@ -231,6 +237,7 @@ func TestConcurrentPollVotesAreNeverLost(t *testing.T) {
 // index: with a long history a rebuild takes seconds and briefly doubles the index in memory. A memory
 // setting, or a key replaced under the same reference, does get a new engine.
 func TestMemoryEngineSurvivesUnrelatedConfigChanges(t *testing.T) {
+	t.Parallel()
 	svc, _ := slowChatSvc(t, 0, nil)
 	first, err := svc.MemoryEngine()
 	if err != nil {
@@ -242,7 +249,7 @@ func TestMemoryEngineSurvivesUnrelatedConfigChanges(t *testing.T) {
 	if again, _ := svc.MemoryEngine(); again != first {
 		t.Fatal("a channel rule change rebuilt the memory engine")
 	}
-	t.Setenv("FAKE_OR_KEY", "rotated")
+	svc.SetEnvForTest(t, "FAKE_OR_KEY", "rotated")
 	if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g", "id": "c", "rules": "길게"}); !r.OK {
 		t.Fatal(r.Error)
 	}
@@ -281,6 +288,7 @@ func queuedTurn(t *testing.T, delay time.Duration, behind application.ChatInput)
 // another one still gets its whole share (it used to be spent in the queue, and the model call that
 // followed failed at once).
 func TestTurnTimeoutStartsAfterTheWait(t *testing.T) {
+	t.Parallel()
 	// a turn takes two model calls (about 1.2 s); the second waits about as long as the first runs, so
 	// waiting and running together (about 2.4 s) overrun 2.1 s, but running alone has 0.9 s to spare for a
 	// slow machine, and a limit started before the wait would still be missed by about 0.3 s
@@ -298,6 +306,7 @@ func TestTurnTimeoutStartsAfterTheWait(t *testing.T) {
 // A call that waited longer than MaxWait is stale: it is refused as busy, and the turn ahead of it is
 // not disturbed.
 func TestStaleQueuedTurnIsRefusedAsBusy(t *testing.T) {
+	t.Parallel()
 	second, first := queuedTurn(t, 80*time.Millisecond, application.ChatInput{MaxWait: 40 * time.Millisecond})
 	if !errors.Is(second, application.ErrChatBusy) || first != nil {
 		t.Fatalf("second: %v, first: %v", second, first)

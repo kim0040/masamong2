@@ -31,7 +31,7 @@ const (
 func (s *Service) discordCheck(ctx context.Context, req action.Request) action.Result {
 	in := inputMap(req)
 	doc := s.Doc()
-	cred, err := providers.Resolve(doc.Discord.TokenRef)
+	cred, err := s.credential(doc.Discord.TokenRef)
 	if err != nil || !cred.Present() {
 		return action.Fail(req, errcode.ProviderUnconfigured, "generic.error", "no Discord bot token stored yet", map[string]any{"reason": "no_token"})
 	}

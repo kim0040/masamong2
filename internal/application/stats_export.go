@@ -240,7 +240,7 @@ func (s *Service) statsExportRows(ctx context.Context, rdb *sql.DB, firstMonday,
 		if err := rows.Scan(&day, &metric, &dims, &n, &rawVals); err != nil {
 			return nil, nil, err
 		}
-		m, ok := statsLookup(metric)
+		m, ok := s.statsLookup(metric)
 		if !ok || !m.Export.Exported {
 			continue
 		}
@@ -339,8 +339,8 @@ func (s *Service) statsExportRows(ctx context.Context, rdb *sql.DB, firstMonday,
 			if rs[i].Week != rs[j].Week {
 				return rs[i].Week < rs[j].Week
 			}
-			mi, _ := statsLookup(rs[i].Metric)
-			mj, _ := statsLookup(rs[j].Metric)
+			mi, _ := s.statsLookup(rs[i].Metric)
+			mj, _ := s.statsLookup(rs[j].Metric)
 			if oi, oj := statsMetricOrder(mi), statsMetricOrder(mj); oi != oj {
 				return oi < oj
 			}
@@ -447,7 +447,7 @@ func (s *Service) statsExportInstall(ctx context.Context, reset bool) (statsExpo
 			return statsExportInstall{}, err
 		}
 	}
-	return statsExportInstall{ID: st.ID, Version: Version, OS: runtime.GOOS, Arch: runtime.GOARCH,
+	return statsExportInstall{ID: st.ID, Version: s.version(), OS: runtime.GOOS, Arch: runtime.GOARCH,
 		Tier: hostprofile.Current().Tier, FirstSeen: st.FirstSeen}, nil
 }
 

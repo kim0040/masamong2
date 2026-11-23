@@ -20,6 +20,7 @@ import (
 // The console action for a provider failure shows the error's class and HTTP status, never the
 // service's own words or the address it was sent to: either can repeat the key back.
 func TestProviderResultShowsClassAndStatusOnly(t *testing.T) {
+	t.Parallel()
 	const serviceWords = "service-says the key was refused"
 	refuse := func(status int) (*httptest.Server, error) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -29,8 +30,9 @@ func TestProviderResultShowsClassAndStatusOnly(t *testing.T) {
 		}))
 		c := providers.NewClient(5*time.Second, nil)
 		c.MaxRetries = 0
-		t.Setenv("PR_KEY", "synthetic-provider-key-0123456789")
-		cred, _ := providers.Resolve("env:PR_KEY")
+		var creds credentialStandIns
+		creds.setForTest(t, "PR_KEY", "synthetic-provider-key-0123456789")
+		cred, _ := creds.resolve("env:PR_KEY")
 		searcher, err := websearch.New("tavily", c, srv.URL, cred)
 		if err != nil {
 			srv.Close()

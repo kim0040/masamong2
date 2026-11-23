@@ -11,6 +11,7 @@ import (
 )
 
 func TestSchedulerHeartbeatIsThrottledWithinTenMinutes(t *testing.T) {
+	t.Parallel()
 	start := time.Date(2026, 10, 12, 1, 0, 0, 0, time.UTC)
 	svc, err := Open(t.TempDir(), clock.Fixed{T: start}, false)
 	if err != nil {

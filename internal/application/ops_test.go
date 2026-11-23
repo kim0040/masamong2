@@ -23,6 +23,7 @@ func patch(t *testing.T, svc *application.Service, path []any, value any) {
 }
 
 func TestScheduledBackupsPruneAndRestoreRoundTrip(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	root := svc.DataRoot
 	sqlitePath := svc.Store.Path()
@@ -101,6 +102,7 @@ func TestScheduledBackupsPruneAndRestoreRoundTrip(t *testing.T) {
 }
 
 func TestRestoreFailureRollsBackSafetyBackup(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	root := svc.DataRoot
 	target := exec(svc, "backup.create", nil).Output["name"].(string)
@@ -156,6 +158,7 @@ func TestRestoreFailureRollsBackSafetyBackup(t *testing.T) {
 }
 
 func TestBackupVerifyRejectsSymlinkDirectory(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	external := t.TempDir()
 	link := filepath.Join(svc.DataRoot, "backups", "backup-evil")
@@ -169,6 +172,7 @@ func TestBackupVerifyRejectsSymlinkDirectory(t *testing.T) {
 }
 
 func TestConfigSnapshotsRestoreKeepsIdentity(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	snap := exec(svc, "config.snapshot", map[string]any{"name": "before experiments"})
 	if !snap.OK {
@@ -193,6 +197,7 @@ func TestConfigSnapshotsRestoreKeepsIdentity(t *testing.T) {
 }
 
 func TestServiceStopsBeforeSetup(t *testing.T) {
+	t.Parallel()
 	svc, err := application.Open(t.TempDir(), nil, false)
 	if err != nil {
 		t.Fatal(err)
@@ -211,6 +216,7 @@ func TestServiceStopsBeforeSetup(t *testing.T) {
 }
 
 func TestUptimeHistoryRecordsCrash(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -231,6 +237,7 @@ func TestUptimeHistoryRecordsCrash(t *testing.T) {
 }
 
 func TestImportPreviewAndPeopleAndReviews(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	path := filepath.Join(svc.DataRoot, "chat.csv")
 	body := "\xef\xbb\xbfDate,User,Message\n2021-12-14 18:11:17,철수,안녕\n2021-12-15 09:00:00,영희,가평 가자\n2021-12-15 09:01:00,철수,좋아\n"
@@ -280,6 +287,7 @@ func TestImportPreviewAndPeopleAndReviews(t *testing.T) {
 
 // Provider daily counts live in the database: a config change (new registry) and a restart keep them.
 func TestProviderQuotaSurvivesConfigChangeAndRestart(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	svc.Registry().Quota.Reserve("kma")
 	svc.Registry().Quota.Reserve("kma")
@@ -303,6 +311,7 @@ func TestProviderQuotaSurvivesConfigChangeAndRestart(t *testing.T) {
 
 // The history shows what a change did, setting by setting.
 func TestConfigChangesBetweenRevisions(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	before := svc.Revision()
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{

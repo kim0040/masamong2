@@ -16,8 +16,9 @@ func residencyRow(t *testing.T, out map[string]any) map[string]any {
 // (embedded in the database) from "resident" (loaded in the index search reads), and the blocks list
 // carries a per-room estimate. Neither names a room.
 func TestMemoryResidencyDoctorRowAndBlockEstimate(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
-	t.Setenv("MASAMONG_OPENROUTER_KEY", "or-key")
+	svc.SetEnvForTest(t, "MASAMONG_OPENROUTER_KEY", "or-key")
 	eng, err := svc.MemoryEngine()
 	if err != nil {
 		t.Fatal(err)

@@ -163,6 +163,7 @@ func drain(t *testing.T, svc *application.Service) {
 // list carries no message text while show reads the cited lines live; a deletion hides an item, an
 // edit makes one dirty, and losing 40% of the items queues the episode for regeneration.
 func TestRoomMemoryExtractsOnceAndInvalidates(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := roomSvc(t)
 	m.extract = func(string) string { return hikeAnswer }
 	sayIn(eng, time.Now().Add(-2*time.Hour), hike...)
@@ -245,6 +246,7 @@ func TestRoomMemoryExtractsOnceAndInvalidates(t *testing.T) {
 // A hidden decision queues the episode on its own; the regeneration makes it again from the messages
 // that remain and replaces the old one.
 func TestRoomMemoryRegeneratesWhenADecisionIsHidden(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := roomSvc(t)
 	m.extract = func(string) string { return hikeAnswer }
 	sayIn(eng, time.Now().Add(-2*time.Hour), hike...)
@@ -279,6 +281,7 @@ func TestRoomMemoryRegeneratesWhenADecisionIsHidden(t *testing.T) {
 // Withdrawn consent deletes the person's items (their messages and the ones naming them) and takes
 // them off the participants; the room state citing them goes too.
 func TestRoomMemoryWithdrawalDeletesThePersonsItems(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := roomSvc(t)
 	m.extract = func(string) string { return hikeAnswer }
 	m.state = func(string) string {
@@ -313,6 +316,7 @@ func TestRoomMemoryWithdrawalDeletesThePersonsItems(t *testing.T) {
 // The room state waits for the room to go quiet with enough new messages, then updates incrementally
 // from what is new with the previous state in the prompt.
 func TestRoomStateDebouncesAndUpdatesIncrementally(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := roomSvc(t)
 	m.state = func(string) string {
 		return `{"threads":[{"label":"등산","gist":"{p1}가 꺼낸 토요일 등산 얘기","who":["p1"],"status":"active","ev":["m1"]}]}`
@@ -364,6 +368,7 @@ func TestRoomStateDebouncesAndUpdatesIncrementally(t *testing.T) {
 
 // The derived budget stops the room state first (at 80%), then extraction; 0 switches room memory off.
 func TestRoomMemoryBudgetStopsStateFirst(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := roomSvc(t)
 	m.extract = func(string) string { return hikeAnswer }
 	sayIn(eng, time.Now().Add(-2*time.Hour), append(append([]said{}, hike...), said{"3005", "u1", "철수", "등산화 챙겨"})...)
@@ -390,6 +395,7 @@ func TestRoomMemoryBudgetStopsStateFirst(t *testing.T) {
 // A later conversation updates an open plan through the link the prompt offers; a plan past its date
 // expires in code without a model call.
 func TestRoomMemoryLinksUpdatesAndExpires(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := roomSvc(t)
 	m.extract = func(string) string {
 		return `{"episodes":[{"op":"create","kind":"plan","title":"토요일 등산","items":[
@@ -427,6 +433,7 @@ func TestRoomMemoryLinksUpdatesAndExpires(t *testing.T) {
 
 // A Kakao block is estimated first, then extracted on request with speakers as kakao:<room>:<label>.
 func TestKakaoBlockExtraction(t *testing.T) {
+	t.Parallel()
 	svc, m, _ := roomSvc(t)
 	csv := writeKakao(t, svc.DataRoot, "club.csv", 40)
 	if r := exec(svc, "imports.start", map[string]any{"source": "kakao_csv", "path": csv, "room": "kakao:club", "label": "동아리"}); !r.OK {
@@ -466,6 +473,7 @@ func TestKakaoBlockExtraction(t *testing.T) {
 // The room memory actions are for the console: a person speaking in a channel is refused, and the state
 // shown carries no person references or message IDs.
 func TestRoomMemoryActionsAreConsoleOnly(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := roomSvc(t)
 	m.state = func(string) string {
 		return `{"threads":[{"label":"등산","gist":"{p1}가 꺼낸 토요일 등산 얘기","who":["p1"],"status":"active","ev":["m1"]}]}`
@@ -499,6 +507,7 @@ func TestRoomMemoryActionsAreConsoleOnly(t *testing.T) {
 // is saved without that item, and a state whose banter has no evidence is saved without the banter. A
 // state with nothing valid left is still refused (it would erase the room's topics).
 func TestRoomMemoryKeepsTheValidPartOfTheLastAnswer(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := roomSvc(t)
 	m.extract = func(string) string {
 		return strings.Replace(hikeAnswer, `"ev":["m4"]}]`, `"ev":["m4"]},{"kind":"fact","text":"{p1}가 등산화 삼","by":["p1"],"ev":["m99"]}]`, 1)

@@ -17,10 +17,11 @@ import (
 // through its consent command), in the asker's language with the room's prefix; a tool the planner
 // calls itself is not repeated there, and a feature that is off is not offered.
 func TestHelpNamesCommandOnlyFeatures(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	url := chatServer(t, "ok", "stop", &calls)
 	svc := setupSvc(t)
-	t.Setenv("FAKE_OR_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_OR_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["host"] = config.Provider{Kind: config.KindOpenAI, BaseURL: url, CredentialRef: "env:FAKE_OR_KEY"}
 		d.Models["response"] = config.Model{Provider: "host", Model: "m"}

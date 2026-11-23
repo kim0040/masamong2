@@ -10,6 +10,7 @@ import (
 )
 
 func TestUsagePeriodTotalsTheWindow(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	_ = s.toolUsage() // makes tool_usage
 	if _, err := s.MemoryEngine(); err != nil {

@@ -80,6 +80,7 @@ func waitJob(t *testing.T, svc *application.Service, id string) map[string]any {
 // (cost and time) → prepare in the background with progress → rename and annotate → connect to a
 // channel (the channel's memory scope grows) → delete (detached everywhere, source file untouched).
 func TestBlockLifecycle(t *testing.T) {
+	t.Parallel()
 	svc := practiceSvc(t)
 	csv := writeKakao(t, svc.DataRoot, "club.csv", 120)
 	if r := exec(svc, "imports.start", map[string]any{"source": "kakao_csv", "path": csv, "room": "kakao:club", "label": "동아리"}); !r.OK {
@@ -188,6 +189,7 @@ func TestBlockLifecycle(t *testing.T) {
 
 // A job cancelled from the console stops and stays cancelled; retry runs it again to success.
 func TestPrepareJobCancelAndRetry(t *testing.T) {
+	t.Parallel()
 	svc := practiceSvc(t)
 	csv := writeKakao(t, svc.DataRoot, "big.csv", 3000)
 	if r := exec(svc, "imports.start", map[string]any{"source": "kakao_csv", "path": csv, "room": "kakao:big"}); !r.OK {
@@ -223,6 +225,7 @@ func TestPrepareJobCancelAndRetry(t *testing.T) {
 
 // Odd inputs fail with a clear error instead of a partial block.
 func TestBlockPrepareRefusesBadInput(t *testing.T) {
+	t.Parallel()
 	svc := practiceSvc(t)
 	for _, in := range []map[string]any{
 		{"source_room": "kakao:nothere"},
@@ -257,6 +260,7 @@ func jsonShape(v any) map[string]any {
 // A service stop while a job runs records "interrupted" (never a closed-database error), and the next
 // start offers the job for retry.
 func TestPrepareJobInterruptedByShutdown(t *testing.T) {
+	t.Parallel()
 	svc := practiceSvc(t)
 	csv := writeKakao(t, svc.DataRoot, "stop.csv", 3000)
 	if r := exec(svc, "imports.start", map[string]any{"source": "kakao_csv", "path": csv, "room": "kakao:stop"}); !r.OK {

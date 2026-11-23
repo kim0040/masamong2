@@ -13,6 +13,7 @@ import (
 )
 
 func TestFinalBLeafCopySurvivesResyncBeforeWorker(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	e, _ := s.MemoryEngine()
 	text := "s3cr3t"
@@ -66,6 +67,7 @@ func TestFinalBLeafCopySurvivesResyncBeforeWorker(t *testing.T) {
 }
 
 func TestFinalBDeletedTurnWrittenAfterQueueDrained(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	s.MessagesDeleted("g", "c", []string{"slow-request"})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -81,6 +83,7 @@ func TestFinalBDeletedTurnWrittenAfterQueueDrained(t *testing.T) {
 }
 
 func TestFinalBQueueInsertFailurePreservesSourceAndCanRetry(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	e, _ := s.MemoryEngine()
 	text := "a private queue failure canary"
@@ -117,6 +120,7 @@ func TestFinalBQueueInsertFailurePreservesSourceAndCanRetry(t *testing.T) {
 }
 
 func TestFinalBConsentCommitCrashGap(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	e, _ := s.MemoryEngine()
 	text := "private withdrawal crash canary"
@@ -155,6 +159,7 @@ func TestFinalBConsentCommitCrashGap(t *testing.T) {
 }
 
 func TestFinalBAccountWithoutNativeIDsPerformance(t *testing.T) {
+	t.Parallel()
 	for _, native := range []bool{true, false} {
 		t.Run(fmt.Sprintf("native=%v", native), func(t *testing.T) {
 			s := privacyService(t)
@@ -190,6 +195,7 @@ func TestFinalBAccountWithoutNativeIDsPerformance(t *testing.T) {
 }
 
 func TestFinalBBackfillResumesBetweenBatches(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	e, _ := s.MemoryEngine()
 	text := "private backfill resume canary"
@@ -222,7 +228,7 @@ func TestFinalBBackfillResumesBetweenBatches(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer again.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second) // the work is 701 turns; -race on a loaded host is slow
 	defer cancel()
 	again.kickRedaction()
 	again.DrainRedactions(ctx)

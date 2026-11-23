@@ -46,6 +46,7 @@ func as(svc *application.Service, act string, in map[string]any, inv *action.Inv
 }
 
 func TestToolSwitchesLimitsAndDefaults(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	serveAnyServer(t, svc)
 	off := exec(svc, "tools.configure", map[string]any{"id": "help.version", "enabled": "off"})
@@ -134,6 +135,7 @@ func TestToolSwitchesLimitsAndDefaults(t *testing.T) {
 }
 
 func TestToolCommandReadinessAndDoctorSurface(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	if !svc.ToolCommandEnabled("weather.query") || !svc.ToolCommandReady("weather.query") {
 		t.Fatal("keyless Open-Meteo should make weather available")
@@ -177,6 +179,7 @@ func TestToolCommandReadinessAndDoctorSurface(t *testing.T) {
 }
 
 func TestMemberCommandFailuresUseLocalizedMessages(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	inv := &action.Invoker{Via: "command", ChannelID: "dm", UserID: "u1", Private: true}
 	for _, tc := range []struct {
@@ -212,6 +215,7 @@ func (g *startupDoctorGateway) Permissions(string, string) (int64, bool)        
 func (g *startupDoctorGateway) StartupStatus() application.DiscordStartupStatus { return g.status }
 
 func TestInvokerCannotComeFromTransportJSON(t *testing.T) {
+	t.Parallel()
 	var req action.Request
 	_ = json.Unmarshal([]byte(`{"action":"help.version","Invoker":{"Via":"chat","UserID":"x"},"invoker":{"via":"chat"}}`), &req)
 	if req.Invoker != nil {
@@ -220,6 +224,7 @@ func TestInvokerCannotComeFromTransportJSON(t *testing.T) {
 }
 
 func TestOperatorHTTPTool(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	var mu sync.Mutex
 	var seen []string
@@ -234,7 +239,7 @@ func TestOperatorHTTPTool(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"draw": 1150, "data": map[string]any{"numbers": []int{1, 2, 3}, "noise": "x"}, "q": r.URL.Query().Get("q")})
 	}))
 	defer srv.Close()
-	t.Setenv("LOTTO_KEY", "s3cr3t-key")
+	svc.SetEnvForTest(t, "LOTTO_KEY", "s3cr3t-key")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Tools = map[string]tools.Settings{"lotto.latest": {
 			Description: "lottery numbers",
@@ -289,6 +294,7 @@ func TestOperatorHTTPTool(t *testing.T) {
 // A path parameter of "." or ".." would move the call to another path of the operator's host; it is
 // refused before anything is sent.
 func TestOperatorHTTPToolRefusesDotSegments(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -358,7 +364,7 @@ func chatSvc(t *testing.T, plan string) (*application.Service, *fakeLLM) {
 	svc := setupSvc(t)
 	f := &fakeLLM{plan: plan}
 	srv := f.server(t)
-	t.Setenv("FAKE_OR_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_OR_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["openrouter"] = config.Provider{Kind: config.KindOpenAI, BaseURL: srv.URL, CredentialRef: "env:FAKE_OR_KEY"}
 		d.Providers["openmeteo"] = config.Provider{Kind: config.KindOpenMeteo, Disabled: true} // no weather source: "unconfigured"
@@ -374,6 +380,7 @@ func chatSvc(t *testing.T, plan string) (*application.Service, *fakeLLM) {
 func boolp(b bool) *bool { return &b }
 
 func TestChatTurnChainsPlannerToolsAndAnswer(t *testing.T) {
+	t.Parallel()
 	plan := `{"memory_requirement":"none","question_kind":"other","tool_plan":[
 		{"tool_name":"weather","parameters":{"region":"부산","channel_id":"999"}},
 		{"tool_name":"finance.quote","parameters":{"symbol":"사용자 종목"}},
@@ -428,6 +435,7 @@ func TestChatTurnChainsPlannerToolsAndAnswer(t *testing.T) {
 }
 
 func TestChatTurnSpeaksTheChannelPersonaLanguage(t *testing.T) {
+	t.Parallel()
 	svc, f := chatSvc(t, `{"memory_requirement":"none","tool_plan":[]}`)
 	if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g", "id": "en", "persona_ref": "friendly_en"}); !r.OK {
 		t.Fatalf("%+v", r.Error)
@@ -452,6 +460,7 @@ func TestChatTurnSpeaksTheChannelPersonaLanguage(t *testing.T) {
 }
 
 func TestChatTurnUsesCurrentMessageLanguageBeforeLocaleAndPersona(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name, message, locale, want string
 	}{
@@ -475,6 +484,7 @@ func TestChatTurnUsesCurrentMessageLanguageBeforeLocaleAndPersona(t *testing.T) 
 }
 
 func TestChatTurnLimitsAndMonthlyBudget(t *testing.T) {
+	t.Parallel()
 	svc, _ := chatSvc(t, `{"memory_requirement":"none","tool_plan":[]}`)
 	exec(svc, "tools.configure", map[string]any{"id": "chat.respond", "per_user_per_day": 1})
 	in := application.ChatInput{GuildID: "g", ChannelID: "c", Message: "안녕", Speaker: "철수", SpeakerID: "u9", DryRun: true}
@@ -498,6 +508,7 @@ func TestChatTurnLimitsAndMonthlyBudget(t *testing.T) {
 // A built-in runs only where it was made to: fortune (consent first) is not offered to the model and a
 // poll vote has no command, whatever config says; the console gets can_chat/can_command to show that.
 func TestToolCapabilitiesAreEnforced(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	if r := exec(svc, "tools.configure", map[string]any{"id": "fortune.query", "chat": "true"}); r.OK {
 		t.Fatalf("fortune in conversation accepted: %+v", r.Output)
@@ -532,6 +543,7 @@ func TestToolCapabilitiesAreEnforced(t *testing.T) {
 // model is gone the intent model answers: the previous bot's most common failure left turns without
 // tools or replies.
 func TestChatFallsBackToTheOtherChatModel(t *testing.T) {
+	t.Parallel()
 	var gone, planned, answered int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
@@ -566,7 +578,7 @@ func TestChatFallsBackToTheOtherChatModel(t *testing.T) {
 	}))
 	defer srv.Close()
 	svc := setupSvc(t)
-	t.Setenv("FAKE_OR_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_OR_KEY", "k")
 	models := func(planner, response string) {
 		applyDoc(t, svc, func(d *config.Document) {
 			d.Chat.ToolMode = "planner" // the planner pipeline; the tool loop has its own tests
@@ -606,6 +618,7 @@ func TestChatFallsBackToTheOtherChatModel(t *testing.T) {
 
 // "What can you do?" lists only what can answer now: a tool without its service key is not offered.
 func TestHelpListsOnlyReadyTools(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	ready := map[string]bool{}
 	for _, it := range exec(svc, "tools.list", nil).Output["tools"].([]any) {
@@ -637,6 +650,7 @@ func TestHelpListsOnlyReadyTools(t *testing.T) {
 }
 
 func TestDoctorShowsConnectingWhileTheFirstDiscordAttemptRuns(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	applyDoc(t, svc, func(d *config.Document) { d.Discord.Enabled = true })
 	svc.SetDiscord(&startupDoctorGateway{status: application.DiscordStartupStatus{Connecting: true}})
@@ -663,6 +677,7 @@ func TestDoctorShowsConnectingWhileTheFirstDiscordAttemptRuns(t *testing.T) {
 }
 
 func TestDoctorLogsABadTimezoneOncePerValue(t *testing.T) {
+	t.Parallel()
 	var logs strings.Builder
 	svc := setupSvcLog(t, func(*application.Service) *slog.Logger { return slog.New(slog.NewTextHandler(&logs, nil)) })
 	zone := fmt.Sprintf("Mars/Doctor-once-%d", badTimezoneTestID.Add(1))
@@ -683,6 +698,7 @@ func TestDoctorLogsABadTimezoneOncePerValue(t *testing.T) {
 }
 
 func TestDoctorSurfacesDataFolderPermissionWarnings(t *testing.T) {
+	// sequential: it records a process-wide permission warning that every doctor report shows
 	svc := setupSvc(t)
 	fsutil.ResetWarnings()
 	t.Cleanup(fsutil.ResetWarnings)

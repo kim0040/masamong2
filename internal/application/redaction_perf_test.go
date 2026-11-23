@@ -23,6 +23,7 @@ import (
 // writes them straight into the table instead (the worker classifies them in the background first);
 // MASAMONG_PERF_LEGACY=text writes rows from an older release that kept only the copied text.
 func TestRedactionPerformance(t *testing.T) {
+	t.Parallel()
 	if os.Getenv("MASAMONG_PERF_TESTS") == "" {
 		t.Skip("set MASAMONG_PERF_TESTS=1")
 	}

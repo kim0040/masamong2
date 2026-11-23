@@ -10,6 +10,7 @@ import (
 // The attachment delete joins stored_name to the channel's folder, so right before the delete only the
 // generated form passes, the same form config parsing accepts.
 func TestAttachmentDeleteAcceptsOnlyTheGeneratedStoredName(t *testing.T) {
+	t.Parallel()
 	hash := strings.Repeat("ab", 32)
 	for name, want := range map[string]bool{
 		hash: true, hash + ".md": true, hash + ".tar.gz": true,

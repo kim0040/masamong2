@@ -15,6 +15,7 @@ func searchResult(status string, ok bool, items ...any) chat.ToolResult {
 // out of the conversation while another search of the same query succeeded. A failed search for a different
 // query does, and so does any other tool's failure. Results that name no query share the empty query.
 func TestReplyKeptWhenOneSearchFailedAndAnotherSucceeded(t *testing.T) {
+	t.Parallel()
 	good := searchResult("ok", true, map[string]any{"title": "t"})
 	failed := chat.ToolResult{Tool: "search.web", OK: false, Status: "error", Error: "timeout"}
 	empty := searchResult("empty", true) // what search.web answers when no service found anything
@@ -59,6 +60,7 @@ func TestReplyKeptWhenOneSearchFailedAndAnotherSucceeded(t *testing.T) {
 // A failed web search carries the query it was asked, so it can be matched with a later search for the same
 // words; other tools and results that already say their query are left alone.
 func TestFailedSearchKeepsItsQuery(t *testing.T) {
+	t.Parallel()
 	failed := withSearchQuery(chat.ToolResult{Tool: "search.web", Status: "unavailable"}, "search.web", map[string]any{"query": "Apple"})
 	if q, _ := failed.Data["query"].(string); q != "Apple" {
 		t.Fatalf("failed search lost its query: %v", failed.Data)
@@ -78,6 +80,7 @@ func TestFailedSearchKeepsItsQuery(t *testing.T) {
 // The turn record keeps 200 characters of each page's text and its length, so a deep search does not put
 // ten thousand characters of other people's pages into every record; what the model saw is not touched.
 func TestTurnRecordClipsPassages(t *testing.T) {
+	t.Parallel()
 	long := strings.Repeat("가", 900)
 	short := "짧은 문장"
 	asAny := searchResult("ok", true,
@@ -122,6 +125,7 @@ func TestTurnRecordClipsPassages(t *testing.T) {
 // A search that read no pages has nothing to clip: the very same slice comes back, so its record is
 // byte-identical to what it was.
 func TestTurnRecordOfPagelessSearchIsUntouched(t *testing.T) {
+	t.Parallel()
 	in := []chat.ToolResult{searchResult("ok", true, map[string]any{"title": "a", "snippet": "s", "url": "u", "datetime": "d"}),
 		{Tool: "memory.search", OK: true}}
 	out := recordTools(in)
@@ -136,6 +140,7 @@ func TestTurnRecordOfPagelessSearchIsUntouched(t *testing.T) {
 // The names the bot is called by are taken out of what is searched (the web knows nothing of them); a
 // query that is only the name, or a word that merely starts with it, is left as it is.
 func TestSearchLeavesOutTheBotsName(t *testing.T) {
+	t.Parallel()
 	names := []string{"마사몽", "masamong"}
 	for _, c := range []struct{ in, want string }{
 		{"마사몽 젠슨황 불륜 논란", "젠슨황 불륜 논란"},

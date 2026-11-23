@@ -40,6 +40,7 @@ func twoServices(t *testing.T) (*Service, *Service) {
 // State that belongs to one service lives in that service: two services in one process never see
 // each other's caches, flags or queues, and a closed service leaves nothing behind in package state.
 func TestTwoServicesKeepTheirOwnState(t *testing.T) {
+	t.Parallel()
 	a, b := twoServices(t)
 
 	t.Run("capability caches", func(t *testing.T) {
@@ -140,6 +141,7 @@ func TestTwoServicesKeepTheirOwnState(t *testing.T) {
 // The practice instance is found by its folder while it is open, and forgotten when it closes, so the
 // real instance's deletions reach it and a closed one is not kept alive.
 func TestPracticeRegistryFollowsOpenAndClose(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	p, err := OpenPractice(context.Background(), s.DataRoot, "en", slog.Default())
 	if err != nil {

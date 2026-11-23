@@ -9,6 +9,7 @@ import (
 )
 
 func TestTimelineListsClosedPiecesByDay(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	eng, err := svc.MemoryEngine()
 	if err != nil {

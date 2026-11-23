@@ -17,6 +17,7 @@ import (
 // R6: a committed restore whose old, set-aside database cannot be deleted (on Windows a scanner or
 // indexer holds it) is a success: the bot starts, the leftovers are retried later.
 func TestCommittedRestoreSurvivesCleanupThatCannotDelete(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	s, _ := stageRestoreTest(t)
 	maintenanceHook = func(p string) error {
 		if p != "committed" {
@@ -74,6 +75,7 @@ func TestCommittedRestoreSurvivesCleanupThatCannotDelete(t *testing.T) {
 // R7: a restore that fails before touching live files clears its own intent, records the failure and the
 // daemon keeps running on the current data.
 func TestRestoreThatFailsBeforeTouchingLiveFilesKeepsTheBotRunning(t *testing.T) {
+	t.Parallel()
 	s, name := stageRestoreTest(t)
 	if err := os.RemoveAll(filepath.Join(s.DataRoot, "backups", name)); err != nil {
 		t.Fatal(err)
@@ -107,6 +109,7 @@ func TestRestoreThatFailsBeforeTouchingLiveFilesKeepsTheBotRunning(t *testing.T)
 // R9: the journal's folder may be spelled in another letter case (Windows, default macOS) or through a
 // link; it is still the same folder. Cancel never hides data that was already set aside.
 func TestJournalRootIsComparedByIdentityNotByBytes(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	s, _ := stageRestoreTest(t)
 	interruptMaintenance(t, "install")
 	_ = ApplyPendingRestore(s.DataRoot, slog.Default())
@@ -169,6 +172,7 @@ func swapCase(p string) string {
 
 // R9: an unreadable journal is only set aside while nothing shows live data was moved.
 func TestCancelRefusesAnUnreadableJournalWhenDataWasSetAside(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	journal := filepath.Join(root, maintenancePending)
 	if err := os.WriteFile(journal, []byte("{ not json"), 0o600); err != nil {
@@ -201,6 +205,7 @@ func TestCancelRefusesAnUnreadableJournalWhenDataWasSetAside(t *testing.T) {
 
 // R16: only the commands that can work in the current state are offered.
 func TestRecoveryCommandsFitTheState(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	t.Run("restore requested", func(t *testing.T) {
 		s, _ := stageRestoreTest(t)
 		kind, cmds := MaintenanceCase(s.DataRoot)
@@ -233,6 +238,7 @@ func TestRecoveryCommandsFitTheState(t *testing.T) {
 
 // Every text the maintenance page and status can show exists in every language.
 func TestMaintenanceTextsExistInEveryLanguage(t *testing.T) {
+	t.Parallel()
 	c := i18n.New()
 	keys := []string{"maintenance.page.title", "maintenance.page.stopped", "maintenance.page.what", "maintenance.page.todo", "maintenance.page.step_stop",
 		"maintenance.page.step_run_one", "maintenance.page.step_run_many", "maintenance.page.step_start", "maintenance.page.none", "maintenance.page.folder",
@@ -284,6 +290,7 @@ func exists(p string) bool { _, err := os.Lstat(p); return err == nil }
 // A program is runnable at every point of a crash: both old programs are never set aside before the
 // first replacement is in place (no Masamong program at all after a crash, as the review found).
 func TestOneProgramAlwaysRemainsDuringAnUpdate(t *testing.T) {
+	// sequential: it sets the package's program path
 	for _, point := range []string{"prepared", "quarantine", "quarantine:0", "install:0", "quarantine:1", "install:1", "verify", "committed"} {
 		t.Run(point, func(t *testing.T) {
 			dir, staged := updateFixture(t)
@@ -305,6 +312,7 @@ func TestOneProgramAlwaysRemainsDuringAnUpdate(t *testing.T) {
 // The operator reinstalled a different release after a crash. Nothing can resume or roll back, the
 // status says so and offers only abandon-update, which keeps every file and clears only the journal.
 func TestStaleProgramJournalHasAnOperatorExit(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	dir, staged := updateFixture(t)
 	interruptMaintenance(t, "quarantine:1") // CLI replaced, the daemon set aside, none installed yet
 	if err := swapBinaries(dir, staged); err == nil {
@@ -375,6 +383,7 @@ func dirListing(t *testing.T, dir string) map[string]string {
 
 // Live files that already are one complete pair settle the journal by themselves.
 func TestUpdateJournalSettlesWhenTheLiveFilesAreACompletePair(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	dir, staged := updateFixture(t)
 	interruptMaintenance(t, "prepared")
 	if err := swapBinaries(dir, staged); err == nil {
@@ -402,6 +411,7 @@ func TestUpdateJournalSettlesWhenTheLiveFilesAreACompletePair(t *testing.T) {
 }
 
 func TestAbandonRefusesWhenNoProgramIsInstalled(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	dir, staged := updateFixture(t)
 	interruptMaintenance(t, "prepared")
 	_ = swapBinaries(dir, staged)
@@ -420,6 +430,7 @@ func TestAbandonRefusesWhenNoProgramIsInstalled(t *testing.T) {
 // ----- R13 -----
 
 func TestInterruptedBackupStagingIsCleanedAtStartup(t *testing.T) {
+	t.Parallel()
 	s := maintenanceService(t, false)
 	staging := filepath.Join(s.backupDir(), ".backup-staging-abc123")
 	if err := os.MkdirAll(staging, 0o700); err != nil {

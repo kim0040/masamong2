@@ -15,6 +15,7 @@ import (
 // memoryLedgerCheckpointAge), Close writes what a job still held, and a call with neither a turn nor a
 // job leaves no row.
 func TestMemoryLedgerCheckpointsSkipsOrphansAndFlushesOnClose(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s, err := Open(dir, nil, false)
 	if err != nil {
@@ -69,6 +70,7 @@ func TestMemoryLedgerCheckpointsSkipsOrphansAndFlushesOnClose(t *testing.T) {
 // batches, and one summary plus one summary-vector request for each leaf. The direct burst keeps this
 // pressure check small while exercising the same aggregation and bounded writer used by fake-provider tests.
 func TestMemoryIndexLedgerAggregatesFullScaleBurst(t *testing.T) {
+	t.Parallel()
 	const (
 		jobID         = "job-full-scale-index"
 		messageCalls  = 3192

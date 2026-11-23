@@ -11,6 +11,7 @@ import (
 // reply; reactions that say nothing and messages that are not replies are ignored, and a withdrawn
 // reaction is withdrawn.
 func TestFeedbackOnRepliesReachesTheTurn(t *testing.T) {
+	t.Parallel()
 	svc, _ := chatSvc(t, `{"memory_requirement":"none","question_kind":"other","tool_plan":[]}`)
 	res, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", Message: "안녕", Speaker: "영희", SpeakerID: "u1"})
 	if err != nil || res.TurnID == "" {

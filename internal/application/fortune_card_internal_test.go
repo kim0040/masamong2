@@ -22,6 +22,7 @@ LUCKY_ITEM: 손목시계
 LUCKY_TIME: 오후 3시`
 
 func TestFortuneCardLaysOutAReading(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	base := action.Card{Title: "🔮 오늘의 운세", Text: tagReading, Footer: "old", Ephemeral: true, Tone: "fortune"}
 	c := s.fortuneCard(fortuneCardSpec{Loc: "ko", Kind: "today", Head: "철수님 · 10월 15일 (수)", Footer: "일진 을사 · 염소자리 · 오늘 남은 조회 횟수: 2회"}, base)
@@ -65,6 +66,7 @@ func TestFortuneCardLaysOutAReading(t *testing.T) {
 }
 
 func TestFortuneCardKeepsFreeTextAsWritten(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	base := action.Card{Title: "t", Text: "**오늘의 흐름**: 85점\n좋은 날이에요.", Footer: "남은 2회", Tone: "fortune"}
 	if got := s.fortuneCard(fortuneCardSpec{Loc: "ko", Kind: "today", Head: "head", Footer: "new footer"}, base); got.Text != base.Text || got.Footer != "남은 2회" || len(got.Fields) != 0 {
@@ -73,6 +75,7 @@ func TestFortuneCardKeepsFreeTextAsWritten(t *testing.T) {
 }
 
 func TestFortuneCardLuckyLineWhenLong(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	text := "SUMMARY: s\nLUCKY_COLOR: 파랑\nLUCKY_ITEM: 오래된 가죽 수첩과 만년필 한 자루\nLUCKY_NUMBER: 7"
 	c := s.fortuneCard(fortuneCardSpec{Loc: "ko", Kind: "today", Head: "", Footer: ""}, action.Card{Text: text})
@@ -82,6 +85,7 @@ func TestFortuneCardLuckyLineWhenLong(t *testing.T) {
 }
 
 func TestRankingCardUsesCatalogSignNames(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	var b strings.Builder
 	for i, name := range []string{"염소자리", "물병", "Leo", "양자리", "황소자리", "쌍둥이자리", "게자리", "처녀자리", "천칭자리", "전갈자리", "사수자리", "물고기자리"} {
@@ -102,6 +106,7 @@ func TestRankingCardUsesCatalogSignNames(t *testing.T) {
 }
 
 func TestNoticeCardGroupsByBandWithDaysLeft(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	c := &notices.Catalog{}
 	today := time.Date(2026, 10, 15, 8, 0, 0, 0, time.UTC)
@@ -123,6 +128,7 @@ func TestNoticeCardGroupsByBandWithDaysLeft(t *testing.T) {
 }
 
 func TestNoticeCardGroupsTransferByUniversity(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	today := time.Date(2026, 10, 15, 8, 0, 0, 0, time.UTC)
 	list := []rankedNotice{
@@ -138,6 +144,7 @@ func TestNoticeCardGroupsTransferByUniversity(t *testing.T) {
 }
 
 func TestDayLabelsFollowTheLanguage(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	d := time.Date(2026, 10, 15, 0, 0, 0, 0, time.UTC)
 	for loc, want := range map[string]string{"ko": "10월 15일 (목)", "en": "Thu, 10/15", "es": "jue 15/10"} {

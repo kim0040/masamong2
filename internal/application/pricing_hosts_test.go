@@ -16,6 +16,7 @@ import (
 // that unit; a model priced nowhere is an alert, because the budget cannot stop it. Shapes recorded
 // 2026-10-01.
 func TestPricesForHostsWithoutPriceLists(t *testing.T) {
+	t.Parallel()
 	comet := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek-v4-flash","object":"model","owned_by":"deepseek","supported_endpoint_types":["openai"]},{"id":"mystery-image-1","object":"model","owned_by":"custom","supported_endpoint_types":["openai"]}],"object":"list"}`))
 	}))
@@ -35,8 +36,8 @@ func TestPricesForHostsWithoutPriceLists(t *testing.T) {
 	defer ref.Close()
 	svc := setupSvc(t)
 	application.SetReferencePricesForTest(svc, ref.URL)
-	t.Setenv("COMET_KEY", "c")
-	t.Setenv("NANO_KEY", "n")
+	svc.SetEnvForTest(t, "COMET_KEY", "c")
+	svc.SetEnvForTest(t, "NANO_KEY", "n")
 	for id, url := range map[string]string{"cometapi": comet.URL + "/v1", "nanogpt": nano.URL + "/api/v1"} {
 		out(t, svc, "providers.add", map[string]any{"api": "compatible", "id": id, "base_url": url})
 	}
@@ -85,6 +86,7 @@ func TestPricesForHostsWithoutPriceLists(t *testing.T) {
 // A fallback model that is priced nowhere counts as free just like a main model does, so the dashboard
 // names its role; setting the fallback's own price clears the alert.
 func TestUnpricedFallbackModelIsAnAlert(t *testing.T) {
+	t.Parallel()
 	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"deepseek-v4-flash","object":"model","owned_by":"deepseek","supported_endpoint_types":["openai"]},{"id":"mystery-chat-1","object":"model","owned_by":"custom","supported_endpoint_types":["openai"]}],"object":"list"}`))
 	}))
@@ -95,7 +97,7 @@ func TestUnpricedFallbackModelIsAnAlert(t *testing.T) {
 	defer ref.Close()
 	svc := setupSvc(t)
 	application.SetReferencePricesForTest(svc, ref.URL)
-	t.Setenv("COMET_KEY", "c")
+	svc.SetEnvForTest(t, "COMET_KEY", "c")
 	out(t, svc, "providers.add", map[string]any{"api": "compatible", "id": "cometapi", "base_url": host.URL + "/v1"})
 	out(t, svc, "providers.credentials", map[string]any{"id": "cometapi", "credential_ref": "env:COMET_KEY"})
 	out(t, svc, "models.select", map[string]any{"role": "response", "provider": "cometapi", "model": "deepseek-v4-flash"})

@@ -50,6 +50,7 @@ func dmCount(t *testing.T, svc *application.Service, tool string) int {
 }
 
 func TestDMPoliciesRefuseBeforeTurnAndLeaveCommandsAvailable(t *testing.T) {
+	t.Parallel()
 	svc := dmService(t)
 	for _, tc := range []struct {
 		mode                            string
@@ -95,6 +96,7 @@ func TestDMPoliciesRefuseBeforeTurnAndLeaveCommandsAvailable(t *testing.T) {
 }
 
 func TestDMQuotasAreAtomicPersistAndResetAtInstanceMidnight(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name                             string
 		userLimit, totalLimit, chatLimit int
@@ -123,11 +125,10 @@ func TestDMQuotasAreAtomicPersistAndResetAtInstanceMidnight(t *testing.T) {
 			if !svc.ClaimDMNotice("11111", "closed") {
 				t.Fatal("first notice not admitted")
 			}
-			root := svc.DataRoot
 			if err := svc.Close(); err != nil {
 				t.Fatal(err)
 			}
-			reopened, err := application.Open(root, clock.Fixed{T: at}, false)
+			reopened, err := application.ReopenForTest(svc, clock.Fixed{T: at}, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -162,6 +163,7 @@ func TestDMQuotasAreAtomicPersistAndResetAtInstanceMidnight(t *testing.T) {
 }
 
 func TestDMKeepsRecentExchangesWithoutRoomMemoryOrNameGate(t *testing.T) {
+	t.Parallel()
 	var plan atomic.Int32
 	var mu sync.Mutex
 	var prompts []string
@@ -233,6 +235,7 @@ func TestDMKeepsRecentExchangesWithoutRoomMemoryOrNameGate(t *testing.T) {
 }
 
 func TestDMUnansweredCommandContinuesConversation(t *testing.T) {
+	t.Parallel()
 	svc := dmService(t)
 	res := action.OK(action.Request{Action: "weather.query"}, map[string]any{"status": "unconfigured"})
 	if out, ok := svc.CommandToChat(context.Background(), res, dmInput("11111")); !ok || out.Answer == "" {
@@ -245,6 +248,7 @@ func TestDMUnansweredCommandContinuesConversation(t *testing.T) {
 }
 
 func TestDMAccountDeletionAndWithdrawalReachContext(t *testing.T) {
+	t.Parallel()
 	for _, withdraw := range []bool{false, true} {
 		t.Run(map[bool]string{false: "account-delete", true: "withdraw"}[withdraw], func(t *testing.T) {
 			svc := dmService(t)
@@ -288,6 +292,7 @@ func TestDMAccountDeletionAndWithdrawalReachContext(t *testing.T) {
 }
 
 func TestDMRetentionDropsOldContext(t *testing.T) {
+	t.Parallel()
 	svc := dmService(t)
 	in := dmInput("11111")
 	if _, err := svc.ChatTurn(context.Background(), in); err != nil {

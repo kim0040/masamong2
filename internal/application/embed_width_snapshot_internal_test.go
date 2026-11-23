@@ -11,8 +11,8 @@ import (
 // The console builds its confirmation basis (revision, model, provider, width) from providers.list's
 // embed_width alone, so that object must describe one committed document.
 func TestProvidersListEmbedWidthNamesItsRevisionModelAndProvider(t *testing.T) {
-	t.Setenv("MASAMONG_OPENROUTER_KEY", "fixture-only")
-	s := privacyService(t)
+	t.Parallel()
+	s := privacyServiceEnv(t, map[string]string{"MASAMONG_OPENROUTER_KEY": "fixture-only"})
 	widthConfig(t, s, "qwen/qwen3-embedding-8b", 1024)
 	r := widthExecute(s, "providers.list", nil)
 	info, ok := r.Output["embed_width"].(map[string]any)
@@ -38,8 +38,8 @@ func TestProvidersListEmbedWidthNamesItsRevisionModelAndProvider(t *testing.T) {
 // Every read must be one of them whole, never the model of one with the rerank judgment of the other, and one
 // revision must never name two different documents.
 func TestEmbedWidthInfoIsOneSnapshotWhileConfigChanges(t *testing.T) {
-	t.Setenv("MASAMONG_OPENROUTER_KEY", "fixture-only")
-	s := privacyService(t)
+	t.Parallel()
+	s := privacyServiceEnv(t, map[string]string{"MASAMONG_OPENROUTER_KEY": "fixture-only"})
 	const modelA, modelB = "qwen/qwen3-embedding-8b", "openai/text-embedding-3-large"
 	usable := map[string]bool{modelA: true, modelB: false}
 	dims := map[string]int{modelA: 1024, modelB: 0}

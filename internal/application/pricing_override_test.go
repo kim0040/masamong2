@@ -12,6 +12,7 @@ import (
 )
 
 func TestConditionalPricingOverridesPersistAndApplyPerRequest(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	openReadyService := func() *Service {
 		t.Helper()
@@ -58,6 +59,7 @@ func TestConditionalPricingOverridesPersistAndApplyPerRequest(t *testing.T) {
 // OpenGateway's prices are scheduled promotions that end at pricing.until: the list is read again then,
 // not up to a day later; a list without an end keeps the daily refresh.
 func TestPriceListStaleAtListedPriceEnd(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
 	fetched := now.Add(-time.Hour).Format(time.RFC3339)
 	ends := &priceList{FetchedAt: fetched, Until: now.Add(time.Hour).Format(time.RFC3339)}

@@ -39,6 +39,7 @@ func strict(t *testing.T, svc *application.Service, p config.GuildPrivacy) {
 // Off by default: another person of the conversation's card is shown, anywhere in the server.
 // own_card_only keeps only the caller's; card_channel_only keeps an item where its evidence was said.
 func TestStrictPrivacyCards(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	climbCard(t, svc, m, eng)
 	turn(t, svc, "u2", "영희", "주말에 뭐 할까")
@@ -71,6 +72,7 @@ func TestStrictPrivacyCards(t *testing.T) {
 
 // "Don't analyze me" deletes the person's card, and no new one is made or used.
 func TestProfileWithdrawalDeletesCards(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	climbCard(t, svc, m, eng)
 	if _, c := mine(t, svc, inChannel("u1")); len(c) != 1 {
@@ -92,6 +94,7 @@ func TestProfileWithdrawalDeletesCards(t *testing.T) {
 // "Don't analyze me" while a promotion pass is between reading the consents and saving (here: during
 // no_sensitive's classifier call) does not bring the deleted card back, then or on later passes.
 func TestProfileWithdrawalDuringPromotion(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	strict(t, svc, config.GuildPrivacy{NoSensitive: true})
 	var once sync.Once
@@ -119,6 +122,7 @@ func TestProfileWithdrawalDuringPromotion(t *testing.T) {
 // card_channel_only: an item is used only where all of its evidence was said. The same fact said on two
 // days in #c and once more in #c3 merges evidence from both, so it is not shown in #c3.
 func TestCardChannelOnlyNeedsAllEvidenceHere(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	strict(t, svc, config.GuildPrivacy{CardChannelOnly: true})
 	climbCard(t, svc, m, eng)
@@ -147,6 +151,7 @@ func TestCardChannelOnlyNeedsAllEvidenceHere(t *testing.T) {
 // no_hearsay also covers episode titles and live topics: a title or topic naming someone who said none of
 // what is shown ("영희 이별") stays out, while it is shown by default.
 func TestNoHearsayTitlesAndTopics(t *testing.T) {
+	t.Parallel()
 	gossip := []said{{"8001", "u1", "철수", "영희 헤어졌대 위로 선물 사줄까"}, {"8002", "u2", "영희", "나 오늘 바빠"}}
 	t.Run("episode title", func(t *testing.T) {
 		svc, m, eng := memorySvc(t)
@@ -190,6 +195,7 @@ func TestNoHearsayTitlesAndTopics(t *testing.T) {
 // no_sensitive: a classifier decides which facts may become card items; a sensitive one does not, and a
 // "remember this" the explicit classifier marks sensitive is refused.
 func TestStrictPrivacyNoSensitive(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	strict(t, svc, config.GuildPrivacy{NoSensitive: true})
 	m.sensitive = func(string) string { return `{"sensitive":["f1"]}` }
@@ -223,6 +229,7 @@ func TestStrictPrivacyNoSensitive(t *testing.T) {
 // The console's switches patch guilds.<g>.privacy.<key> one at a time: on sets true (even for a server
 // with no entry yet), off unsets it.
 func TestStrictPrivacyPatchedFromTheConsole(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	patch := func(op map[string]any) {
 		t.Helper()

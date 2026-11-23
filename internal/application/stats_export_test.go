@@ -131,6 +131,7 @@ func seedHostile(t *testing.T, s *Service) {
 // Every exported dimension value is a member of its dimension's list, and none of the strings an operator,
 // a caller or a database could hold appears anywhere in the file, settings included (H4).
 func TestStatsExportDimensionsAreAllowlisted(t *testing.T) {
+	t.Parallel()
 	s := exportService(t)
 	seedHostile(t, s)
 	doc := exportDoc(t, s, statsExportInput{})
@@ -201,6 +202,7 @@ func TestStatsExportDimensionsAreAllowlisted(t *testing.T) {
 // Member-facing rows under the weekly threshold fold into "other"; operational rows and the model's own
 // tool calls are treated as the policy says; totals are built from the folded rows.
 func TestStatsExportFoldsSmallMemberRows(t *testing.T) {
+	t.Parallel()
 	s := exportService(t)
 	for _, day := range []string{"2026-11-10", "2026-11-17"} { // W46, W47
 		n := int64(8)
@@ -277,6 +279,7 @@ func TestStatsExportFoldsSmallMemberRows(t *testing.T) {
 
 // No daily or hourly row; no date anywhere; activity only as buckets.
 func TestStatsExportHasNoDailyOrHourlyRowsAndBucketsActivity(t *testing.T) {
+	t.Parallel()
 	s := exportService(t)
 	seedStatsDay(t, s, statsGroupTurns, "2026-11-17",
 		statsRow{Metric: "turns.count", Dims: map[string]string{"outcome": "answered"}, N: 31, Vals: map[string]float64{"cost_usd": 1.25, "latency_ms": 9000}, Hist: statsHistAdd(nil, 900)},
@@ -327,6 +330,7 @@ func TestStatsExportHasNoDailyOrHourlyRowsAndBucketsActivity(t *testing.T) {
 // A person's withdrawal removes their rows from the source tables; a finished week's exported numbers do
 // not move (review M10).
 func TestStatsExportWithdrawnPersonChangesNothing(t *testing.T) {
+	t.Parallel()
 	s := exportService(t)
 	ctx := context.Background()
 	seedStatsDay(t, s, statsGroupFeedback, "2026-11-17",
@@ -371,6 +375,7 @@ func TestStatsExportWithdrawnPersonChangesNothing(t *testing.T) {
 
 // stats.enabled: false stops collection, not the export of what exists (review L2).
 func TestStatsExportWorksWithStatsOff(t *testing.T) {
+	t.Parallel()
 	s := exportService(t)
 	seedStatsDay(t, s, statsGroupTurns, "2026-11-17",
 		statsRow{Metric: "turns.count", Dims: map[string]string{"outcome": "answered"}, N: 20})
@@ -403,6 +408,7 @@ func TestStatsExportWorksWithStatsOff(t *testing.T) {
 
 // The install id is made at the first export, stays, and is replaced on request; an empty install exports.
 func TestStatsExportInstallID(t *testing.T) {
+	t.Parallel()
 	s := exportService(t)
 	var st statsInstallState
 	if found, err := s.kvGet(statsInstallKey, &st); err != nil || found {
@@ -438,6 +444,7 @@ func TestStatsExportInstallID(t *testing.T) {
 
 // The period is whole ISO weeks (UTC) and only finished weeks.
 func TestStatsExportPeriodIsWholeFinishedWeeks(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	clk.t = time.Date(2026, 11, 24, 9, 0, 0, 0, time.UTC) // Tuesday of W48: W47 is finished
 	for _, day := range []string{"2026-11-04", "2026-11-11", "2026-11-18", "2026-11-23"} {

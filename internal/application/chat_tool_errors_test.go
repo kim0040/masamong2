@@ -8,6 +8,7 @@ import (
 )
 
 func TestChatToolViewKeepsUnconfiguredAsSetupState(t *testing.T) {
+	t.Parallel()
 	for _, res := range []action.Result{
 		action.OK(action.Request{Action: "search.web"}, map[string]any{"status": "unconfigured", "message": "operator detail"}),
 		action.Fail(action.Request{Action: "finance.quote"}, errcode.ProviderUnconfigured, "provider.unconfigured", "operator detail", nil),

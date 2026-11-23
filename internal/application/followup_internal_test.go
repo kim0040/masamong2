@@ -3,6 +3,7 @@ package application
 import "testing"
 
 func TestScoreFollow(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		f    followFeatures
 		want int
@@ -24,6 +25,7 @@ func TestScoreFollow(t *testing.T) {
 }
 
 func TestEndsWithQuestion(t *testing.T) {
+	t.Parallel()
 	for s, want := range map[string]bool{"내일 갈 거야?": true, "どこ行く？": true, "really? 😄": true, "ok.": false, "응!": false, "what time? 🙂🙂 ": true, "": false} {
 		if got := endsWithQuestion(s); got != want {
 			t.Errorf("%q: %v", s, got)

@@ -11,6 +11,7 @@ import (
 )
 
 func TestVersionsCompare(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		latest, current string
 		newer           bool
@@ -28,6 +29,7 @@ func TestVersionsCompare(t *testing.T) {
 }
 
 func TestUpdateCheckSaysWhenANewerReleaseIsOut(t *testing.T) {
+	t.Parallel()
 	var status atomic.Int32
 	status.Store(200)
 	var ua atomic.Value
@@ -40,8 +42,7 @@ func TestUpdateCheckSaysWhenANewerReleaseIsOut(t *testing.T) {
 		_, _ = w.Write([]byte(`{"tag_name":"v0.3.0","html_url":"https://github.com/kim0040/masamong2/releases/tag/v0.3.0","published_at":"2026-10-01T00:00:00Z"}`))
 	}))
 	defer srv.Close()
-	defer application.SetVersionForTest("0.2.0")()
-	svc := setupSvc(t)
+	svc := setupSvcVersion(t, "0.2.0")
 	application.UseUpdateAPIForTest(svc, srv.URL+"/%s")
 	o := out(t, svc, "updates.check", nil)
 	if o["newer"] != true || o["state"].(map[string]any)["latest"] != "0.3.0" || ua.Load() != "masamong/0.2.0" {

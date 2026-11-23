@@ -6,6 +6,7 @@ import (
 )
 
 func TestThreadClosePersistsAfterTickEviction(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	s.ThreadOpened(context.Background(), "g", "parent", "target", "member", "")
 	// activity while open lives only in memory; the row still says it was last active long ago

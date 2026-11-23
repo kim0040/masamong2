@@ -16,8 +16,9 @@ import (
 // testModelAdapter is an adapter for a model whose host answers with rt, in process.
 func testModelAdapter(t *testing.T, rt registryGateTransport) *openai.Adapter {
 	t.Helper()
-	t.Setenv("MASAMONG_A3_LOOP_TEST_KEY", "synthetic-test-credential")
-	cred, err := providers.Resolve("env:MASAMONG_A3_LOOP_TEST_KEY")
+	var creds credentialStandIns
+	creds.setForTest(t, "MASAMONG_A3_LOOP_TEST_KEY", "synthetic-test-credential")
+	cred, err := creds.resolve("env:MASAMONG_A3_LOOP_TEST_KEY")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,6 +31,7 @@ func testModelAdapter(t *testing.T, rt registryGateTransport) *openai.Adapter {
 // A tool loop round whose model hangs past its own limit is asked of the model's fallback: the round's
 // deadline is the whole chain's (each model's limit), not the first model's alone.
 func TestToolLoopRoundReachesTheFallbackModel(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	const limit = 200 * time.Millisecond
 	hang := registryGateTransport(func(r *http.Request) (*http.Response, error) {

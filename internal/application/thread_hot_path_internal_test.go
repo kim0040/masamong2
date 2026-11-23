@@ -10,6 +10,7 @@ import (
 )
 
 func TestCachedThreadMessageLookupsDoNotWaitForDB(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	s.NoteThread("g", "target", "parent", false)
 	db, err := s.adminDB()

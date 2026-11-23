@@ -92,6 +92,7 @@ func stageRestoreTest(t *testing.T) (*Service, string) {
 }
 
 func TestConcurrentBackupsAllSurvive(t *testing.T) {
+	t.Parallel()
 	s := maintenanceService(t, false)
 	s.Clock = clock.Fixed{T: time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC)}
 	var wg sync.WaitGroup
@@ -134,6 +135,7 @@ func TestConcurrentBackupsAllSurvive(t *testing.T) {
 }
 
 func TestBackupTakesConfigFromSnapshot(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	s := maintenanceService(t, false)
 	oldRev := s.Revision()
 	maintenanceHook = func(p string) error {
@@ -171,6 +173,7 @@ func TestBackupTakesConfigFromSnapshot(t *testing.T) {
 }
 
 func TestInvalidSQLiteMatchingChecksumRefused(t *testing.T) {
+	t.Parallel()
 	s := maintenanceService(t, false)
 	n, m, err := s.createBackup(backupManual)
 	if err != nil {
@@ -187,6 +190,7 @@ func TestInvalidSQLiteMatchingChecksumRefused(t *testing.T) {
 }
 
 func TestRestoreRecoversEveryPhase(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	points := []string{"restore:before-copy", "restore:copy", "prepared", "quarantine", "quarantine:0", "quarantine:1", "quarantine:2", "quarantine:3", "quarantine:4", "install", "install:0", "install:4", "verify", "committed"}
 	for _, point := range points {
 		t.Run(point, func(t *testing.T) {
@@ -221,6 +225,7 @@ func TestRestoreRecoversEveryPhase(t *testing.T) {
 }
 
 func TestRestoreCopyFailurePreservesCrashWAL(t *testing.T) {
+	t.Parallel()
 	s, name := stageRestoreTest(t)
 	wal := s.Store.Path() + "-wal"
 	if err := os.WriteFile(wal, []byte("uncheckpointed committed data"), 0o600); err != nil {
@@ -258,6 +263,7 @@ func TestRestoreCopyFailurePreservesCrashWAL(t *testing.T) {
 }
 
 func TestRollbackResumesAfterEveryMove(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	for _, point := range []string{"rollback", "rollback:0", "rollback:1", "rollback:2", "rollback:3", "rollback:4", "rolled_back"} {
 		t.Run(point, func(t *testing.T) {
 			s, _ := stageRestoreTest(t)
@@ -292,6 +298,7 @@ func TestRollbackResumesAfterEveryMove(t *testing.T) {
 }
 
 func TestMalformedResetNeverDeletes(t *testing.T) {
+	t.Parallel()
 	for _, body := range []string{"", "{", "{}", `{"version":1,"kind":"reset"}`} {
 		t.Run(body, func(t *testing.T) {
 			s := maintenanceService(t, false)
@@ -329,6 +336,7 @@ func TestMalformedResetNeverDeletes(t *testing.T) {
 }
 
 func TestResetCustomDatabaseAndOwnedSourcesResumes(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	points := []string{"erase", "committed"}
 	for i := range resetTargets(t.TempDir(), filepath.Join(t.TempDir(), "x.db"), true) {
 		points = append(points, fmt.Sprintf("erase:%d", i))
@@ -379,6 +387,7 @@ func TestResetCustomDatabaseAndOwnedSourcesResumes(t *testing.T) {
 }
 
 func TestUpdateRecoversEveryPhase(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	// programs are replaced one at a time: quarantine:0, install:0, quarantine:1, install:1
 	for _, point := range []string{"prepared", "quarantine", "quarantine:0", "install:0", "quarantine:1", "install:1", "verify", "committed"} {
 		t.Run(point, func(t *testing.T) {
@@ -410,6 +419,7 @@ func TestUpdateRecoversEveryPhase(t *testing.T) {
 }
 
 func TestStageBinariesRunsBothPrograms(t *testing.T) {
+	// sequential: it sets process environment variables
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -433,6 +443,7 @@ func TestStageBinariesRunsBothPrograms(t *testing.T) {
 }
 
 func TestJournalValidatesPathsBeforeDestruction(t *testing.T) {
+	t.Parallel()
 	s := maintenanceService(t, true)
 	_ = s.Close()
 	j, err := newMaintenance(s.DataRoot, "reset")
@@ -455,6 +466,7 @@ func TestJournalValidatesPathsBeforeDestruction(t *testing.T) {
 }
 
 func TestRollbackFailureBlocksOpenAndReportsDoctor(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	s, _ := stageRestoreTest(t)
 	maintenanceHook = func(point string) error {
 		if point == "verify" {
@@ -503,6 +515,7 @@ func TestRollbackFailureBlocksOpenAndReportsDoctor(t *testing.T) {
 }
 
 func TestProgramRollbackFailureRetainsRecoveryCopies(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	dir := t.TempDir()
 	staged := map[string]string{}
 	for _, base := range []string{"masamong", "masamongd"} {
@@ -546,6 +559,7 @@ func TestProgramRollbackFailureRetainsRecoveryCopies(t *testing.T) {
 }
 
 func TestCommittedUpdateCleanupChecksPairCompleteness(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	dir := t.TempDir()
 	staged := map[string]string{}
 	for _, base := range []string{"masamong", "masamongd"} {
@@ -576,6 +590,7 @@ func TestCommittedUpdateCleanupChecksPairCompleteness(t *testing.T) {
 }
 
 func TestLogicalBackupIsValidatedInIsolation(t *testing.T) {
+	t.Parallel()
 	s := maintenanceService(t, false)
 	dump, err := s.Store.ExportLogical()
 	if err != nil {
@@ -592,6 +607,7 @@ func TestLogicalBackupIsValidatedInIsolation(t *testing.T) {
 }
 
 func TestProgramMaintenanceStatusDoesNotRequireDataJournal(t *testing.T) {
+	// sequential: it sets the package's maintenance hook and program path
 	dir := t.TempDir()
 	staged := map[string]string{}
 	for _, base := range []string{"masamong", "masamongd"} {
@@ -631,6 +647,7 @@ func TestProgramMaintenanceStatusDoesNotRequireDataJournal(t *testing.T) {
 // A data root reached through a link (macOS /var -> /private/var, a moved home folder) is the
 // operator's choice; a link inside the root still refuses destructive maintenance.
 func TestOwnedPathAcceptsLinkedRootRefusesInnerLink(t *testing.T) {
+	t.Parallel()
 	real := t.TempDir()
 	linked := filepath.Join(t.TempDir(), "root-link")
 	if err := os.Symlink(real, linked); err != nil {

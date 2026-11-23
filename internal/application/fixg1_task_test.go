@@ -35,7 +35,7 @@ func taskWithSearch(t *testing.T, plan string, services func(svc *application.Se
 		t.Fatalf("set: %+v", r)
 	}
 	svc.Clock = clock.Fixed{T: time.Date(2026, 10, 16, 9, 0, 20, 0, seoul)}
-	application.DeliverReminders(svc, context.Background())
+	application.DeliverRemindersForTest(svc, context.Background())
 	if gw.postCount() != 1 {
 		t.Fatalf("posted: %+v", gw.posts)
 	}
@@ -70,6 +70,7 @@ func recordedSearch(t *testing.T, body map[string]any) []any {
 // A scheduled task's web search opens no page (it is not a member waiting in the chat), and its record
 // keeps at most 200 runes of any passage a search did bring, as a chat turn's record does.
 func TestScheduledTaskReadsNoPagesAndClipsItsRecord(t *testing.T) {
+	t.Parallel()
 	plan := `{"memory_requirement":"none","question_kind":"other","tool_plan":[{"tool_name":"search.web","parameters":{"query":"가평 캠핑장 요금"}}]}`
 	var fake *fetchFake
 	body := taskWithSearch(t, plan, func(svc *application.Service) {

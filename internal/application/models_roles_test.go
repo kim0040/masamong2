@@ -35,8 +35,8 @@ func listServer(t *testing.T) string {
 }
 
 func listService(t *testing.T) *application.Service {
-	t.Setenv("MASAMONG_OPENROUTER_KEY", "test-key")
 	svc := setupSvc(t)
+	svc.SetEnvForTest(t, "MASAMONG_OPENROUTER_KEY", "test-key")
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{
 		map[string]any{"path": []any{"providers", "openrouter", "api"}, "value": "openrouter"},
 		map[string]any{"path": []any{"providers", "openrouter", "base_url"}, "value": listServer(t)},
@@ -60,6 +60,7 @@ func modelByID(t *testing.T, o map[string]any, id string) map[string]any {
 // models.list hands the console what it needs to show badges, per-million prices and sort: image input
 // and tool support when the list says (absent when it does not), the cached price, context and prices.
 func TestModelsListCarriesCapabilitiesAndPrices(t *testing.T) {
+	t.Parallel()
 	svc := listService(t)
 	o := out(t, svc, "models.list", map[string]any{"provider": "openrouter"})
 	ds := modelByID(t, o, "deepseek/deepseek-v4.1-flash")
@@ -100,6 +101,7 @@ func TestModelsListCarriesCapabilitiesAndPrices(t *testing.T) {
 // models.recommend keeps its picks and adds per-role budget alternatives, ranked by blended price, with
 // metadata and no pick for a role that has no fitting priced model.
 func TestModelsRecommendAddsBudgetAlternatives(t *testing.T) {
+	t.Parallel()
 	svc := listService(t)
 	o := out(t, svc, "models.recommend", map[string]any{"provider": "openrouter"})
 	if len(o["picks"].([]any)) == 0 {
@@ -150,6 +152,7 @@ func TestModelsRecommendAddsBudgetAlternatives(t *testing.T) {
 // With models.vision set, the picture is described by that model (its own provider), before the planner
 // and the answer model; a vision model that refuses pictures falls back to the existing order.
 func TestVisionRoleDescribesFirst(t *testing.T) {
+	t.Parallel()
 	svc, h := visionSvc(t)
 	h.blind.Store(true) // the answer model cannot see, so the picture is described
 	eyes := &visionHosts{}
@@ -204,6 +207,7 @@ func TestVisionRoleDescribesFirst(t *testing.T) {
 
 // Without models.vision nothing changes: the planner describes (no call goes to any other host).
 func TestVisionUnsetKeepsThePlannerFirst(t *testing.T) {
+	t.Parallel()
 	svc, h := visionSvc(t)
 	h.blind.Store(true)
 	url, _ := picture(t)

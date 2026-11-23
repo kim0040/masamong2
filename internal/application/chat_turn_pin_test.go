@@ -43,6 +43,7 @@ func classified(plan *recordingServer) int {
 
 // A name said to the bot tells the caller once, before the answer; talk about the bot does not.
 func TestNameOnlyCallTellsTheCallerItWasAddressed(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		verdict string
 		calls   int
@@ -64,6 +65,7 @@ func TestNameOnlyCallTellsTheCallerItWasAddressed(t *testing.T) {
 // Where the monthly budget is spent, a name alone is not classified (a model call) and gets no budget
 // notice: the turn is "not addressed".
 func TestNameOnlyCallOverTheBudgetIsNotClassified(t *testing.T) {
+	t.Parallel()
 	svc, plan, resp := nameCallSvc(t, `{"to":"bot","tone":"neutral"}`)
 	if _, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "1",
 		Message: "@마사몽 안녕", Speaker: "Chris", SpeakerID: "uc"}); err != nil {

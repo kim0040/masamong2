@@ -10,6 +10,7 @@ import (
 // its own program-update journal (maintenanceNeeded, the supervisor's recovery and the operator
 // commands all use InstallDir).
 func TestInstallDirResolvesLinksEverywhere(t *testing.T) {
+	// sequential: it sets the package's program path
 	real, link := t.TempDir(), filepath.Join(t.TempDir(), "bin")
 	if err := os.Symlink(real, link); err != nil {
 		t.Skipf("cannot create links here: %v", err)

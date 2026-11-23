@@ -13,6 +13,7 @@ import (
 // A run that read its job while it was cancelled must not write that row back over a retry made in
 // between: both rows have an empty lease, so the save compares the status it read as well.
 func TestStaleCancelledRowDoesNotUndoARetry(t *testing.T) {
+	t.Parallel()
 	s, err := Open(t.TempDir(), nil, false)
 	if err != nil {
 		t.Fatal(err)

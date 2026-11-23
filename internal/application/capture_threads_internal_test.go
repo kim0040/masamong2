@@ -16,6 +16,7 @@ import (
 // (turning memory off is explicit and wins), and its own off still counts under a parent that stores.
 // Two passes at once on a small host must both finish (the parent is read from the reader pool).
 func TestAgedThreadFollowsItsParentsCaptureOff(t *testing.T) {
+	// sequential: it installs the process's host profile
 	s, db := smallHostSvc(t)
 	if r := s.mutateConfig(action.Request{}, func(d *config.Document) error {
 		d.Memory.Capture = true
@@ -80,6 +81,7 @@ func TestAgedThreadFollowsItsParentsCaptureOff(t *testing.T) {
 // stores, the thread is a capturing room; once the parent turns capture off, the episode pass, a catch-up and
 // a message the connector could not place all leave the thread alone, with no live list or thread row to ask.
 func TestPrivateThreadFollowsItsStoredParent(t *testing.T) {
+	// sequential: it installs the process's host profile
 	s, db := smallHostSvc(t)
 	setParent := func(captures bool) {
 		t.Helper()

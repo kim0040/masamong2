@@ -41,6 +41,7 @@ func redirectTestArchive(t *testing.T, name string) []byte {
 // GitHub answers a release asset with a redirect to its file host. The provider client refuses every
 // cross-origin redirect, so the in-app update could never download anything in production.
 func TestUpdateDownloadFollowsTheRedirectToTheAssetHost(t *testing.T) {
+	t.Parallel()
 	name := updateAssetName()
 	archive := redirectTestArchive(t, name)
 	sum := sha256.Sum256(archive)
@@ -109,6 +110,7 @@ func updateTempFiles(t *testing.T, dir string) []string {
 }
 
 func TestUpdateRedirectPolicyNamesGitHubHostsOnly(t *testing.T) {
+	t.Parallel()
 	for host, want := range map[string]bool{
 		"github.com": true, "release-assets.githubusercontent.com": true, "objects.githubusercontent.com": true,
 		"githubusercontent.com.evil.example": false, "evilgithubusercontent.com": false, "evil.example": false, "api.github.com": false,

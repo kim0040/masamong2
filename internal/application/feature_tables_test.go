@@ -48,6 +48,7 @@ func practiceNames(t *testing.T, s *Service) map[string]bool {
 // Every table and index a registered statement names exists once the service has opened, and running
 // the migration again changes nothing (it runs on every start).
 func TestRegisteredFeatureTablesExist(t *testing.T) {
+	t.Parallel()
 	s, err := OpenPractice(context.Background(), t.TempDir(), "en", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -93,6 +94,7 @@ var notFeatureTables = map[string]string{
 // the check that fails when a registration is taken out: the SQL stays in the code and the table is
 // gone. migration.go is skipped on purpose: it reads the old Masamong V1 database, not this one.
 func TestEveryTableTheCodeNamesExists(t *testing.T) {
+	t.Parallel()
 	s, err := OpenPractice(context.Background(), t.TempDir(), "en", nil)
 	if err != nil {
 		t.Fatal(err)

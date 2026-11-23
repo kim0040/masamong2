@@ -12,6 +12,7 @@ import (
 // restart). Nothing moves: not the stored words, not the live line, not the reply, not the queue. The stored row always
 // refused it; the job did not, and took the reply on the newest words.
 func TestAnEditOlderThanTheNewestChangesNothing(t *testing.T) {
+	t.Parallel()
 	const key = "discord:g:c"
 	t1 := time.Now().Add(-2 * time.Minute)
 	t2 := t1.Add(time.Minute)
@@ -144,6 +145,7 @@ func TestAnEditOlderThanTheNewestChangesNothing(t *testing.T) {
 // An edit that kept the words overtakes an older one after MessageEdited looked: only the writer can tell. The stored
 // words refuse the older edit, so a job for it would take the reply on words that never changed.
 func TestAnEditOlderThanOneThatKeptTheWordsTakesNoReply(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	e, err := s.MemoryEngine()
 	if err != nil {

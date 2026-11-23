@@ -227,7 +227,11 @@ func (s *Service) weatherKMA(ctx context.Context, req action.Request, g kma.Grid
 // spelling ever asked.
 const geocodeCacheMax = 1024
 
-var geocodeCache = newTTLCache[openmeteo.Place](geocodeCacheMax, 24*time.Hour) // "lang|name" → place
+// geocodeCache is the service's place lookups ("lang|name" → place), made on first use.
+func (s *Service) geocodeCache() *ttlCache[openmeteo.Place] {
+	s.geocodesOnce.Do(func() { s.geocodes = newTTLCache[openmeteo.Place](geocodeCacheMax, 24*time.Hour) })
+	return s.geocodes
+}
 
 // weatherGlobal answers from Open-Meteo. A Korean region from the KMA table (grid) is placed by the
 // grid's own coordinates: Open-Meteo's geocoder misses or misplaces many Korean names.
@@ -241,7 +245,7 @@ func (s *Service) weatherGlobal(ctx context.Context, req action.Request, region 
 	if grid != nil {
 		lat, lon := grid.LatLon()
 		place = openmeteo.Place{Name: grid.Name, CountryCode: "KR", Latitude: lat, Longitude: lon, Timezone: "Asia/Seoul"}
-	} else if cached, _, ok := geocodeCache.get(key, s.Clock.Now()); ok {
+	} else if cached, _, ok := s.geocodeCache().get(key, s.Clock.Now()); ok {
 		place = cached
 	} else {
 		if err := s.Registry().reserve(s.Registry().openMeteoID); err != nil {
@@ -256,7 +260,7 @@ func (s *Service) weatherGlobal(ctx context.Context, req action.Request, region 
 			return s.providerFail(req, s.Registry().openMeteoID, err)
 		}
 		place = p
-		geocodeCache.put(key, p, s.Clock.Now())
+		s.geocodeCache().put(key, p, s.Clock.Now())
 	}
 	if err := s.Registry().reserve(s.Registry().openMeteoID); err != nil {
 		return s.providerFail(req, s.Registry().openMeteoID, err)

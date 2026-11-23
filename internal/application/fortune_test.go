@@ -51,6 +51,7 @@ func person(id string, private bool) *action.Invoker {
 }
 
 func TestFortuneFlow(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	svc := fortuneSvc(t, &calls)
 	serveAnyServer(t, svc)
@@ -138,6 +139,7 @@ func TestFortuneFlow(t *testing.T) {
 }
 
 func TestMorningBriefingIsWrittenEarlyAndSentOnce(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	svc := fortuneSvc(t, &calls)
 	dm := person("u1", true)
@@ -152,35 +154,35 @@ func TestMorningBriefingIsWrittenEarlyAndSentOnce(t *testing.T) {
 	at := func(h, m int) { svc.Clock = clock.Fixed{T: time.Date(2026, 9, 29, h, m, 0, 0, seoul)} }
 	ctx := context.Background()
 	at(7, 0) // too early
-	application.RunFortuneMorning(svc, ctx)
+	application.RunFortuneMorningForTest(svc, ctx)
 	before := calls.Load()
 	at(7, 22) // within the lead: written, not yet sent
-	application.RunFortuneMorning(svc, ctx)
+	application.RunFortuneMorningForTest(svc, ctx)
 	if calls.Load() != before+1 || len(gw.sent) != 0 {
 		t.Fatalf("written early: calls %d sent %d", calls.Load()-before, len(gw.sent))
 	}
 	at(7, 30)
-	application.RunFortuneMorning(svc, ctx)
-	application.RunFortuneMorning(svc, ctx)
+	application.RunFortuneMorningForTest(svc, ctx)
+	application.RunFortuneMorningForTest(svc, ctx)
 	if len(gw.sent) != 1 || gw.to[0] != "u1" || calls.Load() != before+1 {
 		t.Fatalf("sent once without writing again: sent %d calls %d", len(gw.sent), calls.Load()-before)
 	}
 	// quiet hours hold the next day's briefing until they end
 	_ = as(svc, "preferences.set", map[string]any{"quiet_start": "06:00", "quiet_end": "09:00"}, dm)
 	svc.Clock = clock.Fixed{T: time.Date(2026, 9, 30, 7, 30, 0, 0, seoul)}
-	application.RunFortuneMorning(svc, ctx)
+	application.RunFortuneMorningForTest(svc, ctx)
 	if len(gw.sent) != 1 {
 		t.Fatal("held by quiet hours")
 	}
 	svc.Clock = clock.Fixed{T: time.Date(2026, 9, 30, 9, 1, 0, 0, seoul)}
-	application.RunFortuneMorning(svc, ctx)
+	application.RunFortuneMorningForTest(svc, ctx)
 	if len(gw.sent) != 2 {
 		t.Fatalf("sent after quiet hours: %d", len(gw.sent))
 	}
 	// withdrawn consent stops delivery
 	_ = as(svc, "privacy.consent", map[string]any{"scope": "fortune", "decision": "withdraw"}, dm)
 	svc.Clock = clock.Fixed{T: time.Date(2026, 10, 1, 7, 31, 0, 0, seoul)}
-	application.RunFortuneMorning(svc, ctx)
+	application.RunFortuneMorningForTest(svc, ctx)
 	if len(gw.sent) != 2 {
 		t.Fatal("no briefing without consent")
 	}
@@ -190,6 +192,7 @@ func TestMorningBriefingIsWrittenEarlyAndSentOnce(t *testing.T) {
 // the morning DM gets its stop button. A day's reading shows the computed score, lucky points and basis,
 // not the ones the model wrote (77, 파랑, 시계).
 func TestFortuneTagReadingBecomesACard(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	url := chatServer(t, "SCORE: 77\nSUMMARY: 좋은 흐름이에요.\nWORK: 집중\nLUCKY_COLOR: 파랑\nLUCKY_ITEM: 시계", "stop", &calls)
 	svc := routedSvc(t, url, url)
@@ -235,7 +238,7 @@ func TestFortuneTagReadingBecomesACard(t *testing.T) {
 	svc.SetDiscord(gw)
 	due := time.Date(2026, 10, 16, 7, 30, 0, 0, seoul)
 	svc.Clock = clock.Fixed{T: due}
-	application.RunFortuneMorning(svc, context.Background())
+	application.RunFortuneMorningForTest(svc, context.Background())
 	if len(gw.sent) != 1 {
 		t.Fatalf("sent %d", len(gw.sent))
 	}
@@ -252,6 +255,7 @@ func TestFortuneTagReadingBecomesACard(t *testing.T) {
 // A public channel's summary is written without the person's computed facts (scores, lucky points,
 // element counts); the private reading gets them.
 func TestFortunePublicPromptHasNoComputedFacts(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var prompts []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -297,6 +301,7 @@ func TestFortunePublicPromptHasNoComputedFacts(t *testing.T) {
 // the rule in animals.go, 묘 육합 75, 오 반합 72, 술 itself 65, 자 인 사 신 해 60 (인술 has no cardinal),
 // 유 해 54, 축 형 52, 미 형·파 47, 진 충 45.
 func TestFortuneAnimals(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	svc := fortuneSvc(t, &calls)
 	applyDoc(t, svc, func(d *config.Document) { d.I18n.Timezone = "Asia/Seoul" })
@@ -323,6 +328,7 @@ func TestFortuneAnimals(t *testing.T) {
 // The briefing's wording follows its local send time; an evening briefing is tomorrow's reading. The
 // scores are the hand-derived ones of TestFortuneTagReadingBecomesACard: 2026-10-15 is 65, 10-16 is 64.
 func TestBriefingFollowsTheSendTime(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	for _, c := range []struct {
 		at                string
@@ -365,7 +371,7 @@ func TestBriefingFollowsTheSendTime(t *testing.T) {
 		gw := &dmGateway{}
 		svc.SetDiscord(gw)
 		svc.Clock = clock.Fixed{T: c.due}
-		application.RunFortuneMorning(svc, context.Background())
+		application.RunFortuneMorningForTest(svc, context.Background())
 		srv.Close()
 		if len(gw.sent) != 1 || len(prompts) != 1 {
 			t.Fatalf("%s: sent %d, prompts %d", c.at, len(gw.sent), len(prompts))

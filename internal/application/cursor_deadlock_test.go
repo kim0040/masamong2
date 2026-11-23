@@ -28,6 +28,7 @@ func withinDeadline(t *testing.T, what string, f func()) {
 }
 
 func TestRankingAfterConsentChangeDoesNotDeadlock(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	serveAnyServer(t, svc)
 	_ = exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "c1", "respond": "mention"})
@@ -56,6 +57,7 @@ func TestRankingAfterConsentChangeDoesNotDeadlock(t *testing.T) {
 }
 
 func TestReminderContextAfterConsentChangeDoesNotDeadlock(t *testing.T) {
+	t.Parallel()
 	now, _ := repSeoulNow()
 	svc, _ := remCtxSvc(t, now)
 	base := now.Add(-time.Minute)

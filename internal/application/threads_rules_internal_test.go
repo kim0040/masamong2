@@ -12,6 +12,7 @@ import (
 // The offer score adds two for a long run of turns, long replies, three tools and four lines left out, and
 // one for a busy channel.
 func TestThreadOfferScore(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		sig  offerSignals
 		want int
@@ -40,6 +41,7 @@ func TestThreadOfferScore(t *testing.T) {
 // The offer decision checks, in order: the score, the mode off, an offer already made, a "no" still
 // resting, a backed-off channel (logged once per conversation), the hourly limit, a group, then auto or offer.
 func TestThreadOfferDecision(t *testing.T) {
+	t.Parallel()
 	ready := offerFacts{score: threadOfferScore, mode: "button"}
 	for _, tc := range []struct {
 		name      string
@@ -68,6 +70,7 @@ func TestThreadOfferDecision(t *testing.T) {
 }
 
 func TestThreadStopCueAndLines(t *testing.T) {
+	t.Parallel()
 	if got := threadStopText("  !그만!! "); got != "그만" {
 		t.Fatalf("stop text: %q", got)
 	}

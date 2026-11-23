@@ -14,6 +14,7 @@ import (
 )
 
 func TestModelsRecommendWidthUsesAppliedRerankAvailability(t *testing.T) {
+	// sequential: it installs the process's host profile
 	for _, hostID := range []string{"openai", "gemini", "cometapi"} {
 		for _, mode := range []string{"unconfigured", "configured", "small", "picked-unusable"} {
 			t.Run(hostID+"/"+mode, func(t *testing.T) {
@@ -77,6 +78,7 @@ func TestModelsRecommendWidthUsesAppliedRerankAvailability(t *testing.T) {
 }
 
 func TestModelsSelectProviderOnlyPreservesEmbedWidth(t *testing.T) {
+	t.Parallel()
 	for _, dims := range []int{0, 1024, 2048, 4096} {
 		t.Run(strconv.Itoa(dims), func(t *testing.T) {
 			s := privacyService(t)
@@ -99,6 +101,7 @@ func TestModelsSelectProviderOnlyPreservesEmbedWidth(t *testing.T) {
 }
 
 func TestModelsRecommendWidthOutputOnlyForEmbedChange(t *testing.T) {
+	// sequential: it installs the process's host profile
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"text-embedding-3-large","object":"model"}]}`))
 	}))
@@ -141,6 +144,7 @@ func TestModelsRecommendWidthOutputOnlyForEmbedChange(t *testing.T) {
 }
 
 func TestModelsRecommendSmallFullWidthUsesZero(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	r := widthExecute(s, "models.recommend", map[string]any{"provider": "openrouter", "apply": true, "picks": map[string]any{"embed": "qwen/qwen3-embedding-0.6b"}})
 	if !r.OK || r.Output["embed_dimensions"] != 0 || r.Output["embed_full_width"] != 1024 || s.Doc().Models["embed"].Dimensions != 0 {

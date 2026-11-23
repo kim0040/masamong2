@@ -18,6 +18,7 @@ var statsNasty = []string{"", " ", "none", "other", "acme_corp_lookup", "acme-pr
 	"skip_cap", "would_offer", "reaction:👍", "stop", "end_turn", strings.Repeat("x", 300)}
 
 func TestStatsRegistryInvariants(t *testing.T) {
+	t.Parallel()
 	seen := map[string]bool{}
 	groupKind := map[string]statsKind{}
 	for _, m := range statsRegistry {
@@ -141,6 +142,7 @@ func checkStatsDim(t *testing.T, metric string, d statsDim) {
 
 // The fixture of review H4: none of these leave the install as themselves.
 func TestStatsExportFoldsOperatorNames(t *testing.T) {
+	t.Parallel()
 	llm, _ := statsLookup("llm.calls")
 	tools, _ := statsLookup("tools.calls")
 	actions, _ := statsLookup("actions.calls")
@@ -188,6 +190,7 @@ func TestStatsExportFoldsOperatorNames(t *testing.T) {
 }
 
 func TestStatsDimsCanonical(t *testing.T) {
+	t.Parallel()
 	m, _ := statsLookup("tools.calls")
 	a, err := statsEncodeDims(m, map[string]string{"provider": "tavily", "class": "", "status": "ok", "tool": "search.web"})
 	if err != nil {
@@ -214,18 +217,12 @@ func TestStatsDimsCanonical(t *testing.T) {
 	}
 }
 
-// withStatsTestCounter declares a counter with values and a histogram for the length of a test (the
-// shipped counter has neither).
-func withStatsTestCounter(t *testing.T) {
+// withStatsTestCounter declares a counter with values and a histogram on s alone (the shipped counter
+// has neither).
+func withStatsTestCounter(t *testing.T, s *Service) {
 	t.Helper()
-	saved := statsRegistry
-	statsRegistry = append(slices.Clone(statsRegistry), statsMetric{Name: "actions.test", Group: statsGroupActions, Kind: statsCounter,
+	s.hooks.statsMetrics.Store("actions.test", &statsMetric{Name: "actions.test", Group: statsGroupActions, Kind: statsCounter,
 		Doc: "test", Dims: []statsDim{closedDim("via", statsVias, nil)}, Vals: []string{"cost_usd"}, Hist: true})
-	statsByName["actions.test"] = &statsRegistry[len(statsRegistry)-1]
-	t.Cleanup(func() {
-		statsRegistry = saved
-		delete(statsByName, "actions.test")
-	})
 }
 
 func statsRead(t *testing.T, s *Service, day, metric, dims string) (int64, map[string]float64, []int64) {
@@ -244,8 +241,9 @@ func statsRead(t *testing.T, s *Service, day, metric, dims string) (int64, map[s
 }
 
 func TestStatsAddIsAdditive(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
-	withStatsTestCounter(t)
+	withStatsTestCounter(t, s)
 	ctx := context.Background()
 	h := statsHistAdd(nil, 120)
 	add := func() {
@@ -292,6 +290,7 @@ func TestStatsAddIsAdditive(t *testing.T) {
 }
 
 func TestStatsReplaceDay(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	ctx := context.Background()
 	answered := func(n int64) statsRow {
@@ -361,6 +360,7 @@ func TestStatsReplaceDay(t *testing.T) {
 }
 
 func TestStatsHistogramAndBuckets(t *testing.T) {
+	t.Parallel()
 	if len(statsHistBounds) != 11 || statsHistBounds[0] != 100 || statsHistBounds[10] != 120000 {
 		t.Fatalf("bounds %v (review M1)", statsHistBounds)
 	}

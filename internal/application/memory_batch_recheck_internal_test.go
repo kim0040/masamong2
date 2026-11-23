@@ -19,6 +19,7 @@ import (
 // R6: discarding a plan that drains in the background stops that drain, and a new preparation of the
 // room then starts at once instead of waiting for the discarded batch, which keeps running at the host.
 func TestBatchDiscardRetiresTheBackgroundDrain(t *testing.T) {
+	// sequential: it shortens the batch waits of the memory engine package (process state)
 	t.Cleanup(engine.ShortBatchWaitsForTest())
 	host := newBatchHost(openai.BatchRunning)
 	host.noCancel = true // OpenRouter: the batch runs to its end
@@ -72,6 +73,7 @@ func (summaryHost) BatchDiscount(openai.BatchKind, string) float64 { return 0.5 
 // R8: when the live summary probe takes the room's only summary and nothing goes to a batch, the live
 // pass that follows counts the probe's cost against the budget: a probe that spent it starts nothing more.
 func TestBatchProbeSpendCountsAgainstTheLivePass(t *testing.T) {
+	// sequential: it shortens the batch waits of the memory engine package (process state)
 	t.Cleanup(engine.ShortBatchWaitsForTest())
 	var embeds, chats atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -99,8 +101,7 @@ func TestBatchProbeSpendCountsAgainstTheLivePass(t *testing.T) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv("FAKE_BATCH_EMBED_KEY", "synthetic")
-	s := privacyService(t)
+	s := privacyServiceEnv(t, map[string]string{"FAKE_BATCH_EMBED_KEY": "synthetic"})
 	if r := s.mutateConfig(action.Request{}, func(d *config.Document) error {
 		d.Providers["batchhost"] = config.Provider{Kind: config.KindOpenAI, BaseURL: srv.URL, CredentialRef: "env:FAKE_BATCH_EMBED_KEY"}
 		d.Models["embed"] = config.Model{Provider: "batchhost", Model: "fake/embed"}

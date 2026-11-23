@@ -17,6 +17,7 @@ func assertInstalledProgram(t *testing.T, j *maintenanceJournal) {
 }
 
 func TestProgramRollbackRecoversEveryFileOperation(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	for _, forward := range []string{"quarantine:0", "install:0", "quarantine:1", "install:1", "verify"} {
 		t.Run(forward, func(t *testing.T) {
 			dir, staged := updateFixture(t)

@@ -20,6 +20,7 @@ func writeHashed(t *testing.T, dir, name, body string) (path, hash string) {
 }
 
 func TestClassifyUpdate(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	live, liveHash := writeHashed(t, dir, "masamong", "new program")
 	oldPath, _ := writeHashed(t, dir, ".masamong.old-x", "old program")

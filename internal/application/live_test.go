@@ -15,6 +15,7 @@ import (
 const kmaFlat = `{"item":[{"baseDate":"20260915","baseTime":"1500","category":"T1H","obsrValue":"21.5"},{"category":"REH","obsrValue":"40"},{"category":"WSD","obsrValue":"2.1"},{"category":"PTY","obsrValue":"0"}]}`
 
 func TestLiveWeatherThroughConfiguredProvider(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	var hits int
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -28,7 +29,7 @@ func TestLiveWeatherThroughConfiguredProvider(t *testing.T) {
 		_, _ = w.Write([]byte(kmaFlat))
 	}))
 	defer srv.Close()
-	t.Setenv("KMA_TEST", "kma-secret")
+	svc.SetEnvForTest(t, "KMA_TEST", "kma-secret")
 
 	show := exec(svc, "config.show", nil)
 	yaml := show.Output["yaml"].(string)
@@ -66,6 +67,7 @@ func TestLiveWeatherThroughConfiguredProvider(t *testing.T) {
 }
 
 func TestLiveProviderRejectedMapsToStableCode(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(r.URL.Path, "typ01") {
@@ -75,7 +77,7 @@ func TestLiveProviderRejectedMapsToStableCode(t *testing.T) {
 		_, _ = w.Write([]byte(`{"response":{"header":{"resultCode":"30","resultMsg":"SERVICE_KEY_IS_NOT_REGISTERED_ERROR"}}}`))
 	}))
 	defer srv.Close()
-	t.Setenv("KMA_TEST", "wrong")
+	svc.SetEnvForTest(t, "KMA_TEST", "wrong")
 	yaml := exec(svc, "config.show", nil).Output["yaml"].(string)
 	yaml = strings.Replace(yaml, "base_url: https://apihub.kma.go.kr", "base_url: "+srv.URL, 1)
 	yaml = strings.Replace(yaml, "credential_ref: env:MASAMONG_KMA_KEY", "credential_ref: env:KMA_TEST", 1)
@@ -105,6 +107,7 @@ func TestLiveProviderRejectedMapsToStableCode(t *testing.T) {
 }
 
 func TestConfigRejectsInlineSecretsAndUnknownKinds(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	yaml := exec(svc, "config.show", nil).Output["yaml"].(string)
 	bad := strings.Replace(yaml, "credential_ref: env:MASAMONG_KMA_KEY", "credential_ref: abcdef123", 1)
@@ -139,6 +142,7 @@ func TestConfigRejectsInlineSecretsAndUnknownKinds(t *testing.T) {
 }
 
 func TestModelsListRealEndpoint(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/models" || r.Header.Get("Authorization") != "Bearer or-key" {
@@ -149,7 +153,7 @@ func TestModelsListRealEndpoint(t *testing.T) {
 		_, _ = w.Write([]byte(`{"data":[{"id":"openai/gpt-5","name":"GPT-5","context_length":400000,"pricing":{"prompt":"0.000001","completion":"0.000004"}},{"id":"x/embed-1","name":"E"}]}`))
 	}))
 	defer srv.Close()
-	t.Setenv("OR_TEST", "or-key")
+	svc.SetEnvForTest(t, "OR_TEST", "or-key")
 	yaml := exec(svc, "config.show", nil).Output["yaml"].(string)
 	yaml = strings.Replace(yaml, "base_url: https://openrouter.ai/api/v1", "base_url: "+srv.URL, 1)
 	yaml = strings.Replace(yaml, "credential_ref: env:MASAMONG_OPENROUTER_KEY", "credential_ref: env:OR_TEST", 1)

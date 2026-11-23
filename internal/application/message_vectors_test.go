@@ -19,8 +19,9 @@ import (
 )
 
 func TestMessageVectorDoctorShowsMixedAndShortProviderWidthWaits(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
-	t.Setenv("MASAMONG_OPENROUTER_KEY", "synthetic-test-key")
+	svc.SetEnvForTest(t, "MASAMONG_OPENROUTER_KEY", "synthetic-test-key")
 	applyDoc(t, svc, func(d *config.Document) {
 		m := d.Models["embed"]
 		m.Model, m.Dimensions = "baai/bge-m3", 1024
@@ -49,8 +50,8 @@ func TestMessageVectorDoctorShowsMixedAndShortProviderWidthWaits(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": data})
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv("MESSAGE_VECTOR_FAKE_KEY", "synthetic")
-	cred, err := providers.Resolve("env:MESSAGE_VECTOR_FAKE_KEY")
+	svc.SetEnvForTest(t, "MESSAGE_VECTOR_FAKE_KEY", "synthetic")
+	cred, err := svc.CredentialForTest("env:MESSAGE_VECTOR_FAKE_KEY")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,6 +123,7 @@ func memorySection(t *testing.T, svc interface{}, out map[string]any) map[string
 // search config (the candidate source) together, and a change of it builds a new engine. While it is
 // explicitly off nothing about it shows in the memory status or the doctor.
 func TestMessageVectorsSettingIsWiredToEngineStatusAndDoctor(t *testing.T) {
+	t.Parallel()
 	svc, _ := slowChatSvc(t, 0, nil)
 	def, err := svc.MemoryEngine()
 	if err != nil {
@@ -198,6 +200,7 @@ func TestMessageVectorsSettingIsWiredToEngineStatusAndDoctor(t *testing.T) {
 }
 
 func TestMessageVectorTruncationUsesTheMRLCatalog(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	applyDoc(t, svc, func(d *config.Document) {
 		m := d.Models["embed"]
@@ -226,6 +229,7 @@ func TestMessageVectorTruncationUsesTheMRLCatalog(t *testing.T) {
 }
 
 func TestMessageVectorNonMRLExplicitDimensionsAreWired(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	for _, dims := range []int{256, 1024, 4096} {
 		applyDoc(t, svc, func(d *config.Document) {
@@ -254,8 +258,9 @@ func TestMessageVectorNonMRLExplicitDimensionsAreWired(t *testing.T) {
 // leaves that have no vector yet show in the doctor as pending_messages:<n>; an explicit false hides the
 // line again.
 func TestMessageVectorsDoctorShowsPendingMessagesAfterUpgrade(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
-	t.Setenv("MASAMONG_OPENROUTER_KEY", "or-key") // the embedding model's provider has its key
+	svc.SetEnvForTest(t, "MASAMONG_OPENROUTER_KEY", "or-key") // the embedding model's provider has its key
 	eng, err := svc.MemoryEngine()
 	if err != nil {
 		t.Fatal(err)
@@ -288,6 +293,7 @@ func TestMessageVectorsDoctorShowsPendingMessagesAfterUpgrade(t *testing.T) {
 
 // config.patch keeps an explicit false for memory.message_vectors, and unsetting it returns to the default.
 func TestMessageVectorsConfigPatch(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	if !svc.Doc().Memory.MessageVectorsOn() {
 		t.Fatal("not on by default")
@@ -313,8 +319,9 @@ func TestMessageVectorsConfigPatch(t *testing.T) {
 // once and then answers with the last count at once; when the stored vectors change it counts again in
 // the background and a later list shows the new number.
 func TestMessageVectorsPendingCountIsCachedAndRefreshedInTheBackground(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
-	t.Setenv("MASAMONG_OPENROUTER_KEY", "or-key")
+	svc.SetEnvForTest(t, "MASAMONG_OPENROUTER_KEY", "or-key")
 	eng, err := svc.MemoryEngine()
 	if err != nil {
 		t.Fatal(err)

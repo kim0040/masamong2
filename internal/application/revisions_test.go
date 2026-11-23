@@ -17,6 +17,7 @@ import (
 // A Discord message the bot answered and then its author deleted: the turn history keeps no text of it,
 // the chat context forgets it and the stored message becomes a tombstone.
 func TestDeletedDiscordMessageIsForgotten(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	url := chatServer(t, `{"memory_requirement":"none","tool_plan":[]}`, "stop", &calls)
 	svc := routedSvc(t, url, url)
@@ -64,6 +65,7 @@ func TestDeletedDiscordMessageIsForgotten(t *testing.T) {
 }
 
 func TestPromptRecitationGuardRunsBeforeDeliveryAndHistory(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	pack, _ := lang.Get("en")
 	leaked := pack.Chat.PlannerHeader

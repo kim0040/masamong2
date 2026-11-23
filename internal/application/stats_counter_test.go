@@ -33,6 +33,7 @@ func statsCountN(t *testing.T, s *Service, day, dims string) int64 {
 // catalog id, folded action id, the shared via derivation and the result code — and a flush writes
 // them to stats_daily.
 func TestStatsActionCounterCountsDims(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	s.statsFlush(context.Background()) // clear the setup calls
 	day := statsDayOf(s)
@@ -82,6 +83,7 @@ func TestStatsActionCounterCountsDims(t *testing.T) {
 
 // TestStatsActionVia: the shared derivation covers every source the counter may see.
 func TestStatsActionVia(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		req  action.Request
 		want string
@@ -111,6 +113,7 @@ func TestStatsActionVia(t *testing.T) {
 
 // TestStatsActionFlushMergesBack: a failed write keeps the deltas for the next flush.
 func TestStatsActionFlushMergesBack(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	s.statsFlush(context.Background())
 	day := statsDayOf(s)
@@ -140,6 +143,7 @@ func TestStatsActionFlushMergesBack(t *testing.T) {
 
 // TestStatsActionOffDrops: errStatsOff drops the deltas instead of merging them back.
 func TestStatsActionOffDrops(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	s.statsFlush(context.Background())
 	s.statsCount(action.Request{Action: "help.version", RequestID: "cli"}, action.Result{OK: true})
@@ -163,6 +167,7 @@ func TestStatsActionOffDrops(t *testing.T) {
 
 // TestStatsActionCloseFlushes: Close writes what is still counted before the store closes.
 func TestStatsActionCloseFlushes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s, err := Open(dir, nil, false)
 	if err != nil {
@@ -190,6 +195,7 @@ func TestStatsActionCloseFlushes(t *testing.T) {
 // TestStatsActionFlushTickThrottles: the scheduler flushes at most every statsFlushEvery and only
 // when the counter holds something; a failed flush is throttled too.
 func TestStatsActionFlushTickThrottles(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	ctx := context.Background()
 	s.statsFlush(ctx)     // clear the setup calls; flushed is still zero
@@ -229,6 +235,7 @@ func TestStatsActionFlushTickThrottles(t *testing.T) {
 // TestStatsActionCounterRace: increments while a flush swaps and writes must neither race nor lose
 // counts (the store write happens outside the counter lock). Run under -race.
 func TestStatsActionCounterRace(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	ctx := context.Background()
 	const goroutines, each = 8, 200
@@ -263,6 +270,7 @@ func TestStatsActionCounterRace(t *testing.T) {
 
 // TestStatsActionCounterSkips: no store and the practice instance are not counted.
 func TestStatsActionCounterSkips(t *testing.T) {
+	t.Parallel()
 	s, err := Open(t.TempDir(), nil, false) // no database yet
 	if err != nil {
 		t.Fatal(err)

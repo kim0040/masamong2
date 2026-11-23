@@ -16,6 +16,7 @@ import (
 )
 
 func TestEvidenceMigrationPreservesLinksAndDeduplicatesIdentifiers(t *testing.T) {
+	t.Parallel()
 	db, err := storage.Open(filepath.Join(t.TempDir(), "legacy.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -81,6 +82,7 @@ func TestEvidenceMigrationPreservesLinksAndDeduplicatesIdentifiers(t *testing.T)
 }
 
 func TestTraceSharesTurnSourcesEvenBeforeTurnCommit(t *testing.T) {
+	t.Parallel()
 	for _, committed := range []bool{false, true} {
 		t.Run(fmt.Sprint(committed), func(t *testing.T) {
 			s := privacyService(t)
@@ -115,6 +117,7 @@ func TestTraceSharesTurnSourcesEvenBeforeTurnCommit(t *testing.T) {
 }
 
 func TestRetentionRemovesCompactLinksWithExpiredDetails(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	turn := captureAndAnswer(t, s, "expired", "expired private source canary")
 	old := s.Clock.Now().AddDate(-2, 0, 0).UTC().Format(time.RFC3339)

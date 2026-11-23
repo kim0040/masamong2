@@ -74,6 +74,7 @@ func loadCostGuild(t testing.TB, n int) *Service {
 }
 
 func TestReviewResolverCost(t *testing.T) {
+	t.Parallel()
 	s := loadCostGuild(t, 10000)
 	input := ChatInput{GuildID: "g", ChannelID: "c", SpeakerID: "303", Message: "오늘 날씨 알려줘"}
 	start := time.Now()
@@ -90,6 +91,7 @@ func TestReviewResolverCost(t *testing.T) {
 }
 
 func TestAliasFillRunsAfterStartup(t *testing.T) {
+	t.Parallel()
 	s := resolverService(t)
 	e, err := s.MemoryEngine()
 	if err != nil {
@@ -181,6 +183,7 @@ func BenchmarkPersonResolver(b *testing.B) {
 }
 
 func TestReviewResolverIntent(t *testing.T) {
+	t.Parallel()
 	s := resolverService(t)
 	e, err := s.MemoryEngine()
 	if err != nil {
@@ -234,6 +237,7 @@ func TestReviewResolverIntent(t *testing.T) {
 }
 
 func TestPersonTargets(t *testing.T) {
+	t.Parallel()
 	s := resolverService(t)
 	e, err := s.MemoryEngine()
 	if err != nil {
@@ -289,6 +293,7 @@ func TestPersonTargets(t *testing.T) {
 }
 
 func TestSelfIntent(t *testing.T) {
+	t.Parallel()
 	names := []string{"masamong", "마사몽"}
 	for tag, msgs := range map[string][]string{
 		"ko": {"날 기억해?", "나를 기억하니", "저를 기억하세요?", "<@1> 날 기억하고 있어?", "나 기억해?", "저 기억하시나요?", "날 기억해요 ㅋㅋ",
@@ -333,6 +338,7 @@ func TestSelfIntent(t *testing.T) {
 
 // Every pack has whole self requests; none of them is empty after trimming.
 func TestSelfRequestPacks(t *testing.T) {
+	t.Parallel()
 	table := selfRequests()
 	for _, tag := range lang.Available() {
 		p, _ := lang.Get(tag)

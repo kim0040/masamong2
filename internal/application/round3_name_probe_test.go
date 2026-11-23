@@ -12,6 +12,7 @@ import (
 // A plain name fails closed while the name index is missing, a captured
 // message of another account is not yet indexed, or the historical fill failed.
 func TestRound3NameAvailability(t *testing.T) {
+	t.Parallel()
 	s := resolverService(t)
 	e, err := s.MemoryEngine()
 	if err != nil {
@@ -62,6 +63,7 @@ func TestRound3NameAvailability(t *testing.T) {
 // 200,000 deleted rows under the same name, account and room cost the name
 // check nothing: the index holds live rows only, and building it rewrites no row.
 func TestRound3LargeNameIndex(t *testing.T) {
+	t.Parallel()
 	s := resolverService(t)
 	e, err := s.MemoryEngine()
 	if err != nil {

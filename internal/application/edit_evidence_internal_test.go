@@ -12,6 +12,7 @@ import (
 // message (a picture's description) stays tied to that message in the copy too: deleting the picture
 // message takes the original and the copy.
 func TestAThreadCopyOfADescribedTurnFollowsThePicture(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"delete", "edit"} {
 		t.Run(change, func(t *testing.T) {
 			s := privacyService(t)
@@ -67,6 +68,7 @@ func TestAThreadCopyOfADescribedTurnFollowsThePicture(t *testing.T) {
 
 // A copy made after the picture changed is refused like the original would be.
 func TestAThreadSeedSkipsATurnWhosePictureIsGone(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	e, err := s.MemoryEngine()
 	if err != nil {
@@ -95,6 +97,7 @@ func TestAThreadSeedSkipsATurnWhosePictureIsGone(t *testing.T) {
 // An edit whose job is finished while another change of the message waits behind it (committed after the
 // worker took its batch) settles nothing: the words still to come are not the ones a turn would read now.
 func TestSettlingLeavesAMessageWithAJobWaitingBehindIt(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	db, err := s.adminDB()
 	if err != nil {

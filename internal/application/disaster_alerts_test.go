@@ -85,6 +85,7 @@ func warning(regID, parent, region, kind, level, cmd string) string {
 // below 7.0, never a 국내영향없음 notice), an aftershock edits the incident's message, nothing repeats,
 // and weather warnings are announced as issued and lifted according to each channel’s watch levels.
 func TestDisasterAlertsWatchKMAAndAnnounce(t *testing.T) {
+	t.Parallel()
 	feed := &kmaFeed{}
 	srv := feed.server(t)
 	svc := setupSvc(t)
@@ -204,6 +205,7 @@ func TestDisasterAlertsWatchKMAAndAnnounce(t *testing.T) {
 }
 
 func TestDisasterRoomWatchLevels(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	feed := &kmaFeed{}
 	pointAt(t, svc, "kma", feed.server(t).URL, "KMA_TEST_KEY", "k")
@@ -259,6 +261,7 @@ func TestDisasterRoomWatchLevels(t *testing.T) {
 }
 
 func TestDisasterConfigureWatchLevels(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	set := func(levels any) action.Result {
 		return exec(svc, "channels.configure", map[string]any{"guild_id": "g", "id": "c", "watch_level": levels})
@@ -283,6 +286,7 @@ func TestDisasterConfigureWatchLevels(t *testing.T) {
 // older revision is refused (CONFIG_CONFLICT), while one without a revision, or one that leaves the
 // levels out, keeps working as before.
 func TestDisasterConfigureWatchLevelsRefusesAStaleRevision(t *testing.T) {
+	t.Parallel()
 	const area = "L1052100"
 	svc := setupSvc(t)
 	if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "a", "respond": "mention", "watch_level": map[string]int{area: 3}}); !r.OK {
@@ -309,6 +313,7 @@ func TestDisasterConfigureWatchLevelsRefusesAStaleRevision(t *testing.T) {
 }
 
 func TestDisasterWarningUpgrades(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	feed := &kmaFeed{}
 	pointAt(t, svc, "kma", feed.server(t).URL, "KMA_TEST_KEY", "k")
@@ -375,6 +380,7 @@ func TestDisasterWarningUpgrades(t *testing.T) {
 // The watcher writes only what changed: with warnings on and the same ones still in force, a check
 // leaves every stored key alone, yet the console's "last checked" keeps moving (it is kept in memory).
 func TestDisasterAlertsIdleChecksWriteNothingButStatusStaysFresh(t *testing.T) {
+	t.Parallel()
 	feed := &kmaFeed{warnings: []string{warning("L1200100", "부산·울산·경상남도", "부산", "호우", "경보", "발표")}}
 	srv := feed.server(t)
 	svc := setupSvc(t)
@@ -429,6 +435,7 @@ func TestDisasterAlertsIdleChecksWriteNothingButStatusStaysFresh(t *testing.T) {
 // revision that turns marine on and drops the room's only sea area while KMA is answering must not
 // combine the old room level with the new switch.
 func TestDisasterTickReadsOneConfigRevision(t *testing.T) {
+	t.Parallel()
 	const area = "S1252020"
 	svc := setupSvc(t)
 	var calls atomic.Int32
@@ -507,6 +514,7 @@ func (g *configSwapGateway) Connected() bool {
 // server and the second room's areas while the check runs must not combine the new approval with the
 // old rooms (the old revision sends to both rooms, the new one to neither).
 func TestDisasterApprovalReadsTheChecksRevision(t *testing.T) {
+	t.Parallel()
 	const area = "L1052100"
 	svc := setupSvc(t)
 	feed := &kmaFeed{}
@@ -551,6 +559,7 @@ func TestDisasterApprovalReadsTheChecksRevision(t *testing.T) {
 // whatever is in force at the upgrade ends without a lift, even what it stored; a later change is news.
 // The stored rows are what v1.4.0 wrote.
 func TestDisasterOlderWarningStateIsAStartingPoint(t *testing.T) {
+	t.Parallel()
 	const rain = `{"L1|R|3":{"RegionCode":"L1","Region":"경산시","ParentCode":"L1000000","Parent":"경상북도","Kind":"R","KindName":"호우","Level":"3","LevelName":"경보","Command":"발표","Announced":"202610011100","Effective":"202610011200"}}`
 	const surge = `{"L2|해일|3":{"RegionCode":"L2","Region":"포항시","ParentCode":"L1000000","Parent":"경상북도","Kind":"해일","KindName":"해일","Level":"3","LevelName":"경보","Command":"발표","Announced":"202610011100","Effective":"202610011200"}}`
 	for _, tc := range []struct {
@@ -604,7 +613,7 @@ func TestDisasterOlderWarningStateIsAStartingPoint(t *testing.T) {
 			if err := svc.Close(); err != nil {
 				t.Fatal(err)
 			}
-			reopened, err := application.Open(svc.DataRoot, clock.Fixed{T: now.Add(5 * time.Minute)}, false)
+			reopened, err := application.ReopenForTest(svc, clock.Fixed{T: now.Add(5 * time.Minute)}, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -645,6 +654,7 @@ func (g *failingGateway) PostChannel(ctx context.Context, channelID, a, b string
 // not where the issue failed to post, and a room that watches only 경보 hears nothing when the
 // advisory it never got ends.
 func TestDisasterLiftsGoWhereTheIssueWent(t *testing.T) {
+	t.Parallel()
 	const area, sea = "L1052100", "S1252020"
 	rain := warning(area, "광주·전라남도", "목포시", "호우", "경보", "발표")
 	rainAdvisory := warning(area, "광주·전라남도", "목포시", "호우", "주의", "대치")
@@ -755,6 +765,7 @@ func storedDeliveries(t *testing.T, svc *application.Service) map[string]map[str
 // lift goes only where the new issue was posted. A room that no longer watches any area (earthquakes
 // only) or was removed loses its deliveries at the next check and gets no lift.
 func TestDisasterDeliveriesFollowTheLevelInForce(t *testing.T) {
+	t.Parallel()
 	const area = "L1052100"
 	for _, change := range []string{"restart", "lift failed, then issued again", "areas cleared", "room removed"} {
 		t.Run(change, func(t *testing.T) {
@@ -823,7 +834,7 @@ func TestDisasterDeliveriesFollowTheLevelInForce(t *testing.T) {
 			if err := svc.Close(); err != nil {
 				t.Fatal(err)
 			}
-			reopened, err := application.Open(svc.DataRoot, clock.Fixed{T: start.Add(20 * time.Minute)}, false)
+			reopened, err := application.ReopenForTest(svc, clock.Fixed{T: start.Add(20 * time.Minute)}, false)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -852,6 +863,7 @@ func TestDisasterDeliveriesFollowTheLevelInForce(t *testing.T) {
 // command names in JSON, numeric codes in the typ01 text). The release ends the warning; an older
 // release, a replacement by another level and an extension do not.
 func TestDisasterReleaseInTheSameResponse(t *testing.T) {
+	t.Parallel()
 	type row struct{ level, cmd, fc, ef string }
 	json := func(r row) string {
 		lvl := map[string]string{"2": "주의", "3": "경보"}[r.level]
@@ -937,6 +949,7 @@ func TestDisasterReleaseInTheSameResponse(t *testing.T) {
 // the warning's release, the advisory stays in force (the warning is lifted and the advisory announced),
 // and the next check that lists only the advisory announces nothing.
 func TestDisasterReleaseKeepsTheOtherLevel(t *testing.T) {
+	t.Parallel()
 	const area = "L1052100"
 	for _, encoding := range []string{"json", "text"} {
 		t.Run(encoding, func(t *testing.T) {
@@ -1002,6 +1015,7 @@ func TestDisasterReleaseKeepsTheOtherLevel(t *testing.T) {
 // room's watch_areas tell the console which keys match an area KMA has reported so far. A key that
 // matches nothing (서울 is not an area name) is saved and flagged by its absence from "matched".
 func TestDisasterWatchAreasMatchWhatKMAReported(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	feed := &kmaFeed{}
 	pointAt(t, svc, "kma", feed.server(t).URL, "KMA_TEST_KEY", "k")

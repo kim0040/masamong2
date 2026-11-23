@@ -7,6 +7,7 @@ import (
 
 // Restart the real service/store: an in-process negative cache is no authority for deletion.
 func TestDeletedThreadStaysExcludedAfterRestart(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	svc.ThreadOpened(context.Background(), "g", "parent", "deleted", "owner", "")
 	svc.NoteThreadParticipant("deleted", "member")
@@ -43,6 +44,7 @@ func TestDeletedThreadStaysExcludedAfterRestart(t *testing.T) {
 }
 
 func TestThreadDeletionOutlivesRelationRetention(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	// A delete may arrive before discovery; it still records a durable tombstone.
 	svc.ThreadDeleted("unseen")

@@ -13,6 +13,7 @@ import (
 // R07: persisted times come from the service clock, not the wall clock. The fixed times here are
 // synthetic and far from now, so a wall-clock write would stand out.
 func TestJobRowsStampTheServiceClock(t *testing.T) {
+	t.Parallel()
 	t0 := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 	svc, err := Open(t.TempDir(), clock.Fixed{T: t0}, false)
 	if err != nil {
@@ -52,6 +53,7 @@ func TestJobRowsStampTheServiceClock(t *testing.T) {
 }
 
 func TestSetupRevisionStampsTheServiceClock(t *testing.T) {
+	t.Parallel()
 	t0 := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 	svc, err := Open(t.TempDir(), clock.Fixed{T: t0}, false)
 	if err != nil {
@@ -72,6 +74,7 @@ func TestSetupRevisionStampsTheServiceClock(t *testing.T) {
 }
 
 func TestLiveWindowRevisedAtStampsTheServiceClock(t *testing.T) {
+	t.Parallel()
 	t0 := time.Date(2026, 3, 4, 5, 6, 7, 123456789, time.UTC)
 	s := privacyService(t)
 	s.Clock = clock.Fixed{T: t0}

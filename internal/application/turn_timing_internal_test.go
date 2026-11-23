@@ -8,6 +8,7 @@ import (
 )
 
 func TestNoteFirstSendMarksOnlyTheFirstSend(t *testing.T) {
+	t.Parallel()
 	NoteFirstSend(context.Background()) // a context without the marker is ignored
 	ctx, mark := withFirstSend(context.Background())
 	NoteFirstSend(ctx)
@@ -26,6 +27,7 @@ func TestNoteFirstSendMarksOnlyTheFirstSend(t *testing.T) {
 }
 
 func TestDeliverTimedReportsFirstSendAndDeliverEnd(t *testing.T) {
+	t.Parallel()
 	in := ChatInput{Deliver: func(ctx context.Context, res chat.Result) string {
 		NoteFirstSend(ctx)
 		return "said text"
@@ -50,6 +52,7 @@ func TestDeliverTimedReportsFirstSendAndDeliverEnd(t *testing.T) {
 }
 
 func TestNoteTurnTiming(t *testing.T) {
+	t.Parallel()
 	res := &chat.Result{}
 	noteTurnTiming(res, "queue_wait", 10) // no timing map: nothing to record into
 	res = &chat.Result{Timing: map[string]int{}}
@@ -64,6 +67,7 @@ func TestNoteTurnTiming(t *testing.T) {
 }
 
 func TestAddTurnSpans(t *testing.T) {
+	t.Parallel()
 	body := map[string]any{}
 	addTurnSpans(body, chat.Result{})
 	if len(body) != 0 {

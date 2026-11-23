@@ -103,6 +103,7 @@ func edit(t *testing.T, svc *application.Service, words string, at time.Time) {
 const userNew = "user: " + newWords
 
 func TestAnEditDuringATurnKeepsTheNewWordsAndNotTheReply(t *testing.T) {
+	t.Parallel()
 	svc, prompts := quietSvc(t)
 	answerWhile(t, svc, prompts, application.ChatInput{}, func() { edit(t, svc, newWords, time.Now()) })
 	drain(t, svc)
@@ -124,6 +125,7 @@ func TestAnEditDuringATurnKeepsTheNewWordsAndNotTheReply(t *testing.T) {
 
 // The turn commits before, after or at the same moment as the edit's job: the row stays and the old words do not.
 func TestTheJobOfAnEditDuringATurnLeavesTheNewRow(t *testing.T) {
+	t.Parallel()
 	check := func(t *testing.T, svc *application.Service, prompts *promptServer) {
 		t.Helper()
 		wantRows(t, svc, userNew)
@@ -267,6 +269,7 @@ func TestTheJobOfAnEditDuringATurnLeavesTheNewRow(t *testing.T) {
 }
 
 func TestTheNewestEditDuringATurnWins(t *testing.T) {
+	t.Parallel()
 	first, second := time.Now(), time.Now().Add(time.Minute)
 	for name, order := range map[string][]struct {
 		words string
@@ -326,6 +329,7 @@ func keptWords(t *testing.T, svc *application.Service, words string, at time.Tim
 }
 
 func TestEditsThatChangeNothingDuringATurn(t *testing.T) {
+	t.Parallel()
 	t.Run("the same words store the turn as before", func(t *testing.T) {
 		svc, prompts := quietSvc(t)
 		captured(t, svc, oldWords)
@@ -381,6 +385,7 @@ func TestEditsThatChangeNothingDuringATurn(t *testing.T) {
 }
 
 func TestChangesDuringATurnThatLeaveNothing(t *testing.T) {
+	t.Parallel()
 	for name, during := range map[string]func(*testing.T, *application.Service){
 		"delete": func(t *testing.T, svc *application.Service) {
 			if err := svc.MessagesDeleted("g", "c", []string{"m"}); err != nil {
@@ -424,6 +429,7 @@ func TestChangesDuringATurnThatLeaveNothing(t *testing.T) {
 
 // Consent outlives the speaker's tombstone: it is still asked at the commit.
 func TestAnEditDuringATurnOfAPersonWhoWithdrew(t *testing.T) {
+	t.Parallel()
 	svc, prompts := quietSvc(t)
 	answerWhile(t, svc, prompts, application.ChatInput{}, func() {
 		edit(t, svc, newWords, time.Now())
@@ -441,6 +447,7 @@ func TestAnEditDuringATurnOfAPersonWhoWithdrew(t *testing.T) {
 // A blanking edit is a deletion and its tombstone decides. Until it commits there are no words to hold, and an empty
 // row is never what the turn comes to.
 func TestABlankingEditIsNotNotedAsWords(t *testing.T) {
+	t.Parallel()
 	svc, prompts := quietSvc(t)
 	answerWhile(t, svc, prompts, application.ChatInput{}, func() { svc.NoteEditForTest("m", "   ", time.Now()) })
 	if n := chainCount(t, svc, `SELECT COUNT(*) FROM chat_turns WHERE trim(content)=''`); n != 0 {
@@ -454,6 +461,7 @@ func TestABlankingEditIsNotNotedAsWords(t *testing.T) {
 
 // After the commit the row is an ordinary turn of its message.
 func TestALaterChangeReachesTheRowOfAnEditDuringATurn(t *testing.T) {
+	t.Parallel()
 	svc, prompts := quietSvc(t)
 	at := time.Now()
 	answerWhile(t, svc, prompts, application.ChatInput{}, func() { edit(t, svc, newWords, at) })
@@ -475,6 +483,7 @@ func TestALaterChangeReachesTheRowOfAnEditDuringATurn(t *testing.T) {
 // keeps that message's new words alone, as an edit after the commit does (store.EditMessage). Changing an earlier
 // piece keeps nothing, as after the commit too.
 func TestAnEditDuringATurnOfABurst(t *testing.T) {
+	t.Parallel()
 	burst := application.ChatInput{Message: "piece one\n" + oldWords, Fragments: []string{"f1"}}
 	edited := func(t *testing.T, svc *application.Service, message, words string) {
 		t.Helper()
@@ -525,6 +534,7 @@ func TestAnEditDuringATurnOfABurst(t *testing.T) {
 
 // Every way out of a turn takes it off the list, and an edit with no turn under way notes nothing.
 func TestARunningTurnLeavesNothingBehind(t *testing.T) {
+	t.Parallel()
 	svc, prompts := quietSvc(t)
 	seen := func(want int) func() {
 		return func() {
@@ -614,6 +624,7 @@ func TestARunningTurnLeavesNothingBehind(t *testing.T) {
 
 // A practice instance answers offline and takes the same way in and out.
 func TestAPracticeTurnLeavesNothingBehind(t *testing.T) {
+	t.Parallel()
 	p, err := application.OpenPractice(context.Background(), t.TempDir(), "ko", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -629,6 +640,7 @@ func TestAPracticeTurnLeavesNothingBehind(t *testing.T) {
 
 // A thread's seed copies the row of the edit once settled, and a reminder or task, with no message, is untouched.
 func TestThreadCopiesAndTurnsWithoutAMessageAfterAnEditDuringATurn(t *testing.T) {
+	t.Parallel()
 	svc, prompts := quietSvc(t)
 	answerWhile(t, svc, prompts, application.ChatInput{}, func() { edit(t, svc, newWords, time.Now()) })
 	drain(t, svc)

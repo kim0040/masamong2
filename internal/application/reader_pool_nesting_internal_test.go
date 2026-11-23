@@ -62,6 +62,7 @@ func bothFinish(t *testing.T, db *storage.Store, what string, pass func() int) [
 // The episode pass lists the capturing rooms; a room with no entry of its own asks the reader pool for its
 // stored thread parent (roomCaptures). Two passes at once on a small host must both finish.
 func TestCapturingRoomsTwoPassesFinishOnASmallHost(t *testing.T) {
+	// sequential: it installs the process's host profile
 	s, db := smallHostSvc(t)
 	for i := range 200 {
 		if _, err := s.Store.DB.Exec(`INSERT INTO memory_rooms(room, collection, platform, updated_at) VALUES(?,?,?,?)`,
@@ -81,6 +82,7 @@ func TestCapturingRoomsTwoPassesFinishOnASmallHost(t *testing.T) {
 // list itself is read from the same pool. Two lists at once on a small host must both finish, and the
 // names still follow memory consent.
 func TestEpisodeListTwoAtOnceFinishOnASmallHost(t *testing.T) {
+	// sequential: it installs the process's host profile
 	s, db := smallHostSvc(t)
 	at := "2026-11-22T00:00:00Z"
 	for _, room := range []string{"c1", "c2"} {
@@ -156,6 +158,7 @@ func holdWriter(t *testing.T, db *storage.Store) (release func()) {
 // A pass that checks consent per stored line must not keep a reader connection while it waits for the
 // writer: on a small host two such waits would leave no reader for anyone else.
 func TestConsentChecksDoNotHoldAReaderWhileTheWriterIsBusy(t *testing.T) {
+	// sequential: it installs the process's host profile
 	t.Run("room style lines", func(t *testing.T) {
 		s, db := smallHostSvc(t)
 		seedRoomPeople(t, s, s.Clock.Now().Add(-time.Hour))
@@ -168,8 +171,16 @@ func TestConsentChecksDoNotHoldAReaderWhileTheWriterIsBusy(t *testing.T) {
 		done := make(chan result, 1)
 		go func() { l, err := s.styleLines(db, "g", "c"); done <- result{l, err} }()
 		testutil.WaitFor(t, 15*time.Second, "the consent check to wait for the writer", func() bool { return db.DB.Stats().WaitCount > waits })
-		if n := db.Reader().Stats().InUse; n != 0 {
-			t.Fatalf("%d reader connection(s) held while waiting for the writer", n)
+		// a held reader stays held for the whole wait; a background job's short use of the pool (slow under
+		// -race) ends, so the check waits for the pool to be free rather than sampling it once
+		var inUse int
+		for end := time.Now().Add(5 * time.Second); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+			if inUse = db.Reader().Stats().InUse; inUse == 0 {
+				break
+			}
+		}
+		if inUse != 0 {
+			t.Fatalf("%d reader connection(s) held while waiting for the writer", inUse)
 		}
 		release()
 		r := <-done

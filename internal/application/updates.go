@@ -55,7 +55,7 @@ func devBuild(v string) bool { return v == "" || strings.Contains(v, "-dev") }
 
 // updateDue reports whether the daily check should run now.
 func (s *Service) updateDue() bool {
-	if s.Store == nil || s.practice || !s.Doc().Updates.CheckOn() || devBuild(Version) {
+	if s.Store == nil || s.practice || !s.Doc().Updates.CheckOn() || devBuild(s.version()) {
 		return false
 	}
 	var st updateState
@@ -69,7 +69,7 @@ func (s *Service) checkUpdate(ctx context.Context) updateState {
 	st := updateState{CheckedAt: s.Clock.Now().UTC().Format(time.RFC3339)}
 	client := providers.NewClient(15*time.Second, s.Log)
 	client.MaxBody = 1 << 20
-	client.UserAgent = "masamong/" + Version
+	client.UserAgent = "masamong/" + s.version()
 	api := updateAPI
 	if u := s.hooks.updateAPI.Load(); u != nil {
 		api = *u
@@ -175,10 +175,10 @@ func (s *Service) updateAttention() []attention {
 		return nil
 	}
 	var st updateState
-	if ok, _ := s.kvGet("updates:state", &st); !ok || st.Status != "ok" || !newerVersion(st.Latest, Version) {
+	if ok, _ := s.kvGet("updates:state", &st); !ok || st.Status != "ok" || !newerVersion(st.Latest, s.version()) {
 		return nil
 	}
-	return []attention{{"info", "update_available", map[string]any{"version": st.Latest, "current": Version}, "/maintenance"}}
+	return []attention{{"info", "update_available", map[string]any{"version": st.Latest, "current": s.version()}, "/maintenance"}}
 }
 
 // updatesAction: updates.status (the last answer), updates.check (ask now) and updates.apply (install).
@@ -186,7 +186,7 @@ func (s *Service) updatesAction(ctx context.Context, req action.Request) action.
 	if req.Action == "updates.apply" {
 		return s.updateApply(ctx, req)
 	}
-	out := map[string]any{"current": Version, "check": s.Doc().Updates.CheckOn(), "dev_build": devBuild(Version), "repo": UpdateRepo}
+	out := map[string]any{"current": s.version(), "check": s.Doc().Updates.CheckOn(), "dev_build": devBuild(s.version()), "repo": UpdateRepo}
 	var st updateState
 	if req.Action == "updates.check" {
 		if s.practice {
@@ -199,7 +199,7 @@ func (s *Service) updatesAction(ctx context.Context, req action.Request) action.
 	notes := st.Notes
 	st.Notes = "" // the console reads them below, in its language, not as a JSON string
 	out["state"] = st
-	out["newer"] = st.Status == "ok" && newerVersion(st.Latest, Version)
+	out["newer"] = st.Status == "ok" && newerVersion(st.Latest, s.version())
 	// whether the console can install it, or why the installer is needed instead
 	if why := s.updateBlocked(st); why == "" {
 		out["can_apply"] = true
@@ -226,7 +226,7 @@ func (s *Service) fetchReleaseNotes(ctx context.Context, url, tag string) string
 		return ""
 	}
 	client := providers.NewDownloadClient(15*time.Second, s.Log, s.redirectHost())
-	client.UserAgent = "masamong/" + Version
+	client.UserAgent = "masamong/" + s.version()
 	client.MaxRetries = 0
 	client.MaxBody = updateNotesMax
 	resp, err := client.Get(ctx, url, map[string]string{"Accept": "application/octet-stream"})

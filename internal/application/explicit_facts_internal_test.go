@@ -7,6 +7,7 @@ import (
 )
 
 func TestExplicitFactText(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ in, want string }{
 		{"  Hello, World! ", "helloworld"},
 		{"{@user1} likes tea", "likestea"},
@@ -23,6 +24,7 @@ func TestExplicitFactText(t *testing.T) {
 }
 
 func TestRuneBigrams(t *testing.T) {
+	t.Parallel()
 	if got := runeBigrams("ab"); len(got) != 1 {
 		t.Fatalf("one pair from two runes: %v", got)
 	}
@@ -41,6 +43,7 @@ func TestRuneBigrams(t *testing.T) {
 }
 
 func TestExplicitFactDice(t *testing.T) {
+	t.Parallel()
 	if got := explicitFactDice("same words", "same words"); got != 1 {
 		t.Fatalf("identical facts score %f", got)
 	}
@@ -60,6 +63,7 @@ func TestExplicitFactDice(t *testing.T) {
 }
 
 func TestExplicitContains(t *testing.T) {
+	t.Parallel()
 	if explicitContains(nil, "ref") {
 		t.Fatal("found in an empty list")
 	}
@@ -72,12 +76,14 @@ func TestExplicitContains(t *testing.T) {
 }
 
 func TestForgetPendingKey(t *testing.T) {
+	t.Parallel()
 	if got := forgetPendingKey("g1", "p2"); got != "memory:forget:pending:g1:p2" {
 		t.Fatalf("%q", got)
 	}
 }
 
 func TestSameExplicitFact(t *testing.T) {
+	t.Parallel()
 	base := func() episodes.Item {
 		return episodes.Item{Kind: "fact", Text: "{@p1} likes green tea", Evidence: []string{"msg1"}, By: []string{"p1"}}
 	}

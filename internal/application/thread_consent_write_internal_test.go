@@ -6,6 +6,7 @@ import (
 )
 
 func TestThreadParticipantWriteCannotFollowWithdrawal(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"consent", "forget", "both"} {
 		t.Run(change, func(t *testing.T) {
 			s, _ := deliveryService(t)
@@ -35,6 +36,7 @@ func TestThreadParticipantWriteCannotFollowWithdrawal(t *testing.T) {
 }
 
 func TestThreadOpenedDoesNotPersistWithdrawnOwner(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	if _, err := s.setConsent("member", "memory", "withdrawn", "console"); err != nil {
 		t.Fatal(err)
@@ -50,6 +52,7 @@ func TestThreadOpenedDoesNotPersistWithdrawnOwner(t *testing.T) {
 }
 
 func TestThreadSaveDoesNotPersistWithdrawnOwner(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	s.ThreadOpened(context.Background(), "g", "parent", "target", "member", "")
 	if _, err := s.setConsent("member", "memory", "withdrawn", "console"); err != nil {

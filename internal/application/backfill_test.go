@@ -40,6 +40,7 @@ func snowflake(t time.Time) string {
 }
 
 func TestBackfillCatchesUpFromTheLastStoredMessage(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Memory.Capture = true
@@ -111,6 +112,7 @@ func TestBackfillCatchesUpFromTheLastStoredMessage(t *testing.T) {
 }
 
 func TestBackfillStopsAtTheWindow(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Memory.Capture, d.Memory.BackfillDays = true, 1
@@ -138,6 +140,7 @@ func TestBackfillStopsAtTheWindow(t *testing.T) {
 // Backfill stores what live capture would have: a blocked person's messages are still part of the
 // conversation (blocking stops replies); a person who withdrew memory consent is left out.
 func TestBackfillFollowsMemoryConsent(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Memory.Capture = true

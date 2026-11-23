@@ -47,6 +47,7 @@ func (g *onceFailingLogGateway) PostChannel(ctx context.Context, channelID, repl
 // Close ends the server log at once: the post under way is cancelled (it does not run out its own
 // timeout), and an entry still queued is not started.
 func TestServerLogCloseCancelsThePostUnderWay(t *testing.T) {
+	t.Parallel()
 	svc, base := logSvc(t)
 	gw := &heldLogGateway{logGateway: logGateway{fakeGateway: base.fakeGateway}, started: make(chan struct{})}
 	svc.SetDiscord(gw)
@@ -71,6 +72,7 @@ func TestServerLogCloseCancelsThePostUnderWay(t *testing.T) {
 
 // A post that panics is recovered without ending the server log: a later entry is still posted.
 func TestServerLogGoesOnAfterAPanickingPost(t *testing.T) {
+	t.Parallel()
 	svc, base := logSvc(t)
 	gw := &onceFailingLogGateway{logGateway: logGateway{fakeGateway: base.fakeGateway}}
 	svc.SetDiscord(gw)

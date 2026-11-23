@@ -14,6 +14,7 @@ import (
 )
 
 func TestToolFailureAnswerIsNotReplayedIntoLaterTurn(t *testing.T) {
+	t.Parallel()
 	var plannerCalls atomic.Int32
 	plannerURL := chatServer(t, `{"memory_requirement":"none","tool_plan":[{"tool_name":"weather","parameters":{"region":"서울","source":"global"}}]}`, "stop", &plannerCalls)
 	const failedAnswer = "I couldn't fetch the weather earlier; here is another idea."

@@ -9,6 +9,7 @@ import (
 // An episode whose stored segment cannot be read is kept as it is. Reading it as "no messages" looked
 // like a conversation with no people and deleted the episode (error-drop rule, fix-plan R04).
 func TestRegenerationKeepsAnEpisodeWithAnUnreadableSegment(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := roomSvc(t)
 	m.extract = func(string) string { return hikeAnswer }
 	sayIn(eng, time.Now().Add(-2*time.Hour), hike...)
@@ -41,6 +42,7 @@ func TestRegenerationKeepsAnEpisodeWithAnUnreadableSegment(t *testing.T) {
 
 // A room cursor that is not valid JSON must not stall the pass: the room starts over.
 func TestRoomCursorThatIsNotJSONStartsTheRoomOver(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := roomSvc(t)
 	m.extract = func(string) string { return hikeAnswer }
 	sayIn(eng, time.Now().Add(-2*time.Hour), hike...)

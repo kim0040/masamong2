@@ -7,6 +7,7 @@ import (
 )
 
 func TestValidBlockID(t *testing.T) {
+	t.Parallel()
 	for id, want := range map[string]bool{
 		"0123456789abcdef":  true,
 		"0123456789ABCDEF":  true,
@@ -24,6 +25,7 @@ func TestValidBlockID(t *testing.T) {
 }
 
 func TestBlockIDsEqual(t *testing.T) {
+	t.Parallel()
 	items := []blocks.Block{{ID: "a"}, {ID: "b"}}
 	if !blockIDsEqual(items, []string{"a", "b"}) {
 		t.Fatal("same order, same ids")
@@ -40,6 +42,7 @@ func TestBlockIDsEqual(t *testing.T) {
 }
 
 func TestBlockSpaceModel(t *testing.T) {
+	t.Parallel()
 	if got := blockSpaceModel(blocks.Block{EmbeddingSpace: "fakeprov|fakemodel|512|l2"}); got != "fakemodel" {
 		t.Fatalf("declared space model %q", got)
 	}
@@ -53,6 +56,7 @@ func TestBlockSpaceModel(t *testing.T) {
 }
 
 func TestSameBlockPreparation(t *testing.T) {
+	t.Parallel()
 	base := blocks.Block{
 		SourceRoom:          "room1",
 		Collection:          "col",
@@ -96,6 +100,7 @@ func TestSameBlockPreparation(t *testing.T) {
 }
 
 func TestAddBlockWidthAliases(t *testing.T) {
+	t.Parallel()
 	b := blocks.Block{
 		Collection:          "col",
 		SourceRoom:          "room1",

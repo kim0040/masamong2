@@ -17,6 +17,7 @@ func chatAs(channel, user string) *action.Invoker {
 // button: reminders.update {op: confirm | pick | reschedule} from a chat turn is refused and the reminder
 // stays proposed. The button (Via command) still sets it.
 func TestChatTurnCannotConfirmAReminder(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	svc, _ := remindSvc(t, time.Date(2026, 9, 28, 10, 0, 0, 0, seoul))
 	r := as(svc, "reminders.propose", map[string]any{"text": "tomorrow at 3pm call mom"}, inChannel("u1"))
@@ -49,6 +50,7 @@ func TestChatTurnCannotConfirmAReminder(t *testing.T) {
 // A chat turn in a room is given only the reminders the person made in that room; the person's own
 // command (shown to them alone) and a DM chat list all of them.
 func TestChatTurnListsOnlyThisRoomsReminders(t *testing.T) {
+	t.Parallel()
 	seoul, _ := time.LoadLocation("Asia/Seoul")
 	svc, _ := remindSvc(t, time.Date(2026, 9, 28, 10, 0, 0, 0, seoul))
 	for _, ch := range []string{"c", "other"} {
@@ -83,6 +85,7 @@ func TestChatTurnListsOnlyThisRoomsReminders(t *testing.T) {
 // Making a poll never replaces one: a chat turn or a command always gets a new id (the model may have
 // read another poll's), and the console's own id is refused when it is taken.
 func TestPollCreateNeverOverwrites(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	serveAnyServer(t, svc)
 	first := exec(svc, "polls.create", map[string]any{"id": "poll_fixed", "question": "lunch?", "options_text": "a\nb", "scope": "discord:c"})

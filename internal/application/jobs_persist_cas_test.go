@@ -12,6 +12,7 @@ import (
 )
 
 func TestStaleEmptyTokenLeaseCannotReviveCancelledJob(t *testing.T) {
+	t.Parallel()
 	svc, err := Open(t.TempDir(), nil, false)
 	if err != nil {
 		t.Fatal(err)

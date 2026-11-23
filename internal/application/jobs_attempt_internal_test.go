@@ -35,6 +35,7 @@ func jobAction(t *testing.T, s *Service, name, id string) {
 // Cancelled → retried → cancelled again leaves two cancelled rows with the same empty lease. A very late
 // first run must not write its result over the second attempt's, nor think it still owns the job.
 func TestLateRunDoesNotOverwriteALaterCancelledAttempt(t *testing.T) {
+	t.Parallel()
 	s := jobTestSvc(t)
 	j, err := s.Enqueue("test.attempt", "", "{}")
 	if err != nil {
@@ -73,6 +74,7 @@ func TestLateRunDoesNotOverwriteALaterCancelledAttempt(t *testing.T) {
 
 // A run longer than its lease renews it and can still record its end.
 func TestRunRenewsItsLeasePastTheTTL(t *testing.T) {
+	t.Parallel()
 	s := jobTestSvc(t)
 	j, err := s.Enqueue("test.lease", "", "{}")
 	if err != nil {
@@ -106,6 +108,7 @@ func TestRunRenewsItsLeasePastTheTTL(t *testing.T) {
 
 // Only the run that holds the job renews it; one that lost it is stopped as taken, a cancel as a cancel.
 func TestLeaseRenewalNeedsOwnership(t *testing.T) {
+	t.Parallel()
 	s := jobTestSvc(t)
 	j, err := s.Enqueue("test.lease", "", "{}")
 	if err != nil {
@@ -171,6 +174,7 @@ func TestLeaseRenewalNeedsOwnership(t *testing.T) {
 // Cancelled → retried → cancelled again before any new run took it: the retry was already a new
 // attempt, so the late first run still cannot write over the second cancel nor think it owns the job.
 func TestRetryCancelledBeforeARunTookItIsANewAttempt(t *testing.T) {
+	t.Parallel()
 	s := jobTestSvc(t)
 	j, err := s.Enqueue("test.attempt", "", "{}")
 	if err != nil {
@@ -204,6 +208,7 @@ func TestRetryCancelledBeforeARunTookItIsANewAttempt(t *testing.T) {
 
 // A run whose lease ran out with nobody taking the job (the machine slept past it) still records its end.
 func TestRunPastAnExpiredLeaseNobodyTookRecordsItsEnd(t *testing.T) {
+	t.Parallel()
 	s := jobTestSvc(t)
 	j, err := s.Enqueue("test.lease", "", "{}")
 	if err != nil {

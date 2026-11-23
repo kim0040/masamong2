@@ -271,7 +271,7 @@ func (s *Service) reportCreate(req action.Request) action.Result {
 		"period": map[string]any{"from": from, "to": to, "days": days, "timezone": loc.String()}, "instance": s.Doc().Instance.ID,
 		"generated_at": s.nowString(), "turns": map[string]any{"total": total, "by_outcome": outcomes, "avg_latency_ms": avgLatency},
 		"channels": channels, "tools": tools, "spend": map[string]any{"total_usd": cost, "by_kind": spend, "budget_usd": parseUSD(s.Doc().Limits.MonthlyBudgetUSD, 0)},
-		"changes": map[string]any{"total": changes, "failed": failedChanges}, "reviews": reviews, "uptime": history, "version": Version,
+		"changes": map[string]any{"total": changes, "failed": failedChanges}, "reviews": reviews, "uptime": history, "version": s.version(),
 	})
 }
 

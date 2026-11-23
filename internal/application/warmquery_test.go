@@ -69,7 +69,6 @@ func warmSvc(t *testing.T, plan string) (*application.Service, *warmProvider) {
 	t.Helper()
 	f := &warmProvider{}
 	f.plan.Store(&plan)
-	t.Setenv("FAKE_OR_KEY", "k")
 	svc := embedSvc(t, t.TempDir(), f.server(t).URL)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Models["planner"] = config.Model{Provider: "openrouter", Model: "fake/planner"}
@@ -103,6 +102,7 @@ func warmTurn(t *testing.T, svc *application.Service, f *warmProvider, msg strin
 
 // A real turn embeds the message while the planner thinks, though this plan then searches nothing.
 func TestChatTurnEmbedsTheMessageAheadOfThePlan(t *testing.T) {
+	t.Parallel()
 	svc, f := warmSvc(t, warmNone)
 	f.holdPlan.Store(true)
 	warmTurn(t, svc, f, "미리 임베딩할 질문", false)
@@ -113,6 +113,7 @@ func TestChatTurnEmbedsTheMessageAheadOfThePlan(t *testing.T) {
 
 // A dry run has no reply to hurry: only a plan that searches sends the message out, as before.
 func TestDryRunTurnEmbedsOnlyWhenThePlanSearches(t *testing.T) {
+	t.Parallel()
 	svc, f := warmSvc(t, warmNone)
 	warmTurn(t, svc, f, "드라이런 질문", true)
 	if n := f.asked.Load(); n != 0 {
@@ -128,6 +129,7 @@ func TestDryRunTurnEmbedsOnlyWhenThePlanSearches(t *testing.T) {
 
 // A daily limit on the embedding provider is the operator's: calls nobody may need do not use it up.
 func TestDailyLimitedProviderEmbedsOnlyWhenThePlanSearches(t *testing.T) {
+	t.Parallel()
 	svc, f := warmSvc(t, warmNone)
 	applyDoc(t, svc, func(d *config.Document) {
 		p := d.Providers["openrouter"]
@@ -142,6 +144,7 @@ func TestDailyLimitedProviderEmbedsOnlyWhenThePlanSearches(t *testing.T) {
 
 // A person who withdrew consent to being remembered: their message leaves only if a search needs it.
 func TestWithdrawnConsentEmbedsOnlyWhenThePlanSearches(t *testing.T) {
+	t.Parallel()
 	svc, f := warmSvc(t, warmNone)
 	if r := as(svc, "privacy.consent", map[string]any{"scope": "memory", "decision": "withdraw"}, inChannel("u1")); !r.OK {
 		t.Fatal(r.Error)
@@ -156,6 +159,7 @@ func TestWithdrawnConsentEmbedsOnlyWhenThePlanSearches(t *testing.T) {
 // turn's cost is its ledger rows (the embedding's among them) and the same amount reaches the limits'
 // view of the turn's spending. A plan that searches too (the search joins the embedding) pays it once.
 func TestTurnCostIncludesTheEmbeddingAheadOfThePlan(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, plan string
 		rows       int // planner, embedding and answer; a search adds the reranker's (the ledger is written after the turn returns)

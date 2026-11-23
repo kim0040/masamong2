@@ -40,6 +40,7 @@ func committedWithProviderURL(t *testing.T, baseURL string) string {
 // An address the stricter policy refuses must not stop a daemon that ran with it before the upgrade:
 // the provider is switched off, the rest of the bot runs, and doctor says what to change.
 func TestUpgradeKeepsRunningWithAnAddressThePolicyNowRefuses(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ url, reason string }{
 		{"https://user:secret@gateway.example/v1", "user name or password"},
 		{"http://localhost.internal/v1", "only looks like"},
@@ -77,6 +78,7 @@ func TestUpgradeKeepsRunningWithAnAddressThePolicyNowRefuses(t *testing.T) {
 
 // New changes are validated strictly, and the message names the rule that failed.
 func TestNewConfigChangesStillRefuseThoseAddresses(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	for _, tc := range []struct{ url, reason string }{
 		{"https://user:secret@gateway.example/v1", "user name or password"},
@@ -95,6 +97,7 @@ func TestNewConfigChangesStillRefuseThoseAddresses(t *testing.T) {
 // A provider that is already switched off sends nothing, so an unrelated change can be applied while
 // its address is still wrong; turning it on again fails with the reason.
 func TestDisabledProviderWithRefusedAddressDoesNotBlockOtherChanges(t *testing.T) {
+	t.Parallel()
 	root := committedWithProviderURL(t, "https://user:secret@gateway.example/v1")
 	s, err := Open(root, nil, false)
 	if err != nil {

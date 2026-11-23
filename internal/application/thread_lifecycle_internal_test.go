@@ -9,6 +9,7 @@ import (
 )
 
 func TestThreadLifecyclePersistsAcrossTickEviction(t *testing.T) {
+	t.Parallel()
 	for _, phase := range []string{"before-db", "before-write"} {
 		for _, archived := range []bool{false, true} {
 			name := "unarchive"
@@ -77,6 +78,7 @@ func TestThreadLifecyclePersistsAcrossTickEviction(t *testing.T) {
 }
 
 func TestThreadLifecycleInvalidatesAnOlderRead(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	s.NoteThread("g", "target", "parent", false)
 	s.threads.mu.Lock()

@@ -10,6 +10,7 @@ import (
 // A place search with words Kakao cannot match ("분위기 좋은") is tried once more with the place and
 // the kind of shop only, and the result says what was searched.
 func TestPlacesSearchRetriesWithoutTheWordsInBetween(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	var asked []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -43,7 +44,7 @@ func TestPlacesSearchRetriesWithoutTheWordsInBetween(t *testing.T) {
 		_, _ = w.Write([]byte(`{"meta":{"total_count":1,"same_name":{"selected_region":"서울 마포구 홍대"}},"documents":[{"place_name":"골목 카페","place_url":"http://place.map.kakao.com/1","category_name":"음식점 > 카페","address_name":"서울 마포구 서교동 1","road_address_name":"서울 마포구 와우산로 1","phone":"02-000-0000"}]}`))
 	}))
 	defer srv.Close()
-	t.Setenv("KAKAO_TEST", "kakao-secret")
+	svc.SetEnvForTest(t, "KAKAO_TEST", "kakao-secret")
 	yaml := exec(svc, "config.show", nil).Output["yaml"].(string)
 	yaml = strings.Replace(yaml, "base_url: https://dapi.kakao.com", "base_url: "+srv.URL, 1)
 	yaml = strings.Replace(yaml, "credential_ref: env:MASAMONG_KAKAO_KEY", "credential_ref: env:KAKAO_TEST", 1)

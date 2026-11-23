@@ -110,7 +110,7 @@ func (s *Service) setup(_ context.Context, req action.Request) action.Result {
 			return s.failErr(req, "IO", "setup.failed", err, nil)
 		}
 		s.setDoc(doc, 1)
-		_ = s.kvSet("runtime:version", Version) // a new instance: its first start is not an upgrade (BackupOnUpgrade)
+		_ = s.kvSet("runtime:version", s.version()) // a new instance: its first start is not an upgrade (BackupOnUpgrade)
 	} else if s.Registry().Quota.Store == nil {
 		s.setDoc(s.Doc(), s.Revision()) // opened before setup: quota counting can use the database only now
 	}

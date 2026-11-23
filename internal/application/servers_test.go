@@ -57,6 +57,7 @@ func member(guild, user string) *action.Invoker {
 }
 
 func TestNewServersWaitForApproval(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	gw := &serverGateway{guilds: []application.GuildInfo{{ID: oldServer, Name: "old friends"}}}
 	svc.SetDiscord(gw)
@@ -141,6 +142,7 @@ func TestNewServersWaitForApproval(t *testing.T) {
 }
 
 func TestDecliningAServerTakesTheBotOut(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	gw := &serverGateway{guilds: []application.GuildInfo{{ID: stranger, Name: "strangers"}}}
 	svc.SetDiscord(gw)
@@ -181,6 +183,7 @@ func TestDecliningAServerTakesTheBotOut(t *testing.T) {
 }
 
 func TestServerManagersRunTheirServerFromDiscord(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	serveAnyServer(t, svc)
 	if r := exec(svc, "access.policy", map[string]any{"operators": []string{"400000000000000009"}}); !r.OK {
@@ -266,6 +269,7 @@ func TestServerManagersRunTheirServerFromDiscord(t *testing.T) {
 }
 
 func TestChangeLogFiltersAndPages(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	for i := 0; i < 7; i++ {
 		if r := exec(svc, "access.policy", map[string]any{"guild_admins": i%2 == 0}); !r.OK {
@@ -299,6 +303,7 @@ func TestChangeLogFiltersAndPages(t *testing.T) {
 }
 
 func TestInviteAsksOnlyForWhatTheBotUses(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	svc.SetDiscord(&serverGateway{})
 	r := exec(svc, "channels.invite", map[string]any{"guild_id": oldServer})

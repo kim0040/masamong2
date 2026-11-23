@@ -16,6 +16,7 @@ import (
 //
 //	MASAMONG_LIVE_GEMINI_KEY_FILE=~/gemini.key go test ./internal/application -run TestLiveGemini -v
 func TestLiveGemini(t *testing.T) {
+	// sequential: it sets process environment variables
 	keyFile := os.Getenv("MASAMONG_LIVE_GEMINI_KEY_FILE")
 	if keyFile == "" || os.Getenv("CI") != "" {
 		t.Skip("set MASAMONG_LIVE_GEMINI_KEY_FILE to a file with a Gemini API key")

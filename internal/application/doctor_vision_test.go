@@ -13,6 +13,7 @@ import (
 // its provider's key, and a model that refused pictures lately shows as degraded, each with a reason a
 // person can read.
 func TestDoctorReportsTheVisionRole(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.NotFoundHandler())
 	t.Cleanup(srv.Close)
 	svc := setupSvc(t)
@@ -51,7 +52,7 @@ func TestDoctorReportsTheVisionRole(t *testing.T) {
 	})
 	want("provider without its key", "unconfigured", "provider_key_missing")
 
-	t.Setenv("FAKE_EYES_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_EYES_KEY", "k")
 	want("provider with its key", "ready", "configured")
 
 	// the provider failed on the wire a moment ago: degraded while it cools down

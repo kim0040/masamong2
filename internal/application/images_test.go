@@ -34,6 +34,7 @@ func imageServer(t *testing.T, calls *atomic.Int32) string {
 }
 
 func TestImagesGenerateSavesThePicture(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	url := imageServer(t, &calls)
 	svc := setupSvc(t)
@@ -42,7 +43,7 @@ func TestImagesGenerateSavesThePicture(t *testing.T) {
 	if r := as(svc, "images.generate", map[string]any{"prompt": "고양이"}, u); !r.OK || r.Output["status"] != "unconfigured" {
 		t.Fatalf("without an image model: %+v", r)
 	}
-	t.Setenv("FAKE_IMG_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_IMG_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Providers["img"] = config.Provider{Kind: config.KindOpenAI, BaseURL: url, CredentialRef: "env:FAKE_IMG_KEY"}
 		d.Models["image"] = config.Model{Provider: "img", Model: "google/gemini-image"}

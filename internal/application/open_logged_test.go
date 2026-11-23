@@ -32,6 +32,7 @@ func (b *lockedBuffer) String() string {
 // daemon used to swap svc.Log after Open had started them. Its records reach the daemon's handler
 // and the console's live log.
 func TestOpenLoggedInstallsTheLoggerBeforeWorkers(t *testing.T) {
+	t.Parallel()
 	first := setupSvcLog(t, nil)
 	dir := first.DataRoot
 	if err := first.Close(); err != nil {

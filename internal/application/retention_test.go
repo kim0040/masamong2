@@ -12,6 +12,7 @@ import (
 // A long-running instance keeps turn rows for stats but drops old details, traces, per-user counters
 // and question embeddings; leaf embeddings (which save paid re-embedding) and memory are never pruned.
 func TestRetentionPrunesOldOperationalRecords(t *testing.T) {
+	t.Parallel()
 	svc, _ := slowChatSvc(t, 0, nil)
 	// one real turn creates the admin tables, a turn row, a trace, counters and a query embedding
 	if _, err := svc.ChatTurn(context.Background(), chatIn("c", "hello")); err != nil {
@@ -94,6 +95,7 @@ func TestRetentionPrunesOldOperationalRecords(t *testing.T) {
 }
 
 func TestRetentionPrunesOrphanThreadParticipants(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	if _, err := svc.Store.DB.Exec(`INSERT INTO thread_participants(thread_id,user_id,added_at) VALUES(?,?,?)`,
 		"missing-thread", "participant", time.Now().UTC().Format(time.RFC3339Nano)); err != nil {

@@ -47,6 +47,7 @@ func markOf(t *testing.T, s *Service, id string) (string, string) {
 // taken back with "clear". It never counts as a rating by people: the summary, the turn's good/bad
 // counts and the implicit signals stay what they were.
 func TestOperatorMarkIsStoredApartFromRatings(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	markableTurn(s, "t1", "m1", "search.web")
 	s.putFeedback("t1", "u1", "menu", -1, "wrong") // a person's bad rating
@@ -98,6 +99,7 @@ func TestOperatorMarkIsStoredApartFromRatings(t *testing.T) {
 // channel keeps no text or that has no reply cannot be marked: there is nothing left to judge. A mark made
 // earlier stays and still counts; taking it back stays possible.
 func TestOperatorMarkNeedsTheTurnToStillShowWhatWasSaid(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	markableTurnBy(s, "alice", "deleted", "m-deleted", "search.web")
 	markableTurnBy(s, "bob", "withdrawn", "m-withdrawn", "search.web")
@@ -156,6 +158,7 @@ func TestOperatorMarkNeedsTheTurnToStillShowWhatWasSaid(t *testing.T) {
 // The draw holds only search turns that can still be marked and have not been, every turn once, as many as
 // asked for (30 by default); the filter on tool turns leaves out turns that used no tool.
 func TestTurnSampleDrawsMarkableSearchTurns(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	for i := 0; i < 40; i++ {
 		markableTurn(s, fmt.Sprintf("s%02d", i), fmt.Sprintf("m%02d", i), "search.web")
@@ -215,6 +218,7 @@ func TestTurnSampleDrawsMarkableSearchTurns(t *testing.T) {
 // Totals by verdict and by tool: a turn that used two tools counts under both, once in the total; only the
 // operator's marks, only within the period.
 func TestTurnMarksTotalByVerdictAndTool(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	markableTurn(s, "a", "ma", "search.web")
 	markableTurn(s, "b", "mb", "search.web", "weather.query")
@@ -247,6 +251,7 @@ func TestTurnMarksTotalByVerdictAndTool(t *testing.T) {
 // Marks leave with the turn records (retention.turn_days), stay with a turn whose person withdrew (they hold
 // no text and no account), go into the backup with the rest of the database and are gone after a reset.
 func TestOperatorMarksFollowRetentionBackupAndReset(t *testing.T) {
+	t.Parallel()
 	t.Run("retention", func(t *testing.T) {
 		s, clk := deliveryService(t)
 		markableTurn(s, "old", "m1", "search.web")

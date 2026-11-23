@@ -75,7 +75,7 @@ func weatherSvc(t *testing.T, f *fakeWeather, kmaKey bool, openMeteoLimit int) *
 		map[string]any{"path": []any{"providers", "kma", "base_url"}, "value": f.srv.URL},
 	}
 	if kmaKey {
-		t.Setenv("WEATHER_TEST_KMA", "kma-key")
+		svc.SetEnvForTest(t, "WEATHER_TEST_KMA", "kma-key")
 		ops = append(ops, map[string]any{"path": []any{"providers", "kma", "credential_ref"}, "value": "env:WEATHER_TEST_KMA"})
 	}
 	if r := exec(svc, "config.patch", map[string]any{"ops": ops}); !r.OK {
@@ -95,6 +95,7 @@ func weather(svc *application.Service, locale string, in map[string]any) map[str
 }
 
 func TestWeatherWorldwideAndKorea(t *testing.T) {
+	t.Parallel()
 	f := newFakeWeather(t)
 	svc := weatherSvc(t, f, false, 100)
 	city := fmt.Sprintf("도쿄-%d", weatherRegionTestID.Add(1))
@@ -143,6 +144,7 @@ func TestWeatherWorldwideAndKorea(t *testing.T) {
 }
 
 func TestWeatherPrefersKMAInKoreaAndFallsBack(t *testing.T) {
+	t.Parallel()
 	f := newFakeWeather(t)
 	svc := weatherSvc(t, f, true, 100)
 	out := weather(svc, "ko", map[string]any{"region": "서울"})
@@ -166,6 +168,7 @@ func TestWeatherPrefersKMAInKoreaAndFallsBack(t *testing.T) {
 }
 
 func TestWeatherQuotaAndDisabledProvider(t *testing.T) {
+	t.Parallel()
 	f := newFakeWeather(t)
 	svc := weatherSvc(t, f, false, 2) // geocode + forecast = the whole allowance
 	city := fmt.Sprintf("Tokyo-%d", weatherRegionTestID.Add(1))
@@ -192,6 +195,7 @@ func TestWeatherQuotaAndDisabledProvider(t *testing.T) {
 // A place nobody named is an assumption: the result says it came from the default and which place
 // was assumed, so the reply can say so; a named place is the message's and assumes nothing.
 func TestWeatherSaysWhenItAssumedThePlace(t *testing.T) {
+	t.Parallel()
 	f := newFakeWeather(t)
 	svc := weatherSvc(t, f, false, 0)
 	out := weather(svc, "ko", map[string]any{})
@@ -219,6 +223,7 @@ func execLocale(svc *application.Service, act string, in map[string]any, locale 
 
 // The planner is shown exactly the day offsets the weather tool accepts, and the tool's choices match.
 func TestForecastRangeIsOneNumber(t *testing.T) {
+	t.Parallel()
 	if chat.ForecastDays != openmeteo.MaxForecastDays {
 		t.Fatalf("planner shows %d days, the tool answers %d", chat.ForecastDays, openmeteo.MaxForecastDays)
 	}

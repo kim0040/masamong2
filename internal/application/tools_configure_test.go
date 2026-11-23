@@ -3,6 +3,7 @@ package application_test
 import "testing"
 
 func TestToolsConfigureRejectsUnknownKeysWithoutRevision(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	before := svc.Revision()
 	r := exec(svc, "tools.configure", map[string]any{"id": "help.version", "limits": map[string]any{"per_user_per_day": 2}})

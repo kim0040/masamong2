@@ -27,6 +27,7 @@ func permAlerts(t *testing.T, svc *application.Service) map[string]string {
 }
 
 func TestLostDiscordPermissionStaysAnAlertUntilFixed(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "c1", "respond": "mention", "base_revision": 1}); !r.OK {
 		t.Fatal(r.Error)
@@ -54,6 +55,7 @@ func TestLostDiscordPermissionStaysAnAlertUntilFixed(t *testing.T) {
 }
 
 func TestThreadPermissionsReportedWhileThreadsAreOn(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "c1", "respond": "mention", "base_revision": 1}); !r.OK {
 		t.Fatal(r.Error)

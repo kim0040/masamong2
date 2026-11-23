@@ -7,6 +7,7 @@ import (
 )
 
 func TestEvalDryRunResolvesAttachedChannelScopeAfterClosingReviewRows(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	doc := svc.Doc()
 	doc.Guilds = map[string]config.GuildSettings{

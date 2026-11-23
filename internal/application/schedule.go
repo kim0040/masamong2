@@ -319,7 +319,7 @@ func (s *Service) noteUptime(kind, reason string) {
 			s.queueAlert(alertCrash, map[string]any{"reason": note.Reason, "gave_up": note.GaveUp})
 		}
 	}
-	ev = append(ev, uptimeEvent{At: now, Kind: kind, Version: Version, Reason: reason})
+	ev = append(ev, uptimeEvent{At: now, Kind: kind, Version: s.version(), Reason: reason})
 	if len(ev) > maxUptimeEvents {
 		ev = ev[len(ev)-maxUptimeEvents:]
 	}
@@ -357,7 +357,7 @@ func (s *Service) runtimeHistory(req action.Request) action.Result {
 	started := startedAt
 	if s.practice {
 		// the practice instance is not a process of its own: it shows a sample history instead
-		ev, started = practiceUptime(now)
+		ev, started = practiceUptime(now, s.version())
 	} else {
 		_, _ = s.kvGet("uptime:events", &ev)
 	}

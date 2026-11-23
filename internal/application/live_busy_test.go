@@ -32,6 +32,7 @@ func externalWriteLock(t *testing.T, s *Service) func() {
 }
 
 func TestLiveDeleteSurvivesExternalLockLongerThanBusyTimeout(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	turn := captureAndAnswer(t, s, "locked-delete", "busy deletion private canary")
 	unlock := externalWriteLock(t, s)
@@ -59,6 +60,7 @@ func TestLiveDeleteSurvivesExternalLockLongerThanBusyTimeout(t *testing.T) {
 }
 
 func TestLiveCaptureAndEditReplayFromDurableFilesAfterRestart(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	root := s.DataRoot
 	e, err := s.MemoryEngine()
@@ -115,6 +117,7 @@ func TestLiveCaptureAndEditReplayFromDurableFilesAfterRestart(t *testing.T) {
 }
 
 func TestLiveFailedDeleteBlocksReadsAndReplaysAfterRestart(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	root := s.DataRoot
 	turn := captureAndAnswer(t, s, "queued-delete", "durable deletion private canary")
@@ -170,6 +173,7 @@ func TestLiveFailedDeleteBlocksReadsAndReplaysAfterRestart(t *testing.T) {
 }
 
 func TestLiveResyncRetriesExternalWriteLock(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	_, _ = s.MemoryEngine()
 	captureAndAnswer(t, s, "resync", "resync canary")
@@ -201,6 +205,7 @@ func TestLiveResyncRetriesExternalWriteLock(t *testing.T) {
 }
 
 func TestLiveResyncQueueSurvivesFailedCallbackAndRestart(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	root := s.DataRoot
 	e, _ := s.MemoryEngine()
@@ -234,6 +239,7 @@ func TestLiveResyncQueueSurvivesFailedCallbackAndRestart(t *testing.T) {
 }
 
 func TestNewSummaryWaitsForPendingPrivacyCleanup(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	if _, err := s.Store.DB.Exec(`INSERT INTO redaction_jobs(payload,created_at) VALUES('{}','now')`); err != nil {
 		t.Fatal(err)

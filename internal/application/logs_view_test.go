@@ -14,6 +14,7 @@ import (
 // The console follows the log every two seconds; reading it must not write a change line or an
 // audit row each time (it once did, and the log filled with its own reads).
 func TestReadingTheLogWritesNothing(t *testing.T) {
+	t.Parallel()
 	svc := setupSvcLog(t, func(s *application.Service) *slog.Logger { return s.CaptureLogs(nil) })
 	for i := 0; i < 5; i++ {
 		raw, _ := json.Marshal(map[string]any{"after_id": 0})
@@ -34,6 +35,7 @@ func TestReadingTheLogWritesNothing(t *testing.T) {
 // The practice instance is opened with the real instance's logger. Its lines belong to its own
 // console log; the real one must not show them, and only practice has the example lines.
 func TestPracticeLogIsSeparateAndHasExamples(t *testing.T) {
+	t.Parallel()
 	svc := setupSvcLog(t, func(s *application.Service) *slog.Logger { return s.CaptureLogs(nil) })
 	svc.Log.Info("real line")
 	p, err := application.OpenPractice(context.Background(), t.TempDir(), "ko", svc.Log)
@@ -58,6 +60,7 @@ func TestPracticeLogIsSeparateAndHasExamples(t *testing.T) {
 
 // Real history never contains samples; practice shows a sample month that is internally consistent.
 func TestUptimeHistorySamplesOnlyInPractice(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	h := out(t, svc, "runtime.history", map[string]any{"days": 30})
 	if h["sample"] != false {

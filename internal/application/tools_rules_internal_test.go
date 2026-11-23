@@ -8,6 +8,7 @@ import (
 )
 
 func TestToolSurfaceAndInputRules(t *testing.T) {
+	t.Parallel()
 	chatTool := tools.Resolved{ID: "x", Chat: true}
 	commandTool := tools.Resolved{ID: "x", Commands: true}
 	for _, tc := range []struct {

@@ -13,6 +13,7 @@ import (
 // A plain name resolves only when no other account was captured under it in
 // the eligible rooms, whether or not the alias index lists that account.
 func TestRound2AliasCompleteness(t *testing.T) {
+	t.Parallel()
 	const label = "동명이인"
 	for _, tc := range []struct {
 		mode, guild, other, ask string

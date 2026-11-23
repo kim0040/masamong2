@@ -9,6 +9,7 @@ import (
 )
 
 func TestRecoveryFileName(t *testing.T) {
+	t.Parallel()
 	for name, want := range map[string]bool{
 		".masamong.db.old-abc123":     true,
 		".masamong.new-zz":            true,
@@ -26,6 +27,7 @@ func TestRecoveryFileName(t *testing.T) {
 }
 
 func TestDataFoldersIncludesACustomDatabaseFolder(t *testing.T) {
+	// sequential: it sets process environment variables
 	t.Setenv("MASAMONG_DB_BACKEND", "")
 	root := t.TempDir()
 	if got := dataFolders(root); len(got) != 1 || got[0] != root {
@@ -41,6 +43,7 @@ func TestDataFoldersIncludesACustomDatabaseFolder(t *testing.T) {
 }
 
 func TestStagingLeftovers(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if got := stagingLeftovers(root); len(got) != 0 {
 		t.Fatalf("no backups folder, no leftovers: %v", got)

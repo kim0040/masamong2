@@ -26,6 +26,7 @@ func notesFile(t *testing.T, version string) string {
 // release's release-notes.json, within the same limits as the other release files, and anything wrong
 // with that file leaves the check as it was, with no notes.
 func TestUpdateCheckReadsTheNewerReleasesNotes(t *testing.T) {
+	t.Parallel()
 	var notesHits atomic.Int32
 	body, assetSize, assetPath := notesFile(t, "v0.3.0"), 0, "/dl/kim0040/masamong2/v0.3.0/release-notes.json"
 	status := 200
@@ -50,8 +51,7 @@ func TestUpdateCheckReadsTheNewerReleasesNotes(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	defer application.SetVersionForTest("0.2.0")()
-	svc := setupSvc(t)
+	svc := setupSvcVersion(t, "0.2.0")
 	defer application.UseSelfUpdateForTest(svc, srv.URL+"/dl/%s/", t.TempDir())()
 	application.UseUpdateAPIForTest(svc, srv.URL+"/api/%s")
 
@@ -89,7 +89,7 @@ func TestUpdateCheckReadsTheNewerReleasesNotes(t *testing.T) {
 		}
 	}
 	// the same release is not newer: nothing to show
-	defer application.UseVersionForTest("0.3.0")()
+	defer svc.SetVersionForTest("0.3.0")()
 	body, status, assetSize, assetPath = notesFile(t, "v0.3.0"), 200, 0, "/dl/kim0040/masamong2/v0.3.0/release-notes.json"
 	if o := out(t, svc, "updates.check", nil); o["newer"] != false || o["latest_notes"] != nil {
 		t.Fatalf("not newer: %v", o)

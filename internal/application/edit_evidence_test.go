@@ -124,6 +124,7 @@ func changeSource(t *testing.T, svc *application.Service, change, id, author str
 // The bug: for the next 16 turns every reply read the corrected message, every reply was refused, and the
 // bot forgot what it had just said.
 func TestRepliesOnTheEditedWordsAreKept(t *testing.T) {
+	t.Parallel()
 	svc, prompts := editSvc(t)
 	source := chainTurn(t, svc, "c", "secret", "alice")
 	built := chainTurn(t, svc, "c", "n0", "bob")
@@ -156,6 +157,7 @@ func TestRepliesOnTheEditedWordsAreKept(t *testing.T) {
 
 // A reply on the edited words is built on that message like any other: the message's next change takes it.
 func TestRepliesOnTheEditedWordsFollowTheNextChange(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"edit", "delete", "blank", "withdraw"} {
 		t.Run(change, func(t *testing.T) {
 			svc, _ := editSvc(t)
@@ -180,6 +182,7 @@ func TestRepliesOnTheEditedWordsFollowTheNextChange(t *testing.T) {
 // The race: the turn read the old words, the change finished while the model was thinking. Whatever came
 // first, the reply is refused. The turn after it has read what is there now.
 func TestAChangeDuringATurnRefusesItsReply(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"edit", "delete", "blank", "withdraw"} {
 		t.Run(change, func(t *testing.T) {
 			svc, prompts := editSvc(t)
@@ -210,6 +213,7 @@ func TestAChangeDuringATurnRefusesItsReply(t *testing.T) {
 // The intent is committed but the worker has not applied it: a turn starting now still reads the old words,
 // though the tombstone is older than the turn. Comparing the two times would keep this reply.
 func TestATurnStartedBeforeAnEditIsAppliedIsRefused(t *testing.T) {
+	t.Parallel()
 	svc, prompts := editSvc(t)
 	chainTurn(t, svc, "c", "secret", "alice")
 	svc.HoldRedactionForTest(true)
@@ -238,6 +242,7 @@ func TestATurnStartedBeforeAnEditIsAppliedIsRefused(t *testing.T) {
 // A clock that disagrees proves nothing either way: Discord's edit time may be ahead of this computer or
 // behind it, and the replies on the new words stay all the same.
 func TestAnEditIsJudgedWithoutAskingAClock(t *testing.T) {
+	t.Parallel()
 	for _, skew := range []time.Duration{-time.Hour, time.Hour} {
 		t.Run(skew.String(), func(t *testing.T) {
 			svc, _ := editSvc(t)
@@ -259,6 +264,7 @@ func TestAnEditIsJudgedWithoutAskingAClock(t *testing.T) {
 // A deletion or a withdrawal blocks what it blocked before: the window keeps refusing replies that hold the
 // message's IDs, and a turn that starts long after still cannot lift that.
 func TestADeletionStaysBlockedForLaterTurns(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"delete", "blank"} {
 		t.Run(change, func(t *testing.T) {
 			svc, _ := editSvc(t)
@@ -278,6 +284,7 @@ func TestADeletionStaysBlockedForLaterTurns(t *testing.T) {
 // An edit followed by a deletion, in one pass of the worker or in two: what the edit settled does not
 // outlive the deletion.
 func TestADeletionUndoesWhatAnEditSettled(t *testing.T) {
+	t.Parallel()
 	for _, together := range []bool{false, true} {
 		t.Run(fmt.Sprintf("together=%v", together), func(t *testing.T) {
 			svc, _ := editSvc(t)
@@ -318,6 +325,7 @@ func TestADeletionUndoesWhatAnEditSettled(t *testing.T) {
 // A second edit waiting in the queue: what the first one finished says nothing about the words still to
 // come, so a turn reading now is not excused.
 func TestAnEditWaitingBehindAnotherIsNotSettled(t *testing.T) {
+	t.Parallel()
 	svc, _ := editSvc(t)
 	chainTurn(t, svc, "c", "secret", "alice")
 	if err := svc.MessageEdited("g", "c", "secret", "first correction", time.Now().Add(-time.Minute)); err != nil {
@@ -344,6 +352,7 @@ func TestAnEditWaitingBehindAnotherIsNotSettled(t *testing.T) {
 
 // An edit that keeps the words (a changed attachment) is applied like any other.
 func TestAnEditKeepingTheWordsSettles(t *testing.T) {
+	t.Parallel()
 	svc, _ := editSvc(t)
 	chainTurn(t, svc, "c", "secret", "alice")
 	if err := svc.MessageEdited("g", "c", "secret", "message secret from alice", time.Now()); err != nil {
@@ -361,6 +370,7 @@ func TestAnEditKeepingTheWordsSettles(t *testing.T) {
 // The bot's own posts in the live window hold the words of replies. A reply built on the old words is out of
 // the chat context after a change; its post must not come back as context in its place.
 func TestABotPostBuiltOnChangedWordsLeavesTheContext(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"edit", "delete"} {
 		t.Run(change, func(t *testing.T) {
 			svc, prompts := editSvc(t)
@@ -386,6 +396,7 @@ func TestABotPostBuiltOnChangedWordsLeavesTheContext(t *testing.T) {
 // The post of a reply that was refused can reach the window after the change: nothing in the window knows
 // yet, but the turn's record does.
 func TestAPostArrivingAfterTheChangeStaysOutOfTheContext(t *testing.T) {
+	t.Parallel()
 	svc, prompts := editSvc(t)
 	chainTurn(t, svc, "c", "secret", "alice")
 	prompts.whileRunning(func() { changeSource(t, svc, "edit", "secret", "alice") })
@@ -436,7 +447,6 @@ func searchSvc(t *testing.T) (*application.Service, *engine.Engine, *promptServe
 		}
 	}))
 	t.Cleanup(srv.Close)
-	t.Setenv("FAKE_OR_KEY", "k")
 	svc := embedSvc(t, t.TempDir(), srv.URL)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Models["planner"] = config.Model{Provider: "openrouter", Model: "fake/plan"}
@@ -456,6 +466,7 @@ func searchSvc(t *testing.T) (*application.Service, *engine.Engine, *promptServe
 // index shows no hits from that room, a new one shows the corrected words, and the reply on it stays,
 // in the chat context and in the turn history (the leaf's ID comes back when the room is cut again).
 func TestARepliesOnASearchHitOfAnEditedMessageIsKept(t *testing.T) {
+	t.Parallel()
 	svc, eng, prompts := searchSvc(t)
 	start := time.Now().Add(-48 * time.Hour)
 	const oldWords = "the canary lives at number nine"
@@ -557,6 +568,7 @@ func TestARepliesOnASearchHitOfAnEditedMessageIsKept(t *testing.T) {
 // deleted, and it is kept in the chat context, as it was; its turn record stays blocked by the leaf's
 // tombstone, also as it was. A deletion's reach is not narrowed here.
 func TestALeafThatHeldADeletedMessageStaysBlockedInTheTurnRecord(t *testing.T) {
+	t.Parallel()
 	svc, eng, _ := searchSvc(t)
 	start := time.Now().Add(-48 * time.Hour)
 	for i := range 25 {
@@ -623,6 +635,7 @@ func contains(list []string, want string) bool {
 // A settled edit excuses nothing about the edit after it: a turn that read the first correction is refused
 // when a second one finishes while it runs.
 func TestASecondEditDuringATurnRefusesItsReply(t *testing.T) {
+	t.Parallel()
 	svc, prompts := editSvc(t)
 	chainTurn(t, svc, "c", "secret", "alice")
 	changeSource(t, svc, "edit", "secret", "alice")
@@ -652,6 +665,7 @@ func TestASecondEditDuringATurnRefusesItsReply(t *testing.T) {
 
 // A channel without capture keeps the message only as a chat turn (postmortem 0003): the same promise.
 func TestAnEditInAChannelWithoutCapture(t *testing.T) {
+	t.Parallel()
 	svc, prompts := editSvc(t)
 	turn := func(id string) string {
 		t.Helper()
@@ -684,6 +698,7 @@ func TestAnEditInAChannelWithoutCapture(t *testing.T) {
 // A turn that came with something already read (here a command's result) read it before it took its mark, so
 // nothing excuses it: it stays as careful as before.
 func TestATurnThatCameWithAResultIsNotExcused(t *testing.T) {
+	t.Parallel()
 	svc, _ := editSvc(t)
 	chainTurn(t, svc, "c", "secret", "alice")
 	changeSource(t, svc, "edit", "secret", "alice")

@@ -99,6 +99,7 @@ func checkSeeded(t *testing.T, db *sql.DB) {
 // storage.migrate is off together with the TiDB backend (storage.TiDBEnabled): it refuses to run and
 // says why, instead of moving anything.
 func TestStorageMigrateIsDisabled(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	r := exec(svc, "storage.migrate", map[string]any{"to": "sqlite", "sqlite_file": "moved.db", "confirm": true})
 	if r.OK || r.Error == nil || r.Error.Code != "ACTION_UNAVAILABLE" || r.Error.Args["reason"] != "disabled_by_operator" {
@@ -116,6 +117,7 @@ func TestStorageMigrateIsDisabled(t *testing.T) {
 // An instance whose storage.yaml still names TiDB does not start on SQLite behind the operator's back:
 // it stops with the reason and the way over (restore a backup).
 func TestTiDBStorageSettingsAreRefused(t *testing.T) {
+	// sequential: it sets process environment variables
 	if storage.TiDBEnabled {
 		t.Skip("TiDB backend enabled")
 	}
@@ -135,6 +137,7 @@ func TestTiDBStorageSettingsAreRefused(t *testing.T) {
 // TestStorageMigrateTiDBRoundTrip moves SQLite → TiDB → SQLite on a live server. It creates and drops
 // its own database, so point MASAMONG_TIDB_TEST_DSN at a throwaway server (e.g. a local TiDB container).
 func TestStorageMigrateTiDBRoundTrip(t *testing.T) {
+	// sequential: it sets process environment variables
 	if !storage.TiDBEnabled {
 		t.Skip("the TiDB backend is disabled (storage.TiDBEnabled)")
 	}

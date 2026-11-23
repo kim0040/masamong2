@@ -6,6 +6,7 @@ import (
 )
 
 func TestMigrationSkipsBirthDatesThatAreNotDates(t *testing.T) {
+	t.Parallel()
 	// V1 kept a yearless birthday as 0000-MM-DD and did not check the calendar: neither becomes a profile
 	svc := setupSvc(t)
 	path := v1Database(t)

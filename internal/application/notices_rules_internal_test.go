@@ -11,6 +11,7 @@ import (
 )
 
 func TestNoticeRules(t *testing.T) {
+	t.Parallel()
 	c := &notices.Catalog{Sources: []notices.Source{
 		{ID: "a1", Kind: notices.KindSchool, School: "a"},
 		{ID: "a2", Kind: notices.KindSchool, School: "a", Manual: true},

@@ -679,6 +679,14 @@ func statsLookup(name string) (*statsMetric, bool) {
 	return m, ok
 }
 
+// statsLookup finds a declared metric: one a test declared for this service, else the registry's.
+func (s *Service) statsLookup(name string) (*statsMetric, bool) {
+	if m, ok := s.hooks.statsMetrics.Load(name); ok {
+		return m.(*statsMetric), true
+	}
+	return statsLookup(name)
+}
+
 // statsGroupMetrics lists the metrics of a group in registry order.
 func statsGroupMetrics(group string) []*statsMetric {
 	var out []*statsMetric
@@ -836,11 +844,11 @@ type statsEncoded struct {
 }
 
 // statsPrepare checks rows against the registry and merges rows with the same key (additively).
-func statsPrepare(rows []statsRow, kind statsKind) ([]statsEncoded, error) {
+func (s *Service) statsPrepare(rows []statsRow, kind statsKind) ([]statsEncoded, error) {
 	idx := map[statsKey]int{}
 	var out []statsEncoded
 	for _, r := range rows {
-		m, ok := statsLookup(r.Metric)
+		m, ok := s.statsLookup(r.Metric)
 		if !ok {
 			return nil, fmt.Errorf("%w: metric %q", errStatsUndeclared, r.Metric)
 		}
@@ -949,7 +957,7 @@ func (s *Service) statsAdd(ctx context.Context, rows []statsRow) error {
 	if !s.statsOn() {
 		return errStatsOff
 	}
-	enc, err := statsPrepare(rows, statsCounter)
+	enc, err := s.statsPrepare(rows, statsCounter)
 	if err != nil || len(enc) == 0 {
 		return err
 	}
@@ -969,7 +977,7 @@ func (s *Service) statsAdd(ctx context.Context, rows []statsRow) error {
 	}
 	return db.WithWriterContext(ctx, func(tx *sql.Tx) error {
 		for _, e := range enc {
-			m, _ := statsLookup(e.key.metric)
+			m, _ := s.statsLookup(e.key.metric)
 			if _, err := tx.ExecContext(ctx, insert, e.key.day, e.key.metric, e.key.dims); err != nil {
 				return err
 			}
@@ -1033,12 +1041,12 @@ func (s *Service) statsReplaceDay(ctx context.Context, w statsDayWrite) error {
 		if r.Day != w.Day {
 			return fmt.Errorf("statistics: row of %s for %s in the write of %s", r.Metric, r.Day, w.Day)
 		}
-		if m, ok := statsLookup(r.Metric); ok && m.Group != w.Group {
+		if m, ok := s.statsLookup(r.Metric); ok && m.Group != w.Group {
 			return fmt.Errorf("%w: %s belongs to group %s, not %s", errStatsKind, m.Name, m.Group, w.Group)
 		}
 		rows[i] = r
 	}
-	enc, err := statsPrepare(rows, statsDerived)
+	enc, err := s.statsPrepare(rows, statsDerived)
 	if err != nil {
 		return err
 	}
@@ -1076,7 +1084,7 @@ func (s *Service) statsReplaceDay(ctx context.Context, w statsDayWrite) error {
 			return err
 		}
 		for _, e := range enc {
-			m, _ := statsLookup(e.key.metric)
+			m, _ := s.statsLookup(e.key.metric)
 			vals, err := statsEncodeVals(m, e.vals, e.hist)
 			if err != nil {
 				return err

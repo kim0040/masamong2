@@ -35,6 +35,7 @@ func lunarHour(t *testing.T, y, m, d, h, mi int) fortune.Pillar {
 // 00:40, and the fortune data says the correction was applied. With hour_correction_minutes 0 the clock's
 // 축시 comes back and the note goes.
 func TestNatalHourPillarIsInSolarTime(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	withZone(t, s, "Asia/Seoul")
 	at := time.Date(2026, 11, 3, 8, 0, 0, 0, time.UTC)
@@ -68,6 +69,7 @@ func TestNatalHourPillarIsInSolarTime(t *testing.T) {
 // The knob is an operator default of fortune.query, so the console's tool page shows it in its defaults
 // form (operator inputs are never offered to the chat model).
 func TestHourCorrectionIsAConsoleDefault(t *testing.T) {
+	t.Parallel()
 	var inputs []tools.Input
 	for _, b := range tools.Builtins() {
 		if b.ID == "fortune.query" {
@@ -88,6 +90,7 @@ func TestHourCorrectionIsAConsoleDefault(t *testing.T) {
 // One birth-date check serves registration, a stored profile and a V1 import: a calendar date from 1900
 // on and not in the future.
 func TestBirthDateValidator(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 11, 3, 8, 0, 0, 0, time.UTC)
 	for v, want := range map[string]bool{"2000-01-01": true, "1900-01-01": true, "2026-11-03": true,
 		"1899-12-31": false, "0000-05-15": false, "1990-02-30": false, "1990-2-3": false, "2026-11-04": false, "": false} {
@@ -104,6 +107,7 @@ func TestBirthDateValidator(t *testing.T) {
 // Unset, the correction is Seoul's 30 minutes only in Seoul's own zone; anywhere else it is 0 (the 30
 // minutes is Seoul's distance from its meridian). A value the operator set wins in every zone.
 func TestHourCorrectionDefaultFollowsTheBirthZone(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	for zone, want := range map[string]int{"Asia/Seoul": 30, "Asia/Pyongyang": 30, "America/New_York": 0, "Asia/Tokyo": 0, "Australia/Sydney": 0, "": 30} {
 		withZone(t, s, zone)
@@ -136,6 +140,7 @@ func TestHourCorrectionDefaultFollowsTheBirthZone(t *testing.T) {
 // The data line names the offset of the clock the hour was read on, and only when that clock is not the
 // one the birth was given on: a 1955 winter birth (the clock was already UTC+8:30) needs none.
 func TestHourCorrectedLineOnlyWhenTheClockMoved(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	withZone(t, s, "Asia/Seoul")
 	if _, off := time.Date(1955, 7, 20, 12, 0, 0, 0, s.birthZone()).Zone(); off != 9*3600+1800 {
@@ -191,6 +196,7 @@ func TestHourCorrectedLineOnlyWhenTheClockMoved(t *testing.T) {
 // this morning in Seoul is registered at 05:00 KST (still the evening before in UTC), and a New York
 // date that is still tomorrow there is not.
 func TestBirthDateIsComparedInTheBirthZone(t *testing.T) {
+	t.Parallel()
 	seoul, err := time.LoadLocation("Asia/Seoul")
 	if err != nil {
 		t.Fatalf("time zone data: %v", err)

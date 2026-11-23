@@ -10,6 +10,7 @@ import (
 // A thread without an entry of its own follows its parent channel's room_style setting (channelPolicy), so
 // it uses the parent's approved note too. A thread with its own entry keeps its own.
 func TestThreadUsesItsParentRoomStyleNote(t *testing.T) {
+	t.Parallel()
 	s := jobTestSvc(t)
 	doc := s.Doc()
 	doc.Guilds = map[string]config.GuildSettings{"g": {Channels: map[string]config.ChannelPolicy{

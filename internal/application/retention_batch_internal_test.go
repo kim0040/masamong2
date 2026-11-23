@@ -30,6 +30,7 @@ func (c *cancelAtCountContext) Done() <-chan struct{} {
 }
 
 func TestRetentionDeleteAndUpdateStopBetweenBatches(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	tx, err := s.Store.DB.Begin()
 	if err != nil {

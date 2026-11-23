@@ -8,6 +8,7 @@ import (
 )
 
 func TestQuietUntil(t *testing.T) {
+	t.Parallel()
 	s := &Service{}
 	s.cfg.Store(&configSnapshot{doc: config.Default("t", ""), rev: 1})
 	seoul, _ := time.LoadLocation("Asia/Seoul")

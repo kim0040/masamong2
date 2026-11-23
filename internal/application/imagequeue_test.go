@@ -156,7 +156,7 @@ func imageChatSvc(t *testing.T) (*application.Service, *gatedImages, *pictureGat
 	img := newGatedImages(t)
 	svc := setupSvc(t)
 	serveAnyServer(t, svc)
-	t.Setenv("FAKE_IMG_KEY", "k")
+	svc.SetEnvForTest(t, "FAKE_IMG_KEY", "k")
 	applyDoc(t, svc, func(d *config.Document) {
 		d.Discord.Enabled = true
 		d.Providers["img"] = config.Provider{Kind: config.KindOpenAI, BaseURL: img.url, CredentialRef: "env:FAKE_IMG_KEY"}
@@ -177,6 +177,7 @@ func drawFor(svc *application.Service, user, msg, prompt string) chat.ToolResult
 }
 
 func TestChatPictureIsQueuedAtOnceAndPostedLaterAsAReply(t *testing.T) {
+	t.Parallel()
 	svc, img, gw := imageChatSvc(t)
 	began := time.Now()
 	res := drawFor(svc, "u1", "m1", "우주복 입은 햄스터")
@@ -212,6 +213,7 @@ func TestChatPictureIsQueuedAtOnceAndPostedLaterAsAReply(t *testing.T) {
 }
 
 func TestRepeatedPictureRequestIsTheSameJob(t *testing.T) {
+	t.Parallel()
 	svc, img, gw := imageChatSvc(t)
 	first := drawFor(svc, "u1", "m1", "Hamster in a space suit")
 	second := drawFor(svc, "u1", "m2", "  hamster   in a SPACE suit!! ")
@@ -226,6 +228,7 @@ func TestRepeatedPictureRequestIsTheSameJob(t *testing.T) {
 }
 
 func TestPictureQueueCapsPerPersonAndInTotal(t *testing.T) {
+	t.Parallel()
 	svc, img, gw := imageChatSvc(t)
 	if r := drawFor(svc, "u1", "m1", "a cat"); r.Status != "queued" {
 		t.Fatalf("u1: %+v", r)
@@ -258,6 +261,7 @@ func TestPictureQueueCapsPerPersonAndInTotal(t *testing.T) {
 }
 
 func TestFailedPictureSaysSoInTheChannel(t *testing.T) {
+	t.Parallel()
 	svc, img, gw := imageChatSvc(t)
 	img.fail.Store(true)
 	if r := drawFor(svc, "u1", "m1", "a cat"); r.Status != "queued" {
@@ -273,6 +277,7 @@ func TestFailedPictureSaysSoInTheChannel(t *testing.T) {
 }
 
 func TestQueuedPicturesAreDroppedAtShutdownWithoutPosting(t *testing.T) {
+	t.Parallel()
 	svc, img, gw := imageChatSvc(t)
 	drawFor(svc, "u1", "m1", "a cat")
 	testutil.WaitFor(t, 5*time.Second, "the first draw to start", func() bool { return img.calls.Load() == 1 })
@@ -298,6 +303,7 @@ func TestQueuedPicturesAreDroppedAtShutdownWithoutPosting(t *testing.T) {
 }
 
 func TestAsyncOffKeepsThePictureSynchronous(t *testing.T) {
+	t.Parallel()
 	svc, img, gw := imageChatSvc(t)
 	img.open()
 	applyDoc(t, svc, func(d *config.Document) {
@@ -316,6 +322,7 @@ func TestAsyncOffKeepsThePictureSynchronous(t *testing.T) {
 }
 
 func TestPictureRequestsOutsideChatStaySynchronous(t *testing.T) {
+	t.Parallel()
 	svc, img, gw := imageChatSvc(t)
 	img.open()
 	// a chat turn with no message to reply to (a slash command's chat), and the command itself
@@ -338,6 +345,7 @@ func TestPictureRequestsOutsideChatStaySynchronous(t *testing.T) {
 }
 
 func TestPictureJobsAreDroppedSilentlyForPolicyReasons(t *testing.T) {
+	t.Parallel()
 	type change struct {
 		name  string
 		drops int64 // jobs dropped: the waiting one, plus the one being drawn when the change hits it too
@@ -392,6 +400,7 @@ func TestPictureJobsAreDroppedSilentlyForPolicyReasons(t *testing.T) {
 // Withdrawn memory consent is about what is stored, not a policy reason to drop a picture: a person who
 // withdrew before asking, or while their job waits, gets it drawn and posted like /image would.
 func TestPictureForAPersonWhoWithdrewMemoryConsentIsPosted(t *testing.T) {
+	t.Parallel()
 	withdraw := func(t *testing.T, svc *application.Service, user string) {
 		if r := asUser(svc, user, "privacy.consent", map[string]any{"scope": "memory", "decision": "withdraw"}); !r.OK {
 			t.Fatal(r.Error)
@@ -435,6 +444,7 @@ func TestPictureForAPersonWhoWithdrewMemoryConsentIsPosted(t *testing.T) {
 // A reconnecting gateway (not connected, no servers listed for a moment) is not a reason to throw away a
 // picture that is paid for: the post waits for it and then goes out.
 func TestPictureWaitsOutAReconnectBeforePosting(t *testing.T) {
+	t.Parallel()
 	svc, img, gw := imageChatSvc(t)
 	if r := drawFor(svc, "u1", "m1", "a cat"); r.Status != "queued" {
 		t.Fatalf("%+v", r)
@@ -459,6 +469,7 @@ func TestPictureWaitsOutAReconnectBeforePosting(t *testing.T) {
 // Discord stays away for good: the picture that is already paid for is still tried (posting is REST), and
 // the job that has not started is not drawn; its person hears image.failed.
 func TestPictureThatCannotStartForADisconnectedGatewaySaysFailed(t *testing.T) {
+	t.Parallel()
 	svc, img, gw := imageChatSvc(t)
 	application.SetImageConnectWaitForTest(svc, 150*time.Millisecond, 10*time.Millisecond)
 	drawFor(svc, "u1", "m1", "a cat")
@@ -483,6 +494,7 @@ func TestPictureThatCannotStartForADisconnectedGatewaySaysFailed(t *testing.T) {
 }
 
 func TestPictureIsNotDrawnWhereTheBotCannotAttachFiles(t *testing.T) {
+	t.Parallel()
 	svc, img, gw := imageChatSvc(t)
 	img.open()
 	gw.mu.Lock()
@@ -501,6 +513,7 @@ func TestPictureIsNotDrawnWhereTheBotCannotAttachFiles(t *testing.T) {
 }
 
 func TestFailedPicturePostSaysSoUnlessItWasAPermissionOrTheRequestIsGone(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		err   error
 		lines int
@@ -530,6 +543,7 @@ func TestFailedPicturePostSaysSoUnlessItWasAPermissionOrTheRequestIsGone(t *test
 }
 
 func TestPictureOverDiscordsUploadLimitSaysFailedInsteadOfPosting(t *testing.T) {
+	t.Parallel()
 	svc, img, gw := imageChatSvc(t)
 	img.big.Store(true)
 	img.open()
@@ -545,6 +559,7 @@ func TestPictureOverDiscordsUploadLimitSaysFailedInsteadOfPosting(t *testing.T) 
 // The requester deletes the request while the job waits or is being drawn: nothing of it is drawn
 // (waiting) or posted (drawn), and no failure line is posted for it either.
 func TestDeletedRequestCancelsItsPicture(t *testing.T) {
+	t.Parallel()
 	svc, img, gw := imageChatSvc(t)
 	drawFor(svc, "u1", "m1", "a cat")
 	testutil.WaitFor(t, 5*time.Second, "the first draw to start", func() bool { return img.calls.Load() == 1 })
@@ -577,6 +592,7 @@ func TestDeletedRequestCancelsItsPicture(t *testing.T) {
 }
 
 func TestRepeatedRequestReportsItsPlaceInTheLine(t *testing.T) {
+	t.Parallel()
 	svc, img, _ := imageChatSvc(t)
 	drawFor(svc, "u1", "m1", "a cat")
 	testutil.WaitFor(t, 5*time.Second, "the first draw to start", func() bool { return img.calls.Load() == 1 })
@@ -589,6 +605,7 @@ func TestRepeatedRequestReportsItsPlaceInTheLine(t *testing.T) {
 }
 
 func TestSameWordsInAnotherAspectRatioAreAnotherRequest(t *testing.T) {
+	t.Parallel()
 	svc, img, _ := imageChatSvc(t)
 	run := application.ChatToolForTest(svc, application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m1", SpeakerID: "u1"})
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -606,6 +623,7 @@ func TestSameWordsInAnotherAspectRatioAreAnotherRequest(t *testing.T) {
 // A repeat that the queue answers, and a refusal because the line is full, do not use up the person's
 // daily picture allowance.
 func TestQueueAnswersDoNotCountAgainstTheDailyLimit(t *testing.T) {
+	t.Parallel()
 	svc, img, _ := imageChatSvc(t)
 	applyDoc(t, svc, func(d *config.Document) {
 		s := d.Tools["images.generate"]
@@ -634,6 +652,7 @@ func TestQueueAnswersDoNotCountAgainstTheDailyLimit(t *testing.T) {
 
 // After shutdown a request gets a short failure, not a synchronous draw.
 func TestClosedServiceDoesNotDrawSynchronously(t *testing.T) {
+	t.Parallel()
 	svc, img, gw := imageChatSvc(t)
 	drawFor(svc, "u1", "m1", "a cat") // starts the worker
 	testutil.WaitFor(t, 5*time.Second, "the draw to start", func() bool { return img.calls.Load() == 1 })
@@ -648,6 +667,7 @@ func TestClosedServiceDoesNotDrawSynchronously(t *testing.T) {
 }
 
 func TestBackgroundPictureIsRecordedUnderItsTurn(t *testing.T) {
+	t.Parallel()
 	svc, img, gw := imageChatSvc(t)
 	img.open()
 	ctx := observability.WithTurn(context.Background(), "turn-img-1")
@@ -664,6 +684,7 @@ func TestBackgroundPictureIsRecordedUnderItsTurn(t *testing.T) {
 }
 
 func TestPictureToolSettingIsForTheOperatorOnly(t *testing.T) {
+	t.Parallel()
 	svc, _, _ := imageChatSvc(t)
 	tl, _ := tools.Find(svc.ToolRegistryForTest(), "images.generate")
 	var operatorOnly bool

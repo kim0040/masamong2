@@ -33,6 +33,7 @@ type peopleServerTestPerson struct {
 }
 
 func TestPeopleServersReturnsPerGuildCountsNamesAndCardTotals(t *testing.T) {
+	t.Parallel()
 	svc, _, _ := memorySvc(t)
 	seedServerPerson(t, svc, "p1", "discord:g:c", "u1", "Old Name", "2026-10-10T12:00:00+00:00")
 	seedServerPerson(t, svc, "p2", "discord:g:c", "u1", "Mid Name", "2026-10-11T12:00:00+00:00")

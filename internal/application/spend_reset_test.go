@@ -57,6 +57,7 @@ func ledgerRowForTest(t *testing.T, s *Service) spendRowSnapshot {
 }
 
 func TestUsageResetReopensBudgetAndLeavesSpendRowsUntouched(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 14, 12, 30, 0, 0, time.UTC)
 	s := spendResetTestService(t, now)
 	addSpendForTest(t, s, now.Format("2006-01-02"), "chat", 11)
@@ -103,6 +104,7 @@ func TestUsageResetReopensBudgetAndLeavesSpendRowsUntouched(t *testing.T) {
 }
 
 func TestMonthSpendIgnoresPriorMonthResetAndClampsKinds(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 14, 12, 30, 0, 0, time.UTC)
 	s := spendResetTestService(t, now)
 	day := now.Format("2006-01-02")
@@ -134,6 +136,7 @@ func TestMonthSpendIgnoresPriorMonthResetAndClampsKinds(t *testing.T) {
 }
 
 func TestMonthSpendIgnoresUnreadableResetSnapshot(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 14, 12, 30, 0, 0, time.UTC)
 	s := spendResetTestService(t, now)
 	addSpendForTest(t, s, now.Format("2006-01-02"), "chat", 0.25)
@@ -147,6 +150,7 @@ func TestMonthSpendIgnoresUnreadableResetSnapshot(t *testing.T) {
 }
 
 func TestDashboardUsesResetForTodayAndShowsActiveReset(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 10, 14, 12, 30, 0, 0, time.UTC)
 	s := spendResetTestService(t, now)
 	day := now.Format("2006-01-02")

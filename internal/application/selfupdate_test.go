@@ -43,6 +43,7 @@ func fakeRelease(t *testing.T, name, version string) []byte {
 }
 
 func TestUpdateApplyInstallsTheReleaseAndRestarts(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("the fake release programs are shell scripts")
 	}
@@ -77,8 +78,7 @@ func TestUpdateApplyInstallsTheReleaseAndRestarts(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	defer application.SetVersionForTest("0.2.0")()
-	svc := setupSvc(t)
+	svc := setupSvcVersion(t, "0.2.0")
 	defer application.UseSelfUpdateForTest(svc, srv.URL+"/dl/%s/", bin)()
 	application.UseUpdateAPIForTest(svc, srv.URL+"/api/%s")
 
@@ -135,13 +135,13 @@ func TestUpdateApplyInstallsTheReleaseAndRestarts(t *testing.T) {
 }
 
 func TestUpdateApplyRefusesASourceBuild(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"tag_name":"v0.3.0","assets":[]}`))
 	}))
 	defer srv.Close()
 	// git describe of a clone: not a release version, so the installer updates it
-	defer application.SetVersionForTest("d1e4e02-dirty")()
-	svc := setupSvc(t)
+	svc := setupSvcVersion(t, "d1e4e02-dirty")
 	application.UseUpdateAPIForTest(svc, srv.URL+"/%s")
 	svc.Daemon = true
 	o := out(t, svc, "updates.status", nil)
@@ -154,6 +154,7 @@ func TestUpdateApplyRefusesASourceBuild(t *testing.T) {
 }
 
 func TestResetStartsOverButKeepsBackups(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	svc.Daemon = true
 	root := svc.DataRoot
@@ -201,9 +202,8 @@ func TestResetStartsOverButKeepsBackups(t *testing.T) {
 }
 
 func TestFirstStartOfANewVersionTakesABackup(t *testing.T) {
-	restore := application.SetVersionForTest("0.2.0")
-	defer restore()
-	svc := setupSvc(t)
+	t.Parallel()
+	svc := setupSvcVersion(t, "0.2.0")
 	count := func() int {
 		n := 0
 		entries, _ := os.ReadDir(filepath.Join(svc.DataRoot, "backups"))
@@ -218,7 +218,7 @@ func TestFirstStartOfANewVersionTakesABackup(t *testing.T) {
 	if count() != 0 {
 		t.Fatal("a new instance's first start is not an upgrade")
 	}
-	application.SetVersionForTest("0.3.0")
+	svc.SetVersionForTest("0.3.0")
 	svc.BackupOnUpgrade()
 	svc.BackupOnUpgrade() // the second start of the same version
 	if count() != 1 {

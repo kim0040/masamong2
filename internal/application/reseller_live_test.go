@@ -17,6 +17,7 @@ import (
 //
 //	MASAMONG_LIVE_KEYS_DIR=~/keys go test ./internal/application -run TestLiveResellers -v
 func TestLiveResellers(t *testing.T) {
+	// sequential: it sets process environment variables
 	dir := os.Getenv("MASAMONG_LIVE_KEYS_DIR")
 	if dir == "" || os.Getenv("CI") != "" {
 		t.Skip("set MASAMONG_LIVE_KEYS_DIR to a folder of key files")

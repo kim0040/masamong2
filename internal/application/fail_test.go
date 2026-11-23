@@ -24,6 +24,7 @@ func failMessage(svc interface {
 // The failure of an operator HTTP tool names the tool and the error's class, never the server's body or
 // the address it was called at.
 func TestHTTPToolFailureHasNoServerText(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "internal trace: synthetic-backend-secret at /srv/app/main.go:42", http.StatusBadRequest)
@@ -54,6 +55,7 @@ func TestHTTPToolFailureHasNoServerText(t *testing.T) {
 // A settings file the validator refuses is told as the key's sentence followed by the validator's own reason
 // (the setting and the rule: that is what the operator has to fix), the way prefs.invalid does.
 func TestConfigRefusalNamesTheReasonAfterTheKeysSentence(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	in, _ := json.Marshal(map[string]any{"yaml": "instance: [unterminated\n\t- {"})
 	r := svc.Execute(t.Context(), action.Request{Action: "config.apply", Input: in, Locale: "en", BaseRevision: svc.Revision()})
@@ -68,6 +70,7 @@ func TestConfigRefusalNamesTheReasonAfterTheKeysSentence(t *testing.T) {
 
 // A backup name that is not one of ours is refused with the key, not with the path rule's words.
 func TestBackupNameRefusalIsPlainWords(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	for _, act := range []string{"backup.verify", "backup.delete", "backup.restore"} {
 		r := exec(svc, act, map[string]any{"name": "../outside", "confirm": "../outside"})
@@ -82,6 +85,7 @@ func TestBackupNameRefusalIsPlainWords(t *testing.T) {
 
 // A file that is not a SQLite database answers with the key, not with the driver's "file is not a database".
 func TestMigrationOfANonDatabaseIsPlainWords(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	path := filepath.Join(t.TempDir(), "old.db")
 	if err := os.WriteFile(path, []byte(strings.Repeat("this is not a database ", 200)), 0o600); err != nil {

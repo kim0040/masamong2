@@ -30,6 +30,7 @@ import (
 	"masamong/internal/observability"
 	"masamong/internal/providers"
 	"masamong/internal/providers/openai"
+	"masamong/internal/providers/openmeteo"
 	"masamong/internal/storage"
 	"masamong/internal/tools"
 )
@@ -129,6 +130,9 @@ type Service struct {
 	// animalsPosted is when each public channel last got the twelve-animal card (fortune.go animals)
 	animalsOnce   sync.Once
 	animalsPosted *ttlCache[struct{}]
+	// geocodes keeps place lookups for a day (geocodeCache, features.go)
+	geocodesOnce sync.Once
+	geocodes     *ttlCache[openmeteo.Place]
 
 	pendingMsgs pendingMessageCount // the console's count of messages waiting for a vector (pending_count.go)
 	// cfgMu serializes config writers so two changes based on the same revision cannot both commit.
@@ -304,7 +308,7 @@ func openService(dataRoot string, clk clock.Clock, webBuild bool, log *slog.Logg
 	if log != nil {
 		s.Log = s.CaptureLogs(log)
 	}
-	reg := buildRegistry(config.Default("", dataRoot), s.Log, s.Clock.Now)
+	reg := buildRegistryWith(config.Default("", dataRoot), s.Log, s.Clock.Now, s.credential)
 	reg.hooks = &s.hooks
 	s.cfg.Store(&configSnapshot{doc: config.Document{}, reg: reg})
 	opened := false
@@ -511,7 +515,7 @@ func (s *Service) setDoc(doc config.Document, rev int) {
 		regDoc = offlineProviders(doc)
 	}
 	// Provider governors outlive this registry: requests on the old snapshot still hold their slots.
-	reg := buildRegistry(regDoc, s.Log, s.Clock.Now)
+	reg := buildRegistryWith(regDoc, s.Log, s.Clock.Now, s.credential)
 	reg.hooks = &s.hooks
 	if !s.practice {
 		reg.addBuiltinOpenMeteo() // worldwide weather needs no key
@@ -690,7 +694,7 @@ func (s *Service) execute(ctx context.Context, req action.Request) action.Result
 // tool that cannot answer yet (no key, no model) is left out of both lists, so "what can you do?"
 // never promises a quote the bot has no service for.
 func (s *Service) help(req action.Request) action.Result {
-	out := map[string]any{"version": Version, "name": "masamong", "web_build": s.WebBuild}
+	out := map[string]any{"version": s.version(), "name": "masamong", "web_build": s.WebBuild}
 	p := lang.For(req.Locale, s.Doc().I18n.DefaultLocale)
 	var chatTools, commands []any
 	ready, byCommand, memo := map[string]bool{}, map[string]bool{}, map[string]string{}

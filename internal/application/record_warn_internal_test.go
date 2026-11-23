@@ -15,6 +15,7 @@ import (
 // A record write the database refuses warns — losing history must be visible — but at most once a
 // minute, so a broken writer cannot fill the log with one line per turn.
 func TestRecordWriteFailureWarnsOnceAMinute(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	var logs bytes.Buffer
 	s.Log = slog.New(slog.NewTextHandler(&logs, nil))
@@ -44,6 +45,7 @@ func TestRecordWriteFailureWarnsOnceAMinute(t *testing.T) {
 // The ledger's own flush takes the same path: each refused row warns through the throttle, not at
 // debug level.
 func TestLedgerRowFailureWarnsOnce(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	var logs bytes.Buffer
 	s.Log = slog.New(slog.NewTextHandler(&logs, nil))
@@ -82,6 +84,7 @@ func (p *breakingPoster) PostChannel(context.Context, string, string, string, *a
 // A reminder that was sent but whose final status write fails warns instead of staying invisible:
 // the row is left in 'sending', which the next start recovers as 'unknown'.
 func TestReminderStatusWriteFailureWarns(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	var logs bytes.Buffer
 	s.Log = slog.New(slog.NewTextHandler(&logs, nil))
@@ -111,6 +114,7 @@ func TestReminderStatusWriteFailureWarns(t *testing.T) {
 
 // The same pass with a healthy database marks the reminder sent and warns nothing.
 func TestReminderStatusWriteRecorded(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	var logs bytes.Buffer
 	s.Log = slog.New(slog.NewTextHandler(&logs, nil))
@@ -145,6 +149,7 @@ func TestReminderStatusWriteRecorded(t *testing.T) {
 // thing: a reminder that is still to come. This pins them equal for every status and both series
 // shapes, so one cannot drift from the other.
 func TestReminderLiveMatchesCancellable(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	db, err := s.adminDB()
 	if err != nil {

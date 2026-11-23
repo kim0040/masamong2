@@ -62,6 +62,7 @@ func setupTiDBSvc(t *testing.T) *application.Service {
 // On TiDB writes are not serialized in the process: simultaneous button votes (applied to the latest
 // revision) must still all be counted, each exactly once.
 func TestTiDBSimultaneousVotesAllCount(t *testing.T) {
+	// sequential: it sets process environment variables
 	svc := setupTiDBSvc(t)
 	if svc.Store.Backend != storage.BackendTiDB {
 		t.Fatalf("backend %s", svc.Store.Backend)

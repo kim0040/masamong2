@@ -120,6 +120,7 @@ func runOldEdits(t *testing.T, s *Service) {
 }
 
 func TestOldEditsAreSettledAndNothingElseIs(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	holdOldEdits(t, s)
 	e, err := s.MemoryEngine()
@@ -209,6 +210,7 @@ func TestOldEditsAreSettledAndNothingElseIs(t *testing.T) {
 // A message with a job in the queue is the job's: the job settles it if it is an edit, and if it is a deletion the
 // stored row still looks current until the worker reaches it.
 func TestOldEditsLeaveAMessageWithAJobWaiting(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	holdOldEdits(t, s)
 	e, err := s.MemoryEngine()
@@ -245,6 +247,7 @@ func TestOldEditsLeaveAMessageWithAJobWaiting(t *testing.T) {
 // A deletion the old release queued and had not carried out: nothing marks it as one but its job, and the turn is still
 // there because the crash came before the foreground step and the worker has not reached it.
 func TestOldEditsLeaveAnOldDeletionStillQueued(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	holdOldEdits(t, s)
 	e, err := s.MemoryEngine()
@@ -265,6 +268,7 @@ func TestOldEditsLeaveAnOldDeletionStillQueued(t *testing.T) {
 
 // A change that came in and is not in the queue yet has only its event file: nothing is judged until it is.
 func TestOldEditsWaitForAChangeNotYetInTheQueue(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	holdOldEdits(t, s)
 	e, err := s.MemoryEngine()
@@ -292,6 +296,7 @@ func TestOldEditsWaitForAChangeNotYetInTheQueue(t *testing.T) {
 // The pass never holds the write connection for the whole history: it goes in batches, it resumes after a stop, and
 // an edit settled by the worker keeps its number (a new one would refuse the turns under way).
 func TestOldEditsGoInBatchesAndKeepNumbers(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	holdOldEdits(t, s)
 	e, err := s.MemoryEngine()
@@ -366,6 +371,7 @@ func TestOldEditsGoInBatchesAndKeepNumbers(t *testing.T) {
 
 // The whole way: a database as the old release left it, opened by this one, answers on the edited message again.
 func TestAnUpgradedDatabaseKeepsRepliesOnAnOldEdit(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	first, err := Open(dir, nil, false)
 	if err != nil {

@@ -15,6 +15,7 @@ func asUser(svc *application.Service, user, act string, in map[string]any) actio
 }
 
 func TestConsentNeedsTheButtonAndOnlyThePersonCanAgree(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	if svc.ConsentAllows("u1", "fortune") {
 		t.Fatal("fortune needs consent")
@@ -60,6 +61,7 @@ func TestConsentNeedsTheButtonAndOnlyThePersonCanAgree(t *testing.T) {
 }
 
 func TestWithdrawingMemoryForgetsThePerson(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	eng, err := svc.MemoryEngine()
 	if err != nil {
@@ -94,6 +96,7 @@ func TestWithdrawingMemoryForgetsThePerson(t *testing.T) {
 
 // LIVE-06: a withdrawn opt-out scope shows the button that turns it back on.
 func TestWithdrawnMemoryConsentCanBeTurnedBackOn(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	if r := asUser(svc, "u1", "privacy.consent", map[string]any{"scope": "memory", "decision": "withdraw"}); !r.OK || svc.MemoryAllowed("u1") {
 		t.Fatalf("withdraw: %+v", r)

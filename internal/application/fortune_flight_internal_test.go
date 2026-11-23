@@ -49,6 +49,7 @@ func zodiacWorkers(t *testing.T, release func()) (context.Context, *sync.WaitGro
 
 // The slot channel is created from the host profile, not from the medium constant alone.
 func TestZodiacSlotCountFollowsHostProfile(t *testing.T) {
+	// sequential: it installs the process's host profile
 	prev := hostprofile.Current()
 	t.Cleanup(func() { hostprofile.Apply(prev) })
 	for _, n := range []int{1, 2, 4} {
@@ -64,6 +65,7 @@ func TestZodiacSlotCountFollowsHostProfile(t *testing.T) {
 // No more than zodiacMaxGenerations model calls run at once; one that has to wait for a slot gives up with
 // its own context.
 func TestZodiacGenerationsAreBounded(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	db, err := s.adminDB()
 	if err != nil {
@@ -126,6 +128,7 @@ func TestZodiacGenerationsAreBounded(t *testing.T) {
 // When the request that was generating a text runs out of time, an asker waiting for it takes over and
 // still gets its text instead of the first request's timeout.
 func TestZodiacWaiterTakesOverFromATimedOutGenerator(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	db, err := s.adminDB()
 	if err != nil {
@@ -186,6 +189,7 @@ func setZodiacHook(t *testing.T, h *atomic.Pointer[func(key string)], f func(key
 // A request whose cache miss is older than another request's finished generation must read the text that
 // request stored, not generate a second one (one more model call and a different text for the same key).
 func TestZodiacLateRequestReadsWhatTheFlightAheadStored(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	db, err := s.adminDB()
 	if err != nil {
@@ -234,6 +238,7 @@ func TestZodiacLateRequestReadsWhatTheFlightAheadStored(t *testing.T) {
 // A generator that waited for a slot reads the cache once it has the slot: the text may have been stored
 // while it waited.
 func TestZodiacGeneratorReadsTheCacheAfterItsSlot(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	db, err := s.adminDB()
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 )
 
 func TestCallLedgersKeepNinetyDays(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	db, err := s.adminDB()
 	if err != nil {
@@ -45,6 +46,7 @@ func TestCallLedgersKeepNinetyDays(t *testing.T) {
 // A model or tool call outside a turn or job still gets a row, with empty ids; a service without a
 // store records nothing and does not fail.
 func TestLedgerWriteWithoutTurn(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	s.noteLLMCall(context.Background(), llmCall{Role: "summary", Model: "m", CostUSD: 0.5})
 	db, _ := s.adminDB()
@@ -64,6 +66,7 @@ func TestLedgerWriteWithoutTurn(t *testing.T) {
 
 // A turn the channel's logging level kept body-free is not rebuilt from the memory on read (D9).
 func TestBodyFreeTurnIsNotResolvedOnRead(t *testing.T) {
+	t.Parallel()
 	s, _ := deliveryService(t)
 	if _, err := s.MemoryEngine(); err != nil {
 		t.Fatal(err)
@@ -106,6 +109,7 @@ func (errNotFound) Error() string            { return "provider says: private ca
 func (errNotFound) ErrClass() errclass.Class { return errclass.NotFound }
 
 func TestDeclaredParamKeys(t *testing.T) {
+	t.Parallel()
 	decl := []tools.Input{{Name: "region"}, {Name: "day_offset"}}
 	got := declaredParamKeys(decl, map[string]any{"region": "x", "day_offset": 1, "free text key": 2, "another": 3})
 	if strings.Join(got, ",") != "day_offset,region,_other" {
@@ -121,6 +125,7 @@ func TestDeclaredParamKeys(t *testing.T) {
 
 // The writer holds what is queued when the service closes, and a full queue drops rows and counts them.
 func TestLedgerWriterFlushesOnCloseAndDropsWhenFull(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	s, err := Open(dir, nil, false)
 	if err != nil {

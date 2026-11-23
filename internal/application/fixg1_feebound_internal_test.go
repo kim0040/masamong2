@@ -35,7 +35,7 @@ func fixg1Svc(t *testing.T, order []string, extra map[string]string, url map[str
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("FIXG1_KEY", "fixg1-key")
+	s.SetEnvForTest(t, "FIXG1_KEY", "fixg1-key")
 	for id, kind := range extra {
 		d.Providers[id] = config.Provider{Kind: kind}
 	}
@@ -75,6 +75,7 @@ func toolsOf(t *testing.T, s *Service) map[string]chat.ToolInfo {
 // provider the call names is the only one counted. The price fallback of finance.quote holds the
 // standard search it makes. With only free services (or none) neither pays: nothing is held or waited for.
 func TestFeeBoundFollowsTheSearchOrder(t *testing.T) {
+	t.Parallel()
 	infos := toolsOf(t, fixg1Svc(t, opsOrder, nil, nil))
 	search, quote := infos["search.web"], infos["finance.quote"]
 	if !search.Pays || search.FeeBound == nil || !quote.Pays || quote.FeeBound == nil {
@@ -121,6 +122,7 @@ func TestFeeBoundFollowsTheSearchOrder(t *testing.T) {
 // The tool loop runs a round's calls of read-only lookups at once; tools that write keep their order, and
 // a tool that pays nothing holds nothing.
 func TestToolInfoMarksParallelLookups(t *testing.T) {
+	t.Parallel()
 	p, _ := lang.Get("ko")
 	parallel := map[string]bool{}
 	for _, r := range tools.Resolve(nil, nil) {
@@ -199,6 +201,7 @@ func (r *timedRun) run(ctx context.Context, tool string, p map[string]any) chat.
 // search is let in beside them while what is spent and held (0.14) is under the cap. Under a lower cap
 // (0.10) the third waits until one has ended and is then let in on what that one really paid.
 func TestDeepSearchesRunSideBySideUnderTheDefaultCap(t *testing.T) {
+	t.Parallel()
 	s := fixg1Svc(t, opsOrder, nil, nil)
 	if got := parseUSD(s.Doc().Limits.PerRequestBudgetUSD, 0); got != 0.15 {
 		t.Fatalf("default per-reply cap %v", got)
@@ -254,6 +257,7 @@ func TestDeepSearchesRunSideBySideUnderTheDefaultCap(t *testing.T) {
 // A search whose first service charges and finds nothing asks the next one, which charges too: the turn
 // is charged both fees, and both together stay within what the call held.
 func TestFallbackSearchSpendsWithinItsHold(t *testing.T) {
+	t.Parallel()
 	exa := func(results string) *httptest.Server {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"results":` + results + `,"costDollars":{"total":0.007}}`))

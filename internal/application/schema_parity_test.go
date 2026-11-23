@@ -170,6 +170,7 @@ func compareDDL(sqlite, tidb ddlSchema) []string {
 }
 
 func TestAdminSQLiteAndTiDBSchemasDefineTheSameTables(t *testing.T) {
+	t.Parallel()
 	sqlite, tidb := parseDDL(t, adminSQLite), parseDDL(t, adminTiDB)
 	if len(sqlite.tables) < 12 {
 		t.Fatalf("read only %d tables from adminSQLite; an init() that appends to it is missing or the parser changed", len(sqlite.tables))

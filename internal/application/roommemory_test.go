@@ -161,6 +161,7 @@ const (
 // deleted later is left out of the next turn, and the turn record names the episode without any text.
 // While its lines are still among the recent lines the prompt shows, it is not repeated.
 func TestTurnShowsRelatedEpisodeWithLiveEvidence(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	m.extract = hikeOnly
 	sayIn(eng, time.Now().Add(-2*time.Hour), hike...)
@@ -199,6 +200,7 @@ func TestTurnShowsRelatedEpisodeWithLiveEvidence(t *testing.T) {
 
 // Unrelated talk gets no block, and the prompt is then byte-identical to one with room memory off.
 func TestTurnWithoutRoomMemoryKeepsThePrompt(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	m.extract = hikeOnly
 	sayIn(eng, time.Now().Add(-2*time.Hour), hike...)
@@ -223,6 +225,7 @@ func TestTurnWithoutRoomMemoryKeepsThePrompt(t *testing.T) {
 
 // At most three episodes, within the block's budget, however many are related.
 func TestTurnEpisodesAreCappedEndToEnd(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	m.extract = func(string) string {
 		var eps []string
@@ -247,6 +250,7 @@ func TestTurnEpisodesAreCappedEndToEnd(t *testing.T) {
 
 // A KakaoTalk block's episodes show only in a channel the block is linked to, labelled with the block.
 func TestKakaoEpisodesOnlyInLinkedChannels(t *testing.T) {
+	t.Parallel()
 	svc, m, _ := memorySvc(t)
 	csv := writeKakao(t, svc.DataRoot, "club.csv", 12)
 	if r := exec(svc, "imports.start", map[string]any{"source": "kakao_csv", "path": csv, "room": "kakao:club", "label": "동아리"}); !r.OK {
@@ -303,6 +307,7 @@ func texts(items []map[string]any) string {
 // is refused however the classifier read it; "that's wrong" hides the item; "forget that" previews, and
 // /forgetme's confirmation deletes.
 func TestExplicitRememberWrongForget(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	base := time.Now().Add(-time.Minute)
 	sayIn(eng, base, said{"5001", "u1", "철수", "마사몽 기억해줘, 나 고양이 알레르기 있어"})
@@ -395,6 +400,7 @@ func TestExplicitRememberWrongForget(t *testing.T) {
 // /mymemory shows what names the member, in this server only, and never another member's even when
 // asked for by ID.
 func TestMyMemoryScope(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	m.extract = func(string) string { return hikeAnswer }
 	sayIn(eng, time.Now().Add(-2*time.Hour), hike...)
@@ -432,6 +438,7 @@ func TestMyMemoryScope(t *testing.T) {
 // invokers, operators included, still only reach themselves. The console's forget is a preview first,
 // then a confirm with the token.
 func TestOperatorMemoryView(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	m.extract = func(string) string { return hikeAnswer }
 	sayIn(eng, time.Now().Add(-2*time.Hour), hike...)
@@ -501,6 +508,7 @@ const climbFact = `{"episodes":[{"op":"create","kind":"event","title":"클라이
 // A fact the person said about themselves becomes a card item only from two episodes on two days; the
 // card is the server's own and goes with forgetting.
 func TestPersonCardThresholdIsolationAndForget(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	cardsOn(t, svc)
 	m.extract = func(string) string { return climbFact }
@@ -551,6 +559,7 @@ func TestPersonCardThresholdIsolationAndForget(t *testing.T) {
 
 // A deleted evidence line takes the card item resting on it.
 func TestPersonCardFollowsEvidence(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	cardsOn(t, svc)
 	m.extract = func(string) string { return climbFact }
@@ -580,6 +589,7 @@ func TestPersonCardFollowsEvidence(t *testing.T) {
 
 // A bot thread without its own entry stores, and is extracted, when its parent channel stores.
 func TestBotThreadOfCapturingChannelIsExtracted(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	svc.ThreadOpened(context.Background(), "g", "c", "th", "u1", "")
 	m.extract = func(string) string { return hikeAnswer }
@@ -599,6 +609,7 @@ func TestBotThreadOfCapturingChannelIsExtracted(t *testing.T) {
 // A segment whose save is refused twice in a row (a line changed while the model read it) is sealed,
 // so it does not cost a model call every pass.
 func TestSegmentSealedAfterTwoRefusals(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	sayIn(eng, time.Now().Add(-2*time.Hour), hike...)
 	victims := []string{"3004", "3003"}
@@ -622,6 +633,7 @@ func TestSegmentSealedAfterTwoRefusals(t *testing.T) {
 
 // "Remember this" about someone else is an episode fact said by the speaker: never a card, for anyone.
 func TestExplicitFactAboutOthersIsNoCard(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	cardsOn(t, svc)
 	sayIn(eng, time.Now().Add(-time.Minute), said{"7001", "u2", "영희", "안녕"}, said{"7002", "u1", "철수", "기억해, 영희 생일은 5월 3일이야"})
@@ -652,6 +664,7 @@ func storeExplicitFactOn(t *testing.T, svc *application.Service, messageID strin
 }
 
 func TestAutoExtractionSkipsExplicitFactWithSameEvidence(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	m.extract = func(string) string { return overlappingAutoFact }
 	sayIn(eng, time.Now().Add(-2*time.Hour), said{"8101", "u1", "Member", "이거 기억해"}, said{"8102", "u2", "Other", "okay"})
@@ -666,6 +679,7 @@ func TestAutoExtractionSkipsExplicitFactWithSameEvidence(t *testing.T) {
 }
 
 func TestExplicitFactSupersedesOverlappingAutoFact(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	m.extract = func(string) string { return overlappingAutoFact }
 	sayIn(eng, time.Now().Add(-2*time.Hour), said{"8201", "u1", "Member", "이거 기억해"}, said{"8202", "u2", "Other", "okay"})
@@ -684,6 +698,7 @@ const multiFactExtraction = `{"episodes":[{"op":"create","kind":"event","title":
 	{"kind":"fact","text":"{p2} has a peanut allergy","by":["p1"],"ev":["m1"]}],"status":"done","importance":3}]}`
 
 func TestExplicitFactDedupKeepsOtherFactsFromSameObservation(t *testing.T) {
+	t.Parallel()
 	for _, explicitFirst := range []bool{false, true} {
 		name := "auto-first"
 		if explicitFirst {
@@ -743,6 +758,7 @@ func TestExplicitFactDedupKeepsOtherFactsFromSameObservation(t *testing.T) {
 }
 
 func TestAutoExtractionKeepsFactWithMultipleEvidence(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	m.extract = func(string) string {
 		return `{"episodes":[{"op":"create","kind":"event","title":"fact","items":[{"kind":"fact","text":"{p1} likes tea","by":["p1"],"ev":["m1","m2"]}],"status":"done","importance":3}]}`
@@ -760,6 +776,7 @@ func TestAutoExtractionKeepsFactWithMultipleEvidence(t *testing.T) {
 }
 
 func TestExplicitFactDedupKeepsOtherPersonsCard(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	cardsOn(t, svc)
 	m.extract = func(string) string { return overlappingAutoFact }
@@ -801,6 +818,7 @@ func TestExplicitFactDedupKeepsOtherPersonsCard(t *testing.T) {
 }
 
 func TestExplicitSaveConsentRaceRollsBackReplacements(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	m.extract = func(string) string { return strings.ReplaceAll(overlappingAutoFact, `"m1"`, `"m2"`) }
 	sayIn(eng, time.Now().Add(-4*time.Hour), said{"existing-explicit", "u1", "Member", "I like tea."},
@@ -839,6 +857,7 @@ func TestExplicitSaveConsentRaceRollsBackReplacements(t *testing.T) {
 
 // Withdrawing memory consent deletes the person's card.
 func TestPersonCardGoesWithWithdrawal(t *testing.T) {
+	t.Parallel()
 	svc, m, eng := memorySvc(t)
 	cardsOn(t, svc)
 	m.extract = func(string) string { return climbFact }

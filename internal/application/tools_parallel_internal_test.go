@@ -18,10 +18,11 @@ import (
 )
 
 func TestChatToolLedgerIncludesPanicAndPartialCost(t *testing.T) {
+	t.Parallel()
 	for _, outcome := range []string{"ok", "error", "panic"} {
 		t.Run(outcome, func(t *testing.T) {
 			s, _ := deliveryService(t)
-			t.Setenv("MASAMONG_P2_LEDGER_TEST_KEY", "synthetic-test-credential")
+			s.SetEnvForTest(t, "MASAMONG_P2_LEDGER_TEST_KEY", "synthetic-test-credential")
 			doc := s.Doc()
 			doc.Features = maps.Clone(doc.Features)
 			doc.Features["finance"] = true
@@ -115,6 +116,7 @@ func (f *quotaLoopModel) ChatTools(context.Context, string, []chat.LoopMsg, []ch
 }
 
 func TestSameToolQuotaWinnerKeepsModelOrder(t *testing.T) {
+	t.Parallel()
 	for _, limit := range []tools.Limits{{PerDay: 1}, {CooldownSec: 60}} {
 		t.Run(fmt.Sprintf("daily=%d", limit.PerDay), func(t *testing.T) {
 			s, _ := deliveryService(t)
@@ -155,10 +157,11 @@ func TestSameToolQuotaWinnerKeepsModelOrder(t *testing.T) {
 }
 
 func TestChatModelsReserveCallsAtStart(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{"planner", "loop", "response"} {
 		t.Run(mode, func(t *testing.T) {
 			s, _ := deliveryService(t)
-			t.Setenv("MASAMONG_P2_MODEL_TEST_KEY", "synthetic-test-credential")
+			s.SetEnvForTest(t, "MASAMONG_P2_MODEL_TEST_KEY", "synthetic-test-credential")
 			doc := s.Doc()
 			doc.Providers = map[string]config.Provider{"model": {Kind: config.KindOpenAI, BaseURL: "https://model-reservation.test", CredentialRef: "env:MASAMONG_P2_MODEL_TEST_KEY"}}
 			s.setDoc(doc, s.Revision()+1)

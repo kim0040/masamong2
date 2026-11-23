@@ -24,6 +24,7 @@ func cancelRequestAtSnapshot(t *testing.T, cancel context.CancelFunc) {
 }
 
 func TestManualBackupSurvivesTheRequestEnding(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	s, _ := deliveryService(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancelRequestAtSnapshot(t, cancel)
@@ -58,6 +59,7 @@ func TestManualBackupSurvivesTheRequestEnding(t *testing.T) {
 }
 
 func TestManualBackupIsStillCancelledByShutdown(t *testing.T) {
+	// sequential: it sets the package's maintenance hook
 	s, _ := deliveryService(t)
 	reached := make(chan struct{})
 	old := maintenanceHook

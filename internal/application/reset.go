@@ -404,12 +404,12 @@ func RollbackMaintenance(dataRoot string) error {
 // the database only ever moves forward. Schema changes add tables and columns only, so a copy taken
 // right after opening still holds everything the previous version wrote.
 func (s *Service) BackupOnUpgrade() {
-	if s.Store == nil || s.practice || !s.Ready() || devBuild(Version) {
+	if s.Store == nil || s.practice || !s.Ready() || devBuild(s.version()) {
 		return
 	}
 	var last string
 	_, _ = s.kvGet("runtime:version", &last)
-	if last == Version {
+	if last == s.version() {
 		return
 	}
 	var applied struct {
@@ -418,14 +418,14 @@ func (s *Service) BackupOnUpgrade() {
 	_, _ = s.kvGet("updates:applied", &applied)
 	// an instance older than this record counts as an upgrade too; a version the console installed was
 	// backed up right before, so it needs no second copy
-	if applied.To != Version && (last != "" || s.Revision() > 1) {
+	if applied.To != s.version() && (last != "" || s.Revision() > 1) {
 		name, _, err := s.createBackup(backupUpgrade)
 		if err != nil {
-			s.Log.Warn("backup on upgrade failed", "from", last, "to", Version, "err", err)
+			s.Log.Warn("backup on upgrade failed", "from", last, "to", s.version(), "err", err)
 			return // tried again on the next start
 		}
 		s.pruneKind(backupUpgrade, updateBackupsKept)
-		s.Log.Info("backup on upgrade", "from", last, "to", Version, "backup", name)
+		s.Log.Info("backup on upgrade", "from", last, "to", s.version(), "backup", name)
 	}
-	_ = s.kvSet("runtime:version", Version)
+	_ = s.kvSet("runtime:version", s.version())
 }

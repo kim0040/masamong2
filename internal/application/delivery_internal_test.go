@@ -31,6 +31,7 @@ func queuedAlerts(t *testing.T, s *Service) []alertEvent {
 }
 
 func TestNoteDeliveryStoresOneRowPerDelivery(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	s.NoteDelivery("turn-1", "g1", "c1", DeliveryReport{Parts: 3, Sent: 2, Retries: 2, Class: errclass.Overloaded, MessageIDs: []string{"m1", "m2"}})
 	s.NoteDelivery("turn-2", "g1", "c1", DeliveryReport{Parts: 1, Sent: 1, ReferenceDropped: true})
@@ -64,6 +65,7 @@ func TestNoteDeliveryStoresOneRowPerDelivery(t *testing.T) {
 }
 
 func TestDeliveryLedgerKeepsNinetyDays(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	db, err := s.adminDB()
 	if err != nil {
@@ -102,6 +104,7 @@ func TestDeliveryLedgerKeepsNinetyDays(t *testing.T) {
 }
 
 func TestNoteDeliveryProblemAlertsPermissionOncePerChannelPerSixHours(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	s.NoteDeliveryProblem("g1", "c1", errclass.Overloaded) // not something an operator can fix
 	s.NoteDeliveryProblem("g1", "", errclass.Permission)
@@ -131,6 +134,7 @@ func TestNoteDeliveryProblemAlertsPermissionOncePerChannelPerSixHours(t *testing
 }
 
 func TestDeliveryPermissionAlertTextInEveryLanguage(t *testing.T) {
+	t.Parallel()
 	for _, locale := range []string{"ko", "en", "ja", "zh-Hans", "es"} {
 		got := alertText(locale, alertDeliveryPerm, map[string]any{"channel_id": "12345", "guild_id": "7"})
 		if got == "" || got == "attention."+alertDeliveryPerm || !strings.Contains(got, "<#12345>") {
@@ -141,6 +145,7 @@ func TestDeliveryPermissionAlertTextInEveryLanguage(t *testing.T) {
 
 // Conversation lines kept for a reminder that is still waiting do not outlive their age cap.
 func TestRetentionDropsOldReminderContextLines(t *testing.T) {
+	t.Parallel()
 	s, clk := deliveryService(t)
 	db, err := s.adminDB()
 	if err != nil {

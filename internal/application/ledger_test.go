@@ -90,6 +90,7 @@ func rows(v any) []map[string]any {
 }
 
 func TestChatTurnWritesCallLedgers(t *testing.T) {
+	t.Parallel()
 	var n atomic.Int32
 	planURL := chatServer(t, `{"memory_requirement":"none","tool_plan":[{"tool_name":"weather","parameters":{"region":"Atlantis","source":"global"}}]}`, "stop", &n)
 	respURL := usageServer(t, "맑아요")
@@ -144,6 +145,7 @@ func TestChatTurnWritesCallLedgers(t *testing.T) {
 
 // When the planner's model is gone, the response model plans; the ledger tells the stand-in from the rest.
 func TestFallbackCallIsMarkedInTheLedger(t *testing.T) {
+	t.Parallel()
 	planURL := failingServer(t, 404)
 	respURL := usageServer(t, `{"memory_requirement":"none","tool_plan":[]}`)
 	svc := routedSvc(t, planURL, respURL)
@@ -171,6 +173,7 @@ func TestFallbackCallIsMarkedInTheLedger(t *testing.T) {
 
 // A channel's logging.level decides how much of its turns the console keeps (D9).
 func TestChannelLoggingLevelDecidesWhatTheTurnHistoryKeeps(t *testing.T) {
+	t.Parallel()
 	var n atomic.Int32
 	planURL := chatServer(t, `{"memory_requirement":"none","tool_plan":[]}`, "stop", &n)
 	respURL := usageServer(t, "대답이에요")
@@ -244,6 +247,7 @@ func TestChannelLoggingLevelDecidesWhatTheTurnHistoryKeeps(t *testing.T) {
 // The turn detail Action returns the delivery rows with the call ledgers, and the context attribution
 // stays in the turn body.
 func TestTurnDetailReturnsDeliveryAndAttribution(t *testing.T) {
+	t.Parallel()
 	var n atomic.Int32
 	planURL := chatServer(t, `{"memory_requirement":"none","tool_plan":[]}`, "stop", &n)
 	respURL := usageServer(t, "네")

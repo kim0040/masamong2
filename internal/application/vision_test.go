@@ -129,6 +129,7 @@ func visionTurnBody(t *testing.T, svc *application.Service, id string) map[strin
 }
 
 func TestPictureGoesToAnAnswerModelThatTakesIt(t *testing.T) {
+	t.Parallel()
 	svc, h := visionSvc(t)
 	url, _ := picture(t)
 	res, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m1", Message: "이거 뭐야?",
@@ -152,6 +153,7 @@ func TestPictureGoesToAnAnswerModelThatTakesIt(t *testing.T) {
 // A model that refuses pictures is remembered: its refusal falls back to a description by another chat
 // model, put into the answer's prompt, and the next turn describes first without asking it again.
 func TestRefusedPictureIsDescribedAndRemembered(t *testing.T) {
+	t.Parallel()
 	svc, h := visionSvc(t)
 	h.blind.Store(true)
 	url, _ := picture(t)
@@ -206,6 +208,7 @@ func TestRefusedPictureIsDescribedAndRemembered(t *testing.T) {
 }
 
 func TestVisionOffMakesNoPictureCalls(t *testing.T) {
+	t.Parallel()
 	svc, h := visionSvc(t)
 	applyDoc(t, svc, func(d *config.Document) { d.Chat.Vision = "off" })
 	url, hits := picture(t)
@@ -232,6 +235,7 @@ func TestVisionOffMakesNoPictureCalls(t *testing.T) {
 }
 
 func TestNoModelTakesPictures(t *testing.T) {
+	t.Parallel()
 	svc, h := visionSvc(t)
 	h.blind.Store(true)
 	h.planNoIm.Store(true)
@@ -259,6 +263,7 @@ func TestNoModelTakesPictures(t *testing.T) {
 }
 
 func TestUnreadablePictureAloneGetsTheHonestLine(t *testing.T) {
+	t.Parallel()
 	svc, _ := visionSvc(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("<svg></svg>")) }))
 	t.Cleanup(srv.Close)
@@ -270,6 +275,7 @@ func TestUnreadablePictureAloneGetsTheHonestLine(t *testing.T) {
 }
 
 func TestVisionTurnRecordsOverLimitCountsOnly(t *testing.T) {
+	t.Parallel()
 	svc, _ := visionSvc(t)
 	url, _ := picture(t)
 	refs := []vision.Ref{
@@ -294,6 +300,7 @@ func TestVisionTurnRecordsOverLimitCountsOnly(t *testing.T) {
 }
 
 func TestPartialImageFailureProducesLocalizedDeliveryNotice(t *testing.T) {
+	t.Parallel()
 	svc, h := visionSvc(t)
 	goodURL, _ := picture(t)
 	failed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) }))
@@ -326,6 +333,7 @@ func TestPartialImageFailureProducesLocalizedDeliveryNotice(t *testing.T) {
 // picture came from is the turn's own evidence (context.observation_ids). Deleting that message must
 // still redact the turn, in native mode too, where no description is stored.
 func TestDeletingThePictureSourceRedactsTheTurnWithoutVisionMessageIDs(t *testing.T) {
+	t.Parallel()
 	svc, _ := visionSvc(t)
 	url, _ := picture(t)
 	res, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m2", Message: "what is this?",
@@ -354,6 +362,7 @@ func TestDeletingThePictureSourceRedactsTheTurnWithoutVisionMessageIDs(t *testin
 // the description fails too, nothing was read, so the "M of N" line must not be announced (the turn ends
 // with the all-failed text for the model instead).
 func TestPartialNoticeIsNotAnnouncedWhenNoPictureEndedUpRead(t *testing.T) {
+	t.Parallel()
 	svc, h := visionSvc(t)
 	h.blind.Store(true)
 	h.planNoIm.Store(true)
@@ -378,6 +387,7 @@ func TestPartialNoticeIsNotAnnouncedWhenNoPictureEndedUpRead(t *testing.T) {
 }
 
 func TestVisionPartialFetchFailureRecordsCountedReason(t *testing.T) {
+	t.Parallel()
 	svc, _ := visionSvc(t)
 	goodURL, _ := picture(t)
 	failed := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) }))
@@ -398,6 +408,7 @@ func TestVisionPartialFetchFailureRecordsCountedReason(t *testing.T) {
 // A channel that keeps turns body-free keeps no description either; deleting the message the picture
 // came from removes the description from the conversation and the turn history.
 func TestDescriptionFollowsBodyFreeAndDeletion(t *testing.T) {
+	t.Parallel()
 	svc, h := visionSvc(t)
 	h.blind.Store(true)
 	url, _ := picture(t)
@@ -448,6 +459,7 @@ func TestDescriptionFollowsBodyFreeAndDeletion(t *testing.T) {
 // A picture the connector found just before the message (not with it) is read the same way, and the
 // answer is told it came earlier so a message about something else leaves it out.
 func TestEarlierPictureIsMarkedForTheAnswer(t *testing.T) {
+	t.Parallel()
 	svc, h := visionSvc(t)
 	url, _ := picture(t)
 	res, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m2", Message: "이거 뭐야?",

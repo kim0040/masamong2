@@ -210,6 +210,12 @@ func gatedProvider(client *providers.Client, p config.Provider, cred providers.C
 }
 
 func buildRegistry(doc config.Document, log *slog.Logger, now func() time.Time) *Registry {
+	return buildRegistryWith(doc, log, now, providers.Resolve)
+}
+
+// buildRegistryWith is buildRegistry with the lookup of credential references a service gives it
+// (Service.credential), so a test can stand in for the process environment per service.
+func buildRegistryWith(doc config.Document, log *slog.Logger, now func() time.Time, resolve func(ref string) (providers.Credential, error)) *Registry {
 	client := providers.NewClient(15*time.Second, log)
 	limits := map[string]int{}
 	for id, p := range doc.Providers {
@@ -243,7 +249,7 @@ func buildRegistry(doc config.Document, log *slog.Logger, now func() time.Time) 
 			}
 			continue
 		}
-		cred, err := providers.Resolve(p.CredentialRef)
+		cred, err := resolve(p.CredentialRef)
 		if err != nil {
 			st.Status, st.Error = "error", err.Error()
 			r.byID[id] = st

@@ -13,6 +13,7 @@ import (
 // features.disasters is the switch setup turns off outside Korea. It stops the bot's own posts and the
 // status Action says so, even though disaster_alerts.enabled is unset (on).
 func TestDisasterFeatureSwitchStopsTheWatcher(t *testing.T) {
+	t.Parallel()
 	feed := &kmaFeed{}
 	srv := feed.server(t)
 	svc := setupSvc(t)

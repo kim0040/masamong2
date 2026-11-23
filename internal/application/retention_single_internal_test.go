@@ -12,6 +12,7 @@ import (
 // The console's "run now" for usage_gc and the scheduler's daily pass share one mark: while either
 // runs, the other does not start beside it (both prune the same tables and record the same schedule).
 func TestUsageGCRunsOneAtATime(t *testing.T) {
+	t.Parallel()
 	s := privacyService(t)
 	clk := &movableClock{t: time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)}
 	s.Clock = clk

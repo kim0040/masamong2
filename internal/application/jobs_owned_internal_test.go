@@ -11,6 +11,7 @@ import (
 // A run that lost its job by the time indexing ends (a retry's run took it) writes no block status:
 // the newer run's state stays, whatever the cancel watcher saw.
 func TestPrepareRunThatLostItsJobLeavesTheBlockAlone(t *testing.T) {
+	t.Parallel()
 	s, err := OpenPractice(context.Background(), t.TempDir(), "ko", nil)
 	if err != nil {
 		t.Fatal(err)

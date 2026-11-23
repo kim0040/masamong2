@@ -18,6 +18,7 @@ func directKeyTool(header string) tools.Settings {
 // Saving a key written into an operator tool is refused in the person's language, naming the tool and the
 // field and never the value.
 func TestDirectKeySaveErrorIsLocalized(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	direct := "synthetic" + "-direct-value"
 	d := svc.Doc()
@@ -45,6 +46,7 @@ func TestDirectKeySaveErrorIsLocalized(t *testing.T) {
 // the same refusal is localized there too (a regular save and a dry run alike), names the tool and the
 // field, never the value, and leaves the revision where it was.
 func TestDirectKeyPatchAndFormAreLocalized(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	direct := "synthetic" + "-direct-value"
 	ops := []any{map[string]any{"path": []any{"tools", "ops.lookup"}, "value": map[string]any{
@@ -85,6 +87,7 @@ func TestDirectKeyPatchAndFormAreLocalized(t *testing.T) {
 // A configuration an earlier release accepted still loads; the doctor lists the tools that keep a key in
 // it (ids only) so the operator moves them to credential_ref.
 func TestDoctorNamesToolsWithDirectKeys(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	direct := "synthetic" + "-direct-value"
 	d := svc.Doc()
@@ -121,6 +124,7 @@ func TestDoctorNamesToolsWithDirectKeys(t *testing.T) {
 // config.show masks the literal, while a value that is the reference alone ({credential}, or a
 // scheme/name beside it) stays.
 func TestDirectKeySpellingsAreDoctoredAndMasked(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	direct := "synthetic" + "-direct-value"
 	d := svc.Doc()

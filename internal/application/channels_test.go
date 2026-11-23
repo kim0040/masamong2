@@ -10,6 +10,7 @@ import (
 )
 
 func TestChannelConfigurePersistsIsolatedPolicy(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	res := exec(svc, "channels.configure", map[string]any{
 		"guild_id": "g1", "id": "c1", "respond": "mention", "persona_ref": "neutral_en",
@@ -42,6 +43,7 @@ func TestChannelConfigurePersistsIsolatedPolicy(t *testing.T) {
 }
 
 func TestChannelRAGAttachmentIsolatedPerChannel(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	staging := filepath.Join(svc.DataRoot, "rag_staging")
 	if err := os.MkdirAll(staging, 0o755); err != nil {
@@ -91,6 +93,7 @@ func TestChannelRAGAttachmentIsolatedPerChannel(t *testing.T) {
 }
 
 func TestChannelViewAttachDetachNoReembed(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	cfg := exec(svc, "channels.configure", map[string]any{
 		"guild_id": "g1", "id": "c1", "respond": "command", "base_revision": 1,
@@ -154,6 +157,7 @@ func fmtInt(v any) int {
 }
 
 func TestPersonaApplyRequiresChannelScope(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	bad := exec(svc, "personas.apply", map[string]any{"id": "friendly_ko", "base_revision": 1})
 	if bad.OK {
@@ -171,6 +175,7 @@ func TestPersonaApplyRequiresChannelScope(t *testing.T) {
 }
 
 func TestPersonaApplyToSeveralRoomsIsOneChange(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	before := svc.Revision()
 	res := exec(svc, "personas.apply", map[string]any{"id": "neutral_en", "targets": []any{"100000000000000001:200000000000000002", "100000000000000001:200000000000000003"}})
@@ -196,6 +201,7 @@ func TestPersonaApplyToSeveralRoomsIsOneChange(t *testing.T) {
 }
 
 func TestPersonaListOrderIsStable(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	var first []string
 	for i := 0; i < 5; i++ {
@@ -217,6 +223,7 @@ func TestPersonaListOrderIsStable(t *testing.T) {
 // An unconfigured room uses the persona of its language: the server locale, then the instance
 // default. A Korean server never hands an English room a Korean persona, and the reverse.
 func TestDefaultPersonaFollowsTheRoomLanguage(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	// the instance default is en (config.Default): an unconfigured room is English
 	if got := svc.ChannelPolicyFor("g", "c").PersonaRef; strings.TrimSuffix(got, "_v2") != "friendly_en" {
@@ -260,6 +267,7 @@ func TestDefaultPersonaFollowsTheRoomLanguage(t *testing.T) {
 // Hiding a built-in keeps it out of the default choice and marks it in the list, so the console can
 // restore it later.
 func TestHiddenPersonaIsSkippedAndListed(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.I18n.DefaultLocale = "ko"
@@ -293,6 +301,7 @@ func TestHiddenPersonaIsSkippedAndListed(t *testing.T) {
 // The console hides and restores a built-in through config.patch: the flag persists and unsetting
 // the override brings the built-in back.
 func TestPersonaHidePatchRoundTrips(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	r := exec(svc, "config.patch", map[string]any{"base_revision": svc.Revision(), "ops": []any{
 		map[string]any{"path": []any{"personas", "friendly_ko", "hidden"}, "value": true},
@@ -316,6 +325,7 @@ func TestPersonaHidePatchRoundTrips(t *testing.T) {
 
 // Every language has a friendly persona for the default, and the tone sets are complete.
 func TestBuiltinPersonaSetsCoverEachLanguage(t *testing.T) {
+	t.Parallel()
 	all := config.BuiltinPersonas()
 	for id, p := range all {
 		if p.Locale == "" || p.Style == "" || !p.Builtin {
@@ -357,6 +367,7 @@ func TestBuiltinPersonaSetsCoverEachLanguage(t *testing.T) {
 // An instance made before i18n.polite_default existed has no such key and keeps the casual default
 // it was running with; turning it on moves unconfigured Korean rooms to the polite voice.
 func TestPoliteDefaultIsOptInForExistingInstances(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	applyDoc(t, svc, func(d *config.Document) {
 		d.I18n.PoliteDefault = false
@@ -378,6 +389,7 @@ func TestPoliteDefaultIsOptInForExistingInstances(t *testing.T) {
 // in, as a saved entry does: an empty reply_shape used to mean "not bubbles", so their replies were
 // never split into bubbles.
 func TestChannelsWithoutAnEntryReplyInBubbles(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	if res := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "c1", "respond": "mention"}); !res.OK {
 		t.Fatalf("configure: %+v", res.Error)
@@ -396,6 +408,7 @@ func TestChannelsWithoutAnEntryReplyInBubbles(t *testing.T) {
 // Staging takes only regular files inside rag_staging: a link (to a file anywhere on the computer, or a
 // folder link on the way) is refused, so nothing outside the staging folder is copied into a channel.
 func TestChannelAttachmentStagingRefusesLinks(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	staging := filepath.Join(svc.DataRoot, "rag_staging")
 	if err := os.MkdirAll(staging, 0o700); err != nil {

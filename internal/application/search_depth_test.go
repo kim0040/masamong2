@@ -114,6 +114,7 @@ func withFetch(t *testing.T, n int, urlOf func(int) string, reply func(string) (
 
 // Pages are read for a chat turn by the depth's default and nowhere else; a planner's number is clamped.
 func TestSearchPagesByCaller(t *testing.T) {
+	t.Parallel()
 	svc, fake := withFetch(t, 8, hostOf, func(string) (int, string, time.Duration) { return 200, okPage(campPage), 0 })
 
 	chat := runVia(svc, "chat", map[string]any{"query": "가평 캠핑장 요금"})
@@ -161,6 +162,7 @@ func TestSearchPagesByCaller(t *testing.T) {
 
 // Without pages the answer is exactly what it was before: no new keys anywhere.
 func TestSearchWithoutPagesIsByteIdentical(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	pointAt(t, svc, "serper", serperServer(t, 1, func(int) string { return "https://camp.example/1" }).URL, "S_KEY", "key-k1")
 	want := `{"live":true,"paid_provider_call":true,"provider":"serper","query":"캠핑","results":[{"datetime":"","snippet":"스니펫 0","title":"R0","url":"https://camp.example/1"}],"source":"serper","status":"ok"}`
@@ -178,6 +180,7 @@ func TestSearchWithoutPagesIsByteIdentical(t *testing.T) {
 // A failing fetch changes nothing about the search: ok, snippets, and the search service's health. A
 // page's own error never reaches a health record; the service's failure does, under its own key.
 func TestSearchFetchFailureKeepsSnippetsAndHealth(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name   string
 		status int
@@ -213,6 +216,7 @@ func TestSearchFetchFailureKeepsSnippetsAndHealth(t *testing.T) {
 
 // Pages are counted one by one against the daily allowance; when it is used up the rest is snippets.
 func TestSearchFetchQuotaIsPerPage(t *testing.T) {
+	t.Parallel()
 	svc, fake := withFetch(t, 5, hostOf, func(string) (int, string, time.Duration) { return 200, okPage(campPage), 0 })
 	if r := exec(svc, "config.patch", map[string]any{"ops": []any{
 		map[string]any{"path": []any{"web_search", "fetch_daily_limit"}, "value": 4},
@@ -241,6 +245,7 @@ func TestSearchFetchQuotaIsPerPage(t *testing.T) {
 // A host that blocked is not asked again for an hour; login-walled and non-public pages are never asked;
 // Naver blog posts are read at their mobile address.
 func TestSearchFetchHostsAndTargets(t *testing.T) {
+	t.Parallel()
 	urls := []string{"https://shop.example.com/a", "https://cafe.naver.com/club/1", "https://blog.naver.com/someone/22333", "https://news.example.com/b", "http://10.0.0.5/x"}
 	svc, fake := withFetch(t, 5, func(i int) string { return urls[i] }, func(u string) (int, string, time.Duration) {
 		if strings.Contains(u, "shop.") {
@@ -284,6 +289,7 @@ func countOf(f *fetchFake, sub string) int {
 
 // A slow page does not hold the answer: the soft deadline (once two pages are in) cuts it off.
 func TestSearchFetchSoftDeadline(t *testing.T) {
+	t.Parallel()
 	svc, _ := withFetch(t, 3, hostOf, func(u string) (int, string, time.Duration) {
 		if strings.Contains(u, "site1.") {
 			return 200, okPage(campPage), 8 * time.Second
@@ -305,6 +311,7 @@ func TestSearchFetchSoftDeadline(t *testing.T) {
 
 // Results that carry the service's own text of 300+ runes are cut from it: no page is opened.
 func TestSearchUsesServiceTextBeforeFetching(t *testing.T) {
+	t.Parallel()
 	var reqBody atomic.Value
 	exa := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		raw, _ := io.ReadAll(r.Body)
@@ -377,6 +384,7 @@ func newSlowSearch(t *testing.T, delay time.Duration, status int, title, link st
 // when that one fails or finds nothing. Deep waits up to 15 s for a service (Linkup's slow deep search
 // 45 s), 50 s for the whole search.
 func TestDeepSearchUsesOneServiceAtATime(t *testing.T) {
+	t.Parallel()
 	if got := application.SearchDeadlineForTest("linkup", "deep"); got != 45*time.Second {
 		t.Fatalf("linkup deep deadline %v", got)
 	}
@@ -416,6 +424,7 @@ func TestDeepSearchUsesOneServiceAtATime(t *testing.T) {
 // reader when it has none (Serper, Kakao), and not at all for Exa, Linkup, Tavily or Brave results, which
 // come with the service's text.
 func TestSearchPageReaderFollowsTheProvider(t *testing.T) {
+	t.Parallel()
 	// TinyFish search → TinyFish Fetch
 	tf := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"results":[{"title":"T0","url":"https://t0.example.com/p","snippet":"s"},{"title":"T1","url":"https://t1.example.com/p","snippet":"s"}]}`))
@@ -454,6 +463,7 @@ func TestSearchPageReaderFollowsTheProvider(t *testing.T) {
 
 // web.read goes through TinyFish Fetch when that is the reader, and falls back to Jina Reader.
 func TestWebReadThroughTinyFishFetchThenJina(t *testing.T) {
+	t.Parallel()
 	var jinaPath atomic.Value
 	jina := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		jinaPath.Store(r.URL.Path)
@@ -496,6 +506,7 @@ func TestWebReadThroughTinyFishFetchThenJina(t *testing.T) {
 
 // The price fallback (finance.quote → a web search) reads no pages even when a chat turn asked for it.
 func TestQuoteFallbackSearchReadsNoPages(t *testing.T) {
+	t.Parallel()
 	finn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(403)
 		_, _ = w.Write([]byte(`{"error":"You don't have access to this resource."}`))

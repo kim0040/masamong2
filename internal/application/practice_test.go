@@ -16,6 +16,7 @@ import (
 )
 
 func TestPracticeRawMessageSearchAndBlockPrepare(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	p, err := application.OpenPractice(context.Background(), root, "ko", nil)
 	if err != nil {
@@ -46,6 +47,7 @@ func TestPracticeRawMessageSearchAndBlockPrepare(t *testing.T) {
 }
 
 func TestPracticeProviderToolsStayOfflineWithoutKeyWarnings(t *testing.T) {
+	t.Parallel()
 	p := practiceSvc(t)
 	weather := exec(p, "weather.query", nil)
 	if !weather.OK || weather.Output["source"] != "fixture" {
@@ -90,6 +92,7 @@ func TestPracticeProviderToolsStayOfflineWithoutKeyWarnings(t *testing.T) {
 // Practice mode runs the whole pipeline offline: the sample is imported and indexed, search finds it,
 // and a chat turn answers from it without any network call or cost.
 func TestPracticeInstanceAnswersOfflineFromTheSample(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	ctx := context.Background()
 	p, err := application.OpenPractice(ctx, root, "ko", nil)
@@ -132,7 +135,7 @@ func TestPracticeInstanceAnswersOfflineFromTheSample(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	defer srv.Close()
-	t.Setenv("PRACTICE_TEST_KEY", "sk-test")
+	p.SetEnvForTest(t, "PRACTICE_TEST_KEY", "sk-test")
 	ops := []any{
 		map[string]any{"path": []any{"providers", "real"}, "value": map[string]any{"kind": "openai_compat", "base_url": srv.URL, "credential_ref": "env:PRACTICE_TEST_KEY"}},
 		map[string]any{"path": []any{"models", "response"}, "value": map[string]any{"provider": "real", "model": "gpt-real"}},

@@ -3,6 +3,7 @@ package application
 import "testing"
 
 func TestAcceptedLocale(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ header, want string }{
 		{"", "en"},
 		{"ko-KR,ko;q=0.9", "ko"},

@@ -6,6 +6,7 @@ import (
 )
 
 func TestCRLFConfigDiffAndApplyAreNoOps(t *testing.T) {
+	t.Parallel()
 	svc := setupSvc(t)
 	show := exec(svc, "config.show", nil)
 	if !show.OK {
