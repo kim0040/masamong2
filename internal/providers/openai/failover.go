@@ -112,7 +112,10 @@ func (a *Adapter) chatFailover(ctx context.Context, req ChatRequest) (ChatResult
 		began := time.Now()
 		out, err := link.A.chat(actx, r)
 		cancel()
-		if err == nil && emptyAnswer(out) && out.FinishReason != "tool_calls" && !(req.EmptyOK && (out.FinishReason == "stop" || out.FinishReason == "")) {
+		// a Once request goes out one time: its answer cut at the limit with no text is the answer, not a
+		// failure for a fallback to send again (a host error still moves on)
+		if err == nil && emptyAnswer(out) && out.FinishReason != "tool_calls" && !(req.EmptyOK && (out.FinishReason == "stop" || out.FinishReason == "")) &&
+			!(req.Once && out.FinishReason == "length") {
 			err = fmt.Errorf("%w (finish_reason=%s)", errEmpty, out.FinishReason)
 		}
 		if err != nil && ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {

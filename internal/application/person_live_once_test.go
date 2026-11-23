@@ -7,21 +7,36 @@ import (
 	"time"
 
 	"masamong/internal/application"
+	"masamong/internal/config"
 	"masamong/internal/memory/engine"
 )
 
 // The one-line people request goes out once. Its author withdraws memory consent while the request is
 // on its way, and the model answers with no text, cut at the output limit: the line is not sent a second
 // time (without thinking, or with more room), and the empty answer is paid for, not asked again on the
-// next pass. The control is a line whose author stays: one send too, and a later pass buys nothing.
-// Synthetic names, ids and text only.
+// next pass. The control is a line whose author stays: one send too, and a later pass buys nothing. With
+// a fallback model configured, the empty answer is not sent on to it either. Synthetic names, ids and
+// text only.
 func TestLiveOneLineIsSentOnce(t *testing.T) {
 	t.Parallel()
 	const marker = "once-send-marker"
-	for name, withdraw := range map[string]bool{"withdrawn during the send": true, "author stays": false} {
+	for name, tc := range map[string]struct{ withdraw, fallback bool }{
+		"withdrawn during the send":        {true, false},
+		"author stays":                     {false, false},
+		"withdrawn, with a fallback model": {true, true},
+	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+			withdraw := tc.withdraw
 			svc, m, eng := roomSvc(t)
+			if tc.fallback {
+				// the other provider of the same fake host: a send to it is counted with the primary's
+				applyDoc(t, svc, func(d *config.Document) {
+					sm := d.Models["summary"]
+					sm.Fallbacks = []config.ModelFallback{{Provider: "plan-host", Model: "fallback/model"}}
+					d.Models["summary"] = sm
+				})
+			}
 			liveStarted(t, svc)
 			m.mu.Lock()
 			m.extract = func(prompt string) string {

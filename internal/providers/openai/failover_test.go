@@ -18,6 +18,7 @@ import (
 type host struct {
 	status int
 	text   string
+	finish string // the answer's finish_reason; "" = stop
 	delay  time.Duration
 	cost   float64
 	calls  atomic.Int32
@@ -46,8 +47,12 @@ func (h *host) adapter(t *testing.T) *Adapter {
 			_, _ = w.Write([]byte(`{"error":{"message":"nope"}}`))
 			return
 		}
+		finish := h.finish
+		if finish == "" {
+			finish = "stop"
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []any{map[string]any{"message": map[string]any{"content": h.text}, "finish_reason": "stop"}},
+			"choices": []any{map[string]any{"message": map[string]any{"content": h.text}, "finish_reason": finish}},
 			"usage":   map[string]any{"prompt_tokens": 10, "completion_tokens": 5, "cost": h.cost},
 		})
 	}))
@@ -101,6 +106,28 @@ func TestFailoverOnEmptyAnswerAndTimeout(t *testing.T) {
 	out, err := chain(t, nil, slow, f2).Chat(context.Background(), hi)
 	if err != nil || out.Content != "quick" || out.Attempts[0].Class != errclass.Timeout || time.Since(began) > 2500*time.Millisecond {
 		t.Fatalf("timeout: %+v %v after %s", out, err, time.Since(began))
+	}
+}
+
+// A Once request goes out one time: an answer with no text cut at the output limit is its answer, and
+// no fallback is asked (the control without Once asks it). A host error still moves on to the fallback.
+func TestFailoverSendsAOnceRequestOnce(t *testing.T) {
+	req := hi
+	req.Once, req.MaxTokens = true, 50
+	p, f := &host{text: "", finish: "length"}, &host{text: "fallback"}
+	out, err := chain(t, nil, p, f).Chat(context.Background(), req)
+	if err != nil || out.Content != "" || out.FinishReason != "length" || out.Fallback || p.calls.Load() != 1 || f.calls.Load() != 0 {
+		t.Fatalf("cut at the limit: %+v %v, calls %d then %d", out, err, p.calls.Load(), f.calls.Load())
+	}
+	p, f = &host{text: "", finish: "length"}, &host{text: "fallback"}
+	plain := req
+	plain.Once = false
+	if out, err := chain(t, nil, p, f).Chat(context.Background(), plain); err != nil || out.Content != "fallback" || f.calls.Load() != 1 {
+		t.Fatalf("control without Once: %+v %v, fallback calls %d", out, err, f.calls.Load())
+	}
+	p, f = &host{status: 503}, &host{text: "fallback"}
+	if out, err := chain(t, nil, p, f).Chat(context.Background(), req); err != nil || out.Content != "fallback" || !out.Fallback || p.calls.Load() != 1 || f.calls.Load() != 1 {
+		t.Fatalf("5xx: %+v %v, calls %d then %d", out, err, p.calls.Load(), f.calls.Load())
 	}
 }
 
