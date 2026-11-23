@@ -188,7 +188,8 @@ Model calls reserve the call count at their start and add cost at completion. Wi
 | `episodes` | `on` | `on` · `off`. Replies get up to 3 related room episodes (about 1,200 characters), each with a few of its lines read again as they stand now |
 | `state` | `on` | `on` · `off`. Replies get the room's live topics linked to the speaker's conversation (about 500 characters) |
 | `warm_query` | `on` | `on` · `off`. In a room with memory on, the calling message is embedded while the planner thinks, so a memory search finds the vector ready; turns that end up not searching send the message too. `off` sends it only when a search needs it (the first memory search of a turn may take longer). Read each turn, no restart; it rebuilds nothing |
-| `cards` | `off` | `on` · `off`. Person cards: a fact someone said about themselves on 2 or more days, in 2 or more conversations (or asked to have remembered), kept per server. Replies get the speaker's card and up to 2 others'. Members see theirs with `/mymemory` and delete it with `/forgetme` |
+| `people` | `on` | `on` · `off`. Person memory: one line per thing one person said about another (with who said it, who it is about and the evidence), kept per server. What someone said about themselves is used anywhere in the server; what others said is used with the speaker's name ("said by Chris") and only in the channel group it came from; words from a private thread stay in that thread. Chime-ins, banter and drawing (`subjects` of `images.generate`) use it too. Members see theirs with `/mymemory`, delete it with `/forgetme` and can hide single lines in the console. Turning it on never rebuilds existing memory |
+| `cards` | `on` | The name from the person-card days. `off` counts as `people: off` even when `people` is `on`; `on` changes nothing |
 
 ## chat
 
@@ -406,12 +407,12 @@ Per-server blocks are stored in `guilds.<server ID>.blocked_users`. That server'
 
 | Key | Default | What it does |
 |---|---|---|
-| `own_card_only` | `false` | A reply uses only the caller's person card, not those of the others in the conversation |
-| `no_hearsay` | `false` | What one person said about another stays out of the room memory a reply sees (episode items, episode titles that name such a person, and live topics) |
-| `no_sensitive` | `false` | A classifier checks facts before they become card items, and "remember this" refuses sensitive ones (health, romance, money, religion, politics, family or legal trouble). The check is paid from `memory.derived_budget_usd` and cached per fact. Episodes and live topics are not classified |
-| `card_channel_only` | `false` | A card item is used only in the channel (and its threads) where all of its evidence was said |
+| `own_card_only` | `false` | A reply uses only the caller's own person memory, not that of the others in the conversation (drawing references too) |
+| `no_hearsay` | `false` | What one person said about another stays out of the room memory a reply sees (episode items, episode titles that name such a person, live topics and the heard-from-others lines of person memory). They are still stored, so turning this off shows them again |
+| `no_sensitive` | `false` | New person-memory lines wait (`pending`, never read) until a classifier says they are safe, and "remember this" refuses sensitive ones (health, romance, money, religion, politics, family or legal trouble). The check is paid from `memory.derived_budget_usd` and cached per fact. Lines made from records that already existed at the update, and lines made by the paid backfill, are not classified and so are not used. Episodes and live topics are not classified |
+| `card_channel_only` | `false` | A person-memory line is used only in the channel (and its threads) where its evidence was said, what someone said about themselves included |
 
-Whatever these say, servers never share people, deleting a message or withdrawing consent removes what was derived from it, and logs hold no message text or IDs. Anyone can also withdraw **Notes about me** (`/privacy withdraw profile`): their cards are deleted, none are made again, room style notes quoting them stop being used, and their lines stay out of the room style analysis. Facts they saved with "remember this" are conversation memory and stay.
+Whatever these say, servers never share people, deleting a message or withdrawing consent removes what was derived from it, and logs hold no message text or IDs. Anyone can also withdraw **Notes about me** (`/privacy withdraw profile`): what is remembered about them is deleted, none is made again, room style notes quoting them stop being used, and their lines stay out of the room style analysis. Facts they saved with "remember this" are conversation memory and stay.
 
 **Server log** (`guilds.<server ID>.log`): what happened in a server goes to its log channel, as the previous Masamong posted to a channel named `logs`. Set it under **Servers & rooms → Server log**, where **Send a test entry** checks that it arrives (CLI `serverlog test --guild_id G`).
 
