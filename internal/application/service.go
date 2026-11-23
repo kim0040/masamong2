@@ -390,9 +390,7 @@ func (s *Service) Close() error {
 		s.part.chans = nil
 		s.part.mu.Unlock()
 		s.mem.close()
-		if s.logs != nil {
-			s.logs.close()
-		}
+		s.ring().close() // through the once: a logger made during Close must not race the field read
 		s.mu.Lock()
 		for ch := range s.watchers {
 			close(ch)
