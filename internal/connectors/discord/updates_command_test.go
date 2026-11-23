@@ -38,7 +38,8 @@ func TestScenarioUpdateNewsCommands(t *testing.T) {
 	if res, _ := runPrefix(t, svc, minsu, "!업데이트 v1.3.0"); !res.OK || res.Output["version"] != "v1.3.0" {
 		t.Fatalf("named: %+v", res.Output)
 	}
-	if res, _ := runPrefix(t, svc, minsu, "!업데이트 이전 v1.3.0"); !res.OK || res.Output["version"] != "v1.1.1" {
+	// v1.2.2 has user-facing notes, so it is the one before v1.3.0
+	if res, _ := runPrefix(t, svc, minsu, "!업데이트 이전 v1.3.0"); !res.OK || res.Output["version"] != "v1.2.2" {
 		t.Fatalf("the one before a named version: %+v", res.Output)
 	}
 	if res, _ := runPrefix(t, svc, minsu, "!업데이트 v9.9.9"); res.OK {
