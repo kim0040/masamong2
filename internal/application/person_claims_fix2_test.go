@@ -11,11 +11,13 @@ import (
 
 // Round-2 review fixes of person memory v1.7.0 (forget and correction paths).
 
-// One message gives two statements about a person (where they live, what they drink).
-// Marking the residence item wrong, or forgetting it, removes the residence statement only: the other
-// statement resting on the same line stays. The same holds for a correction kept from v1.6 (a hidden item
-// in an episode never made again): it refuses its own statement, not every statement of that line.
-func TestCorrectionKeepsOtherClaimsFromSharedEvidence(t *testing.T) {
+// One message gives two statements about a person (where they live, what they drink). Marking the
+// residence item wrong, or forgetting it, follows the line rule: every statement about the person resting
+// on the corrected line goes, the drink statement too (known limit: recall only, the member can say it
+// again), and nothing about them from that line is written again. A statement on another line stays. The
+// same holds for a correction kept from v1.6 (a hidden item in an episode never made again): it refuses
+// every statement about the person from its line, and passes one from another line.
+func TestCorrectionTakesEveryStatementOfItsLines(t *testing.T) {
 	t.Parallel()
 	for _, how := range []string{"wrong", "forget", "v16"} {
 		t.Run(how, func(t *testing.T) {
@@ -24,10 +26,14 @@ func TestCorrectionKeepsOtherClaimsFromSharedEvidence(t *testing.T) {
 			f := reviewPerson{s, m, e, time.Now().UTC().Add(-time.Hour)}
 			a := store.PersonRef("101")
 			line := f.source(t, "g", "c", "shared-line", "101", "민수", f.at)
+			otherLine := f.source(t, "g", "c", "kept-line", "101", "민수", f.at.Add(time.Minute))
 			residence := "{@" + a + "}는 shared-city-sentinel에 삶"
 			tea := store.PersonClaim{GuildID: "g", SubjectRef: a, SpeakerRef: a, Kind: "like", Topic: "음료", Text: "{@" + a + "}는 shared-tea-sentinel을 좋아함",
 				Evidence: []string{line}, Source: "extract:seg-shared", Link: store.LinkSelf}
 			teaID := claimID("g", a, a, "like", "음료", line)
+			noodle := tea
+			noodle.Topic, noodle.Text, noodle.Evidence = "음식", "{@"+a+"}는 kept-noodle-sentinel을 좋아함", []string{otherLine}
+			noodleID := claimID("g", a, a, "like", "음식", otherLine)
 			if how == "v16" {
 				for _, q := range []struct {
 					sql  string
@@ -48,16 +54,21 @@ func TestCorrectionKeepsOtherClaimsFromSharedEvidence(t *testing.T) {
 				if n, err := s.SavePersonClaimsForTest(t.Context(), corrected); err != nil || n != 0 {
 					t.Errorf("the statement corrected in v1.6 was written again: %d (%v)", n, err)
 				}
-				if n, err := s.SavePersonClaimsForTest(t.Context(), tea); err != nil || n != 1 {
-					t.Errorf("another statement of the corrected line was refused: %d (%v)", n, err)
+				if n, err := s.SavePersonClaimsForTest(t.Context(), tea); err != nil || n != 0 {
+					t.Errorf("another statement about the person from the corrected line was written: %d (%v)", n, err)
+				}
+				if n, err := s.SavePersonClaimsForTest(t.Context(), noodle); err != nil || n != 1 {
+					t.Errorf("control: a statement from another line was refused: %d (%v)", n, err)
 				}
 				return
 			}
 			if n := f.item(t, "c", "res-item", residence, []string{"101"}, line); n != 1 {
 				t.Fatalf("the residence item gave %d claims", n)
 			}
-			if n, err := s.SavePersonClaimsForTest(t.Context(), tea); err != nil || n != 1 {
-				t.Fatalf("the tea statement: %d (%v)", n, err)
+			for _, c := range []store.PersonClaim{tea, noodle} {
+				if n, err := s.SavePersonClaimsForTest(t.Context(), c); err != nil || n != 1 {
+					t.Fatalf("the %s statement: %d (%v)", c.Topic, n, err)
+				}
 			}
 			if how == "wrong" {
 				m.explicitAnswer(`{"intent":"wrong","target":["i1"]}`)
@@ -79,8 +90,16 @@ func TestCorrectionKeepsOtherClaimsFromSharedEvidence(t *testing.T) {
 			if n := personClaimCount(t, s, "source=? AND state<>?", "episode_item:res-item", store.PersonHidden); n != 0 { // wrong hides, forget deletes
 				t.Errorf("the corrected statement is left: %d", n)
 			}
-			if n := personClaimCount(t, s, "id=? AND state=?", teaID, store.PersonActive); n != 1 {
-				t.Errorf("the other statement of the same line went with the correction: %d", n)
+			if n := personClaimCount(t, s, "id=? AND state=?", teaID, store.PersonActive); n != 0 {
+				t.Errorf("another statement about the person on the corrected line stayed: %d", n)
+			}
+			if n := personClaimCount(t, s, "id=? AND state=?", noodleID, store.PersonActive); n != 1 {
+				t.Errorf("control: a statement on another line went with the correction: %d", n)
+			}
+			again := tea // the corrected fact in other words, from a later writer
+			again.Kind, again.Topic, again.Text, again.Source = "status", "residence", "{@"+a+"}는 shared-city-sentinel 거주", "backfill:pb_test"
+			if n, err := s.SavePersonClaimsForTest(t.Context(), again); err != nil || n != 0 {
+				t.Errorf("a later writer stated something about the person from the corrected line again: %d (%v)", n, err)
 			}
 		})
 	}

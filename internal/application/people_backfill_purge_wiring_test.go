@@ -169,3 +169,62 @@ func TestTargetedCorrectionAndForgetPurgePilotCopy(t *testing.T) {
 		}
 	})
 }
+
+// The pilot purge after a member's "that's wrong" or item forget follows the line rule of the claims:
+// a stored pilot fact about the member resting on the item's lines goes even when it says the fact in
+// other words than the item. A fact of the member on other lines, and one of someone else, stay.
+func TestCorrectionPurgesPilotFactsOfItsLines(t *testing.T) {
+	mina, joon := store.PersonRef("101"), store.PersonRef("102")
+	for _, how := range []string{"wrong", "forget"} {
+		t.Run(how, func(t *testing.T) {
+			h := newPBHost(t)
+			s := pbService(t, h, "anthropic")
+			pbSeed(t, s, 70)
+			_, run := pbPiloted(t, s, nil)
+			var target, minaOther, control episodes.PersonFact
+			for _, f := range pbStoredFacts(t, s, run.ID) {
+				own := f.About == mina && slices.Equal(f.By, []string{mina}) && strings.Contains(f.Text, " likes ")
+				switch {
+				case target.Text == "" && own:
+					target = f
+				case minaOther.Text == "" && own && target.Text != "" && !slices.ContainsFunc(f.Ev, func(id string) bool { return slices.Contains(target.Ev, id) }):
+					minaOther = f
+				case control.Text == "" && f.About == joon && slices.Equal(f.By, []string{joon}) && strings.Contains(f.Text, " likes "):
+					control = f
+				}
+			}
+			if target.Text == "" || minaOther.Text == "" || control.Text == "" {
+				t.Fatal("the stored pilot answers lack the facts the test needs")
+			}
+			item := target
+			item.Text = "{@" + mina + "}는 그것의 열렬한 팬임" // the same lines, other words
+			pbItemFor(t, s, "pb-item", item)
+			items := s.myItems(s.Store, "g1", mina, []string{"pb-item"}, 1)
+			if len(items) != 1 {
+				t.Fatalf("the item is not Mina's: %+v", items)
+			}
+			if how == "wrong" {
+				if n, err := s.markWrong(t.Context(), s.Store, items); err != nil || n != 1 {
+					t.Fatalf("wrong: %d %v", n, err)
+				}
+			} else {
+				p := s.forgetPreview(s.Store, "g1", mina, []string{"pb-item"})
+				if p.err != nil || p.count != 1 {
+					t.Fatalf("preview: %+v", p)
+				}
+				if n, err := s.applyForget(t.Context(), s.Store, "g1", mina, p, store.SuppressBySelf); err != nil || n != 1 {
+					t.Fatalf("forget: %d %v", n, err)
+				}
+			}
+			if pbHasFact(t, s, run.ID, target.Text) {
+				t.Errorf("the pilot copy keeps a fact about the member on the corrected line, in other words: %q", target.Text)
+			}
+			if !pbHasFact(t, s, run.ID, minaOther.Text) {
+				t.Error("control: the member's fact on another line went with it")
+			}
+			if !pbHasFact(t, s, run.ID, control.Text) {
+				t.Error("control: someone else's fact went with it")
+			}
+		})
+	}
+}

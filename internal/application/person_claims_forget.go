@@ -50,6 +50,10 @@ func claimMarkers(guild, subject, speaker, kind, topic, text, id, by, at, now st
 	return out
 }
 
+// lineScope is the marker scope of one corrected line of a person (a member's "wrong" or item forget):
+// nothing about the person resting on that line is written again (the line rule).
+func lineScope(obs string) string { return "line:" + obs }
+
 // hideClaimTx hides one claim and writes its markers. False when there is no such claim.
 func (s *Service) hideClaimTx(tx *sql.Tx, id, by string) (bool, error) {
 	var guild, subject, speaker, kind, topic, text string
@@ -78,11 +82,13 @@ func (s *Service) hideClaimTx(tx *sql.Tx, id, by string) (bool, error) {
 
 // itemClaimsTx handles the statements about people that episode items give, when a member said the
 // items are wrong (hide) or forgot them: each gets its markers, and its row is hidden or deleted. The
-// statements are the item's own: the ones it derives, the claims resting on its lines that say the same
-// about someone it names (the same text key, from another writer), and for a remembered fact (an item of
-// an explicit episode, one per message) the claims it was saved as (a told claim names its person only
-// by label). Another statement of the same lines (a second fact of one message) is not the item's and
-// stays. It returns how many rows changed.
+// line rule: the statements are the ones the item derives, every claim resting on its lines about someone
+// it names (whatever its words: one answer writes the same fact as an item and as a people entry, in two
+// wordings), and for a remembered fact (an item of an explicit episode, one per message) the claims it was
+// saved as (a told claim names its person only by label). Each of those people also gets a line marker on
+// each of the item's lines, so no later writer (and no stored pilot answer) states anything about them
+// from those lines again. Known limit: a second fact of the same message goes too (recall only; the member
+// can say it again). It returns how many rows changed.
 func (s *Service) itemClaimsTx(tx *sql.Tx, items []string, hide bool, by string) (int, error) {
 	if len(items) == 0 || !tableExists(tx, "person_claim") {
 		return 0, nil
@@ -109,17 +115,21 @@ func (s *Service) itemClaimsTx(tx *sql.Tx, items []string, hide bool, by string)
 		if err != nil {
 			return 0, err
 		}
-		for _, c := range derivedClaims(guild, it, authors) {
+		derived := derivedClaims(guild, it, authors)
+		for _, c := range derived {
 			id := store.PersonClaimID(c.GuildID, c.SubjectRef, c.SpeakerRef, c.Kind, c.Topic, uniqueStrings(c.Evidence))
 			ids[id] = true
 			marks = append(marks, claimMarkers(c.GuildID, c.SubjectRef, c.SpeakerRef, c.Kind, c.Topic, c.Text, id, by, stamp, now)...)
 		}
 		lines, _ := json.Marshal(uniqueStrings(it.evidence))
-		named, _ := json.Marshal(uniqueStrings(episodes.TextRefs(it.text)))
+		people := episodes.TextRefs(it.text)
+		named, _ := json.Marshal(uniqueStrings(people))
+		for _, c := range derived {
+			people = append(people, c.SubjectRef)
+		}
 		explicitItem := episodeSource == explicitSource
-		itemKey := store.PersonTextKey(strings.Join(strings.Fields(it.text), " "))
-		rows, err := tx.Query(`SELECT id,guild_id,subject_ref,speaker_ref,kind,topic,text,source FROM person_claim WHERE source=?1
-			UNION SELECT c.id,c.guild_id,c.subject_ref,c.speaker_ref,c.kind,c.topic,c.text,c.source FROM evidence_refs r JOIN person_claim c ON c.id=r.holder_id
+		rows, err := tx.Query(`SELECT id,guild_id,subject_ref,speaker_ref,kind,topic,text FROM person_claim WHERE source=?1
+			UNION SELECT c.id,c.guild_id,c.subject_ref,c.speaker_ref,c.kind,c.topic,c.text FROM evidence_refs r JOIN person_claim c ON c.id=r.holder_id
 			WHERE r.holder_kind=?2 AND r.source_id IN (SELECT value FROM json_each(?3)) AND c.guild_id=?4
 			AND ((?7 AND c.source=?5) OR c.subject_ref IN (SELECT value FROM json_each(?6)))`,
 			"episode_item:"+item, store.HolderPersonClaim, string(lines), guild, store.SourceExplicit, string(named), explicitItem)
@@ -127,22 +137,28 @@ func (s *Service) itemClaimsTx(tx *sql.Tx, items []string, hide bool, by string)
 			return 0, err
 		}
 		for rows.Next() {
-			var id, g, subject, speaker, kind, topic, text, source string
-			if err := rows.Scan(&id, &g, &subject, &speaker, &kind, &topic, &text, &source); err != nil {
+			var id, g, subject, speaker, kind, topic, text string
+			if err := rows.Scan(&id, &g, &subject, &speaker, &kind, &topic, &text); err != nil {
 				rows.Close()
 				return 0, err
 			}
-			own := source == "episode_item:"+item || (explicitItem && source == store.SourceExplicit) || store.PersonTextKey(text) == itemKey
-			if !own {
-				continue // another statement of the same lines
-			}
 			ids[id] = true
 			marks = append(marks, claimMarkers(g, subject, speaker, kind, topic, text, id, by, stamp, now)...)
+			people = append(people, subject)
 		}
 		err = rows.Err()
 		rows.Close()
 		if err != nil {
 			return 0, err
+		}
+		for _, ref := range uniqueStrings(people) {
+			if !store.DiscordPersonRef(ref) {
+				continue
+			}
+			for _, line := range uniqueStrings(it.evidence) {
+				marks = append(marks, store.PersonSuppress{GuildID: guild, PersonRef: ref, Role: store.SuppressSubject,
+					Scope: lineScope(line), BeforeTS: stamp, By: by, CreatedAt: now})
+			}
 		}
 	}
 	for _, m := range marks {
@@ -236,7 +252,7 @@ func (s *Service) personStatementSuppressedTx(tx *sql.Tx, c store.PersonClaim) (
 	if hit, err := personSuppressed(tx, c); err != nil || hit {
 		return hit, err
 	}
-	return correctedLines(tx, c.SubjectRef, c.Text, c.Evidence)
+	return correctedLines(tx, c.SubjectRef, c.Evidence)
 }
 
 // deleteEpisodeClaimsTx deletes the claims resting on an episode an operator deletes: the ones its items

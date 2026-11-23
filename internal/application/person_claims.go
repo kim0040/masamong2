@@ -41,9 +41,10 @@ func init() {
 //     withdrawn profile, and none of them has withdrawn memory;
 //   - person_memory_suppress: no forget or hide marker matches at or after the newest evidence time: all
 //     (on the subject, the speaker or anyone the text names), the claim, the statement's text (another
-//     writer citing other lines), or for hearsay the topic;
+//     writer citing other lines), for hearsay the topic, or a line the subject corrected an item of;
 //   - no item a member corrected ("틀려": hidden in an episode never made again) rests on the same lines
-//     and names the subject, so a v1.6 correction is not undone by a derivation or the backfill;
+//     and names the subject (the line rule, whatever the words), so a v1.6 correction is not undone by a
+//     derivation or the backfill;
 //   - an episode_item:<id> source is still an active item;
 //   - the evidence index is written with indexCopy(guard=true), after a check that no key is blocked.
 //
@@ -194,7 +195,7 @@ func (s *Service) personClaimPasses(tx *sql.Tx, c *store.PersonClaim, memoryOut,
 	if suppressed, err := personSuppressed(tx, *c); err != nil || suppressed {
 		return false, err
 	}
-	if corrected, err := correctedLines(tx, c.SubjectRef, c.Text, c.Evidence); err != nil || corrected {
+	if corrected, err := correctedLines(tx, c.SubjectRef, c.Evidence); err != nil || corrected {
 		return false, err
 	}
 	if item, ok := strings.CutPrefix(c.Source, "episode_item:"); ok {
@@ -219,7 +220,8 @@ func (s *Service) personClaimPasses(tx *sql.Tx, c *store.PersonClaim, memoryOut,
 // personSuppressed reports whether a forget or hide marker covers the claim, set at or after the claim's
 // newest evidence (an empty ObservedAt matches every marker): everything about or by anyone the claim
 // names (subject, speaker, the people of its text), this claim, what it says (its text key) about the
-// subject, or the subject's hearsay topic.
+// subject, the subject's hearsay topic, or a line of its evidence the subject corrected or forgot an item
+// of (the line rule, lineScope).
 func personSuppressed(tx *sql.Tx, c store.PersonClaim) (bool, error) {
 	topic := ""
 	if !c.Direct() && c.Topic != "" {
@@ -230,41 +232,35 @@ func personSuppressed(tx *sql.Tx, c store.PersonClaim) (bool, error) {
 		text = "text:" + store.PersonTextKey(c.Text)
 	}
 	named, _ := json.Marshal(uniqueStrings(append([]string{c.SubjectRef, c.SpeakerRef}, episodes.TextRefs(c.Text)...)))
+	lines := make([]string, 0, len(c.Evidence))
+	for _, id := range uniqueStrings(c.Evidence) {
+		lines = append(lines, lineScope(id))
+	}
+	scopes, _ := json.Marshal(lines)
 	var hit bool
 	err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM person_memory_suppress WHERE guild_id=?1 AND ?6<=before_ts AND (
 		(scope='all' AND person_ref IN (SELECT value FROM json_each(?7)))
-		OR (person_ref=?2 AND role='subject' AND (scope=?3 OR (?4<>'' AND scope=?4) OR (?5<>'' AND scope=?5)))))`,
-		c.GuildID, c.SubjectRef, "claim:"+c.ID, topic, text, c.ObservedAt, string(named)).Scan(&hit)
+		OR (person_ref=?2 AND role='subject' AND (scope=?3 OR (?4<>'' AND scope=?4) OR (?5<>'' AND scope=?5)
+			OR scope IN (SELECT value FROM json_each(?8))))))`,
+		c.GuildID, c.SubjectRef, "claim:"+c.ID, topic, text, c.ObservedAt, string(named), string(scopes)).Scan(&hit)
 	return hit, err
 }
 
-// correctedLines reports whether a statement is one a member said is wrong: an item hidden in an episode
-// that is never made again from its lines (regen=3, explicit.go), resting on any of the lines, naming the
-// subject and saying the same (the text key, as a hide marker). v1.6 recorded corrections only this way,
-// without person markers; another statement of the same lines (a second fact of one message) is not the
-// corrected one and passes.
-func correctedLines(tx *sql.Tx, subject, text string, evidence []string) (bool, error) {
+// correctedLines reports whether a member said an item about the subject on any of the lines is wrong:
+// hidden, in an episode that is never made again from its lines (regen=3, explicit.go). v1.6 recorded
+// corrections only this way, without person markers. The line rule: every statement about the subject
+// from those lines is refused, whatever its words (a correction said in other words is the same fact).
+// Known limit: a second fact of the same message is refused with it.
+func correctedLines(tx *sql.Tx, subject string, evidence []string) (bool, error) {
 	if len(evidence) == 0 || !tableExists(tx, "episode_item") {
 		return false, nil
 	}
 	raw, _ := json.Marshal(evidence)
-	rows, err := tx.Query(`SELECT DISTINCT i.text FROM evidence_refs r JOIN episode_item i ON i.id=r.holder_id JOIN channel_episode e ON e.id=i.episode_id
-		WHERE r.holder_kind=? AND r.source_id IN (SELECT value FROM json_each(?)) AND i.state='hidden' AND e.regen=3 AND instr(i.text,?)>0`,
-		store.HolderEpisodeItem, string(raw), "{@"+subject+"}")
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
-	key := store.PersonTextKey(strings.Join(strings.Fields(text), " "))
-	hit := false
-	for rows.Next() {
-		var itemText string
-		if err := rows.Scan(&itemText); err != nil {
-			return false, err
-		}
-		hit = hit || store.PersonTextKey(strings.Join(strings.Fields(itemText), " ")) == key
-	}
-	return hit, rows.Err()
+	var hit bool
+	err := tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM evidence_refs r JOIN episode_item i ON i.id=r.holder_id JOIN channel_episode e ON e.id=i.episode_id
+		WHERE r.holder_kind=? AND r.source_id IN (SELECT value FROM json_each(?)) AND i.state='hidden' AND e.regen=3 AND instr(i.text,?)>0)`,
+		store.HolderEpisodeItem, string(raw), "{@"+subject+"}").Scan(&hit)
+	return hit, err
 }
 
 // writePersonClaim inserts a claim that passed the gate, or hands a derived row with the same id to a
