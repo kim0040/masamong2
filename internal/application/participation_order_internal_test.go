@@ -242,3 +242,43 @@ func TestConsiderCandidateReadsTheModeBeforeTheLock(t *testing.T) {
 	<-considered
 	<-other
 }
+
+// A call to the bot held at its cold mute restore still stops a draft made after it arrived: a chime does not
+// post once the call has set the after-call pause, as when the call moved the room on under the lock (Sol
+// round-2 review of E8, regression R2).
+func TestAFinalCheckFailsOnceAHeldCallSetsTheAfterCallPause(t *testing.T) {
+	s, clk, drain := partOrderService(t, "conservative")
+	s.Paused("g", "a") // the thread lookup is warm: only the mute restore reads the store
+	release := holdReaders(t, s)
+	called := make(chan struct{})
+	go func() {
+		defer close(called)
+		s.Observe(ObservedMessage{GuildID: "g", ChannelID: "a", MessageID: "m1", AuthorID: "u1", AuthorName: "u1",
+			Content: "마사몽 이거 알아?", At: clk.t, Addressed: true, BotCall: "mention"})
+	}()
+	waitsInStore(t, "(*Service).Observe(")
+	s.part.mu.Lock()
+	s.partChannel("g:a").backoffLoaded = true // as a concurrent restore would
+	s.part.mu.Unlock()
+	s.Observe(ObservedMessage{GuildID: "g", ChannelID: "a", MessageID: "m2", AuthorID: "u2", AuthorName: "u2", Content: partQuestion, At: clk.t})
+	s.part.mu.Lock()
+	c := s.part.chans["g:a"]
+	cand := c.pending
+	c.pending = nil // considerCandidate took it: it is judged and drafted now
+	s.part.mu.Unlock()
+	if cand == nil {
+		t.Fatal("precondition: the question is a candidate")
+	}
+	release()
+	<-called
+	drain()
+	s.part.mu.Lock()
+	lastCall := s.part.chans["g:a"].lastCall
+	s.part.mu.Unlock()
+	if !lastCall.Equal(clk.t) {
+		t.Fatalf("precondition: the call set the after-call pause (lastCall %v)", lastCall)
+	}
+	if s.stillCurrent(cand) {
+		t.Fatal("a draft passes the final check after a call set the after-call pause")
+	}
+}
