@@ -1,6 +1,7 @@
 package application
 
 import (
+	"context"
 	"strings"
 
 	"masamong/internal/features/participation"
@@ -10,12 +11,121 @@ import (
 
 // What the participation decisions ask the store is read before s.part.mu is taken, and only memory is
 // read and written under it, so a slow store holds up no channel's decisions (fix plan R03, code standard
-// R20). What reading under the lock gave is kept: reads are made again when what they depend on changed
-// before the lock was taken (lockCandidate).
+// R20). What reading under the lock gave is kept: a message moves the room on before its reads
+// (arriveObserved), and reads are made again when what they depend on changed before the lock was taken
+// (lockCandidate).
 
 // partRereads bounds how often a decision reads again because the configuration changed before it took the
 // lock; one that keeps changing gets the last read.
 const partRereads = 3
+
+// observeArrival is what Observe's first step leaves for the rest.
+type observeArrival struct {
+	version  int
+	gen      uint64
+	watched  bool           // collected rows were waiting for what happens next
+	answered *partCandidate // the waiting candidate this message answered, taken off the wait
+	reason   string         // why it is cancelled (answerCandidate)
+}
+
+// arriveObserved is Observe's first step, under s.part.mu and before anything is read for the message: the
+// message counts as said, so a draft in flight fails its final check (stillCurrent), and a waiting
+// candidate it answers leaves the wait, so it is not judged while the reads run (Sol review of E8, finding
+// 3). Observe logs that candidate's cancellation unless a quiet cue drops it; the bot's own message, which
+// goes no further, logs it here. The entry's mute is restored later (lockPartChannel).
+func (s *Service) arriveObserved(key string, m ObservedMessage) observeArrival {
+	s.part.mu.Lock()
+	defer s.part.mu.Unlock()
+	c := s.partChannel(key)
+	c.version++
+	c.recent = append(c.recent, partMsg{id: m.MessageID, author: m.AuthorID, name: m.AuthorName, text: clip(m.Content, 400), at: m.At,
+		bot: m.FromBot, call: m.BotCall == "mention"})
+	if len(c.recent) > 20 {
+		c.recent = c.recent[len(c.recent)-20:]
+	}
+	a := observeArrival{version: c.version, gen: c.gen, watched: len(c.watches) > 0}
+	if p := c.pending; p != nil {
+		if reason := answerCandidate(p, c.recent[len(c.recent)-1]); reason != "" {
+			p.timer.Stop()
+			c.pending = nil
+			a.answered, a.reason = p, reason
+		}
+	}
+	if m.FromBot {
+		s.logAnswered(a.answered, a.reason, s.partWork())
+		a.answered = nil
+	}
+	return a
+}
+
+// answerCandidate applies to a candidate waiting before it what one later message did: someone else or the
+// bot speaking means people are handling it (the cancellation reason is returned); the same person going on
+// is noted on a moment of collect mode.
+func answerCandidate(p *partCandidate, l partMsg) string {
+	if l.bot || l.author != p.msg.author {
+		reason := "people_answered"
+		if l.bot {
+			reason = "bot_answered"
+		} else if p.collect {
+			p.next = "answered"
+			if l.call {
+				p.next = "called_bot"
+			}
+		}
+		return reason
+	}
+	if p.collect && p.next == "" {
+		p.next = "continued"
+		if l.call {
+			p.next = "called_bot"
+		}
+	}
+	return ""
+}
+
+// waitingBefore is whether c's waiting candidate came before this message; one made by a later message,
+// while this one's reads ran, does not filter it (answeredSince settles the two).
+func (a observeArrival) waitingBefore(c *partChannel) bool {
+	return c.pending != nil && (c.gen != a.gen || c.pending.version <= a.version)
+}
+
+// answeredSince applies to a candidate made after later messages were observed (while its own message's
+// reads ran) what they would have done to it waiting (answerCandidate), and returns the cancellation reason,
+// "" when it may wait. An entry made again meanwhile no longer holds its message: the conversation moved on.
+func answeredSince(c *partChannel, a observeArrival, cand *partCandidate) string {
+	if c.gen != a.gen {
+		return "conversation_moved"
+	}
+	later := c.recent
+	if n := c.version - a.version; n < len(later) {
+		later = later[len(later)-n:]
+	}
+	for _, l := range later {
+		if reason := answerCandidate(cand, l); reason != "" {
+			return reason
+		}
+	}
+	return ""
+}
+
+// logAnswered logs the cancellation of a candidate the room moved past (nil: none). The caller holds
+// s.part.mu, which the tests' startWork needs.
+func (s *Service) logAnswered(p *partCandidate, reason string, startWork func(string, func(context.Context))) {
+	if p == nil {
+		return
+	}
+	startWork("participation cancellation", func(_ context.Context) {
+		s.logParticipation(p, s.participationModeOf(p.guild, p.channel), partCancelled, reason, 0, "", 0)
+	})
+}
+
+// partWork starts the work Observe hands off: s.ownedGo, or the tests' queue (the caller holds s.part.mu).
+func (s *Service) partWork() func(string, func(context.Context)) {
+	if s.part.startWork != nil {
+		return s.part.startWork
+	}
+	return s.ownedGo
+}
 
 // lockPartChannel takes s.part.mu and returns key's entry; the caller unlocks. An entry whose mute was not
 // read yet reads it from the decision log before the lock is taken, so a slow store holds up no other
