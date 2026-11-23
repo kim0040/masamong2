@@ -80,6 +80,13 @@ func TestActivityRankingShowsLastNameAndLeavesOutWithdrawn(t *testing.T) {
 	sec := now.Add(-time.Second)
 	say("1005", "SubNew", sec.Add(800*time.Millisecond)) // two observations inside one second:
 	say("1005", "SubOld", sec.Add(200*time.Millisecond)) // the older one arriving late still loses
+	say("1006", "Early", sec.Add(500*time.Millisecond))  // in order, but the earlier stamp's fraction
+	say("1006", "Late", sec.Add(520*time.Millisecond))   // ends in a zero and wins the string compare
+	// a row an older release wrote in whole seconds must not beat a later fraction of that second
+	if _, err := svc.Store.DB.Exec(`INSERT INTO activity_counts(day, guild_id, channel_id, user_id, name, n, last_at) VALUES('2026-10-01','g1','c1','1007','Whole',1,'2026-10-01T11:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	say("1007", "Frac", time.Date(2026, 10, 1, 11, 0, 0, 400000000, time.UTC))
 	for i := 0; i < 3; i++ {
 		say("1002", "Bob", now.Add(-time.Duration(i)*time.Minute))
 	}
@@ -100,7 +107,7 @@ func TestActivityRankingShowsLastNameAndLeavesOutWithdrawn(t *testing.T) {
 	}
 	m, _ := jsonRoundTrip(r.Output)
 	top := m["top"].([]any)
-	if len(top) != 3 || m["total_messages"].(float64) != 6 || m["people"].(float64) != 3 {
+	if len(top) != 5 || m["total_messages"].(float64) != 10 || m["people"].(float64) != 5 {
 		t.Fatalf("withdrawn person left out of list, total and head count: %v", m)
 	}
 	first, second, third := top[0].(map[string]any), top[1].(map[string]any), top[2].(map[string]any)
@@ -112,5 +119,11 @@ func TestActivityRankingShowsLastNameAndLeavesOutWithdrawn(t *testing.T) {
 	}
 	if third["name"] != "SubNew" || third["count"].(float64) != 2 {
 		t.Fatalf("an older observation inside the same second must not rename the row: %v", third)
+	}
+	if got := top[3].(map[string]any)["name"]; got != "Late" {
+		t.Fatalf("a newer message in the same second lost to a trailing-zero stamp: %v", top)
+	}
+	if got := top[4].(map[string]any)["name"]; got != "Frac" {
+		t.Fatalf("a whole-second row of an older release beat a same-second fraction: %v", top)
 	}
 }
