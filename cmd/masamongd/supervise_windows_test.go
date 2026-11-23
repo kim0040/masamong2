@@ -315,11 +315,3 @@ func TestWindowsSessionEndShrinksTheLoggedGrace(t *testing.T) {
 		t.Fatalf("log did not follow the reduced grace: %s", text)
 	}
 }
-
-func waitForDaemon(t *testing.T, root string) {
-	t.Helper()
-	testutil.WaitFor(t, 30*time.Second, "the fake daemon to become ready", func() bool {
-		_, ok := launcher.ReadInfo(root)
-		return ok
-	})
-}
