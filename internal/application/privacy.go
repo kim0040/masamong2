@@ -348,17 +348,11 @@ func (s *Service) applyPracticePrivacy(fn func(*Service) error) error {
 		return err
 	}
 	p := &Service{DataRoot: root, Store: st, Clock: s.Clock, I18n: s.I18n, Log: s.Log, practice: true, watchers: map[chan Event]struct{}{}}
-	err = fn(p)
-	_ = p.Close()
-	if err != nil {
-		return err
-	}
-	// a practice instance that finished opening while the change went to its database directly may
-	// hold caches read before it (consent): apply the change to it too. The change is idempotent.
-	if ok, err := applyToOpenPractice(root, fn); ok {
-		return err
-	}
-	return nil
+	defer p.Close()
+	// Known limit: a practice instance that finishes opening while this change goes to its database
+	// directly keeps what it read before the change (its consent cache, its live lines) until it is
+	// reopened. Replaying the change on it would write a withdrawal or deletion twice (review round 2).
+	return fn(p)
 }
 
 // applyToOpenPractice runs fn on an open practice service of root, newest first, skipping one that is

@@ -130,30 +130,3 @@ func TestPracticeRegistryRemoveClearsTheSlot(t *testing.T) {
 		}
 	}
 }
-
-// Review round 2: a practice instance that finishes opening while a privacy change goes to its
-// database directly gets the change too, so caches it read before the change do not outlive it.
-func TestPracticePrivacyReachesAnInstancePublishedDuringTheFallback(t *testing.T) {
-	data := t.TempDir()
-	p, err := OpenPractice(context.Background(), data, "en", slog.New(slog.DiscardHandler))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = p.Close() })
-	openPractices.remove(p) // as if it were still opening when the change arrived
-	real := &Service{DataRoot: data}
-	var ran []*Service
-	err = real.applyPracticePrivacy(func(target *Service) error {
-		ran = append(ran, target)
-		if len(ran) == 1 {
-			openPractices.add(p) // it finishes opening while the change goes to the database directly
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(ran) != 2 || ran[0] == p || ran[1] != p {
-		t.Fatalf("the change reached %d services (fallback first, then the published one expected): %v", len(ran), ran)
-	}
-}
