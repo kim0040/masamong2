@@ -17,16 +17,20 @@ import (
 
 // The live extraction asks for "people" next to the episodes (phase 2): the prompt shows the rules and
 // no template fence, the answer's claims go through the write gate in the episode's transaction (one
-// claim per speaker, with that speaker's own lines), and a bad people list costs only the claims.
+// speaker's statement on that speaker's own lines; a fact cited from two people's lines is skipped), and
+// a bad people list costs only the claims.
 
 // peopleAnswer is the hike answer with a people list.
 func peopleAnswer(people string) string {
 	return strings.Replace(hikeAnswer, `"importance":3}]}`, `"importance":3}],"people":`+people+`}`, 1)
 }
 
+// hikePeople: a self statement of each, a hearsay statement of p1 about p2, and a fact cited from both
+// people's lines (skipped by the live rules).
 const hikePeople = `[
  {"about":"p1","kind":"like","topic":"등산","text":"{p1}는 등산을 좋아함","by":["p1"],"ev":["m1"]},
  {"about":"p2","kind":"trait","topic":"요리","text":"{p2}는 김밥을 잘 쌈","by":["p1","p2"],"ev":["m3","m4"]},
+ {"about":"p2","kind":"trait","topic":"아침","text":"{p2}는 아침형 인간","by":["p1"],"ev":["m3"]},
  {"about":"p2","kind":"status","topic":"Residence","text":"{p2}는 광양에 산다","by":["p2"],"ev":["m2"]}]`
 
 // peopleRows reads the stored claims of a server: subject, speaker, kind, topic, source, link, evidence.
@@ -71,7 +75,7 @@ func TestLiveExtractionSavesPeopleInTheEpisodeTransaction(t *testing.T) {
 	}
 
 	rep := svc.RunRoomMemory(context.Background())
-	if rep.Segments != 1 || rep.Episodes != 1 || m.calls("episode") != 1 || rep.PeopleClaims() != 4 || rep.PeopleCalls() != 0 {
+	if rep.Segments != 1 || rep.Episodes != 1 || m.calls("episode") != 1 || rep.PeopleClaims() != 3 || rep.PeopleSkipped() != 1 || rep.PeopleCalls() != 0 {
 		t.Fatalf("pass: %+v calls=%d", rep, m.calls("episode"))
 	}
 	prompt := m.last("episode")
@@ -89,9 +93,8 @@ func TestLiveExtractionSavesPeopleInTheEpisodeTransaction(t *testing.T) {
 	src := "extract:" + corpus.DiscordLiveObservationID("discord:g:c", "3001")
 	want := []peopleRow{
 		{u1, u1, "like", "등산", src, store.LinkSelf, "active", "discord:g:c"},
-		{u2, u1, "trait", "요리", src, "", "active", "discord:g:c"}, // hearsay: link is not self (checked below)
+		{u2, u1, "trait", "아침", src, "", "active", "discord:g:c"}, // hearsay: link is not self (checked below)
 		{u2, u2, "status", "residence", src, store.LinkSelf, "active", "discord:g:c"},
-		{u2, u2, "trait", "요리", src, store.LinkSelf, "active", "discord:g:c"},
 	}
 	var got []peopleRow
 	for _, g := range peopleRows(t, svc) {
@@ -116,11 +119,10 @@ func TestLiveExtractionSavesPeopleInTheEpisodeTransaction(t *testing.T) {
 			t.Errorf("no claim like %+v in %+v", w, got)
 		}
 	}
-	// the claim of the speaker u2 about themselves rests on their own line only (m4), not on u1's
-	var ev string
-	if err := svc.Store.Reader().QueryRow(`SELECT evidence FROM person_claim WHERE subject_ref=? AND speaker_ref=? AND kind='trait'`, u2, u2).Scan(&ev); err != nil ||
-		ev != `["`+corpus.DiscordLiveObservationID("discord:g:c", "3004")+`"]` {
-		t.Fatalf("evidence of a split claim: %s %v", ev, err)
+	// the fact cited from both people's lines is skipped whole: no half of it, by either speaker
+	var n int
+	if err := svc.Store.Reader().QueryRow(`SELECT COUNT(*) FROM person_claim WHERE topic='요리'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("a fact cited from two people's lines was split: %d rows %v", n, err)
 	}
 	if liveSince(t, svc, "g") == "" {
 		t.Fatal("live_since is written on the first people save")

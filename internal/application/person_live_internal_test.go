@@ -11,50 +11,59 @@ import (
 	"masamong/internal/memory/store"
 )
 
-// A people fact becomes one claim per speaker, each with that speaker's own evidence lines and the text
-// each line had when the model read it; a bot line or a stranger's line is never evidence, and self is
-// the link only when the speaker is the subject.
-func TestLiveClaimsSplitPerSpeaker(t *testing.T) {
+// A people fact is one speaker's statement or nothing: every line it cites was written by its one
+// speaker. A fact cited from two people's lines is skipped and counted, never split into one claim per
+// speaker; a bot line or a stranger's line is never evidence; self is the link only when the speaker is
+// the subject, and a self claim names nobody but its subject.
+func TestLiveClaimsNeverSplitSpeakers(t *testing.T) {
 	r := memRoom{guild: "g", channel: "c", room: "discord:g:c", source: "discord"}
-	a, b := store.PersonRef("1"), store.PersonRef("2")
+	a, b, c := store.PersonRef("1"), store.PersonRef("2"), store.PersonRef("3")
 	at := time.Now()
 	lines := []roomLine{
 		{Message: episodes.Message{ID: "o1", Account: "1", Author: "철수", At: at, Text: "민수는 키가 커"}},
 		{Message: episodes.Message{ID: "o2", Account: "2", Author: "민수", At: at, Text: "맞아 나 키 커"}},
 		{Message: episodes.Message{ID: "bot:o3", Account: "bot", Author: "봇", At: at, Bot: true, Text: "민수는 키가 커요"}},
+		{Message: episodes.Message{ID: "o4", Account: "2", Author: "민수", At: at, Text: "나 농구도 해"}},
 	}
-	fact := episodes.PersonFact{About: b, Kind: "appearance", Topic: "키", Text: "{@" + b + "}는 키가 큼", By: []string{a, b}, Ev: []string{"o1", "o2"}, Link: episodes.LinkReply}
-	got, dropped := liveClaims(r, "extract:o1", "2026-01-01T00:00:00Z", []episodes.PersonFact{fact}, lines)
-	if dropped != 0 || len(got) != 2 {
-		t.Fatalf("claims %+v dropped %d", got, dropped)
+	// the fact both cited: skipped, no half is written
+	mixed := episodes.PersonFact{About: b, Kind: "appearance", Topic: "키", Text: "{@" + b + "}는 키가 큼", By: []string{a, b}, Ev: []string{"o1", "o2"}, Link: episodes.LinkSelf}
+	if got, skipped := liveClaims(r, "extract:o1", "2026-01-01T00:00:00Z", []episodes.PersonFact{mixed}, lines); len(got) != 0 || skipped != 1 {
+		t.Fatalf("a fact cited from two people's lines: claims %+v skipped %d", got, skipped)
 	}
-	hearsay, own := got[0], got[1]
-	if hearsay.SpeakerRef != a || hearsay.Link != store.LinkReply || !reflect.DeepEqual(hearsay.Evidence, []string{"o1"}) ||
-		hearsay.Lines["o1"] != "민수는 키가 커" || hearsay.Lines["o2"] != "" {
-		t.Errorf("hearsay claim: %+v", hearsay)
+	// one speaker's own lines: hearsay of a, and b's own statement on two of b's lines
+	hearsay := episodes.PersonFact{About: b, Kind: "appearance", Topic: "키", Text: "{@" + b + "}는 키가 큼", By: []string{a}, Ev: []string{"o1"}, Link: episodes.LinkReply}
+	own := episodes.PersonFact{About: b, Kind: "like", Topic: "운동", Text: "{@" + b + "}는 농구를 함", By: []string{b}, Ev: []string{"o2", "o4"}, Link: episodes.LinkSelf}
+	got, skipped := liveClaims(r, "extract:o1", "2026-01-01T00:00:00Z", []episodes.PersonFact{hearsay, own}, lines)
+	if skipped != 0 || len(got) != 2 {
+		t.Fatalf("claims %+v skipped %d", got, skipped)
 	}
-	if own.SpeakerRef != b || own.Link != store.LinkSelf || !reflect.DeepEqual(own.Evidence, []string{"o2"}) || own.Lines["o2"] != "맞아 나 키 커" {
-		t.Errorf("own claim: %+v", own)
+	if h := got[0]; h.SpeakerRef != a || h.Link != store.LinkReply || !reflect.DeepEqual(h.Evidence, []string{"o1"}) || h.Lines["o1"] != "민수는 키가 커" || len(h.Lines) != 1 {
+		t.Errorf("hearsay claim: %+v", h)
+	}
+	if o := got[1]; o.SpeakerRef != b || o.Link != store.LinkSelf || !reflect.DeepEqual(o.Evidence, []string{"o2", "o4"}) || o.Lines["o4"] != "나 농구도 해" {
+		t.Errorf("own claim: %+v", o)
 	}
 	for _, c := range got {
-		if c.GuildID != "g" || c.Source != "extract:o1" || c.ReadAt == "" || c.Kind != "appearance" {
+		if c.GuildID != "g" || c.Source != "extract:o1" || c.ReadAt == "" {
 			t.Errorf("claim: %+v", c)
 		}
 	}
-	// evidence only a bot line or a line of someone else carries: the speaker is dropped and counted
 	for name, f := range map[string]episodes.PersonFact{
-		"bot line":       {About: b, Kind: "trait", Topic: "x", Text: "{@" + b + "}", By: []string{a}, Ev: []string{"bot:o3"}},
-		"another author": {About: b, Kind: "trait", Topic: "x", Text: "{@" + b + "}", By: []string{a}, Ev: []string{"o2"}},
+		"bot line":                 {About: b, Kind: "trait", Topic: "x", Text: "{@" + b + "}", By: []string{a}, Ev: []string{"bot:o3"}},
+		"another author":           {About: b, Kind: "trait", Topic: "x", Text: "{@" + b + "}", By: []string{a}, Ev: []string{"o2"}},
+		"one line of another":      {About: b, Kind: "trait", Topic: "x", Text: "{@" + b + "}", By: []string{b}, Ev: []string{"o2", "o1"}},
+		"no speaker":               {About: b, Kind: "trait", Topic: "x", Text: "{@" + b + "}", Ev: []string{"o2"}},
+		"self naming someone else": {About: b, Kind: "relation", Topic: "x", Text: "{@" + b + "}는 {@" + c + "}와 친함", By: []string{b}, Ev: []string{"o2"}},
 	} {
-		if c, dropped := liveClaims(r, "extract:o1", "", []episodes.PersonFact{f}, lines); len(c) != 0 || dropped != 1 {
-			t.Errorf("%s: %+v dropped %d", name, c, dropped)
+		if got, skipped := liveClaims(r, "extract:o1", "", []episodes.PersonFact{f}, lines); len(got) != 0 || skipped != 1 {
+			t.Errorf("%s: %+v skipped %d", name, got, skipped)
 		}
 	}
-	// a hearsay link left as self by the parser can never reach the gate as self
-	f := fact
-	f.Link = episodes.LinkSelf
-	if c, _ := liveClaims(r, "extract:o1", "", []episodes.PersonFact{f}, lines); c[0].Link != store.LinkMention {
-		t.Errorf("hearsay link: %q", c[0].Link)
+	// hearsay may name a third person; a hearsay link left as self by the parser never reaches the gate as self
+	f := hearsay
+	f.Link, f.Text = episodes.LinkSelf, "{@"+b+"}는 {@"+c+"}와 친함"
+	if got, _ := liveClaims(r, "extract:o1", "", []episodes.PersonFact{f}, lines); len(got) != 1 || got[0].Link != store.LinkMention {
+		t.Errorf("hearsay: %+v", got)
 	}
 }
 

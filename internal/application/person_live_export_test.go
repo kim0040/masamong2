@@ -5,3 +5,7 @@ func (r RoomMemoryReport) PeopleCalls() int { return r.peopleCalls }
 
 // PeopleClaims is how many person claims live extraction saved in a room-memory pass.
 func (r RoomMemoryReport) PeopleClaims() int { return r.peopleClaims }
+
+// PeopleSkipped is how many people facts of the answers a room-memory pass skipped under the live rules
+// (one speaker's own lines; a self statement names only its subject).
+func (r RoomMemoryReport) PeopleSkipped() int { return r.peopleSkipped }

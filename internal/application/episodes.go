@@ -78,8 +78,9 @@ type RoomMemoryReport struct {
 	States      int    `json:"states"`
 	StoppedBy   string `json:"stopped_by,omitempty"`
 	// person memory (counts only; unexported: they feed the pass log and the tests): model calls made for
-	// one-line self statements, and claims saved by live extraction
-	peopleCalls, peopleClaims int
+	// one-line self statements, claims saved by live extraction, and facts of the answers skipped by the
+	// live rules (liveClaims)
+	peopleCalls, peopleClaims, peopleSkipped int
 }
 
 // memRoom is one room room memory is made for.
@@ -119,7 +120,7 @@ func (s *Service) roomMemoryPass(ctx context.Context) {
 		if rep.Segments+rep.States+rep.Expired+rep.Regenerated > 0 || rep.StoppedBy != "" {
 			s.Log.Info("memory: room memory pass", "segments", rep.Segments, "episodes", rep.Episodes, "failed", rep.Failed,
 				"states", rep.States, "expired", rep.Expired, "regenerated", rep.Regenerated, "stopped_by", rep.StoppedBy,
-				"people_calls", rep.peopleCalls, "people_claims", rep.peopleClaims)
+				"people_calls", rep.peopleCalls, "people_claims", rep.peopleClaims, "people_skipped", rep.peopleSkipped)
 		}
 	})
 }
@@ -153,8 +154,9 @@ func (s *Service) RunRoomMemory(ctx context.Context) RoomMemoryReport {
 		}
 		return true
 	}
-	n, err := s.regenerateEpisodes(ctx, db, now)
+	n, skipped, err := s.regenerateEpisodes(ctx, db, now)
 	rep.Regenerated += n
+	rep.peopleSkipped += skipped
 	if stop(err) {
 		return rep
 	}
@@ -167,7 +169,7 @@ func (s *Service) RunRoomMemory(ctx context.Context) RoomMemoryReport {
 			if s.derivedAllows(spendEpisode) {
 				st, err := s.extractRoom(ctx, db, r, now, passSegments)
 				rep.Segments, rep.Episodes, rep.Failed = rep.Segments+st.segments, rep.Episodes+st.saved, rep.Failed+st.failed
-				rep.peopleCalls, rep.peopleClaims = rep.peopleCalls+st.peopleCalls, rep.peopleClaims+st.claims
+				rep.peopleCalls, rep.peopleClaims, rep.peopleSkipped = rep.peopleCalls+st.peopleCalls, rep.peopleClaims+st.claims, rep.peopleSkipped+st.skipped
 				if stop(err) {
 					return rep
 				}
@@ -189,7 +191,7 @@ func (s *Service) RunRoomMemory(ctx context.Context) RoomMemoryReport {
 	}
 	st, err := s.continueKakaoExtractions(ctx, db, now)
 	rep.Segments, rep.Episodes, rep.Failed = rep.Segments+st.segments, rep.Episodes+st.saved, rep.Failed+st.failed
-	rep.peopleCalls, rep.peopleClaims = rep.peopleCalls+st.peopleCalls, rep.peopleClaims+st.claims
+	rep.peopleCalls, rep.peopleClaims, rep.peopleSkipped = rep.peopleCalls+st.peopleCalls, rep.peopleClaims+st.claims, rep.peopleSkipped+st.skipped
 	stop(err)
 	return rep
 }
@@ -464,9 +466,9 @@ type episodeCursor struct {
 // sealAfterRefusals is how many refused saves in a row seal a segment.
 const sealAfterRefusals = 2
 
-// extractStats counts a room's extraction; peopleCalls and claims are person memory (calls for one-line
-// self statements, claims written by live extraction).
-type extractStats struct{ segments, saved, failed, peopleCalls, claims int }
+// extractStats counts a room's extraction; peopleCalls, claims and skipped are person memory (calls for
+// one-line self statements, claims written by live extraction, facts the live rules skipped).
+type extractStats struct{ segments, saved, failed, peopleCalls, claims, skipped int }
 
 // extractRoom extracts up to limit closed segments of a room and moves its cursor on.
 func (s *Service) extractRoom(ctx context.Context, db *storage.Store, r memRoom, now time.Time, limit int) (extractStats, error) {
@@ -540,6 +542,7 @@ func (s *Service) extractRoom(ctx context.Context, db *storage.Store, r memRoom,
 		saved, ps, err := s.extractSegment(ctx, db, r, segLines, bots, pack, botName)
 		st.peopleCalls += ps.calls
 		st.claims += ps.claims
+		st.skipped += ps.skipped
 		switch {
 		case errors.Is(err, errEvidenceDeleted):
 			if cur.Refused == nil {
@@ -729,8 +732,9 @@ func (s *Service) keepValidPart(kind string, keep bool, problems []string) error
 	return nil
 }
 
-// peopleStats is what person memory did for one segment (counts only).
-type peopleStats struct{ calls, claims int }
+// peopleStats is what person memory did for one segment (counts only): model calls, claims written and
+// facts the live rules skipped.
+type peopleStats struct{ calls, claims, skipped int }
 
 // extractSegment asks the model about one closed segment and saves what validates. It returns how many
 // episodes were created or changed. A segment of one line the bot was addressed with asks the people-only
@@ -747,8 +751,8 @@ func (s *Service) extractSegment(ctx context.Context, db *storage.Store, r memRo
 	if len(human) < 2 {
 		// one message is not a conversation: no episode and, unless it is a short statement made to the
 		// bot, nothing spent
-		calls, claims, err := s.extractSelfStatement(ctx, db, r, lines, bots, pack, botName)
-		return 0, peopleStats{calls, claims}, err
+		ps, err := s.extractSelfStatement(ctx, db, r, lines, bots, pack, botName)
+		return 0, ps, err
 	}
 	msgs := segmentMessages(lines, bots)
 	readAt := s.Clock.Now().UTC().Format(time.RFC3339Nano)
@@ -777,7 +781,8 @@ func (s *Service) extractSegment(ctx context.Context, db *storage.Store, r memRo
 	if err != nil {
 		return 0, ps, err
 	}
-	claims, _ := liveClaims(r, liveSource(lines), readAt, facts, lines)
+	claims, skipped := liveClaims(r, liveSource(lines), readAt, facts, lines)
+	ps.skipped = skipped
 	if len(res.Ops) == 0 && len(claims) == 0 {
 		return 0, ps, nil
 	}
@@ -1125,10 +1130,10 @@ func (s *Service) expireEpisodes(db *storage.Store, now time.Time) int {
 }
 
 // regenerateEpisodes makes episodes that lost evidence again from the raw messages that remain.
-func (s *Service) regenerateEpisodes(ctx context.Context, db *storage.Store, now time.Time) (int, error) {
+func (s *Service) regenerateEpisodes(ctx context.Context, db *storage.Store, now time.Time) (n, skipped int, err error) {
 	rows, err := db.Reader().Query(`SELECT id, guild_id, channel_id, room, source, segment FROM channel_episode WHERE regen=1 ORDER BY updated_at LIMIT ?`, passRegens)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	type job struct {
 		r       memRoom
@@ -1142,23 +1147,22 @@ func (s *Service) regenerateEpisodes(ctx context.Context, db *storage.Store, now
 		}
 	}
 	rows.Close()
-	n := 0
 	for _, j := range jobs {
 		if !s.derivedAllows(spendEpisode) {
-			return n, errRoomMemoryStop
+			return n, skipped, errRoomMemoryStop
 		}
 		var ids []string
 		if err := json.Unmarshal([]byte(j.seg), &ids); err != nil {
 			// no ids would look like a segment with no people and delete the episode: keep it as it is
 			s.Log.Warn("memory: an episode's segment is unreadable; it is kept", "id", j.id, "err", err)
 			if _, err := db.DB.Exec(`UPDATE channel_episode SET regen=2 WHERE id=? AND regen=1`, j.id); err != nil {
-				return n, err
+				return n, skipped, err
 			}
 			continue
 		}
 		lines, err := s.linesByID(db, ids)
 		if err != nil {
-			return n, err
+			return n, skipped, err
 		}
 		human := 0
 		for _, l := range lines {
@@ -1168,7 +1172,7 @@ func (s *Service) regenerateEpisodes(ctx context.Context, db *storage.Store, now
 		}
 		if human < 2 {
 			if err := db.WithWriter(func(tx *sql.Tx) error { return deleteEpisodeTx(tx, j.id) }); err != nil {
-				return n, err
+				return n, skipped, err
 			}
 			n++
 			continue
@@ -1199,30 +1203,31 @@ func (s *Service) regenerateEpisodes(ctx context.Context, db *storage.Store, now
 			s.Log.Warn("memory: an episode was not regenerated", "reason", err.Error())
 			// keep what is still valid; do not try again every pass
 			if _, err := db.DB.Exec(`UPDATE channel_episode SET regen=2 WHERE id=? AND regen=1`, j.id); err != nil {
-				return n, err // unmarked, the same answer would be asked for again every pass
+				return n, skipped, err // unmarked, the same answer would be asked for again every pass
 			}
 			continue
 		case err != nil:
-			return n, err
+			return n, skipped, err
 		}
 		// the same statements made again are the same claims (the id is the statement's), so they merge
-		claims, _ := liveClaims(j.r, liveSource(lines), readAt, facts, lines)
+		claims, dropped := liveClaims(j.r, liveSource(lines), readAt, facts, lines)
+		skipped += dropped
 		_, _, err = s.saveEpisodeOps(ctx, db, j.r, lines, res.Ops, j.id, claims)
 		if errors.Is(err, errEvidenceDeleted) {
 			continue
 		}
 		if err != nil {
-			return n, err
+			return n, skipped, err
 		}
 		if len(res.Ops) == 0 {
 			// nothing worth keeping remains: the old episode goes
 			if err := db.WithWriter(func(tx *sql.Tx) error { return deleteEpisodeTx(tx, j.id) }); err != nil {
-				return n, err
+				return n, skipped, err
 			}
 		}
 		n++
 	}
-	return n, nil
+	return n, skipped, nil
 }
 
 // ---------------------------------------------------------------------------

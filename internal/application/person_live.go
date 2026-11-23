@@ -25,13 +25,16 @@ const livePeoplePrefix = "extract:"
 // liveSinceMu makes "write once" hold when two rooms save their first claim together.
 var liveSinceMu sync.Mutex
 
-// liveClaims turns a segment's validated people facts into claims for the write gate. A fact is split
-// into one claim per speaker, each with that speaker's own evidence lines only (the gate refuses the
-// evidence of another author or of another room), the text each line had when the model read it, and a
-// link that says self only when the speaker is the subject. A speaker with no line among the evidence
-// is dropped and counted. A bot line is never evidence (ParsePeople already refused it; the author map
-// holds human lines only).
-func liveClaims(r memRoom, source, readAt string, facts []episodes.PersonFact, lines []roomLine) (claims []store.PersonClaim, dropped int) {
+// liveClaims turns a segment's validated people facts into claims for the write gate and counts the facts
+// it skips. A fact is one speaker's statement or nothing: its "by" is one person and every line it cites
+// was written by that person (a bot line, or a line of another author, is never evidence). A fact the
+// model cited from two people's lines is skipped, never split: the subject's half would rest on the
+// subject's own line (often only a reaction), be read server-wide as their own statement with no source
+// label, and outlive the line that said it (the backfill drops such a fact too, pbAttribute). A self
+// claim (the speaker is the subject) must also name nobody but its subject, the derivation's rule
+// (derivedClaims). Each claim keeps the text each line had when the model read it, and its link says
+// self only when the speaker is the subject.
+func liveClaims(r memRoom, source, readAt string, facts []episodes.PersonFact, lines []roomLine) (claims []store.PersonClaim, skipped int) {
 	author, text := map[string]string{}, map[string]string{}
 	for _, l := range lines {
 		if !l.Bot {
@@ -39,31 +42,41 @@ func liveClaims(r memRoom, source, readAt string, facts []episodes.PersonFact, l
 		}
 	}
 	for _, f := range facts {
-		for _, speaker := range f.By {
-			var ev []string
-			read := map[string]string{}
-			for _, id := range f.Ev {
-				if author[id] == speaker {
-					ev = append(ev, id)
-					read[id] = text[id]
-				}
-			}
-			if len(ev) == 0 {
-				dropped++
-				continue
-			}
-			link := f.Link
-			switch {
-			case speaker == f.About:
-				link = store.LinkSelf
-			case link == store.LinkSelf || link == "":
-				link = store.LinkMention // a participant the speaker named by token
-			}
-			claims = append(claims, store.PersonClaim{GuildID: r.guild, SubjectRef: f.About, SpeakerRef: speaker, Kind: f.Kind, Topic: f.Topic,
-				Text: f.Text, Evidence: ev, Source: source, Link: link, Lines: read, ReadAt: readAt})
+		c, ok := liveClaim(r, source, readAt, f, author, text)
+		if !ok {
+			skipped++
+			continue
 		}
+		claims = append(claims, c)
 	}
-	return claims, dropped
+	return claims, skipped
+}
+
+// liveClaim is liveClaims for one fact; false means skip it.
+func liveClaim(r memRoom, source, readAt string, f episodes.PersonFact, author, text map[string]string) (store.PersonClaim, bool) {
+	if len(f.By) != 1 || len(f.Ev) == 0 {
+		return store.PersonClaim{}, false
+	}
+	speaker := f.By[0]
+	read := map[string]string{}
+	for _, id := range f.Ev {
+		if a, ok := author[id]; !ok || a != speaker {
+			return store.PersonClaim{}, false
+		}
+		read[id] = text[id]
+	}
+	link := f.Link
+	switch {
+	case speaker == f.About:
+		if named := uniqueStrings(episodes.TextRefs(f.Text)); len(named) != 1 || named[0] != f.About {
+			return store.PersonClaim{}, false // a self claim names only its subject
+		}
+		link = store.LinkSelf
+	case link == store.LinkSelf || link == "":
+		link = store.LinkMention // a participant the speaker named by token
+	}
+	return store.PersonClaim{GuildID: r.guild, SubjectRef: f.About, SpeakerRef: speaker, Kind: f.Kind, Topic: f.Topic,
+		Text: f.Text, Evidence: append([]string(nil), f.Ev...), Source: source, Link: link, Lines: read, ReadAt: readAt}, true
 }
 
 // liveSource is the claim source of a segment: extract:<its first observation id>.
@@ -149,15 +162,15 @@ func (s *Service) selfStatement(r memRoom, lines []roomLine, bots []episodes.Mes
 
 // extractSelfStatement asks the person_extract prompt (people only, no episode) about a one-line segment
 // the bot was addressed with, on the summary role inside the derived budget, and saves the claims that
-// validate. It returns the number of model calls made (0 or 1), the claims saved and an error that
-// ends the pass (budget, provider); a bad answer is not one.
-func (s *Service) extractSelfStatement(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, bots []episodes.Message, pack *lang.Pack, botName string) (calls, saved int, err error) {
+// validate. It returns what it did (model calls made, 0 or 1; claims saved; facts skipped) and an error
+// that ends the pass (budget, provider); a bad answer is not one.
+func (s *Service) extractSelfStatement(ctx context.Context, db *storage.Store, r memRoom, lines []roomLine, bots []episodes.Message, pack *lang.Pack, botName string) (ps peopleStats, err error) {
 	if r.kakao() {
-		return 0, 0, nil
+		return ps, nil
 	}
 	botRef := s.liveBotRef(lines)
 	if !s.selfStatement(r, lines, bots, botRef) {
-		return 0, 0, nil
+		return ps, nil
 	}
 	msgs := segmentMessages(lines, bots)
 	readAt := s.Clock.Now().UTC().Format(time.RFC3339Nano)
@@ -165,7 +178,7 @@ func (s *Service) extractSelfStatement(ctx context.Context, db *storage.Store, r
 		RefOf: func(m episodes.Message) string { return personRefOf(r, m) }, LabelOf: s.refLabels(db, r.room)}, lines)
 	p, ok := episodes.BuildPersonExtract(in)
 	if !ok {
-		return 0, 0, nil
+		return ps, nil
 	}
 	system := lang.Fill(pack.Memory.PersonExtractSystem, "bot", botName)
 	prompt := p.FillPersonExtract(pack.Memory.PersonExtract)
@@ -177,17 +190,18 @@ func (s *Service) extractSelfStatement(ctx context.Context, db *storage.Store, r
 		return nil
 	})
 	if asked {
-		calls = 1
+		ps.calls = 1
 	}
 	if err != nil {
-		return calls, 0, err
+		return ps, err
 	}
-	claims, _ := liveClaims(r, liveSource(lines), readAt, facts, lines)
+	claims, skipped := liveClaims(r, liveSource(lines), readAt, facts, lines)
+	ps.skipped = skipped
 	if len(claims) == 0 {
-		return calls, 0, nil
+		return ps, nil
 	}
-	saved, err = s.savePeopleOnly(ctx, db, r, lines, claims)
-	return calls, saved, err
+	ps.claims, err = s.savePeopleOnly(ctx, db, r, lines, claims)
+	return ps, err
 }
 
 // savePeopleOnly saves claims of a segment that made no episode: the same transaction rule as
