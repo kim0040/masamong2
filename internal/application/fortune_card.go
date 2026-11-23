@@ -57,16 +57,21 @@ func (s *Service) computedOutput(loc string, d fortune.Day) (scores map[string]a
 // luckyInlineMax is the longest lucky value (runes) that still sits in a column of its own.
 const luckyInlineMax = 14
 
-// fortuneCard lays the text of base out as a reading of kind; head is the line under the title (who and
-// when) and footer replaces base's footer. When the text is not a reading, base is returned unchanged.
-func (s *Service) fortuneCard(loc, kind string, base action.Card, head, footer string) action.Card {
-	return s.fortuneCardFor(loc, kind, base, head, footer, nil)
+// fortuneCardSpec says how a reading is laid out: in Loc's words, as a reading of Kind; Head is the line
+// under the title (who and when) and Footer replaces the card's footer. Day is the computed day of a
+// day's reading (nil = none): its score, area scores, lucky points and basis replace whatever the model
+// wrote.
+type fortuneCardSpec struct {
+	Loc, Kind    string
+	Head, Footer string
+	Day          *fortune.Day
 }
 
-// fortuneCardFor is fortuneCard with the computed day of a day's reading: its score, area scores, lucky
-// points and basis replace whatever the model wrote. A text that is not a reading keeps its words (minus
-// SCORE and LUCKY_* key lines) and gets the computed points as fields and footer as its footer.
-func (s *Service) fortuneCardFor(loc, kind string, base action.Card, head, footer string, day *fortune.Day) action.Card {
+// fortuneCard lays the text of base out as spec says. When the text is not a reading, base is returned
+// unchanged; unless the spec has a computed day: then the words stay (minus SCORE and LUCKY_* key
+// lines) and the computed points are added as fields and Footer as the footer.
+func (s *Service) fortuneCard(spec fortuneCardSpec, base action.Card) action.Card {
+	loc, kind, head, footer, day := spec.Loc, spec.Kind, spec.Head, spec.Footer, spec.Day
 	if !fortuneComputed[kind] {
 		day = nil
 	}
