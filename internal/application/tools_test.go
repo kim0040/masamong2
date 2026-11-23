@@ -698,7 +698,7 @@ func TestDoctorLogsABadTimezoneOncePerValue(t *testing.T) {
 }
 
 func TestDoctorSurfacesDataFolderPermissionWarnings(t *testing.T) {
-	t.Parallel()
+	// sequential: it records a process-wide permission warning that every doctor report shows
 	svc := setupSvc(t)
 	fsutil.ResetWarnings()
 	t.Cleanup(fsutil.ResetWarnings)

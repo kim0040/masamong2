@@ -26,7 +26,7 @@ func prepareJobsOf(t *testing.T, s *Service, room string) int {
 // Finding C: a graceful stop while the job waits on its batch records the job INTERRUPTED; the next start
 // runs that same job again (a new attempt) instead of adding a job, and nothing is submitted twice.
 func TestBatchRestartRetriesTheInterruptedJob(t *testing.T) {
-	t.Parallel()
+	// sequential: it shortens the batch waits of the memory engine package (process state)
 	t.Cleanup(engine.ShortBatchWaitsForTest())
 	host := newBatchHost(openai.BatchRunning)
 	s, eng, live := batchService(t, host)
@@ -63,7 +63,7 @@ func TestBatchRestartRetriesTheInterruptedJob(t *testing.T) {
 // Finding D: a submission the host refuses (a rate limit here) fails the job with the reason; nothing
 // runs at the live price and no plan holds the room.
 func TestBatchRefusedSubmitFailsTheJobWithoutLiveCalls(t *testing.T) {
-	t.Parallel()
+	// sequential: it shortens the batch waits of the memory engine package (process state)
 	t.Cleanup(engine.ShortBatchWaitsForTest())
 	host := newBatchHost(openai.BatchRunning)
 	host.submitErr = &openai.APIError{Status: 429, Message: "rate limited"}
@@ -89,7 +89,7 @@ func TestBatchRefusedSubmitFailsTheJobWithoutLiveCalls(t *testing.T) {
 // Finding 3: a cancel at a host that cannot cancel ends the job cancelled at once, while the plan drains
 // in the background (the room held, nothing live) until the batch ends and its results are applied.
 func TestBatchCancelDrainsInTheBackground(t *testing.T) {
-	t.Parallel()
+	// sequential: it shortens the batch waits of the memory engine package (process state)
 	t.Cleanup(engine.ShortBatchWaitsForTest())
 	host := newBatchHost(openai.BatchRunning)
 	host.noCancel = true
@@ -133,7 +133,7 @@ func TestBatchCancelDrainsInTheBackground(t *testing.T) {
 // Finding 1: a submission whose answer was lost at a host without a batch list fails the job with what to
 // do; the block shows it, the room stays held, and memory.blocks.update discard_batch releases it.
 func TestBatchUnknownSubmitIsHeldUntilDiscarded(t *testing.T) {
-	t.Parallel()
+	// sequential: it shortens the batch waits of the memory engine package (process state)
 	t.Cleanup(engine.ShortBatchWaitsForTest())
 	host := newBatchHost(openai.BatchRunning)
 	host.lost = true
