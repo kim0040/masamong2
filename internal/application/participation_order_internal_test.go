@@ -258,7 +258,7 @@ func TestAFinalCheckFailsOnceAHeldCallSetsTheAfterCallPause(t *testing.T) {
 		s.Observe(ObservedMessage{GuildID: "g", ChannelID: "a", MessageID: "m1", AuthorID: "u1", AuthorName: "u1",
 			Content: "마사몽 이거 알아?", At: clk.t, Addressed: true, BotCall: "mention"})
 	}()
-	waitsInStore(t, "(*Service).Observe(")
+	waitsInStore(t, "(*Service).restorePartMute(")
 	s.part.mu.Lock()
 	s.partChannel("g:a").backoffLoaded = true // as a concurrent restore would
 	s.part.mu.Unlock()
