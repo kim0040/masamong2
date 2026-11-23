@@ -321,8 +321,8 @@ func (s *Service) commitSourceChange(ctx context.Context, guildID, channelID str
 			return err
 		}
 		// a stored pilot answer of the paid backfill that cites these lines is purged now, not at apply: only
-		// the pilot windows holding them
-		return s.pbRecheckLinesTx(tx, guildID, j.Obs)
+		// the pilot windows holding them, and a failure there never holds back the deletion or the edit
+		return s.pbRecheckSoftTx(tx, "source_change", len(j.Obs), func() error { return s.pbRecheckLinesTx(tx, guildID, j.Obs) })
 	})
 	if err != nil {
 		return err

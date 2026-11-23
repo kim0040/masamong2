@@ -12,8 +12,8 @@ import (
 )
 
 // The stored pilot answers are re-checked inside the writer transaction of every deleted or edited
-// message and of every withdrawal. These tests pin what those re-checks reach and that every wired path
-// purges the copy.
+// message and of every withdrawal. These tests pin what those re-checks reach, that every wired path
+// purges the copy, and that a failing re-check never holds back a member's own change.
 
 // pbNativeOf is the Discord message id of an observation.
 func pbNativeOf(t *testing.T, s *Service, obs string) string {
@@ -240,5 +240,55 @@ func TestPilotPurgeWiredOnHideEditAndDelete(t *testing.T) {
 				t.Fatalf("control: an unrelated pilot fact went with the %s", how)
 			}
 		})
+	}
+}
+
+// A re-check that fails (here: the run table cannot be read) never holds back a member's deletion or
+// withdrawal: the change commits and the failure is only logged. Hide and forget-all, which an operator or
+// a member asks for and can retry, still return the error.
+func TestPilotRecheckFailureDoesNotBlockDeletionOrWithdrawal(t *testing.T) {
+	h := newPBHost(t)
+	s := pbService(t, h, "anthropic")
+	pbSeed(t, s, 70)
+	_, run := pbPiloted(t, s, nil)
+	target, _ := pbTargetAndControl(t, s, run.ID)
+	native := pbNativeOf(t, s, target.Ev[0])
+	c := store.PersonClaim{GuildID: "g1", SubjectRef: target.About, SpeakerRef: target.By[0], Kind: target.Kind, Topic: target.Topic,
+		Text: target.Text, Evidence: target.Ev, Source: "backfill:" + run.ID, Link: target.Link}
+	if err := s.Store.WithWriter(func(tx *sql.Tx) error {
+		_, err := s.savePersonClaims(t.Context(), tx, []store.PersonClaim{c})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	id := store.PersonClaimID("g1", c.SubjectRef, c.SpeakerRef, c.Kind, store.PersonTopic(c.Topic), c.Evidence)
+	if _, err := s.Store.DB.Exec(`ALTER TABLE people_backfill_run RENAME TO people_backfill_run_gone`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Store.WithWriter(func(tx *sql.Tx) error { return s.pbRecheckLinesTx(tx, "g1", target.Ev) }); err == nil {
+		t.Fatal("control: the re-check does not fail")
+	}
+	if err := s.Store.WithWriter(func(tx *sql.Tx) error { _, err := s.hideClaimTx(tx, id, store.SuppressBySelf); return err }); err == nil {
+		t.Error("a hide whose pilot re-check failed reported success")
+	}
+	if err := s.Store.WithWriter(func(tx *sql.Tx) error {
+		_, err := s.forgetPersonTx(tx, "g1", store.PersonRef("101"), "self")
+		return err
+	}); err == nil {
+		t.Error("a forget-all whose pilot re-check failed reported success")
+	}
+	if err := s.MessagesDeleted("g1", "c1", []string{native}); err != nil {
+		t.Fatalf("a failing pilot re-check held back the deletion: %v", err)
+	}
+	var tomb int
+	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM privacy_tombstones WHERE kind='source' AND source_id=?`, native).Scan(&tomb); err != nil || tomb == 0 {
+		t.Fatalf("the deletion did not commit: %d %v", tomb, err)
+	}
+	if _, err := s.setConsent("102", privacy.Memory, privacy.Withdrawn, "test"); err != nil {
+		t.Fatalf("a failing pilot re-check held back the withdrawal: %v", err)
+	}
+	var status string
+	if err := s.Store.DB.QueryRow(`SELECT status FROM consent_state WHERE user_id='102' AND scope=?`, privacy.Memory).Scan(&status); err != nil || status != privacy.Withdrawn {
+		t.Fatalf("the withdrawal did not commit: %q %v", status, err)
 	}
 }

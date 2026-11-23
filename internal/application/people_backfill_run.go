@@ -791,6 +791,26 @@ func (s *Service) pbRecheckPersonTx(tx *sql.Tx, ref string) error {
 	return s.pbRecheckScopedTx(tx, "", nil, ref)
 }
 
+// pbRecheckSoftTx runs the re-check that follows a member's own change (a deleted or edited line, a
+// withdrawal of consent) inside a savepoint. If it fails, its own writes are rolled back, the failure is
+// logged with counts only (never text: an error may quote a stored answer) and the member's change still
+// commits: a deletion or a withdrawal is never held back by the pilot copy. A fact the purge missed is not
+// read: the review and the apply gate every stored fact again. A failure to roll back is returned.
+func (s *Service) pbRecheckSoftTx(tx *sql.Tx, after string, count int, recheck func() error) error {
+	if _, err := tx.Exec(`SAVEPOINT pb_recheck`); err != nil {
+		s.Log.Warn("people backfill: pilot copy not re-checked", "after", after, "count", count, "class", string(errclass.Of(err)))
+		return nil
+	}
+	if err := recheck(); err != nil {
+		s.Log.Warn("people backfill: pilot copy not re-checked", "after", after, "count", count, "class", string(errclass.Of(err)))
+		if _, err := tx.Exec(`ROLLBACK TO pb_recheck`); err != nil {
+			return err
+		}
+	}
+	_, err := tx.Exec(`RELEASE pb_recheck`)
+	return err
+}
+
 // pbRecheckScopedTx is the re-check over the windows of guild that hold one of obs (all when empty), and
 // over the facts that name person (all when "").
 func (s *Service) pbRecheckScopedTx(tx *sql.Tx, guild string, obs []string, person string) error {
