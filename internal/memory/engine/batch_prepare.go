@@ -292,10 +292,12 @@ func (e *Engine) submitChunk(ctx context.Context, sub *batchSubmit, w batchWork,
 	prov := e.providerOf(w.purpose, client)
 	key := plan.Generation[:16] + fmt.Sprintf("-%d", len(plan.Groups))
 	// the intent is stored before the call: a process that stops during it finds the submission at
-	// restart and looks it up instead of sending it again
+	// restart and looks it up instead of sending it again. Its SubmittedAt is wall time, like the
+	// adapter's ref and every time the host reports (created_at, expires_at): all of them are compared
+	// with each other, so they stay on one clock whatever the engine clock is.
 	plan.Groups = append(plan.Groups, BatchGroup{Purpose: w.purpose, Kind: kind, Model: w.model, Provider: prov,
 		Submit: submitPending, Items: items, Units: units, Ref: openai.BatchRef{API: prov.API, BaseURL: prov.BaseURL,
-			Kind: kind, Model: w.model, Count: len(chunk), SubmitKey: key, SubmittedAt: e.nowT().UTC()}})
+			Kind: kind, Model: w.model, Count: len(chunk), SubmitKey: key, SubmittedAt: time.Now().UTC()}})
 	g := &plan.Groups[len(plan.Groups)-1]
 	save := e.saveBatchPlan
 	if !sub.stored {
@@ -311,11 +313,7 @@ func (e *Engine) submitChunk(ctx context.Context, sub *batchSubmit, w batchWork,
 	ref, err := client.SubmitBatch(ctx, kind, w.model, reqs, key)
 	switch {
 	case err == nil:
-		submittedAt := g.Ref.SubmittedAt
 		g.Ref, g.Submit, g.State = ref, "", openai.BatchPending
-		if !submittedAt.IsZero() {
-			g.Ref.SubmittedAt = submittedAt // keep the intent's stamp: the adapter's ref is wall time
-		}
 		if g.Ref.SubmitKey == "" {
 			g.Ref.SubmitKey = key
 		}

@@ -8,10 +8,10 @@ import (
 	"masamong/internal/providers/openai"
 )
 
-// R07: a plan's CreatedAt and each group's intent SubmittedAt come from Engine.Now (nil = wall
-// clock). The fixed time is synthetic and far from now (the seeded messages stay well behind it),
-// so a wall-clock write would stand out. The submission's answer is lost on purpose: the group then
-// keeps the intent reference the engine wrote before the call, which is where SubmittedAt is read.
+// R07: a plan's CreatedAt comes from Engine.Now (nil = wall clock); each group's SubmittedAt is wall
+// time, because it is compared with the times the host reports. The fixed engine time is synthetic and
+// far from now, so a stamp on the wrong clock stands out. The submission's answer is lost on purpose:
+// the group then keeps the intent reference the engine wrote before the call.
 func TestBatchPlanTimesComeFromTheInjectedClock(t *testing.T) {
 	e, _ := newEngine(t, false)
 	fixed := time.Now().Add(72 * time.Hour).UTC().Truncate(time.Second)
@@ -32,8 +32,8 @@ func TestBatchPlanTimesComeFromTheInjectedClock(t *testing.T) {
 		t.Fatal("no group was prepared")
 	}
 	for i, g := range plan.Groups {
-		if !g.Ref.SubmittedAt.Equal(fixed) {
-			t.Fatalf("group %d submitted at %v, want the injected %v", i, g.Ref.SubmittedAt, fixed)
+		if d := time.Since(g.Ref.SubmittedAt); d < 0 || d > time.Minute {
+			t.Fatalf("group %d submitted at %v, want wall time near %v", i, g.Ref.SubmittedAt, time.Now())
 		}
 	}
 	var createdAt, updatedAt string
@@ -46,11 +46,10 @@ func TestBatchPlanTimesComeFromTheInjectedClock(t *testing.T) {
 	}
 }
 
-// R07: a lost submission's settle wait is measured on the engine clock against the intent's stamp.
-// The engine clock here is a day behind the wall's: on the wall clock the intent looks a day old and
-// the settle long over, but on the engine's clock the submission is fresh and the host must not be
-// asked yet.
-func TestBatchReconcileSettleFollowsTheEngineClock(t *testing.T) {
+// A lost submission's settle wait is measured on the wall clock against the intent's wall stamp. The
+// engine clock here is a day behind: an engine stamp read on the wall clock would look a day old and
+// skip the settle, so the host would be asked at once.
+func TestBatchReconcileSettleIsOnOneClock(t *testing.T) {
 	e, _ := newEngine(t, false)
 	e.Now = func() time.Time { return time.Now().Add(-24 * time.Hour) }
 	seedBatchRoom(t, e, batchRoom, 48, 0)
@@ -78,10 +77,10 @@ func TestBatchReconcileSettleFollowsTheEngineClock(t *testing.T) {
 	}
 }
 
-// R07: the stamp an accepted batch keeps is the engine's intent stamp, not the adapter's wall
-// time. A host that answers without an expiry is then measured against the give-up line on the
-// engine's clock, and a fresh batch is not instantly abandoned under a clock ahead of the wall's.
-func TestBatchAcceptedRefKeepsTheEngineStamp(t *testing.T) {
+// An accepted batch keeps the adapter's own stamp (wall time; the adapter prices and reconciles with
+// it). A host that answers without an expiry is measured against the give-up line on the wall clock,
+// so a fresh batch is not abandoned under an engine clock far ahead of the wall's.
+func TestBatchAcceptedRefKeepsTheAdapterStamp(t *testing.T) {
 	e, _ := newEngine(t, false)
 	fixed := time.Now().Add(100 * time.Hour).UTC().Truncate(time.Second)
 	e.Now = func() time.Time { return fixed }
@@ -97,8 +96,8 @@ func TestBatchAcceptedRefKeepsTheEngineStamp(t *testing.T) {
 		t.Fatalf("one group expected: %+v", plan.Groups)
 	}
 	g := &plan.Groups[0]
-	if !g.Ref.SubmittedAt.Equal(fixed) {
-		t.Fatalf("the accepted batch keeps a %v stamp, want the intent's %v", g.Ref.SubmittedAt, fixed)
+	if want := fb.subs[0].ref.SubmittedAt; !g.Ref.SubmittedAt.Equal(want) {
+		t.Fatalf("the accepted batch keeps a %v stamp, want the adapter's %v", g.Ref.SubmittedAt, want)
 	}
 	open, err := e.pollPlan(context.Background(), &plan)
 	if err != nil {
@@ -106,5 +105,30 @@ func TestBatchAcceptedRefKeepsTheEngineStamp(t *testing.T) {
 	}
 	if !open || g.Abandoned || g.State != openai.BatchRunning {
 		t.Fatalf("a fresh batch was given up under the offset clock: open=%v state=%s abandoned=%v", open, g.State, g.Abandoned)
+	}
+}
+
+// Review round 2: a host's own expiry is host (wall) time. With the engine clock two days ahead, a
+// batch the host says expires in a day is still running and must not be cancelled and abandoned
+// (abandoning would send its still-pending items through the paid live path again).
+func TestBatchHostExpiryIsReadOnTheWallClock(t *testing.T) {
+	e, _ := newEngine(t, false)
+	e.Now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	e.Store.Now = e.Now
+	seedBatchRoom(t, e, batchRoom, 48, 0)
+	fb := newFakeBatch(openai.BatchEmbed)
+	fb.expiresAt = time.Now().Add(24 * time.Hour)
+	e.EmbedBatcher = fb
+	plan, _, err := e.PrepareBatch(context.Background(), batchRoom, BatchOptions{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	open, err := e.pollPlan(context.Background(), &plan)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := plan.Groups[0]
+	if !open || g.Abandoned || len(fb.cancels) != 0 {
+		t.Fatalf("a batch the host still runs was abandoned: open=%v abandoned=%v cancels=%v", open, g.Abandoned, fb.cancels)
 	}
 }

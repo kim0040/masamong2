@@ -32,6 +32,7 @@ type fakeBatch struct {
 	state     openai.BatchState // every batch's state (default running)
 	drop      map[string]bool   // item ids answered with nothing
 	failItems map[string]bool   // item ids answered with an error
+	expiresAt time.Time         // the host's expiry reported on every poll (zero = none)
 	partial   bool              // only the first half of each batch's items come back
 	pollErr   error
 	polls     atomic.Int32
@@ -181,7 +182,7 @@ func (f *fakeBatch) PollBatch(_ context.Context, ref openai.BatchRef) (openai.Ba
 	if s == nil {
 		return openai.BatchStatus{}, errors.New("no such batch")
 	}
-	st := openai.BatchStatus{State: f.state, Total: len(s.items)}
+	st := openai.BatchStatus{State: f.state, Total: len(s.items), ExpiresAt: f.expiresAt}
 	if f.state.Final() {
 		st.Completed = len(s.items)
 	}

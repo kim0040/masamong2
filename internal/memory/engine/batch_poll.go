@@ -80,7 +80,7 @@ func (e *Engine) ReconcilePlan(ctx context.Context, plan *BatchPlan) error {
 		if g.Submit == "" {
 			continue
 		}
-		if wait := batchReconcileSettle - e.nowT().Sub(g.Ref.SubmittedAt); wait > 0 {
+		if wait := batchReconcileSettle - time.Since(g.Ref.SubmittedAt); wait > 0 { // wall time, as the stamp
 			if err := sleepCtx(ctx, wait); err != nil {
 				return err
 			}
@@ -95,13 +95,10 @@ func (e *Engine) ReconcilePlan(ctx context.Context, plan *BatchPlan) error {
 			if g.Submit == submitPending {
 				plan.BatchItems += g.Units // counted at the answer, which never came
 			}
-			key, submittedAt := g.Ref.SubmitKey, g.Ref.SubmittedAt
+			key := g.Ref.SubmitKey
 			g.Ref, g.Submit, g.State, g.Error = ref, "", openai.BatchPending, ""
 			if g.Ref.SubmitKey == "" {
 				g.Ref.SubmitKey = key
-			}
-			if !submittedAt.IsZero() {
-				g.Ref.SubmittedAt = submittedAt // the deadline is read on the engine clock: keep the intent's stamp
 			}
 			slog.Info("memory: a batch whose submission was unanswered was found at the host", "room", plan.Room, "purpose", g.Purpose)
 		case errors.Is(err, openai.ErrBatchNotSubmitted):
@@ -246,7 +243,9 @@ func (g *BatchGroup) deadline(created time.Time) time.Time {
 // gone, or that another host's adapter would have to read, ends the round with ErrBatchProviderGone.
 func (e *Engine) pollPlan(ctx context.Context, plan *BatchPlan) (bool, error) {
 	open := false
-	now := e.nowT()
+	// the deadline is the host's expiry or the wall-time submission stamp, so it is read on the wall
+	// clock too; the engine clock may differ (tests, an offset instance clock)
+	now := time.Now()
 	for i := range plan.Groups {
 		g := &plan.Groups[i]
 		if g.Applied || g.State.Final() || g.Submit != "" {
