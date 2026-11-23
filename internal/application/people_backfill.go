@@ -68,6 +68,9 @@ const (
 	pbHardGap = 45 * time.Minute
 )
 
+// pbWindowLines is the merged-line limit of a window (0 = peoplebackfill.MaxWindowLines; tests shorten it).
+var pbWindowLines int
+
 // pbModels are the two models the backfill may use, by the names the action takes.
 var pbModels = map[string]peoplebackfill.Model{"haiku": peoplebackfill.ModelHaiku, "sonnet": peoplebackfill.ModelSonnet}
 
@@ -321,7 +324,7 @@ func (s *Service) pbBuildPlan(ctx context.Context, db *storage.Store, p pbParams
 	for _, room := range p.Rooms {
 		r := pbRoomOf(room)
 		pack, _ := s.roomVoice(r)
-		opt := peoplebackfill.Options{PromptHash: pbPromptVersion(pack),
+		opt := peoplebackfill.Options{PromptHash: pbPromptVersion(pack), MaxLines: pbWindowLines,
 			Split: episodes.Options{Location: s.instanceZone(), DayBoundary: doc.Memory.Boundary(), Tokenizer: tokenizerFor(pack)}}
 		had := false
 		err := s.pbPageRoom(ctx, db, r, since, until, func(lines []peoplebackfill.Line) {
@@ -351,13 +354,13 @@ func (s *Service) pbBuildPlan(ctx context.Context, db *storage.Store, p pbParams
 	return plan, nil
 }
 
-// pbToken is the plan's fingerprint: its parameters and its windows. Any change of either (a deleted
-// message at a window's edge, a captured old message, another range or cap) gives another token.
+// pbToken is the plan's fingerprint: its parameters and its windows with the lines each holds. Any
+// change of either (a deleted message, a captured old message, another range or cap) gives another token.
 func pbToken(p pbParams, ws []pbWindow) string {
 	h := sha256.New()
 	fmt.Fprintf(h, "people-backfill/1\x00%s\x00%s\x00%s\x00%s\x00%.2f\n", p.Guild, strings.Join(p.Rooms, ","), p.Since, p.Until, p.BudgetUSD)
 	for _, w := range ws {
-		fmt.Fprintf(h, "%s %t\n", w.ID, w.Skipped)
+		fmt.Fprintf(h, "%s %t %d %s\n", w.ID, w.Skipped, w.Lines, strings.Join(w.Obs, ","))
 	}
 	return hex.EncodeToString(h.Sum(nil))[:24]
 }

@@ -3,10 +3,12 @@ package engine
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -225,4 +227,97 @@ func TestOpeningAnOlderReleasesStoreReprocessesNothing(t *testing.T) {
 		t.Errorf("an upgrade spent: %+v embeds %d chats %d", rep, fp.embedCalls.Load(), fp.chatCalls.Load())
 	}
 	wantSameHistory(t, "the pass after the start", before, snapshotHistory(t, db))
+}
+
+// The paid people backfill (person memory v1.7.0) is started by an operator only. A store holding a finished pilot
+// and a run with a batch in flight goes through a restart and the index passes: no backfill row moves, nothing is
+// sent anywhere, no model is asked anything. (The service's own restart and room-memory pass are checked in the
+// application package: TestPeopleBackfillNotStartedByPasses and TestPeopleBackfillRestartPollsOnly.)
+func TestARestartNeverStartsAPeopleBackfill(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "m.db")
+	var requests atomic.Int32
+	open := func() (*storage.Store, *Engine, *fakeProvider) {
+		t.Helper()
+		db, err := storage.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st, err := store.Open(db)
+		if err != nil {
+			db.Close()
+			t.Fatal(err)
+		}
+		for _, q := range store.PeopleBackfillDDL { // the application creates them at every start
+			if _, err := db.DB.Exec(q); err != nil {
+				db.Close()
+				t.Fatal(err)
+			}
+		}
+		fp := &fakeProvider{}
+		t.Setenv("FAKE_KEY", "k")
+		inner := fp.handler()
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			requests.Add(1)
+			inner.ServeHTTP(w, r)
+		}))
+		t.Cleanup(srv.Close)
+		cred, _ := providers.Resolve("env:FAKE_KEY")
+		a := openai.New(providers.NewClient(5*time.Second, nil), srv.URL, cred)
+		return db, New(st, a, Models{Embed: "fake-embed", Rerank: "fake-rerank", Summary: "fake-summary"},
+			Settings{Search: search.Default(), Recipe: leaves.DefaultRecipe(), Summaries: true, MessageVectors: true, RefTZ: time.UTC, HedgeAfter: time.Second}), fp
+	}
+	db, e, _ := open()
+	seed(t, e)
+	ctx := context.Background()
+	if _, err := e.IndexRooms(ctx, IndexOptions{BudgetUSD: 1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	at := "2026-11-01T00:00:00Z"
+	for _, r := range []store.BackfillRun{
+		{ID: "pb_pilot", GuildID: "g1", State: store.BackfillPiloted, Token: "t1", Params: []byte(`{}`), Provider: "claude", BudgetUSD: 3, PilotDone: true,
+			Pilot: []byte(`{"windows":1}`), Windows: 1, CreatedAt: at, UpdatedAt: at},
+		{ID: "pb_run", GuildID: "g2", State: store.BackfillSubmitted, Token: "t2", Params: []byte(`{}`), Model: "claude-haiku-5-5", Provider: "claude",
+			BudgetUSD: 3, PilotDone: true, Batches: []byte(`[{"key":"pbb_1","state":"submitted","model":"claude-haiku-5-5","windows":1,"max_usd":0.01,"at":"` + at + `"}]`),
+			Windows: 2, CreatedAt: at, UpdatedAt: at},
+	} {
+		if err := store.InsertBackfillRun(db.DB, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.InsertBackfillWindows(db.DB, []store.BackfillWindow{
+		{RunID: "pb_pilot", ID: "w1", Room: "discord:g1:c1", Obs: []string{"o1"}, State: store.WindowQueued, Pilot: true, Result: []byte(`{"m":{}}`), UpdatedAt: at},
+		{RunID: "pb_run", ID: "w2", Room: "discord:g2:c1", Obs: []string{"o2"}, State: store.WindowSubmitted, Batch: "pbb_1", Attempts: 1, UpdatedAt: at},
+		{RunID: "pb_run", ID: "w3", Room: "discord:g2:c1", Seq: 1, Obs: []string{"o3"}, State: store.WindowQueued, UpdatedAt: at},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	backfill := func() map[string][]string {
+		return map[string][]string{"runs": tableRows(t, db, "people_backfill_run", ""), "windows": tableRows(t, db, "people_backfill_window", ""),
+			"spend": tableRows(t, db, "memory_spend", "WHERE kind='"+store.SpendPeopleBackfill+"'")}
+	}
+	before := backfill()
+	history := snapshotHistory(t, db)
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	requests.Store(0)
+	db, n, fp := open()
+	defer db.Close()
+	if _, err := n.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := n.IndexRooms(ctx, IndexOptions{BudgetUSD: 1}, nil); err != nil {
+		t.Fatal(err)
+	}
+	after := backfill()
+	for k, rows := range before {
+		if !slices.Equal(rows, after[k]) {
+			t.Errorf("a restart moved the people backfill's %s:\n%v\n%v", k, rows, after[k])
+		}
+	}
+	wantSameHistory(t, "a restart with a people backfill stored", history, snapshotHistory(t, db))
+	if requests.Load() != 0 || fp.chatCalls.Load() != 0 || fp.embedCalls.Load() != 0 {
+		t.Fatalf("a restart sent %d requests (chat %d, embed %d)", requests.Load(), fp.chatCalls.Load(), fp.embedCalls.Load())
+	}
 }
