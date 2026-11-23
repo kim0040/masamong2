@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"masamong/internal/chat"
 	"masamong/internal/lang"
@@ -212,6 +213,10 @@ func TestParsePeopleDropsBadEntriesAndCountsThem(t *testing.T) {
 		"template braces":            `{"about":"p2","kind":"like","topic":"음식","text":"{p2}는 {memory}를 좋아함","by":["p1"],"ev":["m1"]}`,
 		"newline":                    `{"about":"p2","kind":"like","topic":"음식","text":"{p2}는\n좋아함","by":["p1"],"ev":["m1"]}`,
 		"not an object":              `"p2 likes mint"`,
+		// the write gate's rules on the stored text: the subject is named, and the tokens expanded to
+		// references fit the limit (118 runes as written, 123 with {@ref-은비})
+		"subject not named":      `{"about":"p2","kind":"like","topic":"음식","text":"{p1}는 민트초코를 좋아함","by":["p1"],"ev":["m1"]}`,
+		"too long once expanded": `{"about":"p2","kind":"like","topic":"음식","text":"{p2}` + strings.Repeat("나", 114) + `","by":["p1"],"ev":["m1"]}`,
 	}
 	var entries []string
 	for _, e := range cases {
@@ -230,7 +235,8 @@ func TestParsePeopleDropsBadEntriesAndCountsThem(t *testing.T) {
 	}
 	// The topic and the text are measured in runes.
 	ok := strings.Repeat("가", 20)
-	if res, bad := p.ParsePeople(`{"people":[{"about":"p2","kind":"like","topic":"`+ok+`","text":"`+strings.Repeat("나", 120)+`","by":["p1"],"ev":["m1"]}]}`, PeopleOptions{}); len(res) != 1 || bad != 0 {
+	fill := 120 - utf8.RuneCountInString("{@"+eunbi.Ref+"}") // the subject's token as stored
+	if res, bad := p.ParsePeople(`{"people":[{"about":"p2","kind":"like","topic":"`+ok+`","text":"{p2}`+strings.Repeat("나", fill)+`","by":["p1"],"ev":["m1"]}]}`, PeopleOptions{}); len(res) != 1 || bad != 0 {
 		t.Fatalf("limits are inclusive: %d %d", len(res), bad)
 	}
 }
