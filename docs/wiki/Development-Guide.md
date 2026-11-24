@@ -33,7 +33,7 @@ On macOS and Linux: double-click `start-test.command` in Finder, or run `./start
 
 ## Layout
 
-The diagrams, the path from one message to a reply, the memory pipeline and the decision log are in the repository's [architecture docs](https://github.com/kim0040/masamong2/blob/main/docs/architecture/README.md) (in Korean). The table below is a summary of the directories.
+The diagrams, the path from one message to a reply, the memory pipeline and the decision log are in the repository's [architecture docs](https://github.com/kim0040/masamong2/blob/main/docs/architecture/README.en.md) (also in [Korean](https://github.com/kim0040/masamong2/blob/main/docs/architecture/README.md)). The table below is a summary of the directories.
 
 | Path | Role |
 |---|---|

@@ -8,6 +8,26 @@
       "README.md": "b8c7c41b5c04ec75",
       "README.zh-Hans.md": "2838dcc68adc846f"
     },
+    "docs/architecture/README": {
+      "docs/architecture/README.en.md": "5d39987a321ace33",
+      "docs/architecture/README.md": "67e7a54f3b9952d3"
+    },
+    "docs/architecture/console-and-ops": {
+      "docs/architecture/console-and-ops.en.md": "26f529c85eb0cae1",
+      "docs/architecture/console-and-ops.md": "24d6bf35801165a1"
+    },
+    "docs/architecture/data-model": {
+      "docs/architecture/data-model.en.md": "3078d941c711cd91",
+      "docs/architecture/data-model.md": "60cbc400382b48cc"
+    },
+    "docs/architecture/decisions": {
+      "docs/architecture/decisions.en.md": "ab8e1df862d0342d",
+      "docs/architecture/decisions.md": "2c398da4b5a94923"
+    },
+    "docs/architecture/diagrams/README": {
+      "docs/architecture/diagrams/README.en.md": "48b9afe9d10025e0",
+      "docs/architecture/diagrams/README.md": "8fd928f39fc01dcf"
+    },
     "docs/architecture/diagrams/data-model.d2": {
       "docs/architecture/diagrams/data-model.d2": "134623bb6373cefa",
       "docs/architecture/diagrams/data-model.en.d2": "8799339d90f2aaeb"
@@ -24,6 +44,26 @@
       "docs/architecture/diagrams/overview.d2": "59ea79e1b1166d3c",
       "docs/architecture/diagrams/overview.en.d2": "e36644e0a1f34350"
     },
+    "docs/architecture/glossary": {
+      "docs/architecture/glossary.en.md": "a1e40cbddef646cf",
+      "docs/architecture/glossary.md": "c5f5ffd4c9c11328"
+    },
+    "docs/architecture/memory": {
+      "docs/architecture/memory.en.md": "60022efdfc0633c7",
+      "docs/architecture/memory.md": "d1d9178e3b33323c"
+    },
+    "docs/architecture/message-flow": {
+      "docs/architecture/message-flow.en.md": "94d1d7e579ea6892",
+      "docs/architecture/message-flow.md": "cc18b016adb57de8"
+    },
+    "docs/architecture/providers-and-tools": {
+      "docs/architecture/providers-and-tools.en.md": "68f2bc1aface7657",
+      "docs/architecture/providers-and-tools.md": "b9902f4ee8585cbb"
+    },
+    "docs/architecture/system": {
+      "docs/architecture/system.en.md": "686cea379f9824d5",
+      "docs/architecture/system.md": "7d9d95d85d5dda9e"
+    },
     "wiki/CLI-명령어": {
       "docs/wiki/CLI-Commands.md": "a6860444aae9d031",
       "docs/wiki/CLI-명령어.md": "2e6a6ac2bbf82afc"
@@ -37,7 +77,7 @@
       "docs/wiki/Home.md": "4bbe9bc83739f7ac"
     },
     "wiki/개발-가이드": {
-      "docs/wiki/Development-Guide.md": "aa81bcb1810f8774",
+      "docs/wiki/Development-Guide.md": "915529245675d0fa",
       "docs/wiki/개발-가이드.md": "96a5d0320180a681"
     },
     "wiki/관리-콘솔": {

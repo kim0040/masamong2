@@ -6,9 +6,9 @@
 
 | 하려는 일 | 먼저 읽을 것 |
 |---|---|
-| 구조를 3분 안에 파악하기 | [architecture/README.md](architecture/README.md) |
+| 구조를 3분 안에 파악하기 | [architecture/README.md](architecture/README.md) ([English](architecture/README.en.md)) |
 | 패치 작업 시작하기 | [MAINTAINING.md](MAINTAINING.md) → [기여 안내](../CONTRIBUTING.md) |
-| "왜 이렇게 만들었나" 찾기 | [architecture/decisions.md](architecture/decisions.md) |
+| "왜 이렇게 만들었나" 찾기 | [architecture/decisions.md](architecture/decisions.md) ([English](architecture/decisions.en.md)) |
 | 고칠 Action·명령·도구의 위치 찾기 | [code-map/](code-map/README.md) (생성된 색인) |
 | 기억 블록을 만들고 운영하기 | [memory-operations.md](memory-operations.md) |
 | 설치를 코딩 에이전트에게 맡기기 | 저장소 루트의 [INSTALL.md](../INSTALL.md) |
@@ -17,7 +17,7 @@
 
 | 문서 | 내용 |
 |---|---|
-| [architecture/](architecture/README.md) | 구조 문서: 한눈에 보기, [시스템 구성](architecture/system.md), [메시지 흐름](architecture/message-flow.md), [기억](architecture/memory.md), [데이터 모델](architecture/data-model.md), [콘솔과 운영](architecture/console-and-ops.md), [공급자와 도구](architecture/providers-and-tools.md), [결정 기록](architecture/decisions.md), [용어집](architecture/glossary.md) |
+| [architecture/](architecture/README.md) | 구조 문서: 한눈에 보기, [시스템 구성](architecture/system.md), [메시지 흐름](architecture/message-flow.md), [기억](architecture/memory.md), [데이터 모델](architecture/data-model.md), [콘솔과 운영](architecture/console-and-ops.md), [공급자와 도구](architecture/providers-and-tools.md), [결정 기록](architecture/decisions.md), [용어집](architecture/glossary.md). 페이지마다 영어판 `x.en.md`가 있다: [Architecture at a glance](architecture/README.en.md) |
 | [REPO_MAP.md](REPO_MAP.md) | 디렉터리 한 줄 지도 |
 | [code-map/](code-map/README.md) | 생성된 코드 지도: Action, Discord 명령, 채팅 도구, 로케일 색인(소스와 어긋나면 테스트 실패) |
 | [adr/](adr/ADR-16-gui-default-svelte-console.md) | 결정 기록 원본: [ADR-16](adr/ADR-16-gui-default-svelte-console.md) Svelte 관리 콘솔, [ADR-17](adr/ADR-17-derived-room-memory.md) 방 기억, [ADR-18](adr/ADR-18-idle-room-unloading.md) 안 쓰는 방 내려놓기(초안, 결정 대기) |
@@ -62,7 +62,7 @@
 ## 문서를 고칠 때
 
 - 고친 뒤 `make docs`를 돌린다(링크, 번역 기록, 명령 이름, 버전).
-- 한국어 위키나 README를 고쳤으면 다른 언어도 고친 뒤 `make docs-record`를 돌린다.
+- 한국어 위키나 README를 고쳤으면 다른 언어도 고친 뒤 `make docs-record`를 돌린다. [architecture/](architecture/README.md)의 페이지 `x.md`와 영어판 `x.en.md`, 그림 원본 `x.d2`와 `x.en.d2`도 같은 규칙을 따른다.
 - 구조가 바뀌면 [architecture/](architecture/README.md)의 해당 페이지를, 결정이 바뀌면 [결정 기록](architecture/decisions.md)을 함께 고친다.
 - 코드 위치는 줄 번호가 아니라 파일 경로와 심볼 이름으로 가리킨다.
 - 그림 원본(`.d2`)을 고치면 `make diagrams`로 다시 렌더한다. 규칙은 [architecture/diagrams/](architecture/diagrams/README.md)에 있다.
