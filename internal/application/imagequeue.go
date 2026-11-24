@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"masamong/internal/action"
+	"masamong/internal/config"
 	"masamong/internal/crash"
 	"masamong/internal/errclass"
 	"masamong/internal/errcode"
@@ -25,9 +26,9 @@ import (
 // and nothing is posted for it.
 //
 // Limits: at most imageQueueMax jobs wait (the one being drawn is not counted), and a person has one job
-// at a time, waiting or being drawn. The same request (server, channel, person, prompt without case,
-// spacing and closing punctuation) while its job is waiting or being drawn, and asked less than
-// imageDedupeWindow ago, gets that job back ("already_queued") instead of a second picture.
+// at a time, waiting, being drawn or drawn and not yet posted. The same request (server, channel, person,
+// prompt without case, spacing and closing punctuation) while its job is in one of those, and asked less
+// than imageDedupeWindow ago, gets that job back ("already_queued") instead of a second picture.
 //
 // Before drawing and again before posting the job is dropped, without a word, for policy reasons only:
 // the channel is paused or turned off, the server is not approved, the tool was switched off, the person
@@ -37,6 +38,16 @@ import (
 // by imageConnectWait) and, if Discord is still not there, says image.failed. A bot that cannot attach
 // files in the channel does not draw at all (no spend); a failed post says image.failed unless the
 // failure is a missing permission or the request being gone.
+//
+// The picture is posted after the reply of the turn that asked for it ("그리는 중" first, then the picture),
+// even when it is done first: the job draws at once but holds its post (the picture or image.failed) until
+// that turn has ended, delivered or not (ChatTurn closes ChatInput.turnEnded), and at most for as long as
+// the turn may still take after it was queued (its TurnTimeout, else ChatTurnTimeout) and imageTurnMargin.
+// The hold is the last step before posting; the policy checks come
+// after it, so a request deleted while the picture waited is still not posted. A job whose turn is still
+// going is handed to a goroutine of its own for the hold and the post (afterTurn), so the worker draws the
+// next job meanwhile; the held job still counts as its person's job and as the job a repeat gets back until
+// it is posted or dropped (imageQueue.holding).
 //
 // tools.images.generate.defaults.async = false keeps the synchronous behaviour (the reply waits for the
 // picture, which is posted after it). The /image command, the console's test and dry runs always
@@ -57,6 +68,12 @@ const (
 	imageConnectPoll = 250 * time.Millisecond
 )
 
+// imageTurnMargin is what a finished picture waits for the reply of its turn beyond the turn's own time
+// limit, both counted from when the job was queued: a turn whose clock ran out still records its outcome
+// before it ends. The bound is only for a turn that never ends; a turn that does end lets the picture out at
+// once. A test shortens it for its own service (serviceHooks).
+const imageTurnMargin = 15 * time.Second
+
 var (
 	// ErrReplyTargetGone is what a gateway answers when the message a picture replies to no longer exists:
 	// the picture is not posted without it.
@@ -73,9 +90,15 @@ type ImagePoster interface {
 	PostPicture(ctx context.Context, channelID, replyTo string, card action.Card, imageID string) (string, error)
 }
 
-// chatOrigin is where a chat turn's tool call comes from: the Discord message being answered. The tool
-// loop puts it on the call's context (chatTool); the Action reads it to know where a picture goes.
-type chatOrigin struct{ MessageID string }
+// chatOrigin is where a chat turn's tool call comes from: the Discord message being answered, the turn's
+// end (closed by ChatTurn once the turn is over, its reply delivered or not; nil outside a turn) and the
+// turn's own time limit (ChatInput.TurnTimeout; 0: none of its own). The tool loop puts it on the call's
+// context (chatTool); the Action reads it to know where a picture goes and when it may be posted.
+type chatOrigin struct {
+	MessageID   string
+	TurnEnded   <-chan struct{}
+	TurnTimeout time.Duration
+}
 
 type chatOriginKey struct{}
 
@@ -97,6 +120,10 @@ type imageJob struct {
 	timeout                 time.Duration
 	queuedAt                time.Time
 	cancelled               atomic.Bool // the request message was deleted
+	// turnEnded closes when the turn that queued the job has ended; the post waits for it until holdUntil
+	// (wall clock). nil: no turn to wait for.
+	turnEnded <-chan struct{}
+	holdUntil time.Time
 }
 
 // imageQueue is the waiting jobs, the job being drawn and the worker's lifecycle. All fields are guarded
@@ -105,6 +132,8 @@ type imageQueue struct {
 	mu      sync.Mutex
 	waiting []*imageJob
 	running *imageJob
+	// holding are the jobs drawn (or failed) that wait for their turn's reply before they post (afterTurn)
+	holding []*imageJob
 	wake    chan struct{}
 	started bool
 	stopped bool // the worker has ended with the service: nothing more is accepted
@@ -123,12 +152,13 @@ func (d *imageSlot) slot() chan struct{} {
 	return d.ch
 }
 
-// imageQueueState is the queue as the console shows it.
+// imageQueueState is the queue as the console shows it. A job drawn and waiting for its turn's reply
+// before it posts is still running.
 func (s *Service) imageQueueState() (waiting int, running bool) {
 	q := &s.imgq
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	return len(q.waiting), q.running != nil
+	return len(q.waiting), q.running != nil || len(q.holding) > 0
 }
 
 // imageKey is what makes two requests the same one: who asked where, and the prompt without case,
@@ -159,7 +189,8 @@ func (s *Service) imageQueueRefuses(req action.Request) bool {
 	if q.running != nil && q.running.userID == inv.UserID {
 		return true
 	}
-	return slices.ContainsFunc(q.waiting, func(j *imageJob) bool { return j.userID == inv.UserID })
+	mine := func(j *imageJob) bool { return j.userID == inv.UserID }
+	return slices.ContainsFunc(q.waiting, mine) || slices.ContainsFunc(q.holding, mine)
 }
 
 // CancelPictureJobs drops the pictures asked for by these messages of a channel: the request was deleted,
@@ -181,6 +212,11 @@ func (s *Service) CancelPictureJobs(channelID string, messageIDs []string) {
 	q.waiting = keep
 	if r := q.running; r != nil && r.channelID == channelID && slices.Contains(messageIDs, r.messageID) {
 		r.cancelled.Store(true)
+	}
+	for _, h := range q.holding { // checked again right before it posts (imagePolicySkip)
+		if h.channelID == channelID && slices.Contains(messageIDs, h.messageID) {
+			h.cancelled.Store(true)
+		}
 	}
 	q.mu.Unlock()
 	for _, j := range dropped {
@@ -209,12 +245,19 @@ func (s *Service) imagesAsync(ctx context.Context, req action.Request, in map[st
 		return action.Result{}, false
 	}
 	now := s.Clock.Now()
+	// the hold covers the longest the turn may still take: the tool call comes after the turn's clock
+	// started, so its own limit (ChatTurnTimeout, the longest a chat turn gets, when it has none) and a margin
+	turnLimit := origin.TurnTimeout
+	if turnLimit <= 0 {
+		turnLimit = ChatTurnTimeout
+	}
 	job := &imageJob{
 		// the same words about other people are another request
 		id: "imj_" + newOpaqueID(), key: imageKey(inv.GuildID, inv.ChannelID, inv.UserID, prompt, ratio) + "\x00" + strings.Join(subjects.asked, "\x00"),
 		guildID: inv.GuildID, channelID: inv.ChannelID, userID: inv.UserID, messageID: origin.MessageID,
 		turn: observability.TurnID(ctx), locale: req.Locale, prompt: prompt, ratio: ratio, subjects: subjects,
 		timeout: secondsOr(in, "timeout_sec", imageCallTimout), queuedAt: now,
+		turnEnded: origin.TurnEnded, holdUntil: time.Now().Add(turnLimit + durationOr(s.hooks.imageTurnMargin, imageTurnMargin)),
 	}
 	q := &s.imgq
 	q.mu.Lock()
@@ -231,15 +274,22 @@ func (s *Service) imagesAsync(ctx context.Context, req action.Request, in map[st
 		active = append(active, q.running)
 	}
 	active = append(active, q.waiting...)
-	// the same request again: the job it already has
-	for i, j := range active {
-		if j.key == job.key && now.Sub(j.queuedAt) < imageDedupeWindow {
-			return action.OK(req, map[string]any{"status": "already_queued", "live": false, "job_id": j.id, "ahead": i,
-				"aspect_ratio": j.ratio, "note": imageQueuedNote}), true
-		}
+	// the same request again: the job it already has (one drawn and waiting for its turn's reply has
+	// nobody ahead of it)
+	same := func(j *imageJob) bool { return j.key == job.key && now.Sub(j.queuedAt) < imageDedupeWindow }
+	again := func(j *imageJob, ahead int) (action.Result, bool) {
+		return action.OK(req, map[string]any{"status": "already_queued", "live": false, "job_id": j.id, "ahead": ahead,
+			"aspect_ratio": j.ratio, "note": imageQueuedNote}), true
+	}
+	if i := slices.IndexFunc(q.holding, same); i >= 0 {
+		return again(q.holding[i], 0)
+	}
+	if i := slices.IndexFunc(active, same); i >= 0 {
+		return again(active[i], i)
 	}
 	// a person has one picture at a time, and only so many may wait
-	if slices.ContainsFunc(active, func(j *imageJob) bool { return j.userID == job.userID }) {
+	mine := func(j *imageJob) bool { return j.userID == job.userID }
+	if slices.ContainsFunc(active, mine) || slices.ContainsFunc(q.holding, mine) {
 		return action.Fail(req, errcode.ToolLimited, "image.queue_mine", s.msg(req, "image.queue_mine"), nil), true
 	}
 	if len(q.waiting) >= imageQueueMax {
@@ -365,6 +415,33 @@ func (s *Service) waitImageReady(ctx context.Context, j *imageJob) bool {
 	return true
 }
 
+// waitTurnEnd holds a job's post until the turn that queued it has ended or holdUntil has passed. It is
+// false only when the service stops first: then nothing is posted.
+func (s *Service) waitTurnEnd(ctx context.Context, j *imageJob) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	if j.turnEnded == nil {
+		return true
+	}
+	left := time.Until(j.holdUntil)
+	if left <= 0 {
+		return true
+	}
+	bound := time.NewTimer(left)
+	defer bound.Stop()
+	select {
+	case <-j.turnEnded:
+	case <-bound.C:
+		if s.Log != nil {
+			s.Log.Info("image job: posted without waiting longer for its turn's reply", "job", j.id)
+		}
+	case <-ctx.Done():
+		return false
+	}
+	return true
+}
+
 // imageCannotAttach reports a channel where the bot is known not to be allowed to attach files.
 func (s *Service) imageCannotAttach(j *imageJob) bool {
 	dc := s.Discord()
@@ -446,6 +523,58 @@ func (s *Service) runImageJob(ctx context.Context, j *imageJob) {
 		s.postImageFailure(ctx, j)
 		return
 	}
+	// the reply of the turn that asked goes first
+	s.afterTurn(ctx, j, func(ctx context.Context) { s.postImage(ctx, j, m, saved) })
+}
+
+// afterTurn runs post (the picture or the failure line, each of which waits for the turn's end first,
+// waitTurnEnd) once the turn that queued j is over. When it already is, has none or the bound has passed,
+// the worker posts at once, as before. Otherwise the job is handed to a goroutine the service owns, so
+// the worker draws the next job meanwhile; the job stays in holding, counted as its person's job and as
+// the one a repeat gets back, until post returns. Shutdown ends the hold and Close waits for the
+// goroutine (beginWork): nothing is posted after it.
+func (s *Service) afterTurn(ctx context.Context, j *imageJob, post func(context.Context)) {
+	if !j.turnPending() {
+		post(ctx)
+		return
+	}
+	q := &s.imgq
+	q.mu.Lock()
+	q.holding = append(q.holding, j)
+	q.mu.Unlock()
+	unhold := func() {
+		q.mu.Lock()
+		q.holding = slices.DeleteFunc(q.holding, func(h *imageJob) bool { return h == j })
+		q.mu.Unlock()
+	}
+	if !s.ownedGoContext("image queue hold", ctx, func(ctx context.Context) {
+		defer unhold() // also after a panic: the person may ask again
+		post(ctx)
+	}) {
+		unhold()
+		s.dropImageJob(j, "shutdown")
+	}
+}
+
+// turnPending reports whether the turn that queued j may still be running, within the bound.
+func (j *imageJob) turnPending() bool {
+	if j.turnEnded == nil || !time.Now().Before(j.holdUntil) {
+		return false
+	}
+	select {
+	case <-j.turnEnded:
+		return false
+	default:
+		return true
+	}
+}
+
+// postImage posts a drawn picture after its turn's reply (afterTurn).
+func (s *Service) postImage(ctx context.Context, j *imageJob, m config.Model, saved imageSaved) {
+	if !s.waitTurnEnd(ctx, j) {
+		s.dropImageJob(j, "shutdown")
+		return
+	}
 	// the picture is paid for: give a reconnecting gateway time to come back. Posting itself is REST,
 	// so after the wait it is tried even if the gateway still reports itself down.
 	s.waitImageReady(ctx, j)
@@ -489,9 +618,14 @@ func (s *Service) runImageJob(ctx context.Context, j *imageJob) {
 	}
 }
 
-// postImageFailure tells the channel, in one short line, that the picture did not come.
+// postImageFailure tells the channel, in one short line, that the picture did not come, after the reply
+// of the turn that asked (afterTurn).
 func (s *Service) postImageFailure(ctx context.Context, j *imageJob) {
-	if ctx.Err() != nil {
+	s.afterTurn(ctx, j, func(ctx context.Context) { s.postFailureLine(ctx, j) })
+}
+
+func (s *Service) postFailureLine(ctx context.Context, j *imageJob) {
+	if !s.waitTurnEnd(ctx, j) { // after the reply, as the picture would be; shutdown posts nothing
 		return
 	}
 	if why := s.imagePolicySkip(j); why != "" {

@@ -1,0 +1,279 @@
+package application_test
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"masamong/internal/application"
+	"masamong/internal/chat"
+	"masamong/internal/config"
+	"masamong/internal/testutil"
+)
+
+// A picture asked for in chat is posted after the turn's reply ("그리는 중" first), even when it is drawn
+// before the reply is written; a turn that delivers nothing still gets its picture once it is over, and a
+// turn that never ends holds it for a bounded time only.
+
+// pictureTurnSvc is imageChatSvc with chat models whose planner asks for a picture. respond answers the
+// reply model's request (nil: a plain line).
+func pictureTurnSvc(t *testing.T, respond http.HandlerFunc) (*application.Service, *gatedImages, *pictureGateway) {
+	t.Helper()
+	svc, img, gw := imageChatSvc(t)
+	var planCalls atomic.Int32
+	planURL := chatServer(t, `{"memory_requirement":"none","tool_plan":[{"tool_name":"images.generate","parameters":{"prompt":"a cat"}}]}`, "stop", &planCalls)
+	if respond == nil {
+		respond = func(w http.ResponseWriter, _ *http.Request) { writeChatAnswer(w, "그리는 중이야~") }
+	}
+	resp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		respond(w, r)
+	}))
+	t.Cleanup(resp.Close)
+	svc.SetEnvForTest(t, "FAKE_OR_KEY", "k")
+	applyDoc(t, svc, func(d *config.Document) {
+		d.Providers["plan-host"] = config.Provider{Kind: config.KindOpenAI, BaseURL: planURL, CredentialRef: "env:FAKE_OR_KEY"}
+		d.Providers["resp-host"] = config.Provider{Kind: config.KindOpenAI, BaseURL: resp.URL, CredentialRef: "env:FAKE_OR_KEY"}
+		d.Providers["openmeteo"] = config.Provider{Kind: config.KindOpenMeteo, Disabled: true}
+		d.Models["planner"] = config.Model{Provider: "plan-host", Model: "shared/model"}
+		d.Models["response"] = config.Model{Provider: "resp-host", Model: "shared/model"}
+		d.Memory.Retrieve = "off"
+		d.Chat.ToolMode = "planner"
+	})
+	return svc, img, gw
+}
+
+func writeChatAnswer(w http.ResponseWriter, content string) {
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"choices": []any{map[string]any{"message": map[string]any{"role": "assistant", "content": content}, "finish_reason": "stop"}},
+		"usage":   map[string]any{"prompt_tokens": 10, "completion_tokens": 5, "cost": 0.00001},
+	})
+}
+
+// settle gives a finished picture the time it would need to be posted, had it not been held.
+const settle = 300 * time.Millisecond
+
+func TestChatPictureIsPostedAfterTheReplyEvenWhenItIsDoneFirst(t *testing.T) {
+	t.Parallel()
+	svc, img, gw := pictureTurnSvc(t, nil)
+	img.open() // the picture is done as soon as it is asked for
+	var delivered atomic.Bool
+	var picturesAtReply atomic.Int32
+	res, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m1", Message: "고양이 그려줘",
+		Speaker: "철수", SpeakerID: "u1", Deliver: func(_ context.Context, r chat.Result) string {
+			testutil.WaitFor(t, 5*time.Second, "the draw to start", func() bool { return img.calls.Load() == 1 })
+			time.Sleep(settle)
+			p, _ := gw.counts()
+			picturesAtReply.Store(int32(p))
+			delivered.Store(true)
+			return r.Answer
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !delivered.Load() || res.Answer == "" {
+		t.Fatalf("no reply delivered: %+v", res)
+	}
+	if n := picturesAtReply.Load(); n != 0 {
+		t.Fatalf("the picture was posted before the reply (%d pictures when the reply went out)", n)
+	}
+	testutil.WaitFor(t, 5*time.Second, "the picture after the reply", func() bool { p, _ := gw.counts(); return p == 1 })
+	gw.mu.Lock()
+	post := gw.pictures[0]
+	gw.mu.Unlock()
+	if post.channel != "c" || post.replyTo != "m1" {
+		t.Fatalf("picture post: %+v", post)
+	}
+}
+
+func TestPictureOfATurnThatFailedIsPostedWhenTheTurnEnds(t *testing.T) {
+	t.Parallel()
+	var picturesBeforeEnd atomic.Int32
+	picturesBeforeEnd.Store(-1)
+	var img *gatedImages
+	var gw *pictureGateway
+	svc, img, gw := pictureTurnSvc(t, func(w http.ResponseWriter, _ *http.Request) {
+		// the reply model fails, after the picture is done
+		if img.calls.Load() >= 1 {
+			time.Sleep(settle)
+			p, _ := gw.counts()
+			picturesBeforeEnd.CompareAndSwap(-1, int32(p))
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"refused","type":"invalid_request_error"}}`))
+	})
+	img.open() // the bound (the turn's time limit and more) is far off: only the turn's end may let it out in time
+	// whatever the turn ends with (an error, or a fallback line that did not go out), it delivers nothing
+	_, _ = svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m1", Message: "고양이 그려줘",
+		Speaker: "철수", SpeakerID: "u1", Deliver: func(context.Context, chat.Result) string { return "" }})
+	ended := time.Now()
+	if img.calls.Load() != 1 {
+		t.Fatalf("the picture was not queued by the turn: %d provider calls", img.calls.Load())
+	}
+	if n := picturesBeforeEnd.Load(); n > 0 {
+		t.Fatalf("the picture was posted while the turn was still running (%d)", n)
+	}
+	testutil.WaitFor(t, 5*time.Second, "the picture after the failed turn", func() bool { p, _ := gw.counts(); return p == 1 })
+	if took := time.Since(ended); took > 5*time.Second {
+		t.Fatalf("the picture waited %v after its turn ended", took)
+	}
+}
+
+func TestHeldPictureIsPostedAtTheBoundWhenItsTurnNeverEnds(t *testing.T) {
+	t.Parallel()
+	svc, img, gw := imageChatSvc(t)
+	// the bound is the turn's own time limit and a margin, from when the job was queued
+	const turnLimit, margin = 500 * time.Millisecond, 200 * time.Millisecond
+	const bound = turnLimit + margin
+	application.SetImageTurnMarginForTest(svc, margin)
+	never := make(chan struct{}) // the turn that queued it never ends
+	run := application.ChatToolInTurnForTest(svc, application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m1", Message: "a cat", Speaker: "철수", SpeakerID: "u1", TurnTimeout: turnLimit}, never)
+	img.open()
+	queued := time.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if r := run(ctx, "images.generate", map[string]any{"prompt": "a cat"}); r.Status != "queued" {
+		t.Fatalf("%+v", r)
+	}
+	testutil.WaitFor(t, 10*time.Second, "the picture at the bound", func() bool { p, _ := gw.counts(); return p == 1 })
+	if took := time.Since(queued); took < bound-50*time.Millisecond {
+		t.Fatalf("posted after %v, before its turn ended and before the bound (%v)", took, bound)
+	}
+	idle(t, svc)
+}
+
+func TestFailureLineIsHeldForTheTurnToo(t *testing.T) {
+	t.Parallel()
+	svc, img, gw := imageChatSvc(t)
+	img.fail.Store(true)
+	ended := make(chan struct{})
+	run := application.ChatToolInTurnForTest(svc, application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m1", Message: "a cat", Speaker: "철수", SpeakerID: "u1"}, ended)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if r := run(ctx, "images.generate", map[string]any{"prompt": "a cat"}); r.Status != "queued" {
+		t.Fatalf("%+v", r)
+	}
+	testutil.WaitFor(t, 5*time.Second, "the failed draw", func() bool { return img.calls.Load() == 1 })
+	time.Sleep(settle)
+	if p, l := gw.counts(); p != 0 || l != 0 {
+		t.Fatalf("posted before the turn ended: %d pictures, %d lines", p, l)
+	}
+	close(ended)
+	testutil.WaitFor(t, 5*time.Second, "the failure line after the turn", func() bool { _, l := gw.counts(); return l == 1 })
+}
+
+func TestShutdownWhileAPictureWaitsForItsTurnPostsNothing(t *testing.T) {
+	t.Parallel()
+	svc, img, gw := imageChatSvc(t)
+	never := make(chan struct{})
+	run := application.ChatToolInTurnForTest(svc, application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m1", Message: "a cat", Speaker: "철수", SpeakerID: "u1"}, never)
+	img.open()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if r := run(ctx, "images.generate", map[string]any{"prompt": "a cat"}); r.Status != "queued" {
+		t.Fatalf("%+v", r)
+	}
+	testutil.WaitFor(t, 5*time.Second, "the draw", func() bool { return img.calls.Load() == 1 })
+	time.Sleep(settle) // the picture is done and held
+	done := make(chan struct{})
+	go func() { _ = svc.Close(); close(done) }()
+	select {
+	case <-done: // Close waits for the queue's worker: it has returned
+	case <-time.After(10 * time.Second):
+		t.Fatal("shutdown waits for the held picture")
+	}
+	if p, l := gw.counts(); p != 0 || l != 0 {
+		t.Fatalf("posted at shutdown: %d pictures, %d lines", p, l)
+	}
+}
+
+// A held picture does not hold up the line: the next job (another person in another channel, whose turn is
+// already over) is drawn and posted while the first still waits for its turn's reply. The held job still
+// counts as its person's one job, and a repeat of its request gets it back.
+func TestHeldPictureDoesNotHoldUpTheNextJob(t *testing.T) {
+	t.Parallel()
+	svc, img, gw := imageChatSvc(t) // the bound is far off: only A's turn may let A's picture out in time
+	img.open()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	aEnded := make(chan struct{})
+	a := application.ChatToolInTurnForTest(svc, application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m1", Message: "a cat", Speaker: "철수", SpeakerID: "u1"}, aEnded)
+	first := a(ctx, "images.generate", map[string]any{"prompt": "a cat"})
+	if first.Status != "queued" {
+		t.Fatalf("A: %+v", first)
+	}
+	testutil.WaitFor(t, 5*time.Second, "A's draw", func() bool { return img.calls.Load() == 1 })
+	time.Sleep(settle) // A's picture is done and held
+	if r := a(ctx, "images.generate", map[string]any{"prompt": "a dog"}); r.OK || !strings.Contains(r.Error, "drawing one right now") {
+		t.Fatalf("A's held job must still be A's one job: %+v", r)
+	}
+	if r := a(ctx, "images.generate", map[string]any{"prompt": "A cat!"}); r.Status != "already_queued" || r.Data["job_id"] != first.Data["job_id"] || r.Data["ahead"] != 0 {
+		t.Fatalf("a repeat of A's request must get the held job back: %+v", r)
+	}
+	if _, running := application.ImageQueueStateForTest(svc); !running {
+		t.Fatal("a held picture is not posted yet: the queue must not look idle")
+	}
+	bEnded := make(chan struct{})
+	close(bEnded) // B's turn is already over
+	b := application.ChatToolInTurnForTest(svc, application.ChatInput{GuildID: "g", ChannelID: "c2", MessageID: "m2", Message: "a bird", Speaker: "영희", SpeakerID: "u2"}, bEnded)
+	if r := b(ctx, "images.generate", map[string]any{"prompt": "a bird"}); r.Status != "queued" || r.Data["ahead"] != 0 {
+		t.Fatalf("B: %+v", r)
+	}
+	testutil.WaitFor(t, 5*time.Second, "B's picture while A's is held", func() bool { p, _ := gw.counts(); return p == 1 })
+	gw.mu.Lock()
+	post, n := gw.pictures[0], img.calls.Load()
+	gw.mu.Unlock()
+	if post.channel != "c2" || post.replyTo != "m2" || n != 2 {
+		t.Fatalf("B's picture: %+v (%d provider calls)", post, n)
+	}
+	close(aEnded)
+	testutil.WaitFor(t, 5*time.Second, "A's picture after its turn", func() bool { p, _ := gw.counts(); return p == 2 })
+	gw.mu.Lock()
+	post = gw.pictures[1]
+	gw.mu.Unlock()
+	if post.channel != "c" || post.replyTo != "m1" {
+		t.Fatalf("A's picture: %+v", post)
+	}
+	idle(t, svc)
+}
+
+// The hold covers the turn's own time limit. Before, it was a fixed 60 s, a third of a normal turn's 180 s,
+// so a slow reply could come after the picture. Here, scaled down, the turn has 6 s (the old bound would
+// be 2 s) and its reply goes out 2.5 s after the picture is done: the picture still comes after it.
+func TestPictureWaitsForASlowReplyWithinTheTurnsTimeLimit(t *testing.T) {
+	t.Parallel()
+	svc, img, gw := pictureTurnSvc(t, nil)
+	application.SetImageTurnMarginForTest(svc, 100*time.Millisecond)
+	img.open()
+	const turnLimit, slowReply = 6 * time.Second, 2500 * time.Millisecond
+	var delivered atomic.Bool
+	var picturesAtReply atomic.Int32
+	picturesAtReply.Store(-1)
+	res, err := svc.ChatTurn(context.Background(), application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m1", Message: "고양이 그려줘",
+		Speaker: "철수", SpeakerID: "u1", TurnTimeout: turnLimit, Deliver: func(_ context.Context, r chat.Result) string {
+			testutil.WaitFor(t, 5*time.Second, "the draw", func() bool { return img.calls.Load() == 1 })
+			time.Sleep(slowReply)
+			p, _ := gw.counts()
+			picturesAtReply.Store(int32(p))
+			delivered.Store(true)
+			return r.Answer
+		}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !delivered.Load() || res.Answer == "" {
+		t.Fatalf("no reply delivered: %+v", res)
+	}
+	if n := picturesAtReply.Load(); n != 0 {
+		t.Fatalf("the picture was posted before the slow reply (%d pictures when the reply went out)", n)
+	}
+	testutil.WaitFor(t, 5*time.Second, "the picture after the slow reply", func() bool { p, _ := gw.counts(); return p == 1 })
+}

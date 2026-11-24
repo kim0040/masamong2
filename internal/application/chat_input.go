@@ -78,7 +78,10 @@ type ChatInput struct {
 	imageOnly    bool
 	vision       *visionState
 	// turnID is the id ChatTurn gives the turn up front, so Deliver can tie the posted reply to it.
-	turnID     string
+	turnID string
+	// turnEnded is closed by ChatTurn when the turn is over, after Deliver has returned or on any other way
+	// out; a background picture the turn queued waits for it before posting (imagequeue.go).
+	turnEnded  chan struct{}
 	sourceRefs *[]string
 	// context is the body-free record of how the turn's conversation was chosen (attribution)
 	context map[string]any
