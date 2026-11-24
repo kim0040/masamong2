@@ -298,6 +298,7 @@
           {#if updates.data.state?.checked_at}<span class="xs muted">{t('maint.update.checked', { when: relative(updates.data.state.checked_at) })}</span>{/if}</div>
       {/if}
       {#if cfg.loaded}<Switch checked={updateCheckOn} disabled={!can('config.patch')} onchange={setUpdateCheck} label={t('maint.update.check_daily')} hint={t('maint.update.check_daily_hint')} />{/if}
+      <p class="xs muted">{t('maint.cli_only.drain')}</p>
     </div>
   </Card>
 
@@ -352,6 +353,7 @@
         <details><summary class="small muted">{t('maint.tables')}</summary>
           <div use:scrollable class="table-scroll"><table class="table"><tbody>{#each Object.entries(storage.data.tables ?? {}).sort((a, b) => (b[1] as number) - (a[1] as number)) as [k, v]}<tr><td class="mono small">{k}</td><td class="r num">{num(v as number)}</td></tr>{/each}</tbody></table></div>
         </details>
+        <p class="xs muted">{t('maint.cli_only.migrate')}</p>
       </div>
     {/if}
   </Card>

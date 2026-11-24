@@ -3025,6 +3025,8 @@ add("maint", {
     "retention.k.ledger_days": ("모델·도구 호출 장부", "Model & tool call ledgers"),
     "retention.k.pending_days": ("미확정 알림 제안", "Pending reminder proposals"),
     "retention.k.context_days": ("방 대화 맥락", "Room conversation context"),
+    "cli_only.drain": ("점검 종료(drain)는 CLI에서만 실행합니다: masamong runtime drain", "Graceful drain runs from the CLI only: masamong runtime drain"),
+    "cli_only.migrate": ("저장소 이전은 CLI에서만 실행합니다: masamong storage migrate", "Moving the store runs from the CLI only: masamong storage migrate"),
     "update.check_daily": ("매일 새 버전 확인", "Check for a new release daily"),
     "update.check_daily_hint": ("하루 한 번 최신 릴리스를 물어봅니다. 프로그램 이름과 버전만 보냅니다.", "Asks for the newest release once a day; only the program's name and version are sent."),
     "update.saved": ("업데이트 설정을 저장했습니다", "Update setting saved"),

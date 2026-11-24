@@ -1753,6 +1753,8 @@
   "maint.backup_now": "지금 백업",
   "maint.backups": "백업",
   "maint.backups_desc": "설정 파일과 데이터베이스를 함께 압축 보관합니다. 비밀 키는 포함되지 않습니다.",
+  "maint.cli_only.drain": "점검 종료(drain)는 CLI에서만 실행합니다: masamong runtime drain",
+  "maint.cli_only.migrate": "저장소 이전은 CLI에서만 실행합니다: masamong storage migrate",
   "maint.data_root": "데이터 폴더",
   "maint.delete_body": "'{name}' 백업을 삭제합니다. 이 작업은 되돌릴 수 없습니다.",
   "maint.delete_named": "'{name}' 삭제",

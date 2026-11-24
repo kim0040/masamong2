@@ -1753,6 +1753,8 @@
   "maint.backup_now": "Back up now",
   "maint.backups": "Backups",
   "maint.backups_desc": "Config and database together. Secrets are not included.",
+  "maint.cli_only.drain": "Graceful drain runs from the CLI only: masamong runtime drain",
+  "maint.cli_only.migrate": "Moving the store runs from the CLI only: masamong storage migrate",
   "maint.data_root": "Data folder",
   "maint.delete_body": "Deletes {name}. This cannot be undone.",
   "maint.delete_named": "Delete {name}",
