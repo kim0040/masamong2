@@ -33,8 +33,9 @@ type serviceHooks struct {
 	zodiac zodiacHooks
 	// imageConnectWait and imageConnectPoll shorten a picture job's wait for the gateway (imagequeue.go).
 	imageConnectWait, imageConnectPoll time.Duration
-	// imageTurnWait shortens how long a finished picture waits for its turn's reply (imagequeue.go).
-	imageTurnWait time.Duration
+	// imageTurnMargin shortens how long, beyond its turn's time limit, a finished picture waits for its
+	// turn's reply (imagequeue.go).
+	imageTurnMargin time.Duration
 	// chatDeadlines replace chatDeadline's limits for the roles they name (chat_input.go); a test may
 	// change them while the service runs.
 	chatDeadlines atomic.Pointer[map[string]time.Duration]

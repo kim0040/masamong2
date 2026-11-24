@@ -41,8 +41,9 @@ import (
 //
 // The picture is posted after the reply of the turn that asked for it ("그리는 중" first, then the picture),
 // even when it is done first: the job draws at once but holds its post (the picture or image.failed) until
-// that turn has ended, delivered or not (ChatTurn closes ChatInput.turnEnded), and at most until
-// imageTurnWait after it was queued. The hold is the last step before posting; the policy checks come
+// that turn has ended, delivered or not (ChatTurn closes ChatInput.turnEnded), and at most for as long as
+// the turn may still take after it was queued (its TurnTimeout, else ChatTurnTimeout) and imageTurnMargin.
+// The hold is the last step before posting; the policy checks come
 // after it, so a request deleted while the picture waited is still not posted. A job whose turn is still
 // going is handed to a goroutine of its own for the hold and the post (afterTurn), so the worker draws the
 // next job meanwhile; the held job still counts as its person's job and as the job a repeat gets back until
@@ -67,9 +68,11 @@ const (
 	imageConnectPoll = 250 * time.Millisecond
 )
 
-// imageTurnWait bounds how long a finished picture waits for the reply of its turn, counted from when the
-// job was queued. A test shortens it for its own service (serviceHooks).
-const imageTurnWait = 60 * time.Second
+// imageTurnMargin is what a finished picture waits for the reply of its turn beyond the turn's own time
+// limit, both counted from when the job was queued: a turn whose clock ran out still records its outcome
+// before it ends. The bound is only for a turn that never ends; a turn that does end lets the picture out at
+// once. A test shortens it for its own service (serviceHooks).
+const imageTurnMargin = 15 * time.Second
 
 var (
 	// ErrReplyTargetGone is what a gateway answers when the message a picture replies to no longer exists:
@@ -87,13 +90,14 @@ type ImagePoster interface {
 	PostPicture(ctx context.Context, channelID, replyTo string, card action.Card, imageID string) (string, error)
 }
 
-// chatOrigin is where a chat turn's tool call comes from: the Discord message being answered, and the
-// turn's end (closed by ChatTurn once the turn is over, its reply delivered or not; nil outside a turn).
-// The tool loop puts it on the call's context (chatTool); the Action reads it to know where a picture goes
-// and when it may be posted.
+// chatOrigin is where a chat turn's tool call comes from: the Discord message being answered, the turn's
+// end (closed by ChatTurn once the turn is over, its reply delivered or not; nil outside a turn) and the
+// turn's own time limit (ChatInput.TurnTimeout; 0: none of its own). The tool loop puts it on the call's
+// context (chatTool); the Action reads it to know where a picture goes and when it may be posted.
 type chatOrigin struct {
-	MessageID string
-	TurnEnded <-chan struct{}
+	MessageID   string
+	TurnEnded   <-chan struct{}
+	TurnTimeout time.Duration
 }
 
 type chatOriginKey struct{}
@@ -241,13 +245,19 @@ func (s *Service) imagesAsync(ctx context.Context, req action.Request, in map[st
 		return action.Result{}, false
 	}
 	now := s.Clock.Now()
+	// the hold covers the longest the turn may still take: the tool call comes after the turn's clock
+	// started, so its own limit (ChatTurnTimeout, the longest a chat turn gets, when it has none) and a margin
+	turnLimit := origin.TurnTimeout
+	if turnLimit <= 0 {
+		turnLimit = ChatTurnTimeout
+	}
 	job := &imageJob{
 		// the same words about other people are another request
 		id: "imj_" + newOpaqueID(), key: imageKey(inv.GuildID, inv.ChannelID, inv.UserID, prompt, ratio) + "\x00" + strings.Join(subjects.asked, "\x00"),
 		guildID: inv.GuildID, channelID: inv.ChannelID, userID: inv.UserID, messageID: origin.MessageID,
 		turn: observability.TurnID(ctx), locale: req.Locale, prompt: prompt, ratio: ratio, subjects: subjects,
 		timeout: secondsOr(in, "timeout_sec", imageCallTimout), queuedAt: now,
-		turnEnded: origin.TurnEnded, holdUntil: time.Now().Add(durationOr(s.hooks.imageTurnWait, imageTurnWait)),
+		turnEnded: origin.TurnEnded, holdUntil: time.Now().Add(turnLimit + durationOr(s.hooks.imageTurnMargin, imageTurnMargin)),
 	}
 	q := &s.imgq
 	q.mu.Lock()

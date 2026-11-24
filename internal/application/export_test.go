@@ -126,9 +126,9 @@ func SetImageConnectWaitForTest(s *Service, wait, poll time.Duration) {
 	s.hooks.imageConnectWait, s.hooks.imageConnectPoll = wait, poll
 }
 
-// SetImageTurnWaitForTest shortens how long the service's finished pictures wait for their turn's reply.
-// Call it before the jobs are queued.
-func SetImageTurnWaitForTest(s *Service, wait time.Duration) { s.hooks.imageTurnWait = wait }
+// SetImageTurnMarginForTest shortens how long, beyond their turn's time limit, the service's finished
+// pictures wait for their turn's reply. Call it before the jobs are queued.
+func SetImageTurnMarginForTest(s *Service, margin time.Duration) { s.hooks.imageTurnMargin = margin }
 
 // ChatToolInTurnForTest is ChatToolForTest for a call made inside a turn that ends when ended is closed.
 func ChatToolInTurnForTest(s *Service, in ChatInput, ended chan struct{}) chat.ToolRunner {
