@@ -31,6 +31,18 @@
   useConfig()
   let tab = $state(route.query.get('tab') ?? 'form')
   let section = $state(route.query.get('section') ?? 'instance')
+  // a ?tab= / ?section= link that arrives while this page is already open selects that tab and
+  // section (a bare ?section= deep link means the form tab, where the sections live)
+  $effect(() => {
+    const q = route.query
+    const tb = q.get('tab')
+    const sc = q.get('section')
+    if (tb && tb !== tab) tab = tb
+    if (sc && sc !== section) {
+      section = sc
+      if (!tb) tab = 'form'
+    }
+  })
   // on a narrow screen the sections are a sideways row: keep the chosen one in sight
   let secsEl = $state<HTMLElement>()
   $effect(() => {

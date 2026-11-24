@@ -2,7 +2,7 @@
   import { outcomeTone } from '../lib/outcomes'
   import { t, toolName, i18n } from '../lib/i18n.svelte'
   import { scrollable } from '../lib/scrollable'
-  import { call, upload } from '../lib/api.svelte'
+  import { call } from '../lib/api.svelte'
   import { setPaused, roomPaused } from '../lib/pause'
   import { makeInvite } from '../lib/discord'
   import { adopt, dirtyKeys } from '../lib/draft'
@@ -11,7 +11,7 @@
   import { cfg, useConfig, patchConfig, loadConfig } from '../lib/config.svelte'
   import { overview } from '../lib/overview.svelte'
   import { toast } from '../lib/toast.svelte'
-  import { relative, datetime, num, usd, bytes } from '../lib/format'
+  import { relative, datetime, num, usd } from '../lib/format'
   import { blockState, stateTone, blockHref, isKakao } from '../lib/blocks'
   import PageHeader from '../components/PageHeader.svelte'
   import Card from '../components/Card.svelte'
@@ -38,6 +38,7 @@
   import ConversationCard from '../components/ConversationCard.svelte'
   import RemindersList from '../components/RemindersList.svelte'
   import { personaOptionsFor } from '../lib/persona'
+  import { watchApplyTargets } from '../lib/watchapply'
   import * as I from '../lib/icons'
 
   let { params }: { params: { guild: string; channel: string } } = $props()
@@ -53,6 +54,12 @@
   const perms = resource<any>('channels.permissions', () => ({ guild_id: g, channel_id: c }), { live: ['discord', 'config'] })
 
   let tab = $state(route.query.get('tab') ?? 'behavior')
+  // a ?tab= link that arrives while this page is already open (same component, new params or query)
+  // selects that tab
+  $effect(() => {
+    const qt = route.query.get('tab')
+    if (qt && qt !== tab) tab = qt
+  })
   const ch = $derived((list.data?.channels ?? []).find((x: any) => x.id === c && x.guild_id === g))
   const guildName = $derived.by(() => {
     const n = (list.data?.guilds ?? []).find((x: any) => x.id === g)?.name
@@ -191,29 +198,6 @@
     else toast('error', t('common.failed'), r.error?.message)
     void backfill.refresh()
   }
-  // staged import files (rag_attachments): uploaded under rag_staging, then registered on this
-  // channel; they are not memory until they are imported and indexed from Sources
-  let attInput = $state<HTMLInputElement>()
-  let attBusy = $state(false)
-  async function stageAttachment(e: Event) {
-    const el = e.currentTarget as HTMLInputElement
-    const f = el.files?.[0]
-    el.value = '' // the same file can be picked again after a remove
-    if (!f) return
-    attBusy = true
-    const up = await upload(f, undefined, 'attachment')
-    const r = up.ok && up.path ? await call('channels.attachments.add', { guild_id: g, channel_id: c, filename: up.name || f.name, source_path: up.path }) : null
-    attBusy = false
-    if (!r || !r.ok) return toast('error', t('common.failed'), r ? r.error?.message : up.error)
-    toast('ok', t('room.attachment_added'))
-    void list.refresh()
-  }
-  async function unstageAttachment(id: string) {
-    const r = await call('channels.attachments.remove', { guild_id: g, channel_id: c, attachment_id: id })
-    r.ok ? toast('ok', t('room.attachment_removed')) : toast('error', t('common.failed'), r.error?.message)
-    void list.refresh()
-  }
-
   const summary = resource<any>('summaries.channel', () => ({ guild_id: g, channel_id: c, saved: true }))
   let summarizing = $state(false)
   async function summarize(refresh: boolean) {
@@ -228,14 +212,30 @@
   // "per server" in the owner's words: one room's saved alert switch and area levels copied to the
   // other rooms of this server (channels.configure on each — no new Action needed)
   const watchCount = $derived(Object.keys(ch?.watch_level ?? {}).length)
-  const sameGuild = $derived(((list.data?.channels ?? []) as any[]).filter((x) => x.guild_id === g && x.id !== c))
+  // only the rooms the bot can see: hidden channels and offline configured rooms are not targets
+  const sameGuild = $derived(watchApplyTargets(list.data?.channels, g, c))
   let applyAllOpen = $state(false)
   async function applyAlertsToGuild() {
+    // everything the batch needs is read once at the confirm: the saved settings, the target rooms
+    // and the revision they were read at. Navigating while the writes run cannot move the write.
+    const targets = sameGuild
     const src = savedForm
     const input = { disaster_alerts: src.disaster_alerts, watch_level: Object.fromEntries((src.watch_level ?? []).map((w: { region: string; level: string }) => [w.region, Number(w.level)])) }
+    let rev = cfg.revision
     let ok = 0
-    for (const x of sameGuild) if ((await call('channels.configure', { guild_id: g, channel_id: x.id, ...input })).ok) ok++
-    toast(ok === sameGuild.length ? 'ok' : 'warn', t('room.watch_apply_done', { n: ok, total: sameGuild.length }))
+    for (const x of targets) {
+      // each write goes against the revision the previous one left: a change saved elsewhere between
+      // two writes stops the batch on a conflict instead of being overwritten silently
+      const r = await call('channels.configure', { guild_id: x.guild_id, channel_id: x.channel_id, ...input }, { base_revision: rev })
+      if (r.ok) {
+        ok++
+        if (r.revision) rev = r.revision
+      } else if (r.error?.code === 'CONFIG_CONFLICT') {
+        await Promise.all([list.refresh(), loadConfig(true)])
+        return toast('warn', t('config.conflict_title'), t('config.conflict_body'))
+      }
+    }
+    toast(ok === targets.length ? 'ok' : 'warn', t('room.watch_apply_done', { n: ok, total: targets.length }))
     void list.refresh()
   }
 
@@ -472,27 +472,6 @@
             {/snippet}
           </Popover>
           {#if !attachable.length && !attached.length}<p class="xs muted" style:margin-top="8px">{t('room.no_blocks_yet')} <a href="/blocks?import=1">{t('blocks.import')}</a></p>{/if}
-        </div>
-      </Card>
-      <Card title={t('room.attachments_title')} description={t('room.attachments_desc')}>
-        {#snippet actions()}<Button size="sm" variant="ghost" href="/blocks?import=1" iconEnd={I.ArrowRight}>{t('blocks.import')}</Button>{/snippet}
-        <div class="stack">
-          <input bind:this={attInput} type="file" class="sr-only" onchange={stageAttachment} aria-label={t('room.attachment_pick')} />
-          <div><Button size="sm" icon={I.Upload} loading={attBusy} onclick={() => attInput?.click()}>{t('room.attachment_pick')}</Button></div>
-          {#if (ch.rag_attachments ?? []).length === 0}
-            <p class="small muted">{t('room.attachments_empty')}</p>
-          {:else}
-            <ul class="mem">
-              {#each ch.rag_attachments as a (a.id)}
-                <li>
-                  <span class="mi"><I.FileUp size={15} aria-hidden="true" /></span>
-                  <span class="ml"><strong class="break">{a.filename}</strong>{#if a.bytes}<span class="xs muted">{bytes(a.bytes)}</span>{/if}</span>
-                  <Button size="sm" variant="danger-ghost" icon={I.X} aria-label={t('room.attachment_remove_of', { name: a.filename })} onclick={() => unstageAttachment(a.id)}></Button>
-                </li>
-              {/each}
-            </ul>
-          {/if}
-          <div class="callout"><span class="ic"><I.Info size={16} /></span><span>{t('room.attachments_note')}</span></div>
         </div>
       </Card>
       <Card title={t('room.summary_title')} description={t('room.summary_desc')}>

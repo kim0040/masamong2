@@ -1,1 +1,0 @@
-import{D as e,O as t,r as n}from"./Button-CvExYiEq.js";var r=new Set([`$$slots`,`$$events`,`$$legacy`]);function i(i,a){let o=e(a,r),s={name:`upload`,size:24,node:[[`path`,{d:`M12 3v12`}],[`path`,{d:`m17 8-5-5-5 5`}],[`path`,{d:`M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4`}]]};n(i,t(()=>o,{get icon(){return s}}))}export{i as t};

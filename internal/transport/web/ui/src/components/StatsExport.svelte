@@ -19,10 +19,11 @@
   let busy = $state(false)
   let file = $state<any>(null)
   let text = $state('')
-  let collecting = $state<boolean | null>(null) // what the last export said; before it, the config
   let resetOpen = $state(false)
 
-  const off = $derived(collecting === null ? cfg.loaded && cfg.doc?.stats?.enabled === false : !collecting)
+  // the switch shows what the config document says right now, so a change saved in another console
+  // is reflected instead of a stale local value
+  const off = $derived(cfg.loaded && cfg.doc?.stats?.enabled === false)
   const rows = $derived((file?.weekly?.length ?? 0) as number)
 
   function fromDate(): string {
@@ -31,8 +32,7 @@
 
   // stats.enabled: daily totals of this install, kept in its own database; unset = on
   async function setCollecting(v: boolean) {
-    const r = await patchConfig([v ? { path: ['stats', 'enabled'], op: 'unset' } : { path: ['stats', 'enabled'], value: false }], { success: t('stats.enabled.saved') })
-    if (r.ok) collecting = v
+    await patchConfig([v ? { path: ['stats', 'enabled'], op: 'unset' } : { path: ['stats', 'enabled'], value: false }], { success: t('stats.enabled.saved') })
   }
 
   async function build(reset = false) {
@@ -42,7 +42,6 @@
     if (r.ok && r.output) {
       file = r.output.file
       text = JSON.stringify(r.output.file, null, 2)
-      collecting = r.output.collecting !== false
       if (reset) toast('ok', t('stats.export.reset_done'))
     } else toast('error', t('common.failed'), r.error?.message)
   }
