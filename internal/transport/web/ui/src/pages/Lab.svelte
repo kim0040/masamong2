@@ -29,6 +29,7 @@
   import RoomPicker from '../components/RoomPicker.svelte'
   import DiscordText from '../components/DiscordText.svelte'
   import { splitExcerpt } from '../lib/discordtext'
+  import { readPick, writePick, keepKnown, browserStorage } from '../lib/labpick'
   import { useRooms } from '../lib/rooms.svelte'
   import PlanSimulator from '../components/PlanSimulator.svelte'
   import { personaOptionsFor } from '../lib/persona'
@@ -47,7 +48,11 @@
   let tab = $state(route.query.get('tab') ?? 'chat')
   let kind = $state<'chat' | 'search'>(route.query.get('persona') ? 'chat' : 'search')
   let channelKey = $state(route.query.get('guild') && route.query.get('channel') ? `${route.query.get('guild')}:${route.query.get('channel')}` : '')
-  let roomsSel = $state<string[]>((route.query.get('rooms') ?? '').split(',').map((x) => x.trim()).filter(Boolean))
+  const urlRooms = (route.query.get('rooms') ?? '').split(',').map((x) => x.trim()).filter(Boolean)
+  let roomsSel = $state<string[]>(urlRooms)
+  // the room and sources last picked in this browser; an address that names them wins
+  const store = browserStorage()
+  const saved = readPick(store)
   let rankingA = $state('auto')
   let rankingB = $state('rerank')
   let compare = $state(false)
@@ -79,7 +84,20 @@
     return out
   })
   $effect(() => {
-    if (!channelKey && channels.length) channelKey = (channels.find((c) => !c.hidden) ?? channels[0]).value
+    if (!channelKey && channels.length) channelKey = (channels.find((c) => c.value === saved.channel) ?? channels.find((c) => !c.hidden) ?? channels[0]).value
+  })
+  // the saved sources, once the rooms are known: the ones that are gone are dropped
+  let restored = $state(false)
+  $effect(() => {
+    if (restored || !names.ready) return
+    if (!urlRooms.length && saved.rooms.length) roomsSel = keepKnown(saved.rooms, names.items.map((r) => r.key))
+    restored = true
+  })
+  $effect(() => {
+    const c = channelKey
+    const r = [...roomsSel]
+    if (!restored) return
+    writePick(store, { channel: c || saved.channel, rooms: r })
   })
   const withMessages = $derived(((blocks.data?.blocks ?? []) as any[]).filter((b) => (b.message_count ?? 0) > 0))
   const selected = $derived(turns.find((x) => x.id === selectedId) ?? turns.at(-1))
