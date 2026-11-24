@@ -13,51 +13,11 @@
 
 ## 큰 그림
 
-```mermaid
-flowchart TB
-  U["Discord 방 사람들"]
-  O["운영자"]
-  D["Discord"]
-  CLI["masamong: CLI, 런처, 트레이"]
-  BR["브라우저: 관리 콘솔"]
+<picture><source media="(prefers-color-scheme: dark)" srcset="diagrams/overview-dark.svg"><img alt="마사몽 큰 그림. 운영자는 masamong 명령과 브라우저 콘솔로, Discord 방 사람들은 Discord 로 들어온다. 데몬 masamongd 안에서 콘솔 서버와 Discord Gateway 가 Action 계층을 부르고, 그 아래 대화 한 턴, 기억 엔진, 도구와 공급자 어댑터, 백그라운드 작업이 SQLite 파일 하나를 쓴다. 데몬은 모델 API 와 도구 API 를 부른다." src="diagrams/overview-light.svg"></picture>
 
-  subgraph daemon["masamongd: 데몬 프로세스 하나"]
-    GW["Discord Gateway"]
-    WEB["콘솔 서버: loopback 전용"]
-    APP["Action 계층: application.Service"]
-    CHAT["대화 한 턴: chat.Runtime"]
-    MEM["기억 엔진: memory"]
-    BG["백그라운드: 스케줄러와 기억 워커"]
-    TOOLS["도구와 공급자 어댑터"]
-    DB[("SQLite: masamong.db")]
-  end
+그림 원본: [diagrams/overview.d2](diagrams/overview.d2)
 
-  XM["모델 API"]
-  XT["도구 API: 날씨, 금융, 검색, 장소"]
-
-  U --> D
-  D <--> GW
-  O --> CLI
-  O --> BR
-  BR --> WEB
-  CLI --> WEB
-  GW --> APP
-  WEB --> APP
-  APP --> CHAT
-  APP --> MEM
-  APP --> BG
-  APP --> TOOLS
-  CHAT --> MEM
-  CHAT --> TOOLS
-  APP --> DB
-  MEM --> DB
-  BG --> DB
-  CHAT --> XM
-  MEM --> XM
-  TOOLS --> XT
-```
-
-데몬이 꺼져 있을 때 CLI는 같은 데이터 폴더를 직접 열어 같은 Action을 실행한다. 자세한 경계는 [system.md](system.md)에 있다.
+그림의 CLI 화살표는 데몬이 돌 때의 길이다. 데몬이 꺼져 있을 때 CLI는 같은 데이터 폴더를 직접 열어 같은 Action을 실행한다. 자세한 경계는 [system.md](system.md)에 있다.
 
 ## 상세 페이지
 
