@@ -129,6 +129,32 @@
     keepDraft = String(pol.keep ?? 4)
   })
 
+  // the daily release check (config updates.check): unset = on
+  const updateCheckOn = $derived(cfg.doc?.updates?.check !== false)
+  async function setUpdateCheck(v: boolean) {
+    await patchConfig([v ? { path: ['updates', 'check'], op: 'unset' } : { path: ['updates', 'check'], value: false }], { success: t('maint.update.saved') })
+    void updates.refresh()
+  }
+
+  // retention.*: days each kind of operational record is kept; empty = the default at the right, -1 = forever.
+  // pending and context follow usage and turn_detail while unset, as they did before they had keys of their own.
+  const RETENTION = ['turn_days', 'turn_detail_days', 'trace_days', 'audit_days', 'usage_days', 'query_cache_days', 'image_days', 'ledger_days', 'pending_days', 'context_days'] as const
+  const ret = $derived(cfg.doc?.retention ?? {})
+  const retDefOf = (k: (typeof RETENTION)[number]): number => {
+    if (k === 'pending_days') return ret.usage_days || 14
+    if (k === 'context_days') return ret.turn_detail_days || 30
+    return { turn_days: 400, turn_detail_days: 30, trace_days: 30, audit_days: 400, usage_days: 14, query_cache_days: 7, image_days: 14, ledger_days: 90 }[k] ?? 0
+  }
+  async function setRetention(k: (typeof RETENTION)[number], raw: string) {
+    const path = ['retention', k]
+    const n = Math.round(Number(raw))
+    if (!raw.trim() || !Number.isFinite(n) || n === 0) {
+      if (ret[k] == null) return
+      return patchConfig([{ path, op: 'unset' }], { success: t('maint.retention.saved') })
+    }
+    await patchConfig([{ path, value: Math.max(-1, n) }], { success: t('maint.retention.saved') })
+  }
+
   // restore: preview → type the name → staged → restart
   let restoreFor = $state<any>(null)
   let restoreOpen = $state(false)
@@ -271,6 +297,8 @@
         <div class="row"><Button size="sm" variant="ghost" icon={I.RefreshCw} loading={checkingUpdate} disabled={!can('updates.check') || practice.on} onclick={checkUpdate}>{t('maint.update.check')}</Button>
           {#if updates.data.state?.checked_at}<span class="xs muted">{t('maint.update.checked', { when: relative(updates.data.state.checked_at) })}</span>{/if}</div>
       {/if}
+      {#if cfg.loaded}<Switch checked={updateCheckOn} disabled={!can('config.patch')} onchange={setUpdateCheck} label={t('maint.update.check_daily')} hint={t('maint.update.check_daily_hint')} />{/if}
+      <p class="xs muted">{t('maint.cli_only.drain')}</p>
     </div>
   </Card>
 
@@ -325,6 +353,23 @@
         <details><summary class="small muted">{t('maint.tables')}</summary>
           <div use:scrollable class="table-scroll"><table class="table"><tbody>{#each Object.entries(storage.data.tables ?? {}).sort((a, b) => (b[1] as number) - (a[1] as number)) as [k, v]}<tr><td class="mono small">{k}</td><td class="r num">{num(v as number)}</td></tr>{/each}</tbody></table></div>
         </details>
+        <p class="xs muted">{t('maint.cli_only.migrate')}</p>
+      </div>
+    {/if}
+  </Card>
+
+  <Card class="a-retention" title={t('maint.retention.title')} description={t('maint.retention.desc')}>
+    {#if cfg.loaded}
+      <div class="stack">
+        <div class="ret-grid">
+          {#each RETENTION as k (k)}
+            <div class="ret">
+              <label class="small" for="ret-{k}">{t(`maint.retention.k.${k}`)}</label>
+              <div class="row"><Input id="ret-{k}" type="number" min="-1" inputmode="numeric" value={ret[k] ?? ''} placeholder={retDefOf(k) < 0 ? '-1' : String(retDefOf(k))} onchange={(e) => setRetention(k, e.currentTarget.value)} /><span class="xs muted nowrap">{retDefOf(k) < 0 ? t('maint.retention.forever') : t('maint.retention.def', { n: retDefOf(k) })}</span></div>
+            </div>
+          {/each}
+        </div>
+        <p class="xs muted">{t('maint.retention.note')}</p>
       </div>
     {/if}
   </Card>
@@ -474,14 +519,24 @@
   @media (min-width: 1000px) {
     .cols {
       grid-template-columns: repeat(2, minmax(0, 1fr));
-      grid-template-areas: 'service autostart' 'news news' 'storage schedule' 'v1 v1';
+      grid-template-areas: 'service autostart' 'news news' 'storage schedule' 'retention retention' 'v1 v1';
     }
     .cols > :global(.a-service) { grid-area: service; }
     .cols > :global(.a-autostart) { grid-area: autostart; }
     .cols > :global(.a-news) { grid-area: news; }
     .cols > :global(.a-storage) { grid-area: storage; }
     .cols > :global(.a-schedule) { grid-area: schedule; }
+    .cols > :global(.a-retention) { grid-area: retention; }
     .cols > :global(.a-v1) { grid-area: v1; }
+  }
+  .ret-grid {
+    display: grid;
+    gap: var(--s-3);
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  }
+  .ret {
+    display: grid;
+    gap: 4px;
   }
   .mb {
     margin-bottom: var(--s-4);

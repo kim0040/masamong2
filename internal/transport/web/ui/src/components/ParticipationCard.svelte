@@ -72,6 +72,7 @@
       {#if Object.keys(st.data.filtered ?? {}).length}
         <p class="xs muted">{t('part.filtered')}: {Object.entries(st.data.filtered).map(([k, v]) => `${has(`part.why.${k}`) ? t(`part.why.${k}`) : k} ${v}`).join(' · ')}</p>
       {/if}
+      <p class="xs muted">{t('part.global_hint')} <a href="/settings?section=participation">{t('part.global_link')}</a></p>
       {#if (st.data.log ?? []).length === 0}
         <p class="small muted">{st.data.mode === 'off' ? t('part.empty_off') : t('part.empty')}</p>
       {:else}

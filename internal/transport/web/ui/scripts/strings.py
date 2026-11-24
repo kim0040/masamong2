@@ -2288,10 +2288,10 @@ add("cfg", {
 # 2026-10-01 earthquake and weather-warning alerts
 add("disaster", {
     "title": ("지진·특보 알림", "Earthquake & warning alerts"),
-    "desc": ("기상청을 계속 확인해 지진은 1분마다, 기상 특보는 5분마다 새로 나온 것을 봇이 응답하는 채널에 올립니다. 기상청 키가 필요합니다. 방마다 끌 수 있습니다(서버·방 → 방 → 응답).", "The bot keeps checking KMA and posts what is new to the channels it answers in: earthquakes every minute, weather warnings every five. Needs a KMA key. Each room can turn it off (Servers & rooms → room → Replies)."),
+    "desc": ("기상청을 계속 확인해 지진은 1분마다, 기상 특보는 5분마다 새로 나온 것을 봇이 응답하는 채널에 올립니다. 기상청 키가 필요합니다. 방마다 끄고 구역별 알림 레벨을 정합니다(서버·방 → 방 → 응답·말투).", "The bot keeps checking KMA and posts what is new to the channels it answers in: earthquakes every minute, weather warnings every five. Needs a KMA key. Each room turns it off and sets alert levels by area (Servers & rooms → room → Replies & persona)."),
     "enabled": ("지진·특보 알림 켜기", "Announce earthquakes and warnings"), "enabled_hint": ("끄면 아무것도 확인하거나 올리지 않습니다.", "Off: nothing is checked or posted."),
     "warnings": ("기상 특보도 알리기", "Announce weather warnings too"), "warnings_hint": ("각 방에서 설정한 구역과 레벨에 따라 특보의 발표·격상·해제를 알립니다.", "Each room receives issues, upgrades and lifts for the areas and levels it follows."),
-    "legacy_regions": ("이전 버전의 '주의보를 받을 지역'({regions})은 더 이상 쓰지 않습니다. 방마다 서버·방 → 방 → 응답에서 지역별 알림 레벨을 정하세요.", "The old advisory regions ({regions}) are no longer used. Set each room's alert level by area under Servers & rooms → room → Replies."),
+    "legacy_regions": ("이전 버전의 '주의보를 받을 지역'({regions})은 더 이상 쓰지 않습니다. 방마다 서버·방 → 방 → 응답·말투 탭에서 지역별 알림 레벨을 정하세요.", "The old advisory regions ({regions}) are no longer used. Set each room's alert level by area under Servers & rooms → room → Replies & persona."),
     "legacy_regions_clear": ("이전 설정 지우기", "Clear old setting"),
     "marine": ("해상 특보 포함", "Include sea areas"), "marine_hint": ("먼바다·앞바다 풍랑 같은 해상 특보도 알립니다. 보통 끄는 게 조용합니다.", "Sea-area warnings (풍랑 on 먼바다 …) too. Usually quieter off."),
     "min_domestic": ("국내 지진 최소 규모", "Smallest domestic magnitude"), "min_overseas": ("국외 지진 최소 규모", "Smallest overseas magnitude"),
@@ -2310,7 +2310,7 @@ add("disaster", {
 })
 add("room", {
     "disaster_alerts": ("지진·특보 알림 받기", "Earthquake & warning alerts"),
-    "disaster_alerts_hint": ("모든 레벨에서 규모 기준을 충족하는 국내외 지진을 알립니다. 규모 기준은 도구 → 재난·특보 → 운영에서 정합니다.", "Every level includes domestic and overseas earthquakes that meet the thresholds set under Tools → Disaster alerts → Operations."),
+    "disaster_alerts_hint": ("모든 레벨에서 규모 기준을 충족하는 국내외 지진을 알립니다. 규모 기준은 도구 → 재난·특보 → 운영에서, 구역별 레벨은 아래 '지역별 알림 레벨'에서 이 방에만 정합니다.", "Every level includes domestic and overseas earthquakes that meet the thresholds set under Tools → Disaster alerts → Operations. Per-area levels are set for this room only, under 'Alert level by area' below."),
     "watch_region_invalid": ("지역을 입력하고 중복된 지역을 지워 주세요.", "Enter an area for each row and remove duplicates."),
     "watch_levels": ("지역별 알림 레벨", "Alert level by area"),
     "watch_hint": ("기상청 구역명이나 코드를 입력하세요. 세부 구역 설정이 상위 구역보다 우선하고, 어느 설정에도 해당하지 않으면 레벨 1입니다.", "Enter an exact KMA area name or code. A local area overrides its parent. Unmatched areas use level 1."),
@@ -2331,9 +2331,27 @@ add("room", {
     "watch_level.5": ("레벨 4 + 나머지 모든 주의보·경보", "Level 4 + all remaining advisories and warnings"),
     "disaster_alerts_off_respond": ("응답 안 함인 방에는 알림도 올리지 않습니다.", "A room the bot does not answer in gets no alerts either."),
 })
+
+# ---- console-gui: per-room area alert levels (audit 3.1, 4.1) ----
+add("room", {
+    "watch_off_alerts": ("알림 스위치를 켜면 구역별로 다른 알림 레벨을 정할 수 있습니다.", "Turn on the alert switch to set a level per area."),
+    "watch_off_respond": ("응답 안 함인 방에는 알림도 오지 않아 구역 설정이 쓰이지 않습니다.", "This room gets no alerts while it does not answer, so area levels do not apply."),
+    "watch_empty": ("아직 정한 구역이 없습니다. 구역이 없으면 모든 지역이 레벨 1(지진만)입니다.", "No areas yet. With none, every area stays at level 1 (earthquakes only)."),
+    "watch_chip": ("특보 {n}구역", "{n} alert areas"),
+    "watch_apply": ("이 서버의 다른 방에도 적용", "Apply to the server's other rooms"),
+    "watch_apply_title": ("다른 방에도 알림 구역을 적용할까요?", "Apply the alert areas to the other rooms?"),
+    "watch_apply_body": ("저장된 알림 스위치와 지역별 알림 레벨을 이 서버의 다른 방 {n}곳에 덮어씁니다.", "Overwrites the saved alerts switch and per-area levels on the {n} other rooms of this server."),
+    "watch_apply_done": ("전체 {total}곳 중 {n}곳에 적용했습니다", "Applied to {n} of {total} rooms"),
+    "watch_apply_unsaved": ("저장되지 않은 변경은 적용되지 않습니다.", "Unsaved changes are not applied."),
+    "attachment_remove_of": ("{name} 대기 해제", "Unstage {name}"),
+})
+add("disaster", {
+    "rooms_hint": ("구역별 알림 레벨은 방마다 정합니다. 서버·방 → 방 → 응답·말투 탭의 '응답 조건과 말투' 카드에서 정하세요.", "Alert level by area is set per room: Servers & rooms → room → Replies & persona tab, 'Reply mode and persona' card."),
+    "rooms_link": ("방별 구역 설정 열기", "Open Servers & rooms"),
+})
 add("cfg", {
     "disaster_alerts": ("지진·특보 알림", "Earthquake & warning alerts"),
-    "disaster_alerts.desc": ("봇이 기상청을 확인해 지진과 기상 특보를 응답하는 채널에 올리는 기준입니다. 도구 → 재난·특보 → 운영 화면에서 바꾸는 편이 쉽습니다.", "What the bot announces from KMA in the channels it answers in. Easier to change under Tools → Disaster alerts → Operations."),
+    "disaster_alerts.desc": ("봇이 기상청을 확인해 지진과 기상 특보를 응답하는 채널에 올리는 기준입니다. 도구 → 재난·특보 → 운영 화면에서 바꾸는 편이 쉽습니다. 구역별 알림 레벨은 방마다 서버·방 → 방 → 응답·말투에서 정합니다.", "What the bot announces from KMA in the channels it answers in. Easier to change under Tools → Disaster alerts → Operations. Per-area alert levels are set per room under Servers & rooms → room → Replies & persona."),
     "disaster_alerts.enabled": ("알림 켜기", "Announce"), "disaster_alerts.warnings": ("기상 특보도 알리기", "Weather warnings too"),
     "disaster_alerts.earthquake_min_domestic": ("국내 지진 최소 규모", "Smallest domestic magnitude"), "disaster_alerts.earthquake_min_overseas": ("국외 지진 최소 규모", "Smallest overseas magnitude"),
     "disaster_alerts.warning_regions": ("이전 주의보 지역 설정 (채널의 watch_level로 대체됨)", "Legacy advisory regions (replaced by channel watch_level)"), "disaster_alerts.marine": ("해상 특보 포함", "Include sea areas"),
@@ -3075,6 +3093,77 @@ add("people", {
     "tab.users": ("등록된 사용자", "With records"), "tab.seen": ("서버에서 본 사람", "Seen in servers"),
     "tab.users_desc": ("동의·구독·개인 설정 기록이 있는 사람입니다. 줄을 누르면 봇이 기억하는 것과 동의·구독을 보고 철회·삭제할 수 있습니다.", "People with consent, subscription or settings records. Open a row to see what the bot remembers about them and to withdraw or delete."),
     "servers.open": ("{name} ({id}) 정보 열기", "Open details for {name} ({id})"),
+})
+
+# ---- console-gui: friendly homes for raw-only settings (audit 2.2, 4.3) ----
+add("maint", {
+    "retention.title": ("데이터 보관 기간", "Data retention"),
+    "retention.desc": ("답할 때마다 쌓이는 운영 기록을 며칠 동안 보관할지 정합니다. 기억(블록)에는 적용되지 않습니다.", "How long the operational records that grow with every reply are kept. Memory blocks are not affected."),
+    "retention.note": ("비워 두면 기본값(오른쪽)을 따릅니다. -1은 영구 보관입니다.", "Empty follows the default on the right. -1 keeps forever."),
+    "retention.def": ("기본 {n}일", "default {n}d"),
+    "retention.forever": ("기본 영구 보관", "default: forever"),
+    "retention.saved": ("보관 기간을 저장했습니다", "Retention saved"),
+    "retention.k.turn_days": ("대화 턴", "Turns"),
+    "retention.k.turn_detail_days": ("턴 본문·근거", "Turn text & evidence"),
+    "retention.k.trace_days": ("진단 추적", "Diagnostic traces"),
+    "retention.k.audit_days": ("변경·작업 로그", "Change & ops log"),
+    "retention.k.usage_days": ("사용량 집계", "Usage counters"),
+    "retention.k.query_cache_days": ("질문 임베딩 캐시", "Question embedding cache"),
+    "retention.k.image_days": ("생성 이미지", "Generated images"),
+    "retention.k.ledger_days": ("모델·도구 호출 장부", "Model & tool call ledgers"),
+    "retention.k.pending_days": ("미확정 알림 제안", "Pending reminder proposals"),
+    "retention.k.context_days": ("방 대화 맥락", "Room conversation context"),
+    "cli_only.drain": ("점검 종료(drain)는 CLI에서만 실행합니다: masamong runtime drain", "Graceful drain runs from the CLI only: masamong runtime drain"),
+    "cli_only.migrate": ("저장소 이전은 CLI에서만 실행합니다: masamong storage migrate", "Moving the store runs from the CLI only: masamong storage migrate"),
+    "update.check_daily": ("매일 새 버전 확인", "Check for a new release daily"),
+    "update.check_daily_hint": ("하루 한 번 최신 릴리스를 물어봅니다. 프로그램 이름과 버전만 보냅니다.", "Asks for the newest release once a day; only the program's name and version are sent."),
+    "update.saved": ("업데이트 설정을 저장했습니다", "Update setting saved"),
+})
+add("display_page", {
+    "bot_lang": ("봇 언어", "Bot language"),
+    "i18n.default_locale": ("기본 언어", "Default language"),
+    "i18n.locale_hint": ("서버나 방이 따로 정하지 않은 곳에서 쓰는 언어입니다.", "Used where a server or room does not set its own."),
+    "i18n.fallback_locale": ("대체 언어", "Fallback language"),
+    "i18n.fallback_hint": ("기본 언어에 없는 표현을 이 언어로 채웁니다.", "Covers phrasing the default language lacks."),
+    "i18n.timezone": ("시간대", "Timezone"),
+    "i18n.timezone_hint": ("백업·요약 같은 예약 작업의 기준 시각입니다. 예: Asia/Seoul", "The reference clock for scheduled work like backups and summaries. Example: Asia/Seoul"),
+    "i18n.polite": ("새 방은 공손한 말투로 시작", "New rooms start polite"),
+    "i18n.polite_hint": ("말투를 정하지 않은 방이 반말 친구 대신 다정한 존댓말로 답합니다.", "Rooms without a persona answer in a warm polite voice instead of the casual friend."),
+    "i18n.saved": ("봇 언어 설정을 저장했습니다", "Bot language saved"),
+})
+add("tools", {
+    "features.title": ("기능 켜기·끄기", "Feature switches"),
+    "features.desc": ("설치 전체의 기능 스위치입니다. 끄면 그 기능의 도구가 모두 멈춥니다.", "Instance-wide feature switches. Off stops every tool of that feature."),
+    "features.saved": ("기능 스위치를 저장했습니다", "Feature switch saved"),
+})
+add("stats", {
+    "enabled.label": ("사용 통계 수집", "Collect usage statistics"),
+    "enabled.hint": ("하루 합계를 이 기기의 데이터베이스에만 저장합니다. 끄면 수집과 일일 집계가 멈추고 이미 모은 기록은 남습니다.", "Daily totals stay in this device's database. Off stops collection and the daily rollup; what was collected stays."),
+    "enabled.saved": ("통계 수집 설정을 저장했습니다", "Statistics setting saved"),
+})
+add("rooms", {
+    "locale.title": ("언어", "Language"),
+    "locale.desc": ("이 서버에서 봇이 쓰는 언어입니다. 방의 말투가 언어를 정하면 그쪽을 따릅니다.", "The language the bot uses in this server. A room persona that names a language wins."),
+    "locale.label": ("서버 언어", "Server language"),
+    "locale.hint": ("'자동'이면 봇 기본 언어(화면 및 접속)를 따릅니다.", "'Auto' follows the bot default (Display & access)."),
+    "locale.auto": ("자동 (봇 기본)", "Auto (bot default)"),
+    "locale.saved": ("서버 언어를 저장했습니다", "Server language saved"),
+})
+add("part", {
+    "global_hint": ("대기 시간·횟수 제한 같은 전체 기본값은 설정 파일에서 바꿉니다.", "Global defaults — wait time, per-hour and per-day caps — live in the settings file."),
+    "global_link": ("설정에서 열기", "Open in Settings"),
+})
+
+# ---- console-gui: palette entries for important nested keys (audit 4.4) ----
+add("palette", {
+    "key.watch_level": ("지역별 알림 레벨", "Alert level by area"),
+    "key.retention": ("데이터 보관 기간", "Data retention"),
+    "key.features": ("기능 켜기·끄기", "Feature switches"),
+    "key.i18n": ("봇 언어·시간대", "Bot language & time zone"),
+    "key.stats_enabled": ("사용 통계 수집", "Usage statistics collection"),
+    "key.updates_check": ("매일 새 버전 확인", "Daily update check"),
+    "key.participation": ("먼저 말 걸기 기본값", "Chime-in defaults"),
+    "key.guild_locale": ("서버 언어", "Server language"),
 })
 
 # plural forms for strings that take {n}

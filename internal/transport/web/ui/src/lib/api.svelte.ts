@@ -168,18 +168,19 @@ export async function postJSON<T = any>(path: string, body: unknown): Promise<{ 
   }
 }
 
-/** Uploads one file with progress; resolves to the server-side path. */
-export function upload(file: File, onProgress?: (pct: number) => void): Promise<{ ok: boolean; path?: string; error?: string }> {
+/** Uploads one file with progress; resolves to the server-side path. purpose=attachment stores it
+    under rag_staging for channels.attachments.add instead of imports for imports.start. */
+export function upload(file: File, onProgress?: (pct: number) => void, purpose?: string): Promise<{ ok: boolean; path?: string; name?: string; error?: string }> {
   return new Promise((resolve) => {
     const xhr = new XMLHttpRequest()
-    xhr.open('POST', '/api/upload')
+    xhr.open('POST', '/api/upload' + (purpose ? `?purpose=${encodeURIComponent(purpose)}` : ''))
     if (session.value?.csrf) xhr.setRequestHeader('X-CSRF-Token', session.value.csrf)
     if (practice.on) xhr.setRequestHeader('X-Masamong-Practice', '1')
     xhr.upload.onprogress = (e) => e.lengthComputable && onProgress?.(Math.round((100 * e.loaded) / e.total))
     xhr.onload = () => {
       try {
         const b = JSON.parse(xhr.responseText)
-        resolve(xhr.status === 200 ? { ok: true, path: b.path } : { ok: false, error: b.error?.message ?? `HTTP ${xhr.status}` })
+        resolve(xhr.status === 200 ? { ok: true, path: b.path, name: b.name } : { ok: false, error: b.error?.message ?? `HTTP ${xhr.status}` })
       } catch {
         resolve({ ok: false, error: `HTTP ${xhr.status}` })
       }

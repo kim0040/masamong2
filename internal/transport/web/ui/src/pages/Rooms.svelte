@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { t, i18n } from '../lib/i18n.svelte'
+  import { t, i18n, languageLabel } from '../lib/i18n.svelte'
   import { scrollable } from '../lib/scrollable'
-  import { call } from '../lib/api.svelte'
+  import { call, session } from '../lib/api.svelte'
   import { resource } from '../lib/resource.svelte'
   import { cfg, patchConfig, useConfig } from '../lib/config.svelte'
   import { overview } from '../lib/overview.svelte'
@@ -98,6 +98,14 @@
     const path = ['guilds', g.id, 'log', k]
     const unset = k === 'channel' ? v === 'off' : v === true // the defaults are stored as unset
     await patchConfig([unset ? { path, op: 'unset' } : { path, value: v }], { success: t('rooms.log.saved') })
+    void list.refresh()
+  }
+  // the language the bot uses in this server (config guilds.<id>.locale): unset follows i18n.default_locale
+  const localeOpts = $derived((session.value?.locales?.length ? session.value.locales : ['ko', 'en']).map((l) => ({ value: l, label: languageLabel(l) })))
+  const guildLocaleOf = (g: Guild) => cfg.doc?.guilds?.[g.id]?.locale || ''
+  const guildLocaleLabel = (g: Guild) => (guildLocaleOf(g) ? languageLabel(guildLocaleOf(g)) : t('rooms.locale.auto'))
+  async function setLocale(g: Guild, v: string) {
+    await patchConfig([v ? { path: ['guilds', g.id, 'locale'], value: v } : { path: ['guilds', g.id, 'locale'], op: 'unset' }], { success: t('rooms.locale.saved') })
     void list.refresh()
   }
   let logTesting = $state('')
@@ -237,7 +245,7 @@
 {#snippet row(c: any)}
     <tr class:selected={selected.has(key(c))}>
       <td class="cb"><input type="checkbox" checked={selected.has(key(c))} onchange={() => toggle(c)} aria-label={t('rooms.select_one', { name: nm(c).label.replace(/^#/, '') })} /></td>
-      <td><a class="chname" href="/rooms/{c.guild_id}/{c.id}"><I.Hash size={14} aria-hidden="true" />{#if nm(c).hidden}<span class="unnamed" title={t('rooms.channel.unnamed')}>{nm(c).label}</span>{:else}{c.name}{/if}</a>{#if !c.configured}<span class="chip">{t('rooms.defaults')}</span>{/if}</td>
+      <td><a class="chname" href="/rooms/{c.guild_id}/{c.id}"><I.Hash size={14} aria-hidden="true" />{#if nm(c).hidden}<span class="unnamed" title={t('rooms.channel.unnamed')}>{nm(c).label}</span>{:else}{c.name}{/if}</a>{#if !c.configured}<span class="chip">{t('rooms.defaults')}</span>{/if}{@render watchChip(c)}</td>
       <td>
         <div class="rsp">
           {#key rev}<Switch checked={chats(c.respond)} disabled={busy || rowBusy.has(key(c))} ariaLabel={t('rooms.respond_of', { name: nm(c).label })} onchange={(v) => setRespond(c, v)} />{/key}
@@ -314,6 +322,15 @@
           </div>
         {/if}
         {#if g.allowed && cfg.loaded}
+          <details class="priv">
+            <summary><span class="small">{t('rooms.locale.title')}</span> <span class="xs muted">{guildLocaleLabel(g)}</span></summary>
+            <div class="priv-body">
+              <p class="xs muted">{t('rooms.locale.desc')}</p>
+              <Field id="loc-{g.id}" label={t('rooms.locale.label')} hint={t('rooms.locale.hint')}>
+                {#snippet children(f)}<Select id={f.id} aria-describedby={f.describedby} value={guildLocaleOf(g)} options={[{ value: '', label: t('rooms.locale.auto') }, ...localeOpts]} onchange={(e) => setLocale(g, e.currentTarget.value)} />{/snippet}
+              </Field>
+            </div>
+          </details>
           <details class="priv">
             <summary><span class="small">{t('rooms.privacy.title')}</span> <span class="xs muted">{privacyCount(g) ? t('rooms.privacy.n_on', { n: privacyCount(g) }) : t('rooms.privacy.all_off')}</span></summary>
             <div class="priv-body">
@@ -395,6 +412,12 @@
     {#if heldBack}<p class="xs muted note">{t('rooms.bulk_pending_note', { n: heldBack })}</p>{/if}
   </div>
 {/if}
+
+<!-- a room's saved alert areas, as a chip that opens its page: console-gui item 1 -->
+{#snippet watchChip(c: any)}
+  {@const n = Object.keys(c.watch_level ?? {}).length}
+  {#if n}<a class="chip" href="/rooms/{c.guild_id}/{c.id}" title={t('room.watch_levels')}>{t('room.watch_chip', { n })}</a>{/if}
+{/snippet}
 
 <Confirm bind:open={leaveOpen} danger title={t('rooms.server.leave_title', { name: leaveFor?.name ?? '' })} body={t('rooms.server.leave_body')} confirmLabel={leaveFor?.allowed ? t('rooms.server.leave') : t('rooms.server.decline')} onconfirm={leave} />
 

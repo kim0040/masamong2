@@ -2,7 +2,7 @@
   import { outcomeTone } from '../lib/outcomes'
   import { t, toolName, i18n } from '../lib/i18n.svelte'
   import { scrollable } from '../lib/scrollable'
-  import { call } from '../lib/api.svelte'
+  import { call, upload } from '../lib/api.svelte'
   import { setPaused, roomPaused } from '../lib/pause'
   import { makeInvite } from '../lib/discord'
   import { adopt, dirtyKeys } from '../lib/draft'
@@ -11,7 +11,7 @@
   import { cfg, useConfig, patchConfig, loadConfig } from '../lib/config.svelte'
   import { overview } from '../lib/overview.svelte'
   import { toast } from '../lib/toast.svelte'
-  import { relative, datetime, num, usd } from '../lib/format'
+  import { relative, datetime, num, usd, bytes } from '../lib/format'
   import { blockState, stateTone, blockHref, isKakao } from '../lib/blocks'
   import PageHeader from '../components/PageHeader.svelte'
   import Card from '../components/Card.svelte'
@@ -31,6 +31,7 @@
   import Popover from '../components/Popover.svelte'
   import Input from '../components/Input.svelte'
   import Dialog from '../components/Dialog.svelte'
+  import Confirm from '../components/Confirm.svelte'
   import Timeline from '../components/Timeline.svelte'
   import ParticipationCard from '../components/ParticipationCard.svelte'
   import RoomStyleCard from '../components/RoomStyleCard.svelte'
@@ -190,6 +191,29 @@
     else toast('error', t('common.failed'), r.error?.message)
     void backfill.refresh()
   }
+  // staged import files (rag_attachments): uploaded under rag_staging, then registered on this
+  // channel; they are not memory until they are imported and indexed from Sources
+  let attInput = $state<HTMLInputElement>()
+  let attBusy = $state(false)
+  async function stageAttachment(e: Event) {
+    const el = e.currentTarget as HTMLInputElement
+    const f = el.files?.[0]
+    el.value = '' // the same file can be picked again after a remove
+    if (!f) return
+    attBusy = true
+    const up = await upload(f, undefined, 'attachment')
+    const r = up.ok && up.path ? await call('channels.attachments.add', { guild_id: g, channel_id: c, filename: up.name || f.name, source_path: up.path }) : null
+    attBusy = false
+    if (!r || !r.ok) return toast('error', t('common.failed'), r ? r.error?.message : up.error)
+    toast('ok', t('room.attachment_added'))
+    void list.refresh()
+  }
+  async function unstageAttachment(id: string) {
+    const r = await call('channels.attachments.remove', { guild_id: g, channel_id: c, attachment_id: id })
+    r.ok ? toast('ok', t('room.attachment_removed')) : toast('error', t('common.failed'), r.error?.message)
+    void list.refresh()
+  }
+
   const summary = resource<any>('summaries.channel', () => ({ guild_id: g, channel_id: c, saved: true }))
   let summarizing = $state(false)
   async function summarize(refresh: boolean) {
@@ -199,6 +223,20 @@
     if (!r.ok) return toast('error', t('common.failed'), r.error?.message)
     if (r.output.status === 'empty') return toast('warn', r.output.card?.text ?? t('room.summary_too_few'))
     void summary.refresh()
+  }
+
+  // "per server" in the owner's words: one room's saved alert switch and area levels copied to the
+  // other rooms of this server (channels.configure on each — no new Action needed)
+  const watchCount = $derived(Object.keys(ch?.watch_level ?? {}).length)
+  const sameGuild = $derived(((list.data?.channels ?? []) as any[]).filter((x) => x.guild_id === g && x.id !== c))
+  let applyAllOpen = $state(false)
+  async function applyAlertsToGuild() {
+    const src = savedForm
+    const input = { disaster_alerts: src.disaster_alerts, watch_level: Object.fromEntries((src.watch_level ?? []).map((w: { region: string; level: string }) => [w.region, Number(w.level)])) }
+    let ok = 0
+    for (const x of sameGuild) if ((await call('channels.configure', { guild_id: g, channel_id: x.id, ...input })).ok) ok++
+    toast(ok === sameGuild.length ? 'ok' : 'warn', t('room.watch_apply_done', { n: ok, total: sameGuild.length }))
+    void list.refresh()
   }
 
   // copy this room's saved settings to other rooms
@@ -264,6 +302,7 @@
       <Status tone={ch.live ? 'ok' : ch.practice ? 'info' : 'neutral'} label={ch.live ? t('rooms.live') : ch.practice ? t('rooms.practice') : t('rooms.offline')} size="sm" />
       {#if paused}<Status tone="warn" label={t('rooms.paused')} size="sm" />{/if}
       {#if !ch.configured}<span class="chip">{t('rooms.defaults')}</span>{/if}
+      {#if watchCount}<span class="chip">{t('room.watch_chip', { n: watchCount })}</span>{/if}
     {/if}
     <code class="xs subtle">{g} / {c}</code>
   </div>
@@ -291,11 +330,13 @@
           <Segmented label={t('rooms.respond')} bind:value={form.respond} options={['always', 'mention', 'command', 'off'].map((v) => ({ value: v, label: t(`rooms.respond.${v}`) }))} />
           <p class="small muted">{t(`rooms.respond_hint.${form.respond}`)}</p>
           <Switch checked={form.disaster_alerts === 'on'} disabled={form.respond === 'off'} onchange={(v) => (form.disaster_alerts = v ? 'on' : 'off')} label={t('room.disaster_alerts')} hint={form.respond === 'off' ? t('room.disaster_alerts_off_respond') : t('room.disaster_alerts_hint')} />
-          {#if form.disaster_alerts === 'on' && form.respond !== 'off'}
-            <fieldset class="watch-levels stack">
-              <legend>{t('room.watch_levels')}</legend>
-              <p class="small muted">{t('room.watch_hint')}</p>
-              {#each form.watch_level as row, i}
+          <!-- the levels stay visible while the switch is off: the fieldset is disabled then, with a
+               one-line explanation of what turns it on -->
+          <fieldset class="watch-levels stack" disabled={!watchShown}>
+            <legend>{t('room.watch_levels')}</legend>
+            {#if watchShown}<p class="small muted">{t('room.watch_hint')}</p>
+            {:else}<p class="small muted">{form.respond === 'off' ? t('room.watch_off_respond') : t('room.watch_off_alerts')}</p>{/if}
+            {#each form.watch_level as row, i}
                 <!-- a saved key shows the KMA area it matched, or a flag when KMA has reported no such area yet -->
                 {@const key = row.region.trim()}
                 {@const checked = !!ch.watch_areas?.checked && Object.hasOwn(ch.watch_level ?? {}, key)}
@@ -311,13 +352,21 @@
                   {/if}
                 </div>
               {/each}
-              {#if ch.watch_areas && !ch.watch_areas.checked}<p class="xs muted">{t('room.watch_unchecked')}</p>{/if}
+            {#if ch.watch_areas && !ch.watch_areas.checked}<p class="xs muted">{t('room.watch_unchecked')}</p>{/if}
+            {#if watchShown && !form.watch_level.length}
+              <div class="callout"><span class="ic"><I.Info size={16} /></span><span>{t('room.watch_empty')}</span></div>
+            {/if}
+            <div class="row">
               <Button size="sm" onclick={() => form.watch_level.push({ region: '', level: '2' })}>{t('room.watch_add')}</Button>
-              <details><summary class="small">{t('room.watch_guide')}</summary>
-                <ol class="small">{#each [1,2,3,4,5] as level}<li>{t(`room.watch_level.${level}`)}</li>{/each}</ol>
-              </details>
-            </fieldset>
-          {/if}
+              {#if sameGuild.length}
+                <span class="spacer"></span>
+                <Button size="sm" variant="ghost" icon={I.Copy} onclick={() => (applyAllOpen = true)}>{t('room.watch_apply')}</Button>
+              {/if}
+            </div>
+            <details><summary class="small">{t('room.watch_guide')}</summary>
+              <ol class="small">{#each [1,2,3,4,5] as level}<li>{t(`room.watch_level.${level}`)}</li>{/each}</ol>
+            </details>
+          </fieldset>
           <Switch checked={form.update_news === 'on'} disabled={form.respond === 'off'} onchange={(v) => (form.update_news = v ? 'on' : 'off')} label={t('room.update_news')} hint={form.respond === 'off' ? t('room.update_news_off_respond') : t('room.update_news_hint')} />
           <Field id="persona" label={t('rooms.col.persona')} hint={t('room.persona_hint')}>
             {#snippet children({ id, describedby })}<Select {id} aria-describedby={describedby} bind:value={form.persona_ref} options={personaOptions} />{/snippet}
@@ -423,6 +472,27 @@
             {/snippet}
           </Popover>
           {#if !attachable.length && !attached.length}<p class="xs muted" style:margin-top="8px">{t('room.no_blocks_yet')} <a href="/blocks?import=1">{t('blocks.import')}</a></p>{/if}
+        </div>
+      </Card>
+      <Card title={t('room.attachments_title')} description={t('room.attachments_desc')}>
+        {#snippet actions()}<Button size="sm" variant="ghost" href="/blocks?import=1" iconEnd={I.ArrowRight}>{t('blocks.import')}</Button>{/snippet}
+        <div class="stack">
+          <input bind:this={attInput} type="file" class="sr-only" onchange={stageAttachment} aria-label={t('room.attachment_pick')} />
+          <div><Button size="sm" icon={I.Upload} loading={attBusy} onclick={() => attInput?.click()}>{t('room.attachment_pick')}</Button></div>
+          {#if (ch.rag_attachments ?? []).length === 0}
+            <p class="small muted">{t('room.attachments_empty')}</p>
+          {:else}
+            <ul class="mem">
+              {#each ch.rag_attachments as a (a.id)}
+                <li>
+                  <span class="mi"><I.FileUp size={15} aria-hidden="true" /></span>
+                  <span class="ml"><strong class="break">{a.filename}</strong>{#if a.bytes}<span class="xs muted">{bytes(a.bytes)}</span>{/if}</span>
+                  <Button size="sm" variant="danger-ghost" icon={I.X} aria-label={t('room.attachment_remove_of', { name: a.filename })} onclick={() => unstageAttachment(a.id)}></Button>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+          <div class="callout"><span class="ic"><I.Info size={16} /></span><span>{t('room.attachments_note')}</span></div>
         </div>
       </Card>
       <Card title={t('room.summary_title')} description={t('room.summary_desc')}>
@@ -538,6 +608,8 @@
     </div>
   {/if}
 </div>
+
+<Confirm bind:open={applyAllOpen} title={t('room.watch_apply_title')} body={`${dirty ? t('room.watch_apply_unsaved') + ' ' : ''}${t('room.watch_apply_body', { n: sameGuild.length })}`} confirmLabel={t('room.watch_apply')} onconfirm={applyAlertsToGuild} />
 
 <Dialog bind:open={copyOpen} title={t('room.copy_title')} description={t('room.copy_desc')}>
   <div class="stack">

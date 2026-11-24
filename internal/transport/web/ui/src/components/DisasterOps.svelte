@@ -84,6 +84,7 @@
       {#if (d.warning_regions ?? []).length}
         <div class="callout warn"><span class="ic"><I.TriangleAlert size={16} /></span><span>{t('disaster.legacy_regions', { regions: d.warning_regions.join(', ') })}</span><Button size="sm" variant="ghost" disabled={busy} onclick={() => patchConfig([{ path: ['disaster_alerts', 'warning_regions'], op: 'unset' }], { success: t('disaster.saved') })}>{t('disaster.legacy_regions_clear')}</Button></div>
       {/if}
+      <div class="callout"><span class="ic"><I.Info size={16} /></span><span>{t('disaster.rooms_hint')}</span><Button size="sm" variant="ghost" href="/rooms" icon={I.ArrowRight}>{t('disaster.rooms_link')}</Button></div>
       <div class="form-grid">
         <Field id="dmin" label={t('disaster.min_domestic')}>{#snippet children({ id })}<Input {id} bind:value={minDom} type="number" min="1" max="10" step="0.1" inputmode="decimal" />{/snippet}</Field>
         <Field id="omin" label={t('disaster.min_overseas')}>{#snippet children({ id })}<Input {id} bind:value={minOver} type="number" min="1" max="10" step="0.1" inputmode="decimal" />{/snippet}</Field>
