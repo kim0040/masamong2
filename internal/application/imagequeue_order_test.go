@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -193,4 +194,55 @@ func TestShutdownWhileAPictureWaitsForItsTurnPostsNothing(t *testing.T) {
 	if p, l := gw.counts(); p != 0 || l != 0 {
 		t.Fatalf("posted at shutdown: %d pictures, %d lines", p, l)
 	}
+}
+
+// A held picture does not hold up the line: the next job (another person in another channel, whose turn is
+// already over) is drawn and posted while the first still waits for its turn's reply. The held job still
+// counts as its person's one job, and a repeat of its request gets it back.
+func TestHeldPictureDoesNotHoldUpTheNextJob(t *testing.T) {
+	t.Parallel()
+	svc, img, gw := imageChatSvc(t)
+	application.SetImageTurnWaitForTest(svc, time.Minute) // only A's turn may let A's picture out in time
+	img.open()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	aEnded := make(chan struct{})
+	a := application.ChatToolInTurnForTest(svc, application.ChatInput{GuildID: "g", ChannelID: "c", MessageID: "m1", Message: "a cat", Speaker: "철수", SpeakerID: "u1"}, aEnded)
+	first := a(ctx, "images.generate", map[string]any{"prompt": "a cat"})
+	if first.Status != "queued" {
+		t.Fatalf("A: %+v", first)
+	}
+	testutil.WaitFor(t, 5*time.Second, "A's draw", func() bool { return img.calls.Load() == 1 })
+	time.Sleep(settle) // A's picture is done and held
+	if r := a(ctx, "images.generate", map[string]any{"prompt": "a dog"}); r.OK || !strings.Contains(r.Error, "drawing one right now") {
+		t.Fatalf("A's held job must still be A's one job: %+v", r)
+	}
+	if r := a(ctx, "images.generate", map[string]any{"prompt": "A cat!"}); r.Status != "already_queued" || r.Data["job_id"] != first.Data["job_id"] || r.Data["ahead"] != 0 {
+		t.Fatalf("a repeat of A's request must get the held job back: %+v", r)
+	}
+	if _, running := application.ImageQueueStateForTest(svc); !running {
+		t.Fatal("a held picture is not posted yet: the queue must not look idle")
+	}
+	bEnded := make(chan struct{})
+	close(bEnded) // B's turn is already over
+	b := application.ChatToolInTurnForTest(svc, application.ChatInput{GuildID: "g", ChannelID: "c2", MessageID: "m2", Message: "a bird", Speaker: "영희", SpeakerID: "u2"}, bEnded)
+	if r := b(ctx, "images.generate", map[string]any{"prompt": "a bird"}); r.Status != "queued" || r.Data["ahead"] != 0 {
+		t.Fatalf("B: %+v", r)
+	}
+	testutil.WaitFor(t, 5*time.Second, "B's picture while A's is held", func() bool { p, _ := gw.counts(); return p == 1 })
+	gw.mu.Lock()
+	post, n := gw.pictures[0], img.calls.Load()
+	gw.mu.Unlock()
+	if post.channel != "c2" || post.replyTo != "m2" || n != 2 {
+		t.Fatalf("B's picture: %+v (%d provider calls)", post, n)
+	}
+	close(aEnded)
+	testutil.WaitFor(t, 5*time.Second, "A's picture after its turn", func() bool { p, _ := gw.counts(); return p == 2 })
+	gw.mu.Lock()
+	post = gw.pictures[1]
+	gw.mu.Unlock()
+	if post.channel != "c" || post.replyTo != "m1" {
+		t.Fatalf("A's picture: %+v", post)
+	}
+	idle(t, svc)
 }
