@@ -411,7 +411,7 @@ func (s *Service) turnTool(in ChatInput, v chat.Voice, via string) chat.ToolRunn
 			}
 		}
 		raw, _ := json.Marshal(p)
-		ctx = withChatOrigin(ctx, chatOrigin{MessageID: in.MessageID}) // where a background picture is posted (imagequeue.go)
+		ctx = withChatOrigin(ctx, chatOrigin{MessageID: in.MessageID, TurnEnded: in.turnEnded}) // where a background picture is posted (imagequeue.go)
 		res = s.Execute(ctx, action.Request{Action: tool, Input: raw, Locale: v.Pack.Tag, RequestID: "chat",
 			Invoker: &action.Invoker{Via: via, GuildID: in.GuildID, ChannelID: in.ChannelID, UserID: in.SpeakerID}})
 		out = chatView(res)

@@ -126,6 +126,16 @@ func SetImageConnectWaitForTest(s *Service, wait, poll time.Duration) {
 	s.hooks.imageConnectWait, s.hooks.imageConnectPoll = wait, poll
 }
 
+// SetImageTurnWaitForTest shortens how long the service's finished pictures wait for their turn's reply.
+// Call it before the jobs are queued.
+func SetImageTurnWaitForTest(s *Service, wait time.Duration) { s.hooks.imageTurnWait = wait }
+
+// ChatToolInTurnForTest is ChatToolForTest for a call made inside a turn that ends when ended is closed.
+func ChatToolInTurnForTest(s *Service, in ChatInput, ended chan struct{}) chat.ToolRunner {
+	in.turnEnded = ended
+	return s.chatTool(in, chat.Voice{Pack: lang.For("en")})
+}
+
 // RunFortuneMorningForTest runs one pass of the morning briefings (the scheduler runs it every minute).
 func RunFortuneMorningForTest(s *Service, ctx context.Context) { s.runFortuneMorning(ctx) }
 

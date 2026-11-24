@@ -63,6 +63,8 @@ func (s *Service) ChatTurn(ctx context.Context, in ChatInput) (chat.Result, erro
 	started := time.Now()
 	in.clockStart = s.Clock.Now() // the ordering stamp of liveToBot is on the same clock as RevisedAt, taken where started was
 	in.turnID = newID("turn_")
+	in.turnEnded = make(chan struct{})
+	defer close(in.turnEnded) // a picture the turn queued is posted after its reply (imagequeue.go)
 	in.started = started
 	flight, land := s.flyTurn(in)
 	defer land()

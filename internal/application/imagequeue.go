@@ -38,6 +38,12 @@ import (
 // files in the channel does not draw at all (no spend); a failed post says image.failed unless the
 // failure is a missing permission or the request being gone.
 //
+// The picture is posted after the reply of the turn that asked for it ("그리는 중" first, then the picture),
+// even when it is done first: the job draws at once but holds its post (the picture or image.failed) until
+// that turn has ended, delivered or not (ChatTurn closes ChatInput.turnEnded), and at most until
+// imageTurnWait after it was queued. The hold is the last step before posting; the policy checks come
+// after it, so a request deleted while the picture waited is still not posted.
+//
 // tools.images.generate.defaults.async = false keeps the synchronous behaviour (the reply waits for the
 // picture, which is posted after it). The /image command, the console's test and dry runs always
 // stay synchronous, and so does a chat turn that has no message to reply to or no connected Discord.
@@ -57,6 +63,10 @@ const (
 	imageConnectPoll = 250 * time.Millisecond
 )
 
+// imageTurnWait bounds how long a finished picture waits for the reply of its turn, counted from when the
+// job was queued. A test shortens it for its own service (serviceHooks).
+const imageTurnWait = 60 * time.Second
+
 var (
 	// ErrReplyTargetGone is what a gateway answers when the message a picture replies to no longer exists:
 	// the picture is not posted without it.
@@ -73,9 +83,14 @@ type ImagePoster interface {
 	PostPicture(ctx context.Context, channelID, replyTo string, card action.Card, imageID string) (string, error)
 }
 
-// chatOrigin is where a chat turn's tool call comes from: the Discord message being answered. The tool
-// loop puts it on the call's context (chatTool); the Action reads it to know where a picture goes.
-type chatOrigin struct{ MessageID string }
+// chatOrigin is where a chat turn's tool call comes from: the Discord message being answered, and the
+// turn's end (closed by ChatTurn once the turn is over, its reply delivered or not; nil outside a turn).
+// The tool loop puts it on the call's context (chatTool); the Action reads it to know where a picture goes
+// and when it may be posted.
+type chatOrigin struct {
+	MessageID string
+	TurnEnded <-chan struct{}
+}
 
 type chatOriginKey struct{}
 
@@ -97,6 +112,10 @@ type imageJob struct {
 	timeout                 time.Duration
 	queuedAt                time.Time
 	cancelled               atomic.Bool // the request message was deleted
+	// turnEnded closes when the turn that queued the job has ended; the post waits for it until holdUntil
+	// (wall clock). nil: no turn to wait for.
+	turnEnded <-chan struct{}
+	holdUntil time.Time
 }
 
 // imageQueue is the waiting jobs, the job being drawn and the worker's lifecycle. All fields are guarded
@@ -215,6 +234,7 @@ func (s *Service) imagesAsync(ctx context.Context, req action.Request, in map[st
 		guildID: inv.GuildID, channelID: inv.ChannelID, userID: inv.UserID, messageID: origin.MessageID,
 		turn: observability.TurnID(ctx), locale: req.Locale, prompt: prompt, ratio: ratio, subjects: subjects,
 		timeout: secondsOr(in, "timeout_sec", imageCallTimout), queuedAt: now,
+		turnEnded: origin.TurnEnded, holdUntil: time.Now().Add(durationOr(s.hooks.imageTurnWait, imageTurnWait)),
 	}
 	q := &s.imgq
 	q.mu.Lock()
@@ -365,6 +385,33 @@ func (s *Service) waitImageReady(ctx context.Context, j *imageJob) bool {
 	return true
 }
 
+// waitTurnEnd holds a job's post until the turn that queued it has ended or holdUntil has passed. It is
+// false only when the service stops first: then nothing is posted.
+func (s *Service) waitTurnEnd(ctx context.Context, j *imageJob) bool {
+	if ctx.Err() != nil {
+		return false
+	}
+	if j.turnEnded == nil {
+		return true
+	}
+	left := time.Until(j.holdUntil)
+	if left <= 0 {
+		return true
+	}
+	bound := time.NewTimer(left)
+	defer bound.Stop()
+	select {
+	case <-j.turnEnded:
+	case <-bound.C:
+		if s.Log != nil {
+			s.Log.Info("image job: posted without waiting longer for its turn's reply", "job", j.id)
+		}
+	case <-ctx.Done():
+		return false
+	}
+	return true
+}
+
 // imageCannotAttach reports a channel where the bot is known not to be allowed to attach files.
 func (s *Service) imageCannotAttach(j *imageJob) bool {
 	dc := s.Discord()
@@ -446,6 +493,11 @@ func (s *Service) runImageJob(ctx context.Context, j *imageJob) {
 		s.postImageFailure(ctx, j)
 		return
 	}
+	// the reply of the turn that asked goes first
+	if !s.waitTurnEnd(ctx, j) {
+		s.dropImageJob(j, "shutdown")
+		return
+	}
 	// the picture is paid for: give a reconnecting gateway time to come back. Posting itself is REST,
 	// so after the wait it is tried even if the gateway still reports itself down.
 	s.waitImageReady(ctx, j)
@@ -491,7 +543,7 @@ func (s *Service) runImageJob(ctx context.Context, j *imageJob) {
 
 // postImageFailure tells the channel, in one short line, that the picture did not come.
 func (s *Service) postImageFailure(ctx context.Context, j *imageJob) {
-	if ctx.Err() != nil {
+	if !s.waitTurnEnd(ctx, j) { // after the reply, as the picture would be; shutdown posts nothing
 		return
 	}
 	if why := s.imagePolicySkip(j); why != "" {
