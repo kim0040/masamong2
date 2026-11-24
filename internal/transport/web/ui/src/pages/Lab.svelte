@@ -5,7 +5,7 @@
   import { emptyScope, stateLabel } from '../lib/blocks'
   import { fly, fade } from 'svelte/transition'
   import { tick } from 'svelte'
-  import { t, toolName, i18n } from '../lib/i18n.svelte'
+  import { t, toolName, i18n, has } from '../lib/i18n.svelte'
   import { call, can } from '../lib/api.svelte'
   import { resource } from '../lib/resource.svelte'
   import { cfg, useConfig } from '../lib/config.svelte'
@@ -88,6 +88,8 @@
     const [g, c] = (tr.channel ?? '').split(':')
     return emptyScope((blocks.data?.blocks ?? []) as any[], tr.rooms?.length || !g || !c ? null : { guild_id: g, channel_id: c })
   }
+  // a planner value as words: its translation, else the value with spaces for underscores
+  const plain = (prefix: string, v: string) => (has(`${prefix}.${v}`) ? t(`${prefix}.${v}`) : String(v).replace(/_/g, ' '))
   const rankings = ['auto', 'hybrid', 'rerank', 'heuristic'].map((v) => ({ value: v, label: t(`lab.rank.${v}`) }))
   const quick = $derived([t('lab.q.1'), t('lab.q.2'), t('lab.q.3'), t('lab.q.4')])
 
@@ -319,9 +321,9 @@
                   <div>
                     <div class="section-title">{t('lab.diag.plan')}</div>
                     <dl class="kv xs">
-                      {#if selected.plan.question_kind}<dt>{t('lab.diag.question_kind')}</dt><dd>{t(`lab.diag.qk.${selected.plan.question_kind}`)}</dd>{/if}
-                      {#if selected.plan.memory_requirement}<dt>{t('lab.diag.memory_req')}</dt><dd>{t(`lab.diag.mr.${selected.plan.memory_requirement}`)}</dd>{/if}
-                      {#if selected.plan.time_scope}<dt>{t('lab.diag.time_scope')}</dt><dd>{t(`lab.diag.ts.${selected.plan.time_scope}`)}</dd>{/if}
+                      {#if selected.plan.question_kind}<dt>{t('lab.diag.question_kind')}</dt><dd>{plain('lab.diag.qk', selected.plan.question_kind)}</dd>{/if}
+                      {#if selected.plan.memory_requirement}<dt>{t('lab.diag.memory_req')}</dt><dd>{plain('lab.diag.mr', selected.plan.memory_requirement)}</dd>{/if}
+                      {#if selected.plan.time_scope}<dt>{t('lab.diag.time_scope')}</dt><dd>{plain('lab.diag.ts', selected.plan.time_scope)}</dd>{/if}
                       {#if selected.plan.tool_plan?.length}<dt>{t('lab.diag.tool_plan')}</dt><dd>{selected.plan.tool_plan.map((x: any) => toolName(x.tool_name)).join(' → ')}</dd>{/if}
                       {#if selected.retrieval?.applied}<dt>{t('lab.diag.applied')}</dt><dd>{t(`lab.rank.${selected.retrieval.applied}`)}</dd>{/if}
                     </dl>
