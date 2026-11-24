@@ -1071,7 +1071,7 @@ add("lab", {
     "eval_history_empty": ("아직 수행된 평가 기록이 없습니다.", "No evaluations yet."), "eval_open": ("결과 열기", "Open"),
 })
 add("memory", {
-    "tab.search": ("검색", "Search"), "tab.timeline": ("사건 연표", "Timeline"), "tab.reviews": ("검토 완료된 기억", "Reviewed"), "tab.people": ("인물 식별자 연결", "People"),
+    "tab.search": ("검색", "Search"), "tab.timeline": ("사건 연표", "Timeline"), "tab.reviews": ("검토 완료된 기억", "Reviewed"), "tab.people": ("같은 사람 묶기", "Merge names"),
     "timeline_desc": ("선택한 데이터 소스에서 발생한 대화를 시간순으로 조회합니다. 키워드를 입력하면 관련된 대화만 필터링합니다.", "What happened when in the chosen sources. Ask a question to gather only what relates."),
     "correct": ("정정", "Correct"), "exclude": ("제외", "Exclude"), "has_correction": ("정정 등록됨", "Corrected"),
     "correct_title": ("이 기억 정정", "Correct this memory"), "correct_desc": ("원본 데이터는 유지되며 향후 답변 생성 시 이 기억과 함께 정정된 내용이 우선 반영됩니다.", "The source stays; your correction is shown next to it whenever it is used."),
@@ -2678,8 +2678,9 @@ add("", {
 })
 
 add("pm", {
-    "title": ("서버 안의 기억", "Memory in a server"),
-    "desc": ("이 사람이 대화한 서버별로 봇이 무엇을 기억하는지 볼 수 있습니다.", "See what the bot remembers in each server where this person has spoken."),
+    "title": ("봇이 기억하는 것", "What the bot remembers"),
+    "desc": ("서버마다 따로 기억해요. 서버를 고르면 본인이 한 말, 다른 사람이 한 말, 기억해 달라고 한 것을 나눠 보여 줘요.", "Kept separately for each server. Pick a server to see their own words, what others said, and what was asked to be remembered."),
+    "hidden_note": ("숨긴 기억은 이 목록에 나오지 않아요.", "Hidden memories are not listed here."),
     "server": ("서버", "Server"),
     "no_servers": ("이 사람의 메시지가 저장된 서버가 없습니다.", "No server has saved messages from this person."),
     "told": ("기억해 달라고 한 것", "Asked to remember"),
@@ -2694,9 +2695,9 @@ add("pm", {
     "last": ("마지막 갱신 {when}", "last updated {when}"),
     "kind.nickname": ("별명", "Nickname"), "kind.like": ("좋아함", "Likes"), "kind.dislike": ("싫어함", "Dislikes"), "kind.trait": ("성격", "Trait"),
     "kind.status": ("근황", "Status"), "kind.appearance": ("외모", "Appearance"), "kind.relation": ("관계", "Relation"), "kind.other": ("기타", "Other"),
-    "tier.direct": ("직접", "Direct"), "tier.heard": ("전해 들음", "Heard"),
+    "group.direct": ("본인이 한 말", "In their own words"), "group.heard": ("다른 사람이 한 말", "Said by others"),
     "src.self": ("본인", "Themselves"), "src.said": ("{name}님이 말함", "Said by {name}"), "src.said_unknown": ("다른 사람이 말함", "Said by someone else"),
-    "src.explicit": ("기억해", "Asked to remember"), "src.told": ("{name}님이 기억해 달라고 함", "{name} asked to remember it"), "src.told_unknown": ("다른 사람이 기억해 달라고 함", "Someone else asked to remember it"),
+    "src.explicit": ("본인이 기억해 달라고 함", "They asked to remember it"), "src.told": ("{name}님이 기억해 달라고 함", "{name} asked to remember it"), "src.told_unknown": ("다른 사람이 기억해 달라고 함", "Someone else asked to remember it"),
     "pending": ("확인 대기", "Waiting for check"), "pending_hint": ("민감한 내용인지 확인하기 전이라 아직 답변에 쓰지 않아요.", "Not used in answers yet: it is waiting to be checked for sensitive content."),
     "hide": ("숨기기", "Hide"), "hide_one": ("기억 숨기기: {text}", "Hide this memory: {text}"),
     "hide_title": ("이 기억을 숨길까요?", "Hide this memory?"),
@@ -2716,12 +2717,18 @@ add("pm", {
 add("", {
     "memory.tab.person": ("사람 기억", "People memory"),
 })
+add("pml", {
+    "title": ("사람별 기억", "Memory by person"),
+    "desc": ("서버를 고르고 사람을 열면 봇이 그 사람에 대해 기억하는 것을 보고, 숨기거나 지울 수 있어요.", "Pick a server and open a person to see what the bot remembers about them, and to hide or forget it."),
+    "all": ("사람·권한에서 전체 보기", "All people"),
+    "row": ("메시지 {n}개 · 마지막 {when}", "{n} messages · last {when}"),
+    "items": ("기억 {n}개", "{n} kept"), "none": ("기억 없음", "Nothing kept"),
+    "open": ("기억 보기", "Open memory"), "open_one": ("{name}의 기억 보기", "Open {name}'s memory"),
+    "more": ("{n}명이 더 있어요. 전체는 사람·권한에서 볼 수 있어요.", "{n} more people. See them all on the People page."),
+})
 
 # paid people backfill (memory.people.backfill): the Memory page's People memory tab
 add("pb", {
-    "intro_title": ("사람 기억", "People memory"),
-    "intro_desc": ("대화에서 알게 된 사람별 기억이에요. 한 사람의 기억을 보고 숨기거나 지우려면 사람·권한 화면에서 그 사람을 열어요.", "What the bot keeps about each person from conversations. To look at one person's memory, hide or forget it, open that person on the People page."),
-    "open_people": ("사람·권한 열기", "Open People"),
     "title": ("과거 대화로 채우기", "Fill from past conversations"),
     "desc": ("저장된 지난 대화를 모델이 한 번 읽고 사람에 대한 기억을 채워요. 돈이 들어서 운영자가 직접 시작할 때만 돌아가요.", "A model reads the stored past conversations once and fills in what is kept about people. It costs money, so it runs only when an operator starts it."),
     "note": ("봇에 설정된 Anthropic 키를 써요. 이미 만들어 둔 요약과 임베딩은 다시 만들지 않아요.", "It uses the Anthropic key set up for the bot. Summaries and embeddings that already exist are not made again."),
@@ -2966,7 +2973,7 @@ add("rooms", {
 # 2026-10-14 people: per-server people
 add("people", {
     "servers.title": ("서버별 인물", "People by server"),
-    "servers.desc": ("저장된 Discord 메시지에서 본 사람입니다. 메시지 내용은 표시하지 않습니다.", "People seen in stored Discord messages. Message text is not shown."),
+    "servers.desc": ("저장된 Discord 메시지에서 본 사람입니다. 줄을 누르면 봇이 기억하는 것을 볼 수 있습니다. 메시지 내용은 표시하지 않습니다.", "People seen in stored Discord messages. Open a row to see what the bot remembers about them. Message text is not shown."),
     "servers.selector": ("서버", "Server"),
     "servers.all": ("모든 서버", "All servers"),
     "servers.count": ("검색 결과 {n}명", "{n} matching people"),
@@ -2978,14 +2985,15 @@ add("people", {
     "servers.col.last_seen": ("마지막으로 본 때", "Last seen"),
     "servers.col.cards": ("기억 항목", "Memory items"),
     "servers.users_row": ("기록 있음", "Has records"),
-    "servers.readonly": ("동의·설정 정보가 없는 Discord 인물입니다. 저장된 대화 내용은 이 화면에 표시하지 않습니다.", "This Discord person has no consent or settings record. Stored conversation text is not shown here."),
+    "servers.readonly": ("동의·설정 기록이 없는 Discord 사람입니다. 봇이 기억하는 것은 아래에서 볼 수 있고, 저장된 대화 내용은 이 화면에 표시하지 않습니다.", "This Discord person has no consent or settings record. What the bot remembers is below; stored conversation text is not shown here."),
+    "servers.seen_title": ("이 서버에서 본 기록", "Seen in this server"),
     "servers.other_names": ("이전 이름: {names}", "Other names: {names}"),
     "servers.first_seen": ("처음 본 때", "First seen"),
     "servers.group_count": ("{n}명", "{n} people"),
     "servers.more": ("{n}명 더 보기", "Show {n} more"), "servers.less": ("접기", "Show less"),
     "servers.users_row_hint": ("동의·구독·설정 기록이 있는 사람입니다. 누르면 그 기록이 열립니다.", "This person has consent, subscription or settings records. Opens them."),
     "tab.users": ("등록된 사용자", "With records"), "tab.seen": ("서버에서 본 사람", "Seen in servers"),
-    "tab.users_desc": ("동의·구독·개인 설정 기록이 있는 사람입니다. 줄을 누르면 철회·삭제할 수 있습니다.", "People with consent, subscription or settings records. Open a row to withdraw or delete."),
+    "tab.users_desc": ("동의·구독·개인 설정 기록이 있는 사람입니다. 줄을 누르면 봇이 기억하는 것과 동의·구독을 보고 철회·삭제할 수 있습니다.", "People with consent, subscription or settings records. Open a row to see what the bot remembers about them and to withdraw or delete."),
     "servers.open": ("{name} ({id}) 정보 열기", "Open details for {name} ({id})"),
 })
 

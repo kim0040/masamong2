@@ -26,6 +26,7 @@
   import LoadState from '../components/LoadState.svelte'
   import Timeline from '../components/Timeline.svelte'
   import RoomMemory from '../components/RoomMemory.svelte'
+  import PeopleMemoryList from '../components/PeopleMemoryList.svelte'
   import PersonBackfill from '../components/PersonBackfill.svelte'
   import * as I from '../lib/icons'
 
@@ -236,9 +237,7 @@
     <RoomMemory />
   {:else if tab === 'person'}
     <div class="person">
-      <Card title={t('pb.intro_title')} description={t('pb.intro_desc')}>
-        <Button href="/people" icon={I.Users}>{t('pb.open_people')}</Button>
-      </Card>
+      <PeopleMemoryList />
       <PersonBackfill />
     </div>
   {:else if tab === 'timeline'}

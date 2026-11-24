@@ -4,6 +4,7 @@
   import { call } from '../lib/api.svelte'
   import { resource } from '../lib/resource.svelte'
   import { toast } from '../lib/toast.svelte'
+  import { route, navigate } from '../lib/router.svelte'
   import { relative, datetime, num } from '../lib/format'
   import PageHeader from '../components/PageHeader.svelte'
   import Card from '../components/Card.svelte'
@@ -112,6 +113,19 @@
     serverPersonKey = `${p.guild_id}:${p.user_id}`
     serverPersonOpen = true
   }
+  // /people?person=<id>&guild=<server> (from Memory → People memory) opens that person straight at their memory
+  let deepDone = ''
+  $effect(() => {
+    const id = route.query.get('person') ?? ''
+    if (route.path !== '/people' || !id || deepDone === id || !users.data || !serverPeople.data || !serverPeopleCurrent) return
+    deepDone = id
+    const guild = route.query.get('guild') ?? ''
+    const u = ((users.data.users ?? []) as any[]).find((x) => x.user_id === id)
+    const sp = serverShown.find((p: any) => p.user_id === id && (!guild || p.guild_id === guild)) ?? serverShown.find((p: any) => p.user_id === id)
+    if (u) open(u, guild || sp?.guild_id || '')
+    else if (sp) void openServerPerson(sp)
+    navigate('/people', { replace: true })
+  })
   async function run(act: string, input: Record<string, unknown>, ok: string) {
     const r = await call(act, input)
     if (r.ok) toast('ok', ok)
@@ -334,6 +348,13 @@
   {#if cur}
     <div class="stack">
       <div class="row"><code class="small">{cur.user_id}</code><CopyButton text={cur.user_id} /></div>
+      <section data-person-memory>
+        <h3 class="small h">{t('pm.title')}</h3>
+        <p class="xs muted" style:margin-bottom="var(--s-3)">{t('pm.desc')}</p>
+        {#if detailOpen}
+          {#key cur.user_id}<PersonMemory userId={cur.user_id} {preferredGuild} />{/key}
+        {/if}
+      </section>
       <section>
         <h3 class="small h">{t('people.consents')}</h3>
         <ul class="rows">
@@ -387,13 +408,6 @@
         <RemindersList scope={{ user_id: cur.user_id }} empty={t('rem.person_empty')} />
       </section>
       <section>
-        <h3 class="small h">{t('pm.title')}</h3>
-        <p class="xs muted">{t('pm.desc')}</p>
-        {#if detailOpen}
-          {#key cur.user_id}<PersonMemory userId={cur.user_id} {preferredGuild} />{/key}
-        {/if}
-      </section>
-      <section>
         <h3 class="small h">{t('people.prefs.title')}</h3>
         {#if cur.prefs}
           <KeyValue items={[
@@ -420,18 +434,27 @@
   {/if}
 </Dialog>
 
-<Dialog bind:open={serverPersonOpen} size="sm" title={serverPerson?.name ?? ''} description={t('people.servers.readonly')}>
+<Dialog bind:open={serverPersonOpen} size="lg" title={serverPerson?.name ?? ''} description={t('people.servers.readonly')}>
   {#if serverPerson}
     <div class="stack">
-      <code class="small">{serverPerson.user_id}</code>
+      <div class="row"><code class="small">{serverPerson.user_id}</code><CopyButton text={serverPerson.user_id} /></div>
       {#if serverPerson.other_names?.length}<p class="small muted">{t('people.servers.other_names', { names: serverPerson.other_names.join(' · ') })}</p>{/if}
-      <KeyValue items={[
-        { k: t('people.servers.col.server'), v: serverPerson.guild_name || serverPerson.guild_id },
-        { k: t('people.servers.col.messages'), v: num(serverPerson.messages) },
-        { k: t('people.servers.first_seen'), v: datetime(serverPerson.first_seen) },
-        { k: t('people.servers.col.last_seen'), v: datetime(serverPerson.last_seen) },
-        { k: t('people.servers.col.cards'), v: num(serverPerson.card_items) },
-      ]} />
+      <section data-person-memory>
+        <h3 class="small h">{t('pm.title')}</h3>
+        <p class="xs muted" style:margin-bottom="var(--s-3)">{t('pm.desc')}</p>
+        {#if serverPersonOpen}
+          {#key serverPerson.user_id}<PersonMemory userId={serverPerson.user_id} preferredGuild={serverPerson.guild_id} />{/key}
+        {/if}
+      </section>
+      <section>
+        <h3 class="small h">{t('people.servers.seen_title')}</h3>
+        <KeyValue items={[
+          { k: t('people.servers.col.server'), v: serverPerson.guild_name || serverPerson.guild_id },
+          { k: t('people.servers.col.messages'), v: num(serverPerson.messages) },
+          { k: t('people.servers.first_seen'), v: datetime(serverPerson.first_seen) },
+          { k: t('people.servers.col.last_seen'), v: datetime(serverPerson.last_seen) },
+        ]} />
+      </section>
     </div>
   {/if}
 </Dialog>
