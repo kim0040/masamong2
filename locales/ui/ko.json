@@ -2734,6 +2734,7 @@
   "room.attachment_add": "파일 보관",
   "room.attachment_added": "이 방에 파일을 보관했습니다",
   "room.attachment_pick": "파일 선택",
+  "room.attachment_remove_of": "{name} 대기 해제",
   "room.attachment_removed": "대기 파일을 삭제했습니다",
   "room.attachments_desc": "이 방 전용으로 파일을 보관합니다. 자료 화면에서 가져오고 색인한 뒤 검색 블록에 추가해야 기억으로 사용됩니다.",
   "room.attachments_empty": "대기 중인 파일이 없습니다.",

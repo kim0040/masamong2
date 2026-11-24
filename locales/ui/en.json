@@ -2734,6 +2734,7 @@
   "room.attachment_add": "Stage file",
   "room.attachment_added": "File staged for this room",
   "room.attachment_pick": "Choose a file",
+  "room.attachment_remove_of": "Unstage {name}",
   "room.attachment_removed": "Staged file removed",
   "room.attachments_desc": "Stores files for this room only. Import and index them from Sources, then add the resulting memory source.",
   "room.attachments_empty": "No staged files.",

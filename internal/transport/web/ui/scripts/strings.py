@@ -2337,6 +2337,7 @@ add("room", {
     "watch_apply_body": ("저장된 알림 스위치와 지역별 알림 레벨을 이 서버의 다른 방 {n}곳에 덮어씁니다.", "Overwrites the saved alerts switch and per-area levels on the {n} other rooms of this server."),
     "watch_apply_done": ("전체 {total}곳 중 {n}곳에 적용했습니다", "Applied to {n} of {total} rooms"),
     "watch_apply_unsaved": ("저장되지 않은 변경은 적용되지 않습니다.", "Unsaved changes are not applied."),
+    "attachment_remove_of": ("{name} 대기 해제", "Unstage {name}"),
 })
 add("disaster", {
     "rooms_hint": ("구역별 알림 레벨은 방마다 정합니다. 서버·방 → 방 → 응답·말투 탭의 '응답 조건과 말투' 카드에서 정하세요.", "Alert level by area is set per room: Servers & rooms → room → Replies & persona tab, 'Reply mode and persona' card."),
