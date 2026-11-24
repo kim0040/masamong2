@@ -21,8 +21,10 @@
   import Switch from '../components/Switch.svelte'
   import Confirm from '../components/Confirm.svelte'
   import { personaTitle, personaOptionsFor } from '../lib/persona'
+  import { useRooms } from '../lib/rooms.svelte'
   import * as I from '../lib/icons'
 
+  const names = useRooms()
   const list = resource<any>('channels.list', () => ({}), { live: ['config', 'discord'] })
   const personas = resource<any>('personas.list')
   useConfig()
@@ -118,6 +120,10 @@
   const serverState = (g: Guild) => (!g.allowed ? { tone: 'warn', label: t('rooms.server.pending') } : g.approved ? { tone: 'ok', label: t('rooms.server.approved') } : list.data?.server_approval ? { tone: 'ok', label: t('rooms.server.configured') } : { tone: 'neutral', label: t('rooms.server.open') })
   const pauseChannels = $derived(overview.data?.pause?.channels ?? {})
   const key = (c: any) => `${c.guild_id}:${c.id}`
+  // a channel Discord lists but whose name it hides: the bot cannot read it, so it is folded away per server
+  const nm = (c: any) => names.channel(c.name, c.id)
+  const seen = (g: Guild) => g.channels.filter((c) => !nm(c).hidden)
+  const unseen = (g: Guild) => g.channels.filter((c) => nm(c).hidden)
   function toggle(c: any) {
     const k = key(c)
     const s = new Set(selected)
@@ -126,7 +132,7 @@
   }
   function toggleGuild(g: Guild, on: boolean) {
     const s = new Set(selected)
-    for (const c of g.channels) on ? s.add(key(c)) : s.delete(key(c))
+    for (const c of seen(g)) on ? s.add(key(c)) : s.delete(key(c))
     selected = s
   }
   // selected rooms in a server that still waits for approval: they only answer once it is approved
@@ -228,6 +234,29 @@
 
 <svelte:window {onkeydown} />
 
+{#snippet row(c: any)}
+    <tr class:selected={selected.has(key(c))}>
+      <td class="cb"><input type="checkbox" checked={selected.has(key(c))} onchange={() => toggle(c)} aria-label={t('rooms.select_one', { name: nm(c).label.replace(/^#/, '') })} /></td>
+      <td><a class="chname" href="/rooms/{c.guild_id}/{c.id}"><I.Hash size={14} aria-hidden="true" />{#if nm(c).hidden}<span class="unnamed" title={t('rooms.channel.unnamed')}>{nm(c).label}</span>{:else}{c.name}{/if}</a>{#if !c.configured}<span class="chip">{t('rooms.defaults')}</span>{/if}</td>
+      <td>
+        <div class="rsp">
+          {#key rev}<Switch checked={chats(c.respond)} disabled={busy || rowBusy.has(key(c))} ariaLabel={t('rooms.respond_of', { name: nm(c).label })} onchange={(v) => setRespond(c, v)} />{/key}
+          <Status tone={respondTone(c.respond) as any} label={t(`rooms.respond.${c.respond}`)} size="sm" />
+        </div>
+      </td>
+      <td class="pc"><Select aria-label={t('rooms.persona_of', { name: nm(c).label })} value={c.persona_ref} options={personaOptionsFor((personas.data?.personas ?? []) as any[], roomLangOf(c), c.persona_ref)} onchange={(e) => setPersona(c, e.currentTarget.value)} /></td>
+      <td>{#if c.memory_use === 'on'}<span class="chip accent"><I.Brain size={12} aria-hidden="true" />{t('common.on')}</span>{:else}<span class="chip">{t('common.off')}</span>{/if}</td>
+      <td>
+        {#if nm(c).hidden}<Status tone="neutral" label={t('rooms.unseen')} size="sm" />
+  {:else if pauseChannels[key(c)]}<Status tone="warn" label={t('rooms.paused')} size="sm" />
+        {:else if c.live}<Status tone="ok" label={t('rooms.live')} size="sm" />
+        {:else if c.practice}<Status tone="info" label={t('rooms.practice')} size="sm" />
+        {:else}<Status tone="neutral" label={t('rooms.offline')} size="sm" />{/if}
+      </td>
+      <td class="r"><Button href="/rooms/{c.guild_id}/{c.id}" size="sm" variant="ghost" iconEnd={I.ChevronRight}>{t('rooms.manage')}</Button></td>
+    </tr>
+{/snippet}
+
 <PageHeader title={t('rooms.title')} description={t('rooms.desc')}>
   {#snippet actions()}
     <Button data-tour="rooms-add" icon={I.Plus} onclick={() => { addErr = ''; addOpen = true }}>{t('rooms.add')}</Button>
@@ -267,7 +296,7 @@
           <div><h2>{named ? g.name : t('rooms.server.unnamed')}</h2><p class="xs subtle mono">{g.id}{#if g.members} · {t('rooms.server.members', { n: g.members })}{/if}</p></div>
           <Status tone={serverState(g).tone as any} label={serverState(g).label} size="sm" />
           <span class="spacer"></span>
-          <span class="small muted">{t('rooms.channel_count', { n: g.channels.length })}</span>
+          <span class="small muted">{t('rooms.channel_count', { n: seen(g).length })}</span>
           {#if !g.allowed}
             <Button size="sm" variant="primary" icon={I.Check} onclick={() => access({ approve: g.id }, t('rooms.server.approved_toast', { name: g.name }))}>{t('rooms.server.approve')}</Button>
           {:else if g.approved}
@@ -310,37 +339,34 @@
             </div>
           </details>
         {/if}
-        {#if g.channels.length}
+        {#if seen(g).length}
         <div use:scrollable class="table-scroll">
           <!-- the same column widths in every server's table, so the columns line up down the page -->
           <table class="table rooms-t" data-tour="rooms-table">
             <colgroup><col class="w-cb" /><col /><col class="w-rsp" /><col class="w-pc" /><col class="w-mem" /><col class="w-st" /><col class="w-act" /></colgroup>
-            <thead><tr><th class="cb"><input type="checkbox" checked={g.channels.every((c) => selected.has(key(c)))} indeterminate={g.channels.some((c) => selected.has(key(c))) && !g.channels.every((c) => selected.has(key(c)))} onchange={(e) => toggleGuild(g, e.currentTarget.checked)} aria-label={t('rooms.select_all', { name: g.name })} /></th><th>{t('rooms.col.channel')}</th><th>{t('rooms.respond')}</th><th>{t('rooms.col.persona')}</th><th>{t('rooms.col.memory')}</th><th>{t('rooms.col.state')}</th><th><span class="sr-only">{t('common.actions')}</span></th></tr></thead>
+            <thead><tr><th class="cb"><input type="checkbox" checked={seen(g).every((c) => selected.has(key(c)))} indeterminate={seen(g).some((c) => selected.has(key(c))) && !seen(g).every((c) => selected.has(key(c)))} onchange={(e) => toggleGuild(g, e.currentTarget.checked)} aria-label={t('rooms.select_all', { name: g.name })} /></th><th>{t('rooms.col.channel')}</th><th>{t('rooms.respond')}</th><th>{t('rooms.col.persona')}</th><th>{t('rooms.col.memory')}</th><th>{t('rooms.col.state')}</th><th><span class="sr-only">{t('common.actions')}</span></th></tr></thead>
             <tbody>
-              {#each g.channels as c (c.id)}
-                <tr class:selected={selected.has(key(c))}>
-                  <td class="cb"><input type="checkbox" checked={selected.has(key(c))} onchange={() => toggle(c)} aria-label={t('rooms.select_one', { name: c.name })} /></td>
-                  <td><a class="chname" href="/rooms/{c.guild_id}/{c.id}"><I.Hash size={14} aria-hidden="true" />{#if c.name && c.name !== c.id}{c.name}{:else}<span class="mono unnamed" title={t('rooms.channel.unnamed')}>{c.id}</span>{/if}</a>{#if !c.configured}<span class="chip">{t('rooms.defaults')}</span>{/if}</td>
-                  <td>
-                    <div class="rsp">
-                      {#key rev}<Switch checked={chats(c.respond)} disabled={busy || rowBusy.has(key(c))} ariaLabel={t('rooms.respond_of', { name: c.name })} onchange={(v) => setRespond(c, v)} />{/key}
-                      <Status tone={respondTone(c.respond) as any} label={t(`rooms.respond.${c.respond}`)} size="sm" />
-                    </div>
-                  </td>
-                  <td class="pc"><Select aria-label={t('rooms.persona_of', { name: c.name })} value={c.persona_ref} options={personaOptionsFor((personas.data?.personas ?? []) as any[], roomLangOf(c), c.persona_ref)} onchange={(e) => setPersona(c, e.currentTarget.value)} /></td>
-                  <td>{#if c.memory_use === 'on'}<span class="chip accent"><I.Brain size={12} aria-hidden="true" />{t('common.on')}</span>{:else}<span class="chip">{t('common.off')}</span>{/if}</td>
-                  <td>
-                    {#if pauseChannels[key(c)]}<Status tone="warn" label={t('rooms.paused')} size="sm" />
-                    {:else if c.live}<Status tone="ok" label={t('rooms.live')} size="sm" />
-                    {:else if c.practice}<Status tone="info" label={t('rooms.practice')} size="sm" />
-                    {:else}<Status tone="neutral" label={t('rooms.offline')} size="sm" />{/if}
-                  </td>
-                  <td class="r"><Button href="/rooms/{c.guild_id}/{c.id}" size="sm" variant="ghost" iconEnd={I.ChevronRight}>{t('rooms.manage')}</Button></td>
-                </tr>
+              {#each seen(g) as c (c.id)}
+                {@render row(c)}
               {/each}
             </tbody>
           </table>
         </div>
+        {#if unseen(g).length}
+          <details class="unseen-box">
+            <summary><span class="small">{t('rooms.unseen_title', { n: unseen(g).length })}</span> <span class="xs muted">{t('rooms.unseen_hint')}</span></summary>
+            <div use:scrollable class="table-scroll">
+              <table class="table rooms-t">
+                <colgroup><col class="w-cb" /><col /><col class="w-rsp" /><col class="w-pc" /><col class="w-mem" /><col class="w-st" /><col class="w-act" /></colgroup>
+                <tbody>
+                  {#each unseen(g) as c (c.id)}
+                    {@render row(c)}
+                  {/each}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        {/if}
         {/if}
       </Card>
     {/each}
@@ -438,6 +464,13 @@
     .rooms-t td:nth-child(2) {
       white-space: normal;
     }
+  }
+  .unseen-box {
+    padding: 0 var(--pad-card) var(--s-3);
+  }
+  .unseen-box summary {
+    cursor: pointer;
+    padding: var(--s-2) 0;
   }
   .bar {
     display: flex;
@@ -593,6 +626,7 @@
   }
   .unnamed {
     font-size: var(--text-xs);
+    font-style: italic;
     color: var(--text-muted);
   }
   .chname:hover {

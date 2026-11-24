@@ -2146,6 +2146,7 @@ add("rooms.log", {
     "test_failed": ("시험 글을 올리지 못했습니다", "Could not post the test entry"),
     "saved": ("서버 로그 설정을 저장했습니다", "Server log saved"),
 })
+add("rooms", {"unseen": ("봇이 볼 수 없음", "Bot cannot see it"), "unseen_title": ("볼 수 없는 채널 {n}개", "{n} channels the bot cannot see"), "unseen_hint": ("봇에게 보기 권한이 없어 일괄 작업에서 빠집니다", "No view permission for the bot; left out of bulk actions")})
 add("rooms.channel", {"unnamed": ("Discord가 이름을 알려 주지 않은 채널", "Discord has not reported this channel's name")})
 
 # 2026-09-30 production pass: operator alerts, crash restarts
