@@ -27,6 +27,6 @@ export function useRooms() {
     server: (name: string | undefined, id: string) => serverLabel(name, id, roomWords()),
     /** a block's title: a Discord block named after a channel Discord hides gets the plain label; a name the operator chose stays */
     block: (b: { label?: string; platform?: string; own_channel?: { channel_id: string } }) =>
-      b.platform === 'discord' && b.own_channel && placeholderName((b.label ?? '').replace(/^#/, '')) ? channelLabel('', b.own_channel.channel_id, roomWords()).label : (b.label ?? ''),
+      b.platform === 'discord' && b.own_channel && placeholderName((b.label ?? '').replace(/^#/, ''), b.own_channel.channel_id) ? channelLabel('', b.own_channel.channel_id, roomWords()).label : (b.label ?? ''),
   }
 }

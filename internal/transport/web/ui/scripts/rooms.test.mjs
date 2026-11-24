@@ -8,8 +8,8 @@ const r = await loadLib('rooms.ts')
 const w = { hidden: (t) => `hidden …${t}`, server: (t) => `server …${t}`, kakao: 'Kakao' }
 
 test('a name that names nothing is a placeholder', () => {
-  for (const n of ['___hidden___', '#___hidden___', '__hidden__', '___HIDDEN___', '', '  ', '#', '123456', '#123456', '______', null, undefined]) assert.equal(r.placeholderName(n), true, String(n))
-  for (const n of ['logs', '#general', 'hidden', 'hidden-room', 'a_hidden_b', '12-general']) assert.equal(r.placeholderName(n), false, n)
+  for (const n of ['___hidden___', '#___hidden___', '__hidden__', '___HIDDEN___', '', '  ', '#', '______', null, undefined]) assert.equal(r.placeholderName(n), true, String(n))
+  for (const n of ['logs', '#general', 'hidden', 'hidden-room', 'a_hidden_b', '12-general', '2024', '#2024', '1', '123456']) assert.equal(r.placeholderName(n), false, n)
 })
 
 test('a channel label is its name, or the plain label with the end of its ID', () => {
@@ -17,6 +17,26 @@ test('a channel label is its name, or the plain label with the end of its ID', (
   assert.deepEqual(r.channelLabel('logs', '111222333444', w), { label: '#logs', hidden: false })
   assert.deepEqual(r.channelLabel('___hidden___', '111222333444', w), { label: 'hidden …333444', hidden: true })
   assert.deepEqual(r.channelLabel(undefined, '42', w), { label: 'hidden …42', hidden: true })
+})
+
+test('a name equal to the channel ID is a placeholder only for that channel', () => {
+  assert.equal(r.placeholderName('1100000000000000001', '1100000000000000001'), true)
+  assert.equal(r.placeholderName('2024', '1100000000000000001'), false)
+})
+
+test('a real channel named only with digits stays a normal channel', () => {
+  assert.deepEqual(r.channelLabel('2024', '1100000000000000001', w), { label: '#2024', hidden: false })
+  assert.deepEqual(r.channelLabel('1', '1100000000000000001', w), { label: '#1', hidden: false })
+})
+
+test('a configured room whose name fell back to its ID (Discord offline) shows its ID, not "cannot see"', () => {
+  const id = '1100000000000000001'
+  assert.deepEqual(r.channelLabel(id, id, w), { label: `#${id}`, hidden: false })
+  assert.deepEqual(r.channelLabel(`#${id}`, id, w), { label: `#${id}`, hidden: false })
+})
+
+test('a server named with digits is still a name, a server named by its own ID is not', () => {
+  assert.equal(r.serverLabel('2024', '9988776655', w), '2024')
 })
 
 test('a server is named, or shown by the end of its ID', () => {
@@ -70,4 +90,25 @@ test('a hit from a room nobody has named is named from its key', () => {
   assert.deepEqual(r.roomName('discord:2:300', items, w), { label: '#logs', server: 'Beta' })
   assert.deepEqual(r.roomName('discord:77:8899001', items, w), { label: 'hidden …899001', server: 'server …77' })
   assert.deepEqual(r.roomName('kakao:old', items, w), { label: 'old', server: 'Kakao' })
+})
+
+test('rooms of a server whose name fell back to IDs stay readable in the picker', () => {
+  const offline = [{ source_room: 'discord:7:1100000000000000001', platform: 'discord', message_count: 2 }]
+  const items = r.roomItems(offline, { guilds: [{ id: '7', name: '7' }], channels: [{ guild_id: '7', id: '1100000000000000001', name: '1100000000000000001' }] }, w)
+  assert.deepEqual(items.map((i) => [i.label, i.hidden, i.server]), [['#1100000000000000001', false, 'server …7']])
+})
+
+test('two servers with the same name stay two groups, told apart by the end of their IDs', () => {
+  const b = ['g1000001', 'g2000002'].map((g) => ({ source_room: `discord:${g}:${g}c`, message_count: 1 }))
+  const guilds = ['g1000001', 'g2000002'].map((id) => ({ id, name: 'Same' }))
+  const chans = guilds.map((g) => ({ guild_id: g.id, id: g.id + 'c', name: 'general' }))
+  const groups = r.groupRooms(r.roomItems(b, { guilds, channels: chans }, w), { showEmpty: false, filter: '' })
+  assert.equal(groups.length, 2)
+  assert.deepEqual(groups.map((g) => g.server), ['Same …000001', 'Same …000002'])
+  assert.equal(new Set(groups.map((g) => g.id)).size, 2)
+  assert.deepEqual(groups.map((g) => g.items.map((i) => i.key)), [['discord:g1000001:g1000001c'], ['discord:g2000002:g2000002c']])
+  // a filter that leaves one of the twins does not change its name
+  const one = r.groupRooms(r.roomItems(b, { guilds, channels: chans }, w), { showEmpty: false, filter: 'general' })
+  assert.equal(one.length, 2)
+  assert.deepEqual(r.groupRooms(r.roomItems(b, { guilds, channels: chans }, w), { showEmpty: false, filter: '000002' }).length, 0)
 })

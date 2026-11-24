@@ -41,4 +41,15 @@ test('an excerpt tag line is split off', () => {
   assert.deepEqual(s, { head: { room: 'kakao:practice', date: '2026-05-02', speakers: 'A, B' }, body: 'A: hi\nB: yo' })
   assert.deepEqual(d.splitExcerpt('no tag'), { head: null, body: 'no tag' })
   assert.deepEqual(d.splitExcerpt(undefined), { head: null, body: '' })
+  const g = d.splitExcerpt('[discord guild=1 channel=2 · 2026-05-02 · A]\nA: hi')
+  assert.deepEqual(g, { head: { room: 'discord guild=1 channel=2', date: '2026-05-02', speakers: 'A' }, body: 'A: hi' })
+  assert.equal(d.splitExcerpt('[discord:1:2]\nA: hi').body, 'A: hi')
+})
+
+test('a message that starts with a bracketed line keeps it', () => {
+  for (const m of ['[TODO]\nship checklist', '[공지]\n내일 휴무', '[a · b]\nx']) {
+    assert.deepEqual(d.splitExcerpt(m, { raw: true }), { head: null, body: m })
+  }
+  assert.deepEqual(d.splitExcerpt('[TODO]\nship checklist'), { head: null, body: '[TODO]\nship checklist' })
+  assert.equal(d.splitExcerpt('[kakao:practice · 2026-05-02 · A]\nA: hi', { raw: true }).body, '[kakao:practice · 2026-05-02 · A]\nA: hi')
 })

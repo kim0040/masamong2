@@ -130,12 +130,17 @@ export function parseDiscord(text: string): DNode[] {
 /** Whether the text has any markup worth drawing (plain text can be shown as it is). */
 export const hasMarkup = (text: string): boolean => /[*_~`|<>\\]/.test(text ?? '')
 
-/** A stored excerpt starts with a tag line "[room · date · speakers]"; the page already shows those three,
- * so the line is taken off the text. */
-export function splitExcerpt(excerpt: string | undefined): { head: { room: string; date: string; speakers: string } | null; body: string } {
+/** What the generated tag line starts with: a Discord room label, or a room key. */
+const ROOM_LABEL = /^(discord guild=|discord DM channel=|discord:|kakao:)/
+
+/** A generated excerpt starts with a tag line "[room · date · speakers]"; the page already shows those three,
+ * so the line is taken off the text. Only a line that looks generated goes (a room label, or the " · " between
+ * its parts): a bracketed first line of a message ("[TODO]") is text and stays, and `raw` (the excerpt is a stored
+ * message, not a generated one) keeps every line. */
+export function splitExcerpt(excerpt: string | undefined, opts: { raw?: boolean } = {}): { head: { room: string; date: string; speakers: string } | null; body: string } {
   const s = excerpt ?? ''
   const m = /^\[([^\]\n]*)\]\n/.exec(s)
-  if (!m) return { head: null, body: s }
+  if (!m || opts.raw || !(ROOM_LABEL.test(m[1]) || m[1].includes(' · '))) return { head: null, body: s }
   const [room = '', date = '', ...rest] = m[1].split(' · ')
   return { head: { room, date, speakers: rest.join(' · ') }, body: s.slice(m[0].length) }
 }

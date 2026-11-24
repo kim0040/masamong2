@@ -369,12 +369,14 @@
             </tbody>
           </table>
         </div>
+        {/if}
         {#if unseen(g).length}
           <details class="unseen-box">
             <summary><span class="small">{t('rooms.unseen_title', { n: unseen(g).length })}</span> <span class="xs muted">{t('rooms.unseen_hint')}</span></summary>
             <div use:scrollable class="table-scroll">
               <table class="table rooms-t">
                 <colgroup><col class="w-cb" /><col /><col class="w-rsp" /><col class="w-pc" /><col class="w-mem" /><col class="w-st" /><col class="w-act" /></colgroup>
+                <thead class="sr-only"><tr><th class="cb"><span class="sr-only">{t('rooms.col.select')}</span></th><th>{t('rooms.col.channel')}</th><th>{t('rooms.respond')}</th><th>{t('rooms.col.persona')}</th><th>{t('rooms.col.memory')}</th><th>{t('rooms.col.state')}</th><th>{t('common.actions')}</th></tr></thead>
                 <tbody>
                   {#each unseen(g) as c (c.id)}
                     {@render row(c)}
@@ -383,7 +385,6 @@
               </table>
             </div>
           </details>
-        {/if}
         {/if}
       </Card>
     {/each}

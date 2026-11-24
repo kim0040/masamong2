@@ -29,7 +29,7 @@
   import RoomPicker from '../components/RoomPicker.svelte'
   import DiscordText from '../components/DiscordText.svelte'
   import { splitExcerpt } from '../lib/discordtext'
-  import { readPick, writePick, keepKnown, browserStorage } from '../lib/labpick'
+  import { readPick, writePick, keepKnown, resolveChannel, browserStorage } from '../lib/labpick'
   import { useRooms } from '../lib/rooms.svelte'
   import PlanSimulator from '../components/PlanSimulator.svelte'
   import { personaOptionsFor } from '../lib/persona'
@@ -84,7 +84,9 @@
     return out
   })
   $effect(() => {
-    if (!channelKey && channels.length) channelKey = (channels.find((c) => c.value === saved.channel) ?? channels.find((c) => !c.hidden) ?? channels[0]).value
+    // only once channels.list has answered (or failed): the config's own rooms come first and may lack the saved one
+    const k = resolveChannel(channelKey, saved.channel, channels, chList.data !== undefined || chList.error !== undefined)
+    if (k !== channelKey) channelKey = k
   })
   // the saved sources, once the rooms are known: the ones that are gone are dropped
   let restored = $state(false)
@@ -296,9 +298,9 @@
                   {:else if tr.error}
                     <p class="err">{tr.error}</p>
                   {:else if tr.kind === 'chat'}
-                    <p class="ans">{#if tr.answer}<DiscordText text={tr.answer} />{:else}{t('lab.silent')}{/if}</p>
+                    <p class="ans">{#if tr.answer}<DiscordText text={tr.answer} still />{:else}{t('lab.silent')}{/if}</p>
                   {:else}
-                    <p class="ans muted small">{#if tr.evidence[0]?.excerpt}<DiscordText text={splitExcerpt(tr.evidence[0].excerpt).body.slice(0, 220)} />{:else}{`${t('lab.no_hits')} ${t(`lab.empty.${emptyWhy(tr)}`)}`}{/if}</p>
+                    <p class="ans muted small">{#if tr.evidence[0]?.excerpt}<DiscordText text={splitExcerpt(tr.evidence[0].excerpt).body.slice(0, 220)} still />{:else}{`${t('lab.no_hits')} ${t(`lab.empty.${emptyWhy(tr)}`)}`}{/if}</p>
                   {/if}
                 </div>
               </button>
@@ -343,7 +345,7 @@
                       {#if selected.plan.memory_requirement}<dt>{t('lab.diag.memory_req')}</dt><dd>{plain('lab.diag.mr', selected.plan.memory_requirement)}</dd>{/if}
                       {#if selected.plan.time_scope}<dt>{t('lab.diag.time_scope')}</dt><dd>{plain('lab.diag.ts', selected.plan.time_scope)}</dd>{/if}
                       {#if selected.plan.tool_plan?.length}<dt>{t('lab.diag.tool_plan')}</dt><dd>{selected.plan.tool_plan.map((x: any) => toolName(x.tool_name)).join(' → ')}</dd>{/if}
-                      {#if selected.retrieval?.applied}<dt>{t('lab.diag.applied')}</dt><dd>{t(`lab.rank.${selected.retrieval.applied}`)}</dd>{/if}
+                      {#if selected.retrieval?.applied}<dt>{t('lab.diag.applied')}</dt><dd>{plain('lab.rank', selected.retrieval.applied)}</dd>{/if}
                     </dl>
                   </div>
                 {/if}

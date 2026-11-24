@@ -221,7 +221,7 @@
             {#if corrected[h.doc_id]}<Status tone="info" label={t('memory.has_correction')} size="sm" />{/if}
             {#if h.summary}<p class="sum small"><DiscordText text={h.summary} mark={(x) => mark(x, q)} /></p>{/if}
             {#if shownIn(hits, i)}<p class="xs muted">{t('evidence.shown_in', { n: shownIn(hits, i) })}</p>{/if}
-            <pre><DiscordText text={splitExcerpt(h.excerpt).body} mark={(x) => mark(x, q)} /></pre>
+            <pre><DiscordText text={splitExcerpt(h.excerpt, { raw: ragState === 'raw_lexical' }).body} mark={(x) => mark(x, q)} /></pre>
             <footer class="row">
               {#if h.packing_status}<span class="xs subtle">{codeLabel('memory.packing', h.packing_status)}</span>{/if}
               <span class="spacer"></span>

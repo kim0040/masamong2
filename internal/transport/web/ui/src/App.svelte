@@ -3,6 +3,7 @@
   import type { Component } from 'svelte'
   import { routes, notFound } from './routes'
   import { route, match, navigate, startRouter } from './lib/router.svelte'
+  import { pathWithQuery } from './lib/peopledeep'
   import { loadRoute, prefetchRoute } from './lib/route-load'
   import { session, loadSession, setUnauthorizedHandler, practice } from './lib/api.svelte'
   import { loadStrings, t, i18n } from './lib/i18n.svelte'
@@ -42,10 +43,10 @@
       setUnauthorizedHandler(async () => {
         disconnectLive()
         await loadSession()
-        if (route.path !== '/login') navigate('/login?next=' + encodeURIComponent(route.path), { replace: true })
+        if (route.path !== '/login') navigate('/login?next=' + encodeURIComponent(pathWithQuery(route.path, route.query)), { replace: true })
       })
       if (s.authenticated) await afterLogin()
-      else if (route.path !== '/login') navigate('/login' + (route.path !== '/' ? '?next=' + encodeURIComponent(route.path) : ''), { replace: true })
+      else if (route.path !== '/login') navigate('/login' + (route.path !== '/' ? '?next=' + encodeURIComponent(pathWithQuery(route.path, route.query)) : ''), { replace: true })
       booted = true
     } catch {
       bootError = 'offline'

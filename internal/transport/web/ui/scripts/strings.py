@@ -3166,6 +3166,16 @@ add("palette", {
     "key.guild_locale": ("서버 언어", "Server language"),
 })
 
+# ---- console-fix-a: review fixes (rooms table header, ranking fallback names) ----
+add("rooms", {"col.select": ("선택", "Select")})
+add("people", {"deep.not_found": ("링크가 가리키는 사람을 찾지 못했습니다. 아직 이 서버에서 대화한 기록이 없거나, 정보 철회로 목록에서 빠졌을 수 있습니다.", "Could not find the person this link points to. They may have no messages in that server yet, or withdrew and left the list.")})
+add("lab.rank", {
+    "hybrid_fallback": ("단어·의미 검색 (재정렬을 쓸 수 없어 대신 사용)", "Lexical + vector (rerank was unavailable)"),
+    "heuristic_fallback": ("규칙 가산 (재정렬을 쓸 수 없어 대신 사용)", "Heuristic (rerank was unavailable)"),
+    "rerank_fallback": ("재정렬 (대체 순서)", "Rerank (fallback order)"),
+    "auto_fallback": ("자동 (대체 순서)", "Auto (fallback order)"),
+})
+
 # plural forms for strings that take {n}
 S["savebar.count.one"] = ("저장하지 않은 변경 {n}개", "{n} unsaved change")
 S["topbar.notifications.one"] = ("읽지 않은 알림 {n}건", "{n} unread notification")
