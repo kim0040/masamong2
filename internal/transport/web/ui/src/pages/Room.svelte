@@ -38,6 +38,7 @@
   import ConversationCard from '../components/ConversationCard.svelte'
   import RemindersList from '../components/RemindersList.svelte'
   import { personaOptionsFor } from '../lib/persona'
+  import { watchApplyTargets } from '../lib/watchapply'
   import * as I from '../lib/icons'
 
   let { params }: { params: { guild: string; channel: string } } = $props()
@@ -228,14 +229,30 @@
   // "per server" in the owner's words: one room's saved alert switch and area levels copied to the
   // other rooms of this server (channels.configure on each — no new Action needed)
   const watchCount = $derived(Object.keys(ch?.watch_level ?? {}).length)
-  const sameGuild = $derived(((list.data?.channels ?? []) as any[]).filter((x) => x.guild_id === g && x.id !== c))
+  // only the rooms the bot can see: hidden channels and offline configured rooms are not targets
+  const sameGuild = $derived(watchApplyTargets(list.data?.channels, g, c))
   let applyAllOpen = $state(false)
   async function applyAlertsToGuild() {
+    // everything the batch needs is read once at the confirm: the saved settings, the target rooms
+    // and the revision they were read at. Navigating while the writes run cannot move the write.
+    const targets = sameGuild
     const src = savedForm
     const input = { disaster_alerts: src.disaster_alerts, watch_level: Object.fromEntries((src.watch_level ?? []).map((w: { region: string; level: string }) => [w.region, Number(w.level)])) }
+    let rev = cfg.revision
     let ok = 0
-    for (const x of sameGuild) if ((await call('channels.configure', { guild_id: g, channel_id: x.id, ...input })).ok) ok++
-    toast(ok === sameGuild.length ? 'ok' : 'warn', t('room.watch_apply_done', { n: ok, total: sameGuild.length }))
+    for (const x of targets) {
+      // each write goes against the revision the previous one left: a change saved elsewhere between
+      // two writes stops the batch on a conflict instead of being overwritten silently
+      const r = await call('channels.configure', { guild_id: x.guild_id, channel_id: x.channel_id, ...input }, { base_revision: rev })
+      if (r.ok) {
+        ok++
+        if (r.revision) rev = r.revision
+      } else if (r.error?.code === 'CONFIG_CONFLICT') {
+        await Promise.all([list.refresh(), loadConfig(true)])
+        return toast('warn', t('config.conflict_title'), t('config.conflict_body'))
+      }
+    }
+    toast(ok === targets.length ? 'ok' : 'warn', t('room.watch_apply_done', { n: ok, total: targets.length }))
     void list.refresh()
   }
 
