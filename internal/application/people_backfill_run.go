@@ -1680,11 +1680,12 @@ func (s *Service) pbSubmit(ctx context.Context, db *storage.Store, runID string,
 		if c.States[store.WindowSubmitted] > 0 {
 			return false, true, nil
 		}
-		s.pbEndLocked(db, runID, l, store.BackfillDone, "")
+		// the plan goes before the run reads done, so no one who sees the run done still finds its plan
 		var plan pbParams
 		if ok, _ := s.kvGet(pbPlanKey+run.GuildID, &plan); ok && plan.Token == run.Token {
 			_ = s.kvDelete(pbPlanKey + run.GuildID)
 		}
+		s.pbEndLocked(db, runID, l, store.BackfillDone, "")
 		return true, false, nil
 	}
 	type sent struct {
