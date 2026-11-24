@@ -3064,6 +3064,18 @@ add("part", {
     "global_link": ("설정에서 열기", "Open in Settings"),
 })
 
+# ---- console-gui: palette entries for important nested keys (audit 4.4) ----
+add("palette", {
+    "key.watch_level": ("지역별 알림 레벨", "Alert level by area"),
+    "key.retention": ("데이터 보관 기간", "Data retention"),
+    "key.features": ("기능 켜기·끄기", "Feature switches"),
+    "key.i18n": ("봇 언어·시간대", "Bot language & time zone"),
+    "key.stats_enabled": ("사용 통계 수집", "Usage statistics collection"),
+    "key.updates_check": ("매일 새 버전 확인", "Daily update check"),
+    "key.participation": ("먼저 말 걸기 기본값", "Chime-in defaults"),
+    "key.guild_locale": ("서버 언어", "Server language"),
+})
+
 # plural forms for strings that take {n}
 S["savebar.count.one"] = ("저장하지 않은 변경 {n}개", "{n} unsaved change")
 S["topbar.notifications.one"] = ("읽지 않은 알림 {n}건", "{n} unread notification")
