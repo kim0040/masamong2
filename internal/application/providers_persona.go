@@ -772,7 +772,16 @@ func cloneGuilds(in map[string]config.GuildSettings) map[string]config.GuildSett
 	}
 	out := make(map[string]config.GuildSettings, len(in))
 	for gid, g := range in {
-		ng := config.GuildSettings{Locale: g.Locale}
+		// every field of the server is kept (a field left out here was silently dropped from the saved
+		// file by any console change: the per-server blocked users, privacy options and log channel
+		// were); the maps, slices and pointers are copied so a failed mutation never leaks into the live
+		// document
+		ng := g
+		ng.BlockedUsers = slices.Clone(g.BlockedUsers)
+		ng.Log.Deletes = cloneBool(g.Log.Deletes)
+		ng.Log.DeletedText = cloneBool(g.Log.DeletedText)
+		ng.Log.Problems = cloneBool(g.Log.Problems)
+		ng.Channels = nil
 		if g.Channels != nil {
 			ng.Channels = make(map[string]config.ChannelPolicy, len(g.Channels))
 			for cid, ch := range g.Channels {
@@ -793,6 +802,14 @@ func cloneGuilds(in map[string]config.GuildSettings) map[string]config.GuildSett
 		out[gid] = ng
 	}
 	return out
+}
+
+func cloneBool(p *bool) *bool {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
 }
 
 func (s *Service) stats(req action.Request) action.Result {
