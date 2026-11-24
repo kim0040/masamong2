@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { t } from '../lib/i18n.svelte'
+  import { t, languageLabel } from '../lib/i18n.svelte'
   import { session, can, loadSession, postJSON } from '../lib/api.svelte'
-  import { patchConfig } from '../lib/config.svelte'
+  import { resource } from '../lib/resource.svelte'
+  import { cfg, patchConfig, useConfig } from '../lib/config.svelte'
   import { prefs, setPrefs, densities } from '../lib/prefs.svelte'
   import { navigate } from '../lib/router.svelte'
   import { toast } from '../lib/toast.svelte'
@@ -9,6 +10,10 @@
   import Card from '../components/Card.svelte'
   import Button from '../components/Button.svelte'
   import Segmented from '../components/Segmented.svelte'
+  import Select from '../components/Select.svelte'
+  import Switch from '../components/Switch.svelte'
+  import Field from '../components/Field.svelte'
+  import Input from '../components/Input.svelte'
   import LanguageSelect from '../components/LanguageSelect.svelte'
   import AltCommand from '../components/AltCommand.svelte'
   import CopyButton from '../components/CopyButton.svelte'
@@ -57,6 +62,16 @@
     if (r.ok) await loadSession()
     saving = false
   }
+
+  // the bot's own language (config i18n.*), beside the console language above: what the bot answers
+  // in where a server or room sets nothing, the fallback for missing phrasing, the schedule clock and
+  // whether rooms without a persona start polite
+  useConfig()
+  const locales = resource<any>('locales.list')
+  const botLangs = $derived((locales.data?.bundled ?? locales.data?.loaded ?? session.value?.locales ?? ['ko', 'en']).map((l: string) => ({ value: l, label: languageLabel(l) })))
+  async function setI18n(key: string, value: unknown) {
+    await patchConfig([value === '' ? { path: ['i18n', key], op: 'unset' } : { path: ['i18n', key], value }], { success: t('display_page.i18n.saved') })
+  }
 </script>
 
 <PageHeader title={t('display_page.title')} description={t('display_page.desc')} />
@@ -87,6 +102,17 @@
       <LanguageSelect id="lang" />
       <p class="xs muted">{t('display_page.lang_add', { path: 'locales/ui/<tag>.json' })}</p>
       <p class="xs muted">{t('display_page.lang_bot')} <a href="/persona">{t('nav.persona')}</a></p>
+      {#if cfg.loaded}
+        <div>
+          <div class="section-title">{t('display_page.bot_lang')}</div>
+          <div class="stack mt">
+            <Field id="i18n-def" label={t('display_page.i18n.default_locale')} hint={t('display_page.i18n.locale_hint')}>{#snippet children(f)}<Select id={f.id} aria-describedby={f.describedby} disabled={!can('config.patch')} value={cfg.doc?.i18n?.default_locale ?? ''} options={botLangs} onchange={(e) => setI18n('default_locale', e.currentTarget.value)} />{/snippet}</Field>
+            <Field id="i18n-fb" label={t('display_page.i18n.fallback_locale')} hint={t('display_page.i18n.fallback_hint')}>{#snippet children(f)}<Select id={f.id} aria-describedby={f.describedby} disabled={!can('config.patch')} value={cfg.doc?.i18n?.fallback_locale ?? ''} options={botLangs} onchange={(e) => setI18n('fallback_locale', e.currentTarget.value)} />{/snippet}</Field>
+            <Field id="i18n-tz" label={t('display_page.i18n.timezone')} hint={t('display_page.i18n.timezone_hint')}>{#snippet children(f)}<Input id={f.id} aria-describedby={f.describedby} disabled={!can('config.patch')} mono value={cfg.doc?.i18n?.timezone ?? ''} placeholder="Asia/Seoul" onchange={(e) => setI18n('timezone', e.currentTarget.value.trim())} />{/snippet}</Field>
+            <Switch checked={!!cfg.doc?.i18n?.polite_default} disabled={!can('config.patch')} onchange={(v) => setI18n('polite_default', v)} label={t('display_page.i18n.polite')} hint={t('display_page.i18n.polite_hint')} />
+          </div>
+        </div>
+      {/if}
     </div>
   </Card>
 

@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { t, i18n } from '../lib/i18n.svelte'
+  import { t, i18n, languageLabel } from '../lib/i18n.svelte'
   import { scrollable } from '../lib/scrollable'
-  import { call } from '../lib/api.svelte'
+  import { call, session } from '../lib/api.svelte'
   import { resource } from '../lib/resource.svelte'
   import { cfg, patchConfig, useConfig } from '../lib/config.svelte'
   import { overview } from '../lib/overview.svelte'
@@ -96,6 +96,14 @@
     const path = ['guilds', g.id, 'log', k]
     const unset = k === 'channel' ? v === 'off' : v === true // the defaults are stored as unset
     await patchConfig([unset ? { path, op: 'unset' } : { path, value: v }], { success: t('rooms.log.saved') })
+    void list.refresh()
+  }
+  // the language the bot uses in this server (config guilds.<id>.locale): unset follows i18n.default_locale
+  const localeOpts = $derived((session.value?.locales?.length ? session.value.locales : ['ko', 'en']).map((l) => ({ value: l, label: languageLabel(l) })))
+  const guildLocaleOf = (g: Guild) => cfg.doc?.guilds?.[g.id]?.locale || ''
+  const guildLocaleLabel = (g: Guild) => (guildLocaleOf(g) ? languageLabel(guildLocaleOf(g)) : t('rooms.locale.auto'))
+  async function setLocale(g: Guild, v: string) {
+    await patchConfig([v ? { path: ['guilds', g.id, 'locale'], value: v } : { path: ['guilds', g.id, 'locale'], op: 'unset' }], { success: t('rooms.locale.saved') })
     void list.refresh()
   }
   let logTesting = $state('')
@@ -285,6 +293,15 @@
           </div>
         {/if}
         {#if g.allowed && cfg.loaded}
+          <details class="priv">
+            <summary><span class="small">{t('rooms.locale.title')}</span> <span class="xs muted">{guildLocaleLabel(g)}</span></summary>
+            <div class="priv-body">
+              <p class="xs muted">{t('rooms.locale.desc')}</p>
+              <Field id="loc-{g.id}" label={t('rooms.locale.label')} hint={t('rooms.locale.hint')}>
+                {#snippet children(f)}<Select id={f.id} aria-describedby={f.describedby} value={guildLocaleOf(g)} options={[{ value: '', label: t('rooms.locale.auto') }, ...localeOpts]} onchange={(e) => setLocale(g, e.currentTarget.value)} />{/snippet}
+              </Field>
+            </div>
+          </details>
           <details class="priv">
             <summary><span class="small">{t('rooms.privacy.title')}</span> <span class="xs muted">{privacyCount(g) ? t('rooms.privacy.n_on', { n: privacyCount(g) }) : t('rooms.privacy.all_off')}</span></summary>
             <div class="priv-body">

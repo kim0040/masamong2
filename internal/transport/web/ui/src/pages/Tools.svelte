@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t, has, toolName, toolDesc } from '../lib/i18n.svelte'
+  import { can } from '../lib/api.svelte'
   import { resource } from '../lib/resource.svelte'
   import { cfg, patchConfig, useConfig } from '../lib/config.svelte'
   import { num } from '../lib/format'
@@ -85,6 +86,24 @@
   async function setProgress(v: Progress) {
     await patchConfig([v === 'deep' ? { path: ['chat', 'progress'], op: 'unset' } : { path: ['chat', 'progress'], value: v }], { success: t('tools.progress.saved') })
   }
+  // the instance feature switches (config features.*): unset = on; each gates the tools listed with it
+  // (the Feature field of every built-in in internal/tools/tools.go)
+  const FEATURES: [string, string[]][] = [
+    ['weather', ['weather.query']],
+    ['disasters', ['disasters.query']],
+    ['finance', ['finance.quote', 'finance.fx']],
+    ['search', ['search.web', 'places.search', 'web.read']],
+    ['images', ['images.generate']],
+    ['polls', ['polls.create']],
+    ['summaries', ['summaries.channel']],
+    ['fortune', ['fortune.query']],
+    ['notices', ['notices.status']],
+    ['reminders', ['reminders.propose']],
+  ]
+  async function setFeature(name: string, v: boolean) {
+    await patchConfig([v ? { path: ['features', name], op: 'unset' } : { path: ['features', name], value: false }], { success: t('tools.features.saved') })
+    void tools.refresh()
+  }
   // how much of the room's talk a reply reads (config chat.transcript_chars, in characters); 5000 is
   // the default and is stored as unset
   async function setTranscript(raw: string) {
@@ -153,6 +172,19 @@
       <div class="model-select"><Input aria-labelledby="tool-transcript-title" type="number" inputmode="numeric" min="1000" max="20000" step="1" placeholder="5000" value={cfg.doc?.chat?.transcript_chars ?? ''} onchange={(e) => setTranscript(e.currentTarget.value)} /></div>
     </div>
   </section>
+{/if}
+
+{#if cfg.loaded}
+  <Card title={t('tools.features.title')} description={t('tools.features.desc')} class="feats">
+    <div class="feat-grid">
+      {#each FEATURES as [name, ids] (name)}
+        <div class="feat">
+          <Switch checked={cfg.doc?.features?.[name] !== false} disabled={!can('config.patch')} onchange={(v) => setFeature(name, v)} label={t(`feature.${name}`)} />
+          <span class="xs muted feat-links">{#each ids as id, i (id)}{#if i},&nbsp;{/if}<a href="/tools/{encodeURIComponent(id)}">{toolName(id)}</a>{/each}</span>
+        </div>
+      {/each}
+    </div>
+  </Card>
 {/if}
 
 {#if !tools.data}
@@ -301,6 +333,21 @@
     align-items: center;
     gap: 4px;
     color: var(--text-muted);
+  }
+  :global(.card.feats) {
+    margin-bottom: var(--s-5);
+  }
+  .feat-grid {
+    display: grid;
+    gap: var(--s-3) var(--s-5);
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  }
+  .feat {
+    display: grid;
+    gap: 2px;
+  }
+  .feat-links {
+    padding-inline-start: calc(22px + var(--s-2));
   }
   .more {
     margin-bottom: var(--s-3);

@@ -3007,6 +3007,63 @@ add("people", {
     "servers.open": ("{name} ({id}) 정보 열기", "Open details for {name} ({id})"),
 })
 
+# ---- console-gui: friendly homes for raw-only settings (audit 2.2, 4.3) ----
+add("maint", {
+    "retention.title": ("데이터 보관 기간", "Data retention"),
+    "retention.desc": ("답할 때마다 쌓이는 운영 기록을 며칠 동안 보관할지 정합니다. 기억(블록)에는 적용되지 않습니다.", "How long the operational records that grow with every reply are kept. Memory blocks are not affected."),
+    "retention.note": ("비워 두면 기본값(오른쪽)을 따릅니다. -1은 영구 보관입니다.", "Empty follows the default on the right. -1 keeps forever."),
+    "retention.def": ("기본 {n}일", "default {n}d"),
+    "retention.forever": ("기본 영구 보관", "default: forever"),
+    "retention.saved": ("보관 기간을 저장했습니다", "Retention saved"),
+    "retention.k.turn_days": ("대화 턴", "Turns"),
+    "retention.k.turn_detail_days": ("턴 본문·근거", "Turn text & evidence"),
+    "retention.k.trace_days": ("진단 추적", "Diagnostic traces"),
+    "retention.k.audit_days": ("변경·작업 로그", "Change & ops log"),
+    "retention.k.usage_days": ("사용량 집계", "Usage counters"),
+    "retention.k.query_cache_days": ("질문 임베딩 캐시", "Question embedding cache"),
+    "retention.k.image_days": ("생성 이미지", "Generated images"),
+    "retention.k.ledger_days": ("모델·도구 호출 장부", "Model & tool call ledgers"),
+    "retention.k.pending_days": ("미확정 알림 제안", "Pending reminder proposals"),
+    "retention.k.context_days": ("방 대화 맥락", "Room conversation context"),
+    "update.check_daily": ("매일 새 버전 확인", "Check for a new release daily"),
+    "update.check_daily_hint": ("하루 한 번 최신 릴리스를 물어봅니다. 프로그램 이름과 버전만 보냅니다.", "Asks for the newest release once a day; only the program's name and version are sent."),
+    "update.saved": ("업데이트 설정을 저장했습니다", "Update setting saved"),
+})
+add("display_page", {
+    "bot_lang": ("봇 언어", "Bot language"),
+    "i18n.default_locale": ("기본 언어", "Default language"),
+    "i18n.locale_hint": ("서버나 방이 따로 정하지 않은 곳에서 쓰는 언어입니다.", "Used where a server or room does not set its own."),
+    "i18n.fallback_locale": ("대체 언어", "Fallback language"),
+    "i18n.fallback_hint": ("기본 언어에 없는 표현을 이 언어로 채웁니다.", "Covers phrasing the default language lacks."),
+    "i18n.timezone": ("시간대", "Timezone"),
+    "i18n.timezone_hint": ("백업·요약 같은 예약 작업의 기준 시각입니다. 예: Asia/Seoul", "The reference clock for scheduled work like backups and summaries. Example: Asia/Seoul"),
+    "i18n.polite": ("새 방은 공손한 말투로 시작", "New rooms start polite"),
+    "i18n.polite_hint": ("말투를 정하지 않은 방이 반말 친구 대신 다정한 존댓말로 답합니다.", "Rooms without a persona answer in a warm polite voice instead of the casual friend."),
+    "i18n.saved": ("봇 언어 설정을 저장했습니다", "Bot language saved"),
+})
+add("tools", {
+    "features.title": ("기능 켜기·끄기", "Feature switches"),
+    "features.desc": ("설치 전체의 기능 스위치입니다. 끄면 그 기능의 도구가 모두 멈춥니다.", "Instance-wide feature switches. Off stops every tool of that feature."),
+    "features.saved": ("기능 스위치를 저장했습니다", "Feature switch saved"),
+})
+add("stats", {
+    "enabled.label": ("사용 통계 수집", "Collect usage statistics"),
+    "enabled.hint": ("하루 합계를 이 기기의 데이터베이스에만 저장합니다. 끄면 수집과 일일 집계가 멈추고 이미 모은 기록은 남습니다.", "Daily totals stay in this device's database. Off stops collection and the daily rollup; what was collected stays."),
+    "enabled.saved": ("통계 수집 설정을 저장했습니다", "Statistics setting saved"),
+})
+add("rooms", {
+    "locale.title": ("언어", "Language"),
+    "locale.desc": ("이 서버에서 봇이 쓰는 언어입니다. 방의 말투가 언어를 정하면 그쪽을 따릅니다.", "The language the bot uses in this server. A room persona that names a language wins."),
+    "locale.label": ("서버 언어", "Server language"),
+    "locale.hint": ("'자동'이면 봇 기본 언어(화면 및 접속)를 따릅니다.", "'Auto' follows the bot default (Display & access)."),
+    "locale.auto": ("자동 (봇 기본)", "Auto (bot default)"),
+    "locale.saved": ("서버 언어를 저장했습니다", "Server language saved"),
+})
+add("part", {
+    "global_hint": ("대기 시간·횟수 제한 같은 전체 기본값은 설정 파일에서 바꿉니다.", "Global defaults — wait time, per-hour and per-day caps — live in the settings file."),
+    "global_link": ("설정에서 열기", "Open in Settings"),
+})
+
 # plural forms for strings that take {n}
 S["savebar.count.one"] = ("저장하지 않은 변경 {n}개", "{n} unsaved change")
 S["topbar.notifications.one"] = ("읽지 않은 알림 {n}건", "{n} unread notification")

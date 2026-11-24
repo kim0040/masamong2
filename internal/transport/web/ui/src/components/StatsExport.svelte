@@ -1,7 +1,7 @@
 <script lang="ts">
   import { t } from '../lib/i18n.svelte'
-  import { call } from '../lib/api.svelte'
-  import { useConfig } from '../lib/config.svelte'
+  import { call, can } from '../lib/api.svelte'
+  import { useConfig, patchConfig } from '../lib/config.svelte'
   import { toast } from '../lib/toast.svelte'
   import { num } from '../lib/format'
   import { saveFile } from '../lib/download'
@@ -9,6 +9,7 @@
   import Card from './Card.svelte'
   import Button from './Button.svelte'
   import Segmented from './Segmented.svelte'
+  import Switch from './Switch.svelte'
   import Confirm from './Confirm.svelte'
 
   // stats.export: weekly totals of this install as a file. The complete file is shown first; it is
@@ -26,6 +27,12 @@
 
   function fromDate(): string {
     return new Date(Date.now() - Number(weeks) * 7 * 86400000).toISOString().slice(0, 10)
+  }
+
+  // stats.enabled: daily totals of this install, kept in its own database; unset = on
+  async function setCollecting(v: boolean) {
+    const r = await patchConfig([v ? { path: ['stats', 'enabled'], op: 'unset' } : { path: ['stats', 'enabled'], value: false }], { success: t('stats.enabled.saved') })
+    if (r.ok) collecting = v
   }
 
   async function build(reset = false) {
@@ -47,6 +54,7 @@
 
 <Card title={t('stats.export.title')} description={t('stats.export.desc')} id="stats-export">
   <div class="stack">
+    {#if cfg.loaded}<Switch checked={!off} disabled={!can('config.patch')} onchange={setCollecting} label={t('stats.enabled.label')} hint={t('stats.enabled.hint')} />{/if}
     {#if off}
       <div class="callout warn"><span class="ic"><I.TriangleAlert size={16} /></span><span>{t('stats.export.off')}</span></div>
     {/if}
