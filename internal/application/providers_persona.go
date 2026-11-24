@@ -20,7 +20,6 @@ import (
 	"masamong/internal/providers/openai"
 	"masamong/internal/providers/websearch"
 	"masamong/internal/secrets"
-	"masamong/internal/tools"
 )
 
 func (s *Service) providers(ctx context.Context, req action.Request) action.Result {
@@ -727,30 +726,23 @@ func (s *Service) mutateConfig(req action.Request, fn func(*config.Document) err
 	s.cfgMu.Lock()
 	defer s.cfgMu.Unlock()
 	live := s.snapshot()
-	doc := live.doc
-	// deep copy maps so a failed mutation never leaks into the live document
-	doc.Providers = map[string]config.Provider{}
-	for k, v := range live.doc.Providers {
-		doc.Providers[k] = v
+	// a deep copy: a failed or refused mutation never leaks into the live document, and no field is lost
+	doc := live.doc.Clone()
+	// the mutations write into these maps directly: they are never nil here (Tools stays nil when unset)
+	if doc.Providers == nil {
+		doc.Providers = map[string]config.Provider{}
 	}
-	doc.Models = map[string]config.Model{}
-	for k, v := range live.doc.Models {
-		doc.Models[k] = v
+	if doc.Models == nil {
+		doc.Models = map[string]config.Model{}
 	}
-	doc.Features = map[string]bool{}
-	for k, v := range live.doc.Features {
-		doc.Features[k] = v
+	if doc.Features == nil {
+		doc.Features = map[string]bool{}
 	}
-	if live.doc.Tools != nil {
-		doc.Tools = make(map[string]tools.Settings, len(live.doc.Tools))
-		for k, v := range live.doc.Tools {
-			doc.Tools[k] = v
-		}
+	if doc.Guilds == nil {
+		doc.Guilds = map[string]config.GuildSettings{}
 	}
-	doc.Guilds = cloneGuilds(live.doc.Guilds)
-	doc.Personas = map[string]config.Persona{}
-	for k, v := range live.doc.Personas {
-		doc.Personas[k] = v
+	if doc.Personas == nil {
+		doc.Personas = map[string]config.Persona{}
 	}
 	if err := fn(&doc); err != nil {
 		return s.configFail(req, errcode.InvalidInput, err, nil)
@@ -766,33 +758,12 @@ func (s *Service) mutateConfig(req action.Request, fn func(*config.Document) err
 	return s.applyCandidateLocked(req, raw, base)
 }
 
+// cloneGuilds is a deep copy of the server settings (config.Document.Clone); nil gives an empty map.
 func cloneGuilds(in map[string]config.GuildSettings) map[string]config.GuildSettings {
 	if in == nil {
 		return map[string]config.GuildSettings{}
 	}
-	out := make(map[string]config.GuildSettings, len(in))
-	for gid, g := range in {
-		ng := config.GuildSettings{Locale: g.Locale}
-		if g.Channels != nil {
-			ng.Channels = make(map[string]config.ChannelPolicy, len(g.Channels))
-			for cid, ch := range g.Channels {
-				cp := ch
-				cp.WatchLevel = maps.Clone(ch.WatchLevel)
-				if ch.RAGAttachments != nil {
-					cp.RAGAttachments = append([]config.RAGAttachmentRef{}, ch.RAGAttachments...)
-				}
-				if ch.Tools != nil {
-					cp.Tools = make(map[string]bool, len(ch.Tools))
-					for k, v := range ch.Tools {
-						cp.Tools[k] = v
-					}
-				}
-				ng.Channels[cid] = cp
-			}
-		}
-		out[gid] = ng
-	}
-	return out
+	return config.Document{Guilds: in}.Clone().Guilds
 }
 
 func (s *Service) stats(req action.Request) action.Result {
