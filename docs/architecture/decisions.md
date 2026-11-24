@@ -604,7 +604,7 @@ flowchart TB
 <summary><b>F-2. 역할별 대체 모델과 차단기. "한 번만" 요청은 넘기지 않는다</b></summary>
 
 - **이유**: 공급자 장애가 답 실패가 되지 않게. 반대로 돈이 드는 일회성 요청이 조용히 두 번 나가면 안 된다.
-- **지금 상태**: 역할마다 대체 모델 최대 3개. 넘길 만한 실패와 아닌 실패를 가른다.
+- **지금 상태**: 대화하는 역할(답변, 플래너, 요약, 사진 이해)마다 대체 모델 최대 3개. 임베딩에는 두지 않는다(다른 모델의 벡터는 저장된 벡터와 맞지 않는다). 넘길 만한 실패와 아닌 실패를 가른다.
 - **근거**: [providers-and-tools.md](providers-and-tools.md)의 "대체 모델과 차단기", [`internal/providers/openai/failover.go`](../../internal/providers/openai/failover.go)의 머리말 주석.
 
 </details>
