@@ -247,4 +247,4 @@ The whole procedure is under "Releases" in the wiki's [development guide](../wik
 
 ---
 
-As of v1.7.1 (2026-11-24). Related decisions: [G-1 every surface calls the same Action](decisions.en.md#g-1), [G-2 ADR-16](decisions.en.md#g-2), [G-3 loopback and SSH](decisions.en.md#g-3), [G-6 the supervisor](decisions.en.md#g-6), [G-7 one journal](decisions.en.md#g-7), [H-2 main and dev](decisions.en.md#h-2).
+As of v1.8.0 (2026-11-24). Related decisions: [G-1 every surface calls the same Action](decisions.en.md#g-1), [G-2 ADR-16](decisions.en.md#g-2), [G-3 loopback and SSH](decisions.en.md#g-3), [G-6 the supervisor](decisions.en.md#g-6), [G-7 one journal](decisions.en.md#g-7), [H-2 main and dev](decisions.en.md#h-2).

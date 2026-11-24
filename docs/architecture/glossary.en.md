@@ -220,4 +220,4 @@ flowchart TB
 
 ---
 
-As of v1.7.1 (2026-11-24). The words appear in context in [system.en.md](system.en.md), [message-flow.en.md](message-flow.en.md), [memory.en.md](memory.en.md) and [providers-and-tools.en.md](providers-and-tools.en.md).
+As of v1.8.0 (2026-11-24). The words appear in context in [system.en.md](system.en.md), [message-flow.en.md](message-flow.en.md), [memory.en.md](memory.en.md) and [providers-and-tools.en.md](providers-and-tools.en.md).

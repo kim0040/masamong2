@@ -103,4 +103,4 @@ The sandbox is a development tool for comparing retrieval methods. It does not u
 
 ---
 
-As of v1.7.1 (2026-11-24). This folder replaces the earlier `docs/ARCHITECTURE.html`. When the code changes, the page that describes it changes with it. Code is pointed at by file path and symbol name, never by line number.
+As of v1.8.0 (2026-11-24). This folder replaces the earlier `docs/ARCHITECTURE.html`. When the code changes, the page that describes it changes with it. Code is pointed at by file path and symbol name, never by line number.

@@ -275,4 +275,4 @@ flowchart TB
 
 ---
 
-기준: v1.7.1(2026-11-24). 관련 결정: [A-2 원문만 입력](decisions.md#a-2), [C-1 샌드박스 레시피를 Go로](decisions.md#c-1), [C-6 메시지 벡터](decisions.md#c-6), [C-7 폭 1024](decisions.md#c-7), [C-9 재처리 금지](decisions.md#c-9), [D-1 ADR-17](decisions.md#d-1), [D-4 사람 기억은 한 줄](decisions.md#d-4), [D-7 유료 백필](decisions.md#d-7).
+기준: v1.8.0(2026-11-24). 관련 결정: [A-2 원문만 입력](decisions.md#a-2), [C-1 샌드박스 레시피를 Go로](decisions.md#c-1), [C-6 메시지 벡터](decisions.md#c-6), [C-7 폭 1024](decisions.md#c-7), [C-9 재처리 금지](decisions.md#c-9), [D-1 ADR-17](decisions.md#d-1), [D-4 사람 기억은 한 줄](decisions.md#d-4), [D-7 유료 백필](decisions.md#d-7).

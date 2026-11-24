@@ -240,4 +240,4 @@ DM은 `onDirectMessage`로 간다. 멘션이 필요 없고, `dm.allow`와 하루
 
 ---
 
-기준: v1.7.1(2026-11-24). 관련 결정: [E-1 딴 얘기 격리](decisions.md#e-1), [E-2 도구 구조](decisions.md#e-2), [E-8 답변 프롬프트 캐시](decisions.md#e-8), [E-10 방마다 한 턴](decisions.md#e-10). 설정 값은 위키 [설정 레퍼런스](../wiki/설정-레퍼런스.md), 동작의 세부는 [기억 운영 §10·§12](../memory-operations.md)에 있다.
+기준: v1.8.0(2026-11-24). 관련 결정: [E-1 딴 얘기 격리](decisions.md#e-1), [E-2 도구 구조](decisions.md#e-2), [E-8 답변 프롬프트 캐시](decisions.md#e-8), [E-10 방마다 한 턴](decisions.md#e-10). 설정 값은 위키 [설정 레퍼런스](../wiki/설정-레퍼런스.md), 동작의 세부는 [기억 운영 §10·§12](../memory-operations.md)에 있다.

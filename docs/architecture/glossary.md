@@ -220,4 +220,4 @@ flowchart TB
 
 ---
 
-기준: v1.7.1(2026-11-24). 낱말이 쓰이는 맥락은 [system.md](system.md), [message-flow.md](message-flow.md), [memory.md](memory.md), [providers-and-tools.md](providers-and-tools.md)에 있다.
+기준: v1.8.0(2026-11-24). 낱말이 쓰이는 맥락은 [system.md](system.md), [message-flow.md](message-flow.md), [memory.md](memory.md), [providers-and-tools.md](providers-and-tools.md)에 있다.

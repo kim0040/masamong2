@@ -237,4 +237,4 @@ Code: [`internal/lang/lang.go`](../../internal/lang/lang.go) `For`, `MergeSearch
 
 ---
 
-As of v1.7.1 (2026-11-24). Related decisions: [F-1 roles and host families](decisions.en.md#f-1), [F-2 fallbacks](decisions.en.md#f-2), [F-3 the tool registry](decisions.en.md#f-3), [F-4 language packs and locales](decisions.en.md#f-4), [E-9 search depth](decisions.en.md#e-9). The setting keys are in the wiki's [configuration reference](../wiki/Configuration-Reference.md) and [tools and limits](../wiki/Tools-and-Limits.md).
+As of v1.8.0 (2026-11-24). Related decisions: [F-1 roles and host families](decisions.en.md#f-1), [F-2 fallbacks](decisions.en.md#f-2), [F-3 the tool registry](decisions.en.md#f-3), [F-4 language packs and locales](decisions.en.md#f-4), [E-9 search depth](decisions.en.md#e-9). The setting keys are in the wiki's [configuration reference](../wiki/Configuration-Reference.md) and [tools and limits](../wiki/Tools-and-Limits.md).

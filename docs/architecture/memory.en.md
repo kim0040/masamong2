@@ -275,4 +275,4 @@ More: [memory operations §2](../memory-operations.md), [maintainer guide §5](.
 
 ---
 
-As of v1.7.1 (2026-11-24). Related decisions: [A-2 raw input only](decisions.en.md#a-2), [C-1 the sandbox recipe in Go](decisions.en.md#c-1), [C-6 message vectors](decisions.en.md#c-6), [C-7 width 1024](decisions.en.md#c-7), [C-9 no reprocessing](decisions.en.md#c-9), [D-1 ADR-17](decisions.en.md#d-1), [D-4 person memory is one line each](decisions.en.md#d-4), [D-7 the paid backfill](decisions.en.md#d-7).
+As of v1.8.0 (2026-11-24). Related decisions: [A-2 raw input only](decisions.en.md#a-2), [C-1 the sandbox recipe in Go](decisions.en.md#c-1), [C-6 message vectors](decisions.en.md#c-6), [C-7 width 1024](decisions.en.md#c-7), [C-9 no reprocessing](decisions.en.md#c-9), [D-1 ADR-17](decisions.en.md#d-1), [D-4 person memory is one line each](decisions.en.md#d-4), [D-7 the paid backfill](decisions.en.md#d-7).

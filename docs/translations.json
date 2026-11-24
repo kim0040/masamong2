@@ -2,27 +2,27 @@
   "note": "Translation record checked by tools/doccheck. When a file of a group changes, bring the other languages along, then run: go run ./tools/doccheck -write",
   "groups": {
     "README": {
-      "README.es.md": "5dc1f9861bcbf93f",
-      "README.ja.md": "a71603082a784307",
-      "README.ko.md": "e9ceb3e50979e3dd",
-      "README.md": "b8c7c41b5c04ec75",
-      "README.zh-Hans.md": "2838dcc68adc846f"
+      "README.es.md": "b43436d35e01df17",
+      "README.ja.md": "bf7eec1979727719",
+      "README.ko.md": "2f9142fd441cb048",
+      "README.md": "4cc1c5666c08e716",
+      "README.zh-Hans.md": "d3bad4ebb6fe90dc"
     },
     "docs/architecture/README": {
-      "docs/architecture/README.en.md": "5d39987a321ace33",
-      "docs/architecture/README.md": "67e7a54f3b9952d3"
+      "docs/architecture/README.en.md": "bbd08cdc3603f19f",
+      "docs/architecture/README.md": "e76114c412d03e01"
     },
     "docs/architecture/console-and-ops": {
-      "docs/architecture/console-and-ops.en.md": "26f529c85eb0cae1",
-      "docs/architecture/console-and-ops.md": "24d6bf35801165a1"
+      "docs/architecture/console-and-ops.en.md": "4efef460353b2465",
+      "docs/architecture/console-and-ops.md": "f72f42e2055d68c9"
     },
     "docs/architecture/data-model": {
-      "docs/architecture/data-model.en.md": "3078d941c711cd91",
-      "docs/architecture/data-model.md": "60cbc400382b48cc"
+      "docs/architecture/data-model.en.md": "80e60aea087134d6",
+      "docs/architecture/data-model.md": "a8cee0c6401a3885"
     },
     "docs/architecture/decisions": {
-      "docs/architecture/decisions.en.md": "ab8e1df862d0342d",
-      "docs/architecture/decisions.md": "2c398da4b5a94923"
+      "docs/architecture/decisions.en.md": "029702abecabc612",
+      "docs/architecture/decisions.md": "5b959747454ff0a3"
     },
     "docs/architecture/diagrams/README": {
       "docs/architecture/diagrams/README.en.md": "48b9afe9d10025e0",
@@ -45,24 +45,24 @@
       "docs/architecture/diagrams/overview.en.d2": "e36644e0a1f34350"
     },
     "docs/architecture/glossary": {
-      "docs/architecture/glossary.en.md": "a1e40cbddef646cf",
-      "docs/architecture/glossary.md": "c5f5ffd4c9c11328"
+      "docs/architecture/glossary.en.md": "94a1fad467b648f9",
+      "docs/architecture/glossary.md": "44014906ca048a10"
     },
     "docs/architecture/memory": {
-      "docs/architecture/memory.en.md": "60022efdfc0633c7",
-      "docs/architecture/memory.md": "d1d9178e3b33323c"
+      "docs/architecture/memory.en.md": "3dd57bbbf961c455",
+      "docs/architecture/memory.md": "b6adf1cb8b8447fc"
     },
     "docs/architecture/message-flow": {
-      "docs/architecture/message-flow.en.md": "94d1d7e579ea6892",
-      "docs/architecture/message-flow.md": "cc18b016adb57de8"
+      "docs/architecture/message-flow.en.md": "9ef582ba8bf75ab3",
+      "docs/architecture/message-flow.md": "85c986119107e435"
     },
     "docs/architecture/providers-and-tools": {
-      "docs/architecture/providers-and-tools.en.md": "68f2bc1aface7657",
-      "docs/architecture/providers-and-tools.md": "b9902f4ee8585cbb"
+      "docs/architecture/providers-and-tools.en.md": "0885c58ab7bdac1b",
+      "docs/architecture/providers-and-tools.md": "e6c74785ce0eb32f"
     },
     "docs/architecture/system": {
-      "docs/architecture/system.en.md": "686cea379f9824d5",
-      "docs/architecture/system.md": "7d9d95d85d5dda9e"
+      "docs/architecture/system.en.md": "edeb57a4ea0800d7",
+      "docs/architecture/system.md": "aacf5f719a9cc6bc"
     },
     "wiki/CLI-명령어": {
       "docs/wiki/CLI-Commands.md": "a6860444aae9d031",
@@ -73,8 +73,8 @@
       "docs/wiki/Discord-연결.md": "7884d20bb94a02fe"
     },
     "wiki/Home": {
-      "docs/wiki/English.md": "53fde71f269e5cb5",
-      "docs/wiki/Home.md": "4bbe9bc83739f7ac"
+      "docs/wiki/English.md": "ee3deb16e0e34e39",
+      "docs/wiki/Home.md": "ff2b3ca4e48e5912"
     },
     "wiki/개발-가이드": {
       "docs/wiki/Development-Guide.md": "915529245675d0fa",

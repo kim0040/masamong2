@@ -228,4 +228,4 @@ The full index of Actions, Discord commands, chat tools and locale keys is the [
 
 ---
 
-As of v1.7.1 (2026-11-24). Related decisions: [B-1 rewriting in Go](decisions.en.md#b-1), [B-2 SQLite only](decisions.en.md#b-2), [G-1 every surface calls the same Action](decisions.en.md#g-1).
+As of v1.8.0 (2026-11-24). Related decisions: [B-1 rewriting in Go](decisions.en.md#b-1), [B-2 SQLite only](decisions.en.md#b-2), [G-1 every surface calls the same Action](decisions.en.md#g-1).

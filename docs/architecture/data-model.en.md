@@ -196,4 +196,4 @@ The procedures are in [STORAGE.md](../STORAGE.md) (Korean) and the wiki's [stora
 
 ---
 
-As of v1.7.1 (2026-11-24). Related decisions: [B-2 SQLite only](decisions.en.md#b-2), [D-3 deletion reach](decisions.en.md#d-3), [G-7 one journal](decisions.en.md#g-7), [G-10 statistics stay local](decisions.en.md#g-10).
+As of v1.8.0 (2026-11-24). Related decisions: [B-2 SQLite only](decisions.en.md#b-2), [D-3 deletion reach](decisions.en.md#d-3), [G-7 one journal](decisions.en.md#g-7), [G-10 statistics stay local](decisions.en.md#g-10).

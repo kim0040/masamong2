@@ -19,7 +19,7 @@ In short:
 - **Keeps costs in check** — a monthly budget and per-tool, per-person limits
 - **Runs on your machine** — you install your own copy and use your own API keys; the console binds to `127.0.0.1`, and practice mode lets you look around for free
 
-Version: `1.7.1`
+Version: `1.8.0`
 
 **Contents**: [Screenshots](#screenshots) · [What it does](#what-it-does) · [Getting started](#getting-started) · [Install with AI](#install-with-an-ai-coding-agent) · [Using it in Discord](#4-using-it-in-discord) · [Costs and outside services](#costs-and-outside-services) · [Docs](#docs) · [Development](#development) · [Contributors](#contributors) · [License](#license) · [Disclaimer](#disclaimer)
 

@@ -247,4 +247,4 @@ flowchart TB
 
 ---
 
-기준: v1.7.1(2026-11-24). 관련 결정: [G-1 모든 표면은 같은 Action](decisions.md#g-1), [G-2 ADR-16](decisions.md#g-2), [G-3 loopback과 SSH](decisions.md#g-3), [G-6 감시 프로세스](decisions.md#g-6), [G-7 공통 저널](decisions.md#g-7), [H-2 main과 dev](decisions.md#h-2).
+기준: v1.8.0(2026-11-24). 관련 결정: [G-1 모든 표면은 같은 Action](decisions.md#g-1), [G-2 ADR-16](decisions.md#g-2), [G-3 loopback과 SSH](decisions.md#g-3), [G-6 감시 프로세스](decisions.md#g-6), [G-7 공통 저널](decisions.md#g-7), [H-2 main과 dev](decisions.md#h-2).

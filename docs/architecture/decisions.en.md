@@ -884,4 +884,4 @@ Read the decision behind an item before proposing it again.
 
 ---
 
-As of v1.7.1 (2026-11-24). A new decision gets one row in the summary table and one folded entry in its section. When a decision changes, it is not deleted: its status becomes "replaced" and it points to the new entry. A decision that changes the structure is written as an ADR under `docs/adr/` and linked from here.
+As of v1.8.0 (2026-11-24). A new decision gets one row in the summary table and one folded entry in its section. When a decision changes, it is not deleted: its status becomes "replaced" and it points to the new entry. A decision that changes the structure is written as an ADR under `docs/adr/` and linked from here.

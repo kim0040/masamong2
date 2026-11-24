@@ -228,4 +228,4 @@ Action·Discord 명령·채팅 도구·로케일 키의 전체 색인은 [생성
 
 ---
 
-기준: v1.7.1(2026-11-24). 관련 결정: [B-1 Go로 다시 만들기](decisions.md#b-1), [B-2 SQLite 하나](decisions.md#b-2), [G-1 모든 표면은 같은 Action](decisions.md#g-1).
+기준: v1.8.0(2026-11-24). 관련 결정: [B-1 Go로 다시 만들기](decisions.md#b-1), [B-2 SQLite 하나](decisions.md#b-2), [G-1 모든 표면은 같은 Action](decisions.md#g-1).

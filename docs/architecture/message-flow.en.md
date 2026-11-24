@@ -240,4 +240,4 @@ All three are experimental and off by default in every channel. Even when off, t
 
 ---
 
-As of v1.7.1 (2026-11-24). Related decisions: [E-1 keeping other talk out](decisions.en.md#e-1), [E-2 the tool structure](decisions.en.md#e-2), [E-8 the answer prompt cache](decisions.en.md#e-8), [E-10 one turn per room](decisions.en.md#e-10). Setting values are in the wiki's [configuration reference](../wiki/Configuration-Reference.md); the finer behaviour is in [memory operations §10 and §12](../memory-operations.md) (Korean).
+As of v1.8.0 (2026-11-24). Related decisions: [E-1 keeping other talk out](decisions.en.md#e-1), [E-2 the tool structure](decisions.en.md#e-2), [E-8 the answer prompt cache](decisions.en.md#e-8), [E-10 one turn per room](decisions.en.md#e-10). Setting values are in the wiki's [configuration reference](../wiki/Configuration-Reference.md); the finer behaviour is in [memory operations §10 and §12](../memory-operations.md) (Korean).

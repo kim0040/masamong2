@@ -237,4 +237,4 @@ flowchart TB
 
 ---
 
-기준: v1.7.1(2026-11-24). 관련 결정: [F-1 역할과 호스트 계열](decisions.md#f-1), [F-2 대체 모델](decisions.md#f-2), [F-3 도구 등록부](decisions.md#f-3), [F-4 언어팩과 로케일](decisions.md#f-4), [E-9 검색 깊이](decisions.md#e-9). 설정 키는 위키 [설정 레퍼런스](../wiki/설정-레퍼런스.md)와 [도구와 한도](../wiki/도구와-한도.md).
+기준: v1.8.0(2026-11-24). 관련 결정: [F-1 역할과 호스트 계열](decisions.md#f-1), [F-2 대체 모델](decisions.md#f-2), [F-3 도구 등록부](decisions.md#f-3), [F-4 언어팩과 로케일](decisions.md#f-4), [E-9 검색 깊이](decisions.md#e-9). 설정 키는 위키 [설정 레퍼런스](../wiki/설정-레퍼런스.md)와 [도구와 한도](../wiki/도구와-한도.md).

@@ -196,4 +196,4 @@
 
 ---
 
-기준: v1.7.1(2026-11-24). 관련 결정: [B-2 SQLite 하나](decisions.md#b-2), [D-3 삭제 전파](decisions.md#d-3), [G-7 공통 저널](decisions.md#g-7), [G-10 통계는 로컬에만](decisions.md#g-10).
+기준: v1.8.0(2026-11-24). 관련 결정: [B-2 SQLite 하나](decisions.md#b-2), [D-3 삭제 전파](decisions.md#d-3), [G-7 공통 저널](decisions.md#g-7), [G-10 통계는 로컬에만](decisions.md#g-10).
