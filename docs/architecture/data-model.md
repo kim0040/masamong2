@@ -13,27 +13,11 @@
 
 ## 표 사이의 관계
 
-```mermaid
-erDiagram
-  MEMORY_ROOMS ||--o{ MEMORY_OBSERVATIONS : "방의 원문"
-  MEMORY_OBSERVATIONS }o--o{ MEMORY_LEAVES : "조각에 묶임"
-  MEMORY_OBSERVATIONS ||--o| MEMORY_MESSAGE_VECTORS : "메시지 벡터"
-  MEMORY_LEAVES }o--o{ CHANNEL_EPISODE : "episode_leaf 로 연결"
-  CHANNEL_EPISODE ||--o{ EPISODE_ITEM : "항목"
-  MEMORY_OBSERVATIONS ||--o{ EPISODE_ITEM : "근거"
-  MEMORY_OBSERVATIONS ||--o{ CHANNEL_STATE : "근거"
-  MEMORY_OBSERVATIONS ||--o{ PERSON_CLAIM : "근거"
-  EPISODE_ITEM ||--o{ PERSON_CLAIM : "파생"
-  MEMORY_OBSERVATIONS ||--o{ EVIDENCE_LINKS : "출처"
-  CHAT_TURNS ||--o{ EVIDENCE_LINKS : "읽은 쪽"
-  TURN_LOG ||--o{ EVIDENCE_LINKS : "읽은 쪽"
-  TURN_LOG ||--o{ LLM_CALLS : "turn_id"
-  TURN_LOG ||--o{ TOOL_CALLS : "turn_id"
-  TURN_LOG ||--o{ DELIVERY_LEDGER : "turn_id"
-  TURN_LOG ||--o{ TURN_FEEDBACK : "turn_id"
-```
+<picture><source media="(prefers-color-scheme: dark)" srcset="diagrams/data-model-dark.svg"><img alt="데이터 모델 한눈에. 원문 표(memory_rooms, memory_observations)에서 검색 색인(memory_leaves 등), 방 기억(channel_episode, channel_state), 사람 기억(person_claim 등)이 근거 ID 로 이어진다. 삭제와 근거 표(evidence, privacy_tombstones, redaction_jobs, consent)는 방 기억과 대화 기록이 읽은 원문을 등록받는다. 대화와 기록 표(chat_turns, turn_log, llm_calls), 설정과 운영과 개인 기능 표가 따로 있다." src="diagrams/data-model-light.svg"></picture>
 
-선은 논리적인 참조다. 대부분 외래 키 제약이 아니라 ID 열과 근거 색인으로 이어져 있고, 정리는 코드(삭제 작업자, 보관 정리)가 한다.
+그림 원본: [diagrams/data-model.d2](diagrams/data-model.d2)
+
+영역마다 중심이 되는 표만 그렸다. 전체 표는 아래 접힌 절에 있다. 선은 논리적인 참조다. 대부분 외래 키 제약이 아니라 ID 열과 근거 색인으로 이어져 있고, 정리는 코드(삭제 작업자, 보관 정리)가 한다.
 
 ## 자세히
 

@@ -1,0 +1,88 @@
+# 데이터 모델 한눈에: masamong.db 의 표를 영역별로. docs/architecture/data-model.md 가 쓴다.
+# 표를 전부 싣지 않는다. 영역마다 중심이 되는 표만 적는다.
+grid-columns: 1
+grid-gap: 20
+
+raw: "원문 · 다시 만들 수 없는 것" {
+  class: group
+  grid-rows: 1
+  grid-gap: 24
+  rooms: "memory_rooms\n방 목록" {class: store; width: 312}
+  obs: "memory_observations\n메시지 한 건이 한 행" {class: store; width: 312}
+  rev: "수정 순서 · 관찰 별칭\n덮어쓰지 않는다" {class: store; width: 312}
+}
+
+built: "" {
+  class: row
+  grid-rows: 1
+  grid-gap: 36
+
+  index: "검색 색인" {
+    class: group
+    grid-columns: 1
+    grid-gap: 16
+    leaves: "memory_leaves\n조각 · 요약 · 벡터" {class: memory; width: 252}
+    msgvec: "memory_message_vectors" {class: memory; width: 252}
+    cache: "memory_embed_cache" {class: memory; width: 252}
+  }
+
+  room: "방 기억" {
+    class: group
+    grid-columns: 1
+    grid-gap: 16
+    episode: "channel_episode\nepisode_item · episode_leaf" {class: memory; width: 252}
+    state: "channel_state" {class: memory; width: 252}
+    explicit: "memory_explicit" {class: memory; width: 252}
+  }
+
+  people: "사람 기억" {
+    class: group
+    grid-columns: 1
+    grid-gap: 16
+    claim: "person_claim\n한 줄에 근거 하나 이상" {class: memory; width: 252}
+    alias: "person_alias · person_relation" {class: memory; width: 252}
+    suppress: "person_memory_suppress" {class: memory; width: 252}
+  }
+}
+
+trace: "" {
+  class: row
+  grid-rows: 1
+  grid-gap: 36
+
+  evidence: "삭제와 근거 · 누가 어떤 원문을 읽었나" {
+    class: group
+    grid-columns: 2
+    grid-gap: 16
+    links: "evidence_sources\nholders · links" {class: core; width: 208}
+    tomb: "privacy_tombstones\nprivacy_settled" {class: core; width: 208}
+    jobs: "redaction_jobs" {class: core; width: 208}
+    consent: "consent_state\nconsents" {class: core; width: 208}
+  }
+
+  turns: "대화와 기록" {
+    class: group
+    grid-columns: 2
+    grid-gap: 16
+    chat: "chat_turns\n대화 문맥" {class: core; width: 208}
+    log: "turn_log\n턴 기록" {class: core; width: 208}
+    calls: "llm_calls · tool_calls" {class: core; width: 208}
+    delivery: "delivery_ledger\nreply_messages" {class: core; width: 208}
+  }
+}
+
+ops: "설정 · 운영 · 개인 기능" {
+  class: group
+  grid-rows: 1
+  grid-gap: 24
+  config: "config_revisions\naudit_log" {class: store; width: 228}
+  work: "jobs · admin_state\nmemory_spend" {class: store; width: 228}
+  usage: "tool_usage\nstats_daily" {class: store; width: 228}
+  personal: "reminders · polls\nfortune_* · notice_*" {class: store; width: 228}
+}
+
+raw.obs -> built.index: "자른다"
+raw.obs -> built.room: "근거 ID"
+raw.obs -> built.people: "근거 ID"
+built.room -> trace.evidence: "읽은 원문을 등록한다" {class: weak}
+trace.turns -> trace.evidence: "" {class: weak}
