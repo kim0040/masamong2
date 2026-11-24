@@ -70,9 +70,11 @@ func fakeDaemon(dir string) {
 	script := strings.Split(os.Getenv("MASAMONG_FAKE_SCRIPT"), ",")
 	code, _ := strconv.Atoi(script[min(n, len(script)-1)])
 	if code == 81 {
-		_ = os.WriteFile(filepath.Join(dir, "ready-signal"), nil, 0o600)
+		// the handler goes in before the test is told to signal: a SIGTERM that came first would end the
+		// process by its default action and the test would wait for a "signaled" that never comes
 		ch := make(chan os.Signal, 1)
 		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+		_ = os.WriteFile(filepath.Join(dir, "ready-signal"), nil, 0o600)
 		<-ch
 		_ = os.WriteFile(filepath.Join(dir, "signaled"), nil, 0o600)
 		waitForRelease(dir) // takes after its signal exactly as long as the test allows
