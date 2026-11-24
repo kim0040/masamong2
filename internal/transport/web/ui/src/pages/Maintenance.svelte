@@ -9,6 +9,7 @@
   import { overview, startOverview } from '../lib/overview.svelte'
   import { noteLifecycle } from '../lib/live.svelte'
   import { useConfig, patchConfig } from '../lib/config.svelte'
+  import { parseRetentionDays } from '../lib/validate'
   import PageHeader from '../components/PageHeader.svelte'
   import Card from '../components/Card.svelte'
   import Button from '../components/Button.svelte'
@@ -145,14 +146,20 @@
     if (k === 'context_days') return ret.turn_detail_days || 30
     return { turn_days: 400, turn_detail_days: 30, trace_days: 30, audit_days: 400, usage_days: 14, query_cache_days: 7, image_days: 14, ledger_days: 90 }[k] ?? 0
   }
+  let retErr = $state<Record<string, string>>({})
   async function setRetention(k: (typeof RETENTION)[number], raw: string) {
     const path = ['retention', k]
-    const n = Math.round(Number(raw))
-    if (!raw.trim() || !Number.isFinite(n) || n === 0) {
+    const parsed = parseRetentionDays(raw)
+    if (parsed.kind === 'invalid') {
+      retErr = { ...retErr, [k]: t('maint.retention.invalid') }
+      return
+    }
+    retErr = { ...retErr, [k]: '' }
+    if (parsed.kind === 'unset') {
       if (ret[k] == null) return
       return patchConfig([{ path, op: 'unset' }], { success: t('maint.retention.saved') })
     }
-    await patchConfig([{ path, value: Math.max(-1, n) }], { success: t('maint.retention.saved') })
+    await patchConfig([{ path, value: parsed.days }], { success: t('maint.retention.saved') })
   }
 
   // restore: preview → type the name → staged → restart
@@ -365,7 +372,8 @@
           {#each RETENTION as k (k)}
             <div class="ret">
               <label class="small" for="ret-{k}">{t(`maint.retention.k.${k}`)}</label>
-              <div class="row"><Input id="ret-{k}" type="number" min="-1" inputmode="numeric" value={ret[k] ?? ''} placeholder={retDefOf(k) < 0 ? '-1' : String(retDefOf(k))} onchange={(e) => setRetention(k, e.currentTarget.value)} /><span class="xs muted nowrap">{retDefOf(k) < 0 ? t('maint.retention.forever') : t('maint.retention.def', { n: retDefOf(k) })}</span></div>
+              <div class="row"><Input id="ret-{k}" type="number" min="-1" inputmode="numeric" value={ret[k] ?? ''} invalid={!!retErr[k]} aria-describedby={retErr[k] ? `ret-${k}-err` : undefined} placeholder={retDefOf(k) < 0 ? '-1' : String(retDefOf(k))} onchange={(e) => setRetention(k, e.currentTarget.value)} /><span class="xs muted nowrap">{retDefOf(k) < 0 ? t('maint.retention.forever') : t('maint.retention.def', { n: retDefOf(k) })}</span></div>
+              {#if retErr[k]}<p class="xs err" id="ret-{k}-err">{retErr[k]}</p>{/if}
             </div>
           {/each}
         </div>

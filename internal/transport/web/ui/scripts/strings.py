@@ -3149,6 +3149,14 @@ add("part", {
     "global_link": ("설정에서 열기", "Open in Settings"),
 })
 
+# ---- console fix round: refused invalid field values ----
+add("maint.retention", {
+    "invalid": ("정수 일수만 넣을 수 있습니다(-1은 영구 보관).", "Enter a whole number of days (-1 keeps forever)."),
+})
+add("display_page.i18n", {
+    "timezone_invalid": ("알 수 없는 시간대입니다. 예: Asia/Seoul", "Unknown time zone. For example: Asia/Seoul"),
+})
+
 # ---- console-gui: palette entries for important nested keys (audit 4.4) ----
 add("palette", {
     "key.watch_level": ("지역별 알림 레벨", "Alert level by area"),
