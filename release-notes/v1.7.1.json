@@ -12,12 +12,14 @@
   "operator": {
     "en": [
       "People memory import: one window's answer may now be up to 4096 tokens (was 1400). A small model's answer for a busy window was cut every time, so the pilot could not pass.",
-      "Only tokens actually written are billed. While a request is in flight, the budget reserves its largest possible cost, so fewer requests may run at once under a small budget.",
+      "Only tokens actually written are billed. Each request in flight reserves its largest cost, so under a small budget a pilot may stop at \"budget\" sooner; raise it or run the pilot again.",
+      "A Haiku prompt over 100k tokens is now reserved and counted at Anthropic's higher price tier. Windows on real data stay far below that.",
       "A pilot that stopped for that reason continues with \"pilot\" again on the same plan: only the windows without a whole answer are asked again."
     ],
     "ko": [
       "사람 기억 가져오기: 한 구간 답의 출력 한도를 1400에서 4096토큰으로 올렸습니다. 작은 모델이 바쁜 구간에서 매번 잘려 시범이 통과하지 못했습니다.",
-      "실제로 쓴 토큰만 과금됩니다. 보내는 중인 요청은 예산에서 가장 클 수 있는 비용을 미리 잡아 두므로, 예산이 작으면 동시에 나가는 요청이 줄 수 있습니다.",
+      "실제로 쓴 토큰만 과금됩니다. 보내는 중인 요청마다 가장 클 수 있는 비용을 미리 잡아 두므로, 예산이 작으면 시범이 더 일찍 \"예산\"으로 멈출 수 있습니다. 예산을 늘리거나 시범을 다시 실행하세요.",
+      "10만 토큰이 넘는 Haiku 프롬프트는 이제 Anthropic의 더 높은 가격 구간으로 잡고 셉니다. 실제 데이터의 구간은 그보다 훨씬 작습니다.",
       "그 때문에 멈춘 시범은 같은 계획에서 \"시범\"을 다시 누르면 이어집니다. 온전한 답이 없는 구간만 다시 묻습니다."
     ]
   }

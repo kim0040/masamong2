@@ -117,7 +117,7 @@ func TestUpdatesNotesForBuilds(t *testing.T) {
 		{"1.0.0-dev", false, ""},
 		{"v1.5.1-3-gabc1234", true, "v1.5.1"},
 		{"v1.4.2", true, "v1.4.0"},
-		{"v2.0.0", true, "v1.7.0"},
+		{"v2.0.0", true, "v1.7.1"},
 	} {
 		restore := svc.SetVersionForTest(c.version)
 		o := out(t, svc, "updates.notes", nil)

@@ -26,6 +26,14 @@ var prices = map[Model]struct{ in, out float64 }{
 	ModelSonnet: {2.00, 10.00},
 }
 
+// Haiku 5.5 bills a whole request whose prompt is over 100k tokens at 5x ($0.50/$2.50). A window is far
+// below that on live data, but its merged lines are not bounded in total, so the reservation and the
+// settlement price such a prompt at the higher tier.
+const (
+	haikuLongPrompt = 100_000
+	haikuLongFactor = 5.0
+)
+
 const (
 	cacheReadFactor = 0.1 // input read from the prompt cache, relative to the input price
 	batchFactor     = 0.5 // Message Batches
@@ -93,6 +101,9 @@ func Settle(u Usage, model Model, mode Mode) (float64, error) {
 	in, out, err := priceOf(model, mode)
 	if err != nil {
 		return 0, err
+	}
+	if model == ModelHaiku && u.InputTokens+u.CacheReadTokens > haikuLongPrompt {
+		in, out = in*haikuLongFactor, out*haikuLongFactor // a long prompt is billed at the higher tier
 	}
 	return (float64(u.InputTokens)*in + float64(u.CacheReadTokens)*in*cacheReadFactor + float64(u.OutputTokens)*out) / 1e6, nil
 }
