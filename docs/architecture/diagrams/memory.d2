@@ -1,0 +1,60 @@
+# 기억 파이프라인: 쌓이고 꺼내지는 길. docs/architecture/memory.md 가 쓴다.
+grid-columns: 1
+grid-gap: 44
+
+sources: "들어오는 원문" {
+  class: group
+  grid-rows: 1
+  grid-gap: 24
+  kakao: "카카오톡 CSV\n운영자가 가져온다" {class: entry; width: 290}
+  history: "Discord 꺼진 동안\n다시 연결되면 채운다" {class: entry; width: 290}
+  live: "Discord 실시간\n새 글 · 수정 · 삭제" {class: entry; width: 290}
+}
+
+raw: "원문 관찰 · memory_observations\n모든 기억의 근거. 지워지거나 동의가 철회되면 아래 층도 함께 사라진다" {class: store}
+
+built: "" {
+  class: row
+  grid-rows: 1
+  grid-gap: 36
+
+  index: "검색 색인 · 그때 실제로 뭐라고 했나" {
+    class: group
+    grid-columns: 2
+    grid-gap: 24
+    leaf: "leaf\n8개 또는 30분 공백" {class: memory; width: 190}
+    fts: "어휘 색인\nFTS5 · 메모리 안" {class: memory; width: 190}
+    vec: "leaf 벡터와 요약\n폭 1024" {class: memory; width: 190}
+    msg: "메시지 벡터\n후보 찾기 보조" {class: memory; width: 190}
+  }
+
+  derived: "방 기억과 사람 기억 · 근거가 붙은 짧은 문장" {
+    class: group
+    grid-columns: 2
+    grid-gap: 24
+    episode: "L2 에피소드\n계획 · 결정 · 사건" {class: memory; width: 190}
+    state: "L1 방 상태\n진행 중인 화제" {class: memory; width: 190}
+    claim: "사람 기억\n한 사람이 한 말 한 줄" {class: memory; width: 190}
+    backfill: "유료 백필\n운영자가 시작할 때만" {class: entry; width: 190}
+    backfill -> claim
+  }
+}
+
+answer: "답할 때" {
+  class: group
+  grid-rows: 1
+  grid-gap: 24
+  find: "후보 찾기\n이 방과 연결한 블록만" {class: core; width: 212}
+  rank: "결합과 재순위\nRRF · 규칙이 정한다" {class: core; width: 212}
+  expand: "원문으로 펼치기\n범위 · 수정 · 삭제 재확인" {class: core; width: 212}
+  prompt: "답변 프롬프트\n근거 원문 + 방 · 사람 기억" {class: core; width: 212}
+  find -> rank
+  rank -> expand
+  expand -> prompt
+}
+
+sources -> raw
+raw -> built.index: "자르고 색인한다"
+raw -> built.derived: "구간마다 뽑는다"
+built.index -> answer: "후보"
+built.derived -> answer: "읽을 때 근거를 다시 확인"

@@ -13,45 +13,9 @@
 
 ## 층과 흐름
 
-```mermaid
-flowchart TB
-  K["카카오톡 CSV"] --> RAW
-  DH["Discord 과거 기록"] --> RAW
-  DE["Discord 실시간: 새 글, 수정, 삭제"] --> RAW
-  RAW["원문 관찰"]
+<picture><source media="(prefers-color-scheme: dark)" srcset="diagrams/memory-dark.svg"><img alt="기억 파이프라인. 카카오톡 CSV, 꺼진 동안의 Discord 메시지, 실시간 Discord 메시지가 원문 관찰로 저장된다. 원문에서 검색 색인(leaf, 어휘 색인, leaf 벡터와 요약, 메시지 벡터)과 방 기억, 사람 기억(L2 에피소드, L1 방 상태, 사람 기억, 운영자가 시작하는 유료 백필)을 만든다. 답할 때는 후보 찾기, 결합과 재순위, 원문으로 펼치기를 거쳐 답변 프롬프트에 넣는다." src="diagrams/memory-light.svg"></picture>
 
-  RAW --> LEAF["leaf: 8개 또는 30분 공백"]
-  LEAF --> FTS["어휘 색인: FTS5"]
-  LEAF --> VEC["leaf 벡터와 요약"]
-  LEAF --> MV["메시지 벡터"]
-
-  RAW --> SEG["구간 나누기"]
-  SEG --> EP["L2 에피소드"]
-  SEG --> ST["L1 방 상태"]
-  SEG --> PC["사람 기억"]
-  EP --> PC
-  BF["유료 백필: 운영자가 시작"] --> PC
-
-  subgraph read["답할 때"]
-    Q["질문과 계획"] --> CAND["후보 찾기"]
-    CAND --> FUSE["결합과 재순위"]
-    FUSE --> EXPAND["원문으로 펼치고 범위 재확인"]
-    EXPAND --> ANS["답변 프롬프트"]
-    RM["방 기억과 사람 기억 읽기"] --> ANS
-  end
-
-  FTS --> CAND
-  VEC --> CAND
-  MV --> CAND
-  EP --> RM
-  ST --> RM
-  PC --> RM
-
-  RAW -. "삭제, 수정, 철회" .-> EV["근거 색인과 삭제 작업자"]
-  EV -.-> LEAF
-  EV -.-> EP
-  EV -.-> PC
-```
+그림 원본: [diagrams/memory.d2](diagrams/memory.d2)
 
 ## 자세히
 
@@ -232,13 +196,24 @@ L0은 [message-flow.md](message-flow.md)의 "문맥 읽기"에서 다룬다. 표
 업그레이드 직후의 사람 기억은 방 사건 항목에서 모델 없이 뽑은 소량뿐이다. 이미 있는 기록 전체에서 뽑으려면 운영자가 백필을 직접 시작한다. **자동으로 시작되는 일은 없다.**
 
 ```mermaid
-flowchart LR
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 36, "rankSpacing": 44}}}%%
+flowchart TB
   A["비용 계산: 모델 호출 없음"] --> B["시범: 창 60개를 두 모델에"]
   B --> C["운영자가 시범 결과를 보고 모델을 고름"]
   C --> D["본 실행: 나머지 창을 배치로"]
   D --> E["창마다 저장 관문을 지나 적용"]
   B -. "한도에 닿으면 멈춤" .-> S["대기"]
   D -. "한도에 닿으면 멈춤" .-> S
+
+  classDef entry fill:#dbe7ff,stroke:#2563eb,color:#1c1917
+  classDef core fill:#fde3cf,stroke:#d9661a,color:#1c1917
+  classDef memory fill:#dcf3e3,stroke:#15803d,color:#1c1917
+  classDef external fill:#ebe2fd,stroke:#7c3aed,color:#1c1917
+  classDef store fill:#e7e5e4,stroke:#57534e,color:#1c1917
+  class C entry
+  class A,B,D core
+  class E memory
+  class S store
 ```
 
 - **창(window)**: 같은 방의 대화 구간을 이어 붙인 최대 120줄. 의미 있는 줄이 없는 창은 보내지 않는다. 카톡 방은 대상이 아니다.
