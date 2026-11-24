@@ -298,9 +298,9 @@
                   {:else if tr.error}
                     <p class="err">{tr.error}</p>
                   {:else if tr.kind === 'chat'}
-                    <p class="ans">{#if tr.answer}<DiscordText text={tr.answer} />{:else}{t('lab.silent')}{/if}</p>
+                    <p class="ans">{#if tr.answer}<DiscordText text={tr.answer} still />{:else}{t('lab.silent')}{/if}</p>
                   {:else}
-                    <p class="ans muted small">{#if tr.evidence[0]?.excerpt}<DiscordText text={splitExcerpt(tr.evidence[0].excerpt).body.slice(0, 220)} />{:else}{`${t('lab.no_hits')} ${t(`lab.empty.${emptyWhy(tr)}`)}`}{/if}</p>
+                    <p class="ans muted small">{#if tr.evidence[0]?.excerpt}<DiscordText text={splitExcerpt(tr.evidence[0].excerpt).body.slice(0, 220)} still />{:else}{`${t('lab.no_hits')} ${t(`lab.empty.${emptyWhy(tr)}`)}`}{/if}</p>
                   {/if}
                 </div>
               </button>
