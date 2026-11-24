@@ -40,3 +40,18 @@ test('only the rooms that still exist are kept, in order', () => {
 test('asking for the browser storage is safe where there is none', () => {
   assert.equal(l.browserStorage(), null)
 })
+
+test('the saved room is resolved only after the channel list has loaded, so a room from the later list is not lost', () => {
+  const early = [{ value: 'g:configured' }]
+  const full = [{ value: 'g:configured' }, { value: 'g:live' }]
+  // config answered first, channels.list has not: nothing is chosen yet
+  assert.equal(l.resolveChannel('', 'g:live', early, false), '')
+  // the list arrived with the saved room: it is kept
+  assert.equal(l.resolveChannel('', 'g:live', full, true), 'g:live')
+  // the saved room is gone: the first room the bot can see, else the first
+  assert.equal(l.resolveChannel('', 'g:old', [{ value: 'a', hidden: true }, { value: 'b' }], true), 'b')
+  assert.equal(l.resolveChannel('', '', [{ value: 'a', hidden: true }], true), 'a')
+  assert.equal(l.resolveChannel('', 'g:live', [], true), '')
+  // an address that names a room wins, loaded or not
+  assert.equal(l.resolveChannel('x:y', 'g:live', full, false), 'x:y')
+})

@@ -29,7 +29,7 @@
   import RoomPicker from '../components/RoomPicker.svelte'
   import DiscordText from '../components/DiscordText.svelte'
   import { splitExcerpt } from '../lib/discordtext'
-  import { readPick, writePick, keepKnown, browserStorage } from '../lib/labpick'
+  import { readPick, writePick, keepKnown, resolveChannel, browserStorage } from '../lib/labpick'
   import { useRooms } from '../lib/rooms.svelte'
   import PlanSimulator from '../components/PlanSimulator.svelte'
   import { personaOptionsFor } from '../lib/persona'
@@ -84,7 +84,9 @@
     return out
   })
   $effect(() => {
-    if (!channelKey && channels.length) channelKey = (channels.find((c) => c.value === saved.channel) ?? channels.find((c) => !c.hidden) ?? channels[0]).value
+    // only once channels.list has answered (or failed): the config's own rooms come first and may lack the saved one
+    const k = resolveChannel(channelKey, saved.channel, channels, chList.data !== undefined || chList.error !== undefined)
+    if (k !== channelKey) channelKey = k
   })
   // the saved sources, once the rooms are known: the ones that are gone are dropped
   let restored = $state(false)

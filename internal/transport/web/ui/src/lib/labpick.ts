@@ -37,6 +37,15 @@ export const keepKnown = (picked: string[], known: Iterable<string>): string[] =
   return picked.filter((k) => set.has(k))
 }
 
+/** The room to open with. An address that names one wins; otherwise nothing is chosen until the channel list
+ * (`loaded`) is in, because the list from the config alone can lack the saved room, and a fallback chosen early
+ * could not be taken back. Then the saved room if it exists, else the first one the bot can see, else the first. */
+export function resolveChannel(current: string, savedChannel: string, channels: { value: string; hidden?: boolean }[], loaded: boolean): string {
+  if (current) return current
+  if (!loaded || !channels.length) return ''
+  return (channels.find((c) => c.value === savedChannel) ?? channels.find((c) => !c.hidden) ?? channels[0]).value
+}
+
 /** The browser's storage, or null when asking for it throws. */
 export function browserStorage(): Storage | null {
   try {
