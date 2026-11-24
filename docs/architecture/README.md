@@ -1,3 +1,5 @@
+**한국어** | [English](README.en.md)
+
 # 마사몽 구조 한눈에 보기
 
 > **한 줄 요약**: 마사몽은 내 컴퓨터에서 도는 Go 프로그램 두 개(데몬과 CLI)이고, Discord 대화·관리 콘솔·CLI가 모두 같은 Action 계층을 거쳐 SQLite 파일 하나를 쓴다.
