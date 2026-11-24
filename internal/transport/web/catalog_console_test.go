@@ -32,6 +32,9 @@ var consoleUnreachable = map[string]string{
 	"usage.budgets":      "equivalent: the Usage page shows the month's spend, budget and per-kind spend (dashboard.overview month), each provider's calls today against its daily limit (providers.list, from the same registry statuses) and each tool's calls today (tools.list used_today); usage.budgets is those three joined for the CLI, while the page calls usage.reset and reads its active reset from dashboard.overview",
 	"stats.rollup":       "equivalent: the daily statistics rollup runs inside the usage_gc schedule, which Jobs → Scheduled tasks shows and runs now (schedules.run); stats.rollup is the CLI's way to recompute chosen days (--since, --force)",
 	"channels.view.show": "equivalent: the Room page lists a channel's attached blocks from memory.blocks.list (channels[].attached, the same RAGView.Blocks this Action returns) and Block shows the reverse",
+
+	"channels.attachments.add":    "dormant: attachments are stored in config (RAGAttachments) but nothing in answering reads them yet, so a console control would look like it works while doing nothing",
+	"channels.attachments.remove": "dormant: attachments are stored in config (RAGAttachments) but nothing in answering reads them yet, so a console control would look like it works while doing nothing",
 }
 
 // The guard counts an Action as called only when its id is the first argument of an Action call in code

@@ -407,10 +407,6 @@ add("room", {
     "searched_rooms": ("검색 대상 자료", "Searched sources"), "no_rooms": ("검색할 자료가 없습니다.", "No sources to search."),
     
     "no_blocks": ("추가한 자료가 없습니다.", "No extra sources."), "pick_block": ("추가할 자료 선택", "Pick a source"), "attach": ("추가", "Add"), "detach": ("제거", "Remove"),
-    "attachments_title": ("가져오기 대기 파일", "Files waiting for import"), "attachments_desc": ("이 방 전용으로 파일을 보관합니다. 자료 화면에서 가져오고 색인한 뒤 검색 블록에 추가해야 기억으로 사용됩니다.", "Stores files for this room only. Import and index them from Sources, then add the resulting memory source."),
-    "attachments_empty": ("대기 중인 파일이 없습니다.", "No staged files."), "attachment_pick": ("파일 선택", "Choose a file"), "attachment_add": ("파일 보관", "Stage file"),
-    "attachment_added": ("이 방에 파일을 보관했습니다", "File staged for this room"), "attachment_removed": ("대기 파일을 삭제했습니다", "Staged file removed"),
-    "attachments_note": ("보관 상태에서는 검색되지 않습니다. 자료 가져오기와 색인을 완료해 주세요.", "Staging alone does not make it searchable. Finish import and indexing."),
     "tools_title": ("이 방의 도구", "Tools in this room"), "tools_desc": ("기본값은 도구 전체 설정을 따릅니다. 여기서 켜거나 끄면 이 방에만 개별 적용됩니다.", "Default follows the global tool setting. On or off applies to this room only."),
     "tools_global": ("전체 설정", "Global"), "tools_here": ("이 방", "This room"),
     "recent_turns": ("최근 대화", "Recent conversations"), "ops_log": ("운영 기록", "Operations log"), "no_ops": ("운영 기록이 없습니다.", "No operations logged."),
@@ -2343,7 +2339,6 @@ add("room", {
     "watch_apply_body": ("저장된 알림 스위치와 지역별 알림 레벨을 이 서버의 다른 방 {n}곳에 덮어씁니다.", "Overwrites the saved alerts switch and per-area levels on the {n} other rooms of this server."),
     "watch_apply_done": ("전체 {total}곳 중 {n}곳에 적용했습니다", "Applied to {n} of {total} rooms"),
     "watch_apply_unsaved": ("저장되지 않은 변경은 적용되지 않습니다.", "Unsaved changes are not applied."),
-    "attachment_remove_of": ("{name} 대기 해제", "Unstage {name}"),
 })
 add("disaster", {
     "rooms_hint": ("구역별 알림 레벨은 방마다 정합니다. 서버·방 → 방 → 응답·말투 탭의 '응답 조건과 말투' 카드에서 정하세요.", "Alert level by area is set per room: Servers & rooms → room → Replies & persona tab, 'Reply mode and persona' card."),
