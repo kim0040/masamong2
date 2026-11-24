@@ -125,9 +125,13 @@
   // The person is asked for by ID (and server) from people.servers, so the right server opens even when the person
   // is beyond the first page of its list; nothing found says so.
   let deepDone = ''
+  // only the latest link's answer acts, and only while this page still shows that link
+  let deepSeq = 0
   async function openDeep(id: string, guild: string) {
+    const seq = ++deepSeq
     const u = ((users.data?.users ?? []) as any[]).find((x) => x.user_id === id)
     const r = await call<any>('people.servers', { user_id: id, ...(guild ? { guild_id: guild } : {}) })
+    if (seq !== deepSeq || route.path !== '/people' || route.query.get('person') !== id) return
     const sp = r.ok ? deepPerson(r.output?.servers, id, guild) : null
     navigate('/people', { replace: true })
     if (u) open(u, guild || sp?.guild_id || '')

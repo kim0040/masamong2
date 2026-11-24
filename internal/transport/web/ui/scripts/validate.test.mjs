@@ -28,4 +28,5 @@ test('a timezone must be a real zone name', () => {
   assert.equal(v.validTimeZone('Mars/Olympus'), false)
   assert.equal(v.validTimeZone(''), false)
   assert.equal(v.validTimeZone('not a zone'), false)
+  assert.equal(v.validTimeZone('+09:00'), false)
 })

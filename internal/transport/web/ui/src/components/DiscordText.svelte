@@ -5,7 +5,8 @@
 
   // Stored messages and answers hold Discord's markup; this draws it (see lib/discordtext.ts) and puts a name
   // on every mention. `mark` (optional) highlights the search words in the plain text. `still` is for text drawn
-  // inside a button (a preview you press to select): a spoiler stays covered and is not a button of its own.
+  // inside a button (a preview you press to select): a spoiler is shown uncovered, marked as a spoiler, and is not a
+  // button of its own (the console is the operator's view; the preview is the only place a Lab answer is read).
   let { text, mark, still = false }: { text: string; mark?: (s: string) => { t: string; m: boolean }[]; still?: boolean } = $props()
   const nodes = $derived(hasMarkup(text) ? parseDiscord(text) : ([{ k: 'text', v: text ?? '' }] as DNode[]))
   let shown = $state<Record<string, boolean>>({})
@@ -19,7 +20,7 @@
     {:else if n.k === 'underline'}<u>{@render draw(n.c, path + '.' + i)}</u>
     {:else if n.k === 'strike'}<s>{@render draw(n.c, path + '.' + i)}</s>
     {:else if n.k === 'quote'}<span class="quote">{@render draw(n.c, path + '.' + i)}</span>
-    {:else if n.k === 'spoiler' && still}<span class="spoiler" role="img" aria-label={t('dt.spoiler')}><span aria-hidden="true">{@render draw(n.c, path + '.' + i)}</span></span>
+    {:else if n.k === 'spoiler' && still}<span class="spoiler open" title={t('dt.spoiler')}>{@render draw(n.c, path + '.' + i)}</span>
     {:else if n.k === 'spoiler'}<button type="button" class="spoiler" class:open={shown[path + '.' + i]} aria-pressed={!!shown[path + '.' + i]} aria-label={shown[path + '.' + i] ? undefined : t('dt.spoiler')} onclick={() => (shown[path + '.' + i] = !shown[path + '.' + i])}><span aria-hidden={!shown[path + '.' + i]}>{@render draw(n.c, path + '.' + i)}</span></button>
     {:else if n.k === 'code'}{#if n.block}<code class="block">{n.v}</code>{:else}<code>{n.v}</code>{/if}
     {:else if n.k === 'user'}<span class="ref">@{t('dt.user', { tail: tail(n.id) })}</span>

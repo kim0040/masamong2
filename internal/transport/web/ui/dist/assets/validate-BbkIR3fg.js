@@ -1,1 +1,0 @@
-function e(e){let t=e.trim();if(t===``)return{kind:`unset`};if(!/^-?\d+$/.test(t))return{kind:`invalid`};let n=Number(t);return n===0?{kind:`unset`}:n<-1?{kind:`invalid`}:{kind:`set`,days:n}}function t(e){try{return new Intl.DateTimeFormat(`en`,{timeZone:e}),!0}catch{return!1}}export{t as n,e as t};

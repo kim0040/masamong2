@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { outcomeTone } from '../lib/outcomes'
   import { t, toolName, i18n } from '../lib/i18n.svelte'
   import { scrollable } from '../lib/scrollable'
@@ -56,9 +57,12 @@
   let tab = $state(route.query.get('tab') ?? 'behavior')
   // a ?tab= link that arrives while this page is already open (same component, new params or query)
   // selects that tab
+  // (only the query is tracked: a click on another tab is not undone by the link that opened the page)
   $effect(() => {
     const qt = route.query.get('tab')
-    if (qt && qt !== tab) tab = qt
+    untrack(() => {
+      if (qt && qt !== tab) tab = qt
+    })
   })
   const ch = $derived((list.data?.channels ?? []).find((x: any) => x.id === c && x.guild_id === g))
   const guildName = $derived.by(() => {
@@ -221,6 +225,7 @@
     const targets = sameGuild
     const src = savedForm
     const input = { disaster_alerts: src.disaster_alerts, watch_level: Object.fromEntries((src.watch_level ?? []).map((w: { region: string; level: string }) => [w.region, Number(w.level)])) }
+    if (!cfg.loaded || !cfg.revision) return // the revision the batch is checked against must be known
     let rev = cfg.revision
     let ok = 0
     for (const x of targets) {
@@ -360,7 +365,7 @@
               <Button size="sm" onclick={() => form.watch_level.push({ region: '', level: '2' })}>{t('room.watch_add')}</Button>
               {#if sameGuild.length}
                 <span class="spacer"></span>
-                <Button size="sm" variant="ghost" icon={I.Copy} onclick={() => (applyAllOpen = true)}>{t('room.watch_apply')}</Button>
+                <Button size="sm" variant="ghost" icon={I.Copy} disabled={!cfg.loaded} onclick={() => (applyAllOpen = true)}>{t('room.watch_apply')}</Button>
               {/if}
             </div>
             <details><summary class="small">{t('room.watch_guide')}</summary>

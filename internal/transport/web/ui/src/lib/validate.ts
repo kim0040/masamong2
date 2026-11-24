@@ -19,6 +19,8 @@ export function parseRetentionDays(raw: string): RetentionDays {
 /** true for a name the platform's clock accepts, so a typo is refused instead of silently falling
  * back to UTC in the scheduler. */
 export function validTimeZone(v: string): boolean {
+  // an offset such as "+09:00" passes Intl in some runtimes but is not a zone name the server loads
+  if (/^[+-]/.test(v.trim())) return false
   try {
     new Intl.DateTimeFormat('en', { timeZone: v })
     return true
