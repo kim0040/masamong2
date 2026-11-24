@@ -2,7 +2,7 @@
 
 마사몽은 2026-10-13에 기능을 마무리했고, 이후 개선은 **업데이트 패치**로 낸다. 이 문서는 패치 작업을 시작하는 사람(또는 코딩 에이전트)이 **처음 읽는 문서**다. 무엇을 하는지보다 **왜 그렇게 정했는지**를 먼저 적는다.
 
-읽는 순서: 이 문서 → [기여 안내](../CONTRIBUTING.md) → [남은 일](BACKLOG.md)·[알려진 문제](KNOWN_ISSUES.md) → 작업 영역의 운영 문서([기억 운영](memory-operations.md), [도구와 언어](tools-and-languages.md), [저장소 지도](REPO_MAP.md)).
+읽는 순서: 이 문서 → [기여 안내](../CONTRIBUTING.md) → [구조 한눈에 보기](architecture/README.md)와 [결정 기록](architecture/decisions.md) → [남은 일](BACKLOG.md)·[알려진 문제](KNOWN_ISSUES.md) → 작업 영역의 운영 문서([기억 운영](memory-operations.md), [도구와 언어](tools-and-languages.md), [저장소 지도](REPO_MAP.md)).
 
 ---
 
@@ -27,7 +27,7 @@
 - **검색 동작을 바꾸면 샌드박스(`experimental/rag-leaf-parent`)와 Go를 함께 고친다.**
   - `make parity`로 확인한다(§5). 비공개 인덱스가 있으면 실데이터 parity도 돌린다.
   - 한국어 플래너·문맥·기억·보안·색인 요약 프롬프트는 샌드박스와 **바이트 단위로 같아야** 한다.
-- **문서를 고치면 `make docs`를 돌린다.** 한국어 위키나 README를 고쳤으면 다른 언어도 고친 뒤 `make docs-record`를 돌린다.
+- **문서를 고치면 `make docs`를 돌린다.** 한국어 위키나 README, 구조 문서(`docs/architecture/`의 `x.md`와 영어판 `x.en.md`)를 고쳤으면 다른 언어도 고친 뒤 `make docs-record`를 돌린다. 구조 문서의 그림 원본(`.d2`)을 고쳤으면 `make diagrams`로 다시 렌더한다([그림 규칙](architecture/diagrams/README.md)).
 - **스크린샷은 `output/layout/`에만** 저장하고 커밋하지 않는다. README 화면만 예외로, 연습 모드에서 찍어 `docs/images/readme/`에 커밋한다.
 - **UX 문제는 예시로 받는다.** 한 화면의 문제를 찾으면 같은 종류의 문제를 콘솔 전체에서 찾아 함께 고친다.
 
@@ -57,6 +57,8 @@
 
 ## 3. 결정 이력
 
+아래 표는 2026-10-13까지의 결정이다. 그 뒤의 결정(공개 릴리스, 재처리 금지, 브랜치 모델, 답변 프롬프트 캐시, 사람 기억과 유료 백필, 통계, 릴리스 노트)과 결정마다 검토하고 버린 방법은 [결정 기록](architecture/decisions.md)에 있다. 새 결정은 그쪽에 적는다.
+
 | 날짜 | 결정 | 이유 |
 |---|---|---|
 | 09-14~ | 기존 가공 방식과 산출물은 새 제품 입력에서 모두 제외([RAW_DATA_POLICY](RAW_DATA_POLICY.md)) | 원문부터 새 파이프라인으로 처리하려고 |
@@ -82,6 +84,8 @@
 패치는 버전 태그를 단 GitHub Release로 낸다. 번호 규칙(수정은 세 번째, 기능은 두 번째, 큰 개편은 첫 번째 자리)은 [개발 가이드의 "버전 번호"](wiki/개발-가이드.md)를 따른다.
 
 **지금 상태**
+- 작업과 풀 리퀘스트는 `dev`로 간다. 릴리스할 때 `dev`를 `main`에 빨리감기로 병합하고 `main`에 태그를 단다.
+- 릴리스 노트(`release-notes/<태그>.md`와 `.json`)를 태그 전에 커밋한다(`make release-notes VERSION=<태그>`로 초안을 만든다).
 - 첫 공개 Release는 `v1.0.0`(2026-11-02)이다.
 - 버전 문자열은 빌드 방식마다 다르다.
   - 릴리스 빌드: `scripts/release.sh`가 태그(`v1.0.0`)를 `-X`로 박는다. 앱 안 업데이트 확인과 **지금 업데이트**가 이 빌드에서 동작한다.
@@ -186,7 +190,7 @@ go test -c -o /tmp/app.test ./internal/application
 
 ## 6. 개발 장비 준비
 
-1. 저장소를 clone하고 main에서 시작한다. 쓰던 버전은 Go 1.27.x, Node 26.x, uv 0.13.x다.
+1. 저장소를 clone하고 `dev`에서 시작한다(`main`은 안정판이고 릴리스 태그만 받는다. 위키 [개발 가이드](wiki/개발-가이드.md)의 "브랜치"). 쓰던 버전은 Go 1.27.x, Node 26.x, uv 0.13.x다.
 2. **에이전트 지침(선택, git 제외)**: 코딩 에이전트에게 개인 작업 규칙을 주려면 저장소 루트에 `AGENTS.md`를 만든다. `.gitignore`에 들어 있어 커밋되지 않는다.
 3. **키(git 제외)**: 실제 API를 부르는 테스트에만 필요하다. `.env`(`.env.example` 참고)에 테스트용 키를 넣고, 실사용 시나리오용 키 폴더는 이렇게 만든다.
    ```sh

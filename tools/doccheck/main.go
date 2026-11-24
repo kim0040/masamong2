@@ -1,11 +1,12 @@
-// doccheck keeps the documentation honest, in four ways:
+// doccheck keeps the documentation honest, in five ways:
 //
 //   - links: every relative link, and every link to this repository's files or wiki pages, points at a
 //     file that exists (wiki links had broken before; nothing caught them);
 //
 //   - translations: a page and its translations move together. docs/translations.json records a hash of
 //     every file of every translated group (the five READMEs, each Korean wiki page and its English
-//     page). When one file changes and the record no longer matches, the check fails until the other
+//     page, and under docs/ each page x.md with its English twin x.en.md, D2 sources x.d2 and x.en.d2
+//     included). When one file changes and the record no longer matches, the check fails until the other
 //     languages are brought along and the record is written again. The idea comes from DeepSeek
 //     Harness's translation-pairing gate.
 //
@@ -16,6 +17,10 @@
 //     it is the version of the newest release-notes/vX.Y.Z.json. The version is bumped at release, so a
 //     README that was not brought along fails here, not in a user's browser. (The tree itself carries
 //     an unreleased "-dev" version, so the pages are compared with each other and the notes, not a tag.)
+//
+//   - diagrams: every D2 source has its light and dark SVG, and each SVG was rendered from the source
+//     and the style file as they are now (diagrams.go; the stamps are written by make diagrams, so the
+//     check needs no d2).
 //
 //     go run ./tools/doccheck          check (go test ./tools/doccheck runs the same)
 //     go run ./tools/doccheck -write   after updating every language of a changed page, record them
@@ -80,6 +85,7 @@ func main() {
 	problems := append(checkLinks(root), checkTranslations(root)...)
 	problems = append(problems, checkCommands(root)...)
 	problems = append(problems, checkVersions(root)...)
+	problems = append(problems, checkDiagrams(root)...)
 	for _, p := range problems {
 		fmt.Println(p)
 	}
@@ -87,7 +93,7 @@ func main() {
 		fmt.Printf("\n%d problem(s)\n", len(problems))
 		os.Exit(1)
 	}
-	fmt.Println("doccheck: links, translations, command names and versions ok")
+	fmt.Println("doccheck: links, translations, command names, versions and diagrams ok")
 }
 
 func repoRoot() (string, error) {
@@ -136,6 +142,7 @@ var (
 	mdLink     = regexp.MustCompile(`\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)`)
 	refLink    = regexp.MustCompile(`(?m)^\s*\[[^\]]+\]:\s*(\S+)`)
 	htmlSrc    = regexp.MustCompile(`(?:src|href)="([^"]+)"`)
+	htmlSrcset = regexp.MustCompile(`srcset="([^"]+)"`)
 )
 
 // links returns the link targets of a Markdown text, outside code.
@@ -146,6 +153,14 @@ func links(text string) []string {
 	for _, re := range []*regexp.Regexp{mdLink, refLink, htmlSrc} {
 		for _, m := range re.FindAllStringSubmatch(text, -1) {
 			out = append(out, m[1])
+		}
+	}
+	// srcset="a.svg, b.svg 2x": each candidate is an address, then an optional width or density
+	for _, m := range htmlSrcset.FindAllStringSubmatch(text, -1) {
+		for _, candidate := range strings.Split(m[1], ",") {
+			if f := strings.Fields(candidate); len(f) > 0 {
+				out = append(out, f[0])
+			}
 		}
 	}
 	return out
@@ -330,6 +345,54 @@ func translationGroups(root string) ([]group, error) {
 	}
 	if len(unpaired) > 0 {
 		return groups, fmt.Errorf("wiki pages without a language switch to their translation: %s", strings.Join(unpaired, ", "))
+	}
+	twins, err := twinGroups(root)
+	return append(groups, twins...), err
+}
+
+// twinGroups pairs the pages of docs/ that exist in two languages. docs/ is written in Korean, so the
+// Korean page keeps the plain name and its English twin sits beside it as x.en.md (the wiki keeps its
+// own convention, a page per title). A D2 source is paired the same way, x.d2 with x.en.d2, so a
+// diagram redrawn in one language is not left as it was in the other.
+//
+// Each page of a pair starts with a switch to the other: "**한국어** | [English](x.en.md)" on the
+// Korean page and "[한국어](x.md) | **English**" on the English one. A twin without its Korean page, or
+// a pair without both switches, is an error.
+func twinGroups(root string) ([]group, error) {
+	var groups []group
+	var problems []string
+	for _, suffix := range []string{".md", ".d2"} {
+		twins, err := diagramFiles(root, ".en"+suffix)
+		if err != nil {
+			return nil, err
+		}
+		for _, en := range twins {
+			if !strings.HasPrefix(en, "docs/") || strings.HasPrefix(en, wikiDir+"/") {
+				continue
+			}
+			ko := strings.TrimSuffix(en, ".en"+suffix) + suffix
+			if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(ko))); err != nil {
+				problems = append(problems, en+" (no "+ko+")")
+				continue
+			}
+			if suffix == ".md" {
+				koSwitch := "**한국어** | [English](" + path.Base(en) + ")"
+				enSwitch := "[한국어](" + path.Base(ko) + ") | **English**"
+				if languageSwitch(filepath.Join(root, filepath.FromSlash(ko))) != koSwitch {
+					problems = append(problems, ko+" (wants the line "+koSwitch+")")
+					continue
+				}
+				if languageSwitch(filepath.Join(root, filepath.FromSlash(en))) != enSwitch {
+					problems = append(problems, en+" (wants the line "+enSwitch+")")
+					continue
+				}
+			}
+			name := strings.TrimSuffix(ko, ".md")
+			groups = append(groups, group{Name: name, Files: []string{ko, en}})
+		}
+	}
+	if len(problems) > 0 {
+		return groups, fmt.Errorf("pages in two languages that are not paired: %s", strings.Join(problems, ", "))
 	}
 	return groups, nil
 }
@@ -595,8 +658,8 @@ func commandDoc(f string) bool {
 }
 
 // pageLanguage is the language a page is written for: the README suffix, the wiki language switch
-// that pairs a page with its translation, or (for an unpaired page) the script its prose is in —
-// "" when it mixes languages or has too little prose to tell.
+// that pairs a page with its translation, the .en.md name of a docs/ page in two languages, or (for an
+// unpaired page) the script its prose is in — "" when it mixes languages or has too little prose to tell.
 func pageLanguage(root, f, text string) string {
 	if m := readmeLanguage.FindStringSubmatch(f); m != nil {
 		return m[1]
@@ -609,6 +672,13 @@ func pageLanguage(root, f, text string) string {
 		if wikiKorean.MatchString(sw) {
 			return "en"
 		}
+	}
+	// a page of docs/ in two languages (twinGroups): x.en.md is English and its x.md is Korean
+	if strings.HasSuffix(f, ".en.md") {
+		return "en"
+	}
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(strings.TrimSuffix(f, ".md")+".en.md"))); err == nil {
+		return "ko"
 	}
 	return proseLanguage(text)
 }

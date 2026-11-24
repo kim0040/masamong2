@@ -1,0 +1,88 @@
+# The data model at a glance: the tables of masamong.db by area. Used by docs/architecture/data-model.en.md.
+# Not every table is here, only the ones each area turns on.
+grid-columns: 1
+grid-gap: 20
+
+raw: "Raw · what cannot be rebuilt" {
+  class: group
+  grid-rows: 1
+  grid-gap: 24
+  rooms: "memory_rooms\nthe rooms" {class: store; width: 312}
+  obs: "memory_observations\none row per message" {class: store; width: 312}
+  rev: "Edit order · observation aliases\nnothing is overwritten" {class: store; width: 312}
+}
+
+built: "" {
+  class: row
+  grid-rows: 1
+  grid-gap: 36
+
+  index: "Search index" {
+    class: group
+    grid-columns: 1
+    grid-gap: 16
+    leaves: "memory_leaves\nleaf · summary · vectors" {class: memory; width: 252}
+    msgvec: "memory_message_vectors" {class: memory; width: 252}
+    cache: "memory_embed_cache" {class: memory; width: 252}
+  }
+
+  room: "Room memory" {
+    class: group
+    grid-columns: 1
+    grid-gap: 16
+    episode: "channel_episode\nepisode_item · episode_leaf" {class: memory; width: 252}
+    state: "channel_state" {class: memory; width: 252}
+    explicit: "memory_explicit" {class: memory; width: 252}
+  }
+
+  people: "Person memory" {
+    class: group
+    grid-columns: 1
+    grid-gap: 16
+    claim: "person_claim\nevidence on every line" {class: memory; width: 252}
+    alias: "person_alias · person_relation" {class: memory; width: 252}
+    suppress: "person_memory_suppress" {class: memory; width: 252}
+  }
+}
+
+trace: "" {
+  class: row
+  grid-rows: 1
+  grid-gap: 36
+
+  evidence: "Deletion and evidence · who read what" {
+    class: group
+    grid-columns: 2
+    grid-gap: 16
+    links: "evidence_sources\nholders · links" {class: core; width: 208}
+    tomb: "privacy_tombstones\nprivacy_settled" {class: core; width: 208}
+    jobs: "redaction_jobs" {class: core; width: 208}
+    consent: "consent_state\nconsents" {class: core; width: 208}
+  }
+
+  turns: "Conversation and records" {
+    class: group
+    grid-columns: 2
+    grid-gap: 16
+    chat: "chat_turns\nconversation context" {class: core; width: 208}
+    log: "turn_log\nturn records" {class: core; width: 208}
+    calls: "llm_calls · tool_calls" {class: core; width: 208}
+    delivery: "delivery_ledger\nreply_messages" {class: core; width: 208}
+  }
+}
+
+ops: "Configuration · operations · personal features" {
+  class: group
+  grid-rows: 1
+  grid-gap: 24
+  config: "config_revisions\naudit_log" {class: store; width: 228}
+  work: "jobs · admin_state\nmemory_spend" {class: store; width: 228}
+  usage: "tool_usage\nstats_daily" {class: store; width: 228}
+  personal: "reminders · polls\nfortune_* · notice_*" {class: store; width: 228}
+}
+
+raw.obs -> built.index: "cut"
+raw.obs -> built.room: "evidence IDs"
+raw.obs -> built.people: "evidence IDs"
+built.room -> trace.evidence: "registers what it read" {class: weak}
+trace.turns -> trace.evidence: "" {class: weak}

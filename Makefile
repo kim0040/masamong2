@@ -1,6 +1,6 @@
 # Common builds. The console (internal/transport/web/ui) is committed pre-built in ui/dist, so plain
 # `go build` works without Node; run `make ui` after changing the console.
-.PHONY: ui check build test parity docs docs-record codemap testnames testnames-update release-notes try install uninstall app release
+.PHONY: ui check build test parity docs docs-record diagrams codemap testnames testnames-update release-notes try install uninstall app release
 
 ui:
 	cd internal/transport/web/ui && npm ci && npm run build
@@ -27,6 +27,11 @@ docs:
 # after updating every language of a changed page
 docs-record:
 	go run ./tools/doccheck -write
+
+# diagrams: renders every docs/**/*.d2 to its light and dark SVG and stamps each with the hash of its
+# source (make docs fails on a source changed without this). Needs d2; PNG previews: scripts/diagrams.sh --png DIR
+diagrams:
+	scripts/diagrams.sh
 
 # code map: writes the generated indexes under docs/code-map (a stale map fails go test ./tools/codemap)
 codemap:

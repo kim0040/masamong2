@@ -56,6 +56,7 @@
 - [Svelte](https://github.com/sveltejs/svelte): MIT
 - [Lucide](https://github.com/lucide-icons/lucide/blob/main/LICENSE): ISC, 포함된 Feather-derived 부분은 MIT
 - [Pretendard](https://github.com/orioncactus/pretendard/blob/main/packages/pretendard/dist/LICENSE.txt): SIL OFL-1.1
+  - 구조 문서의 그림(`docs/architecture/diagrams/*.svg`)도 같은 글꼴(v1.3.9)에서 그림이 쓰는 글자만 넣는다. 글꼴 파일 자체는 저장소에 두지 않고, 렌더 스크립트(`scripts/diagrams.sh`)가 내려받아 해시를 확인한다.
 
 ### 4. 선택형 Python과 CDN
 

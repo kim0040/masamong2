@@ -1,9 +1,9 @@
 # ADR-18: 안 쓰는 방 내려놓기 — 색인 하나를 "상주 방 집합"으로 다시 만든다
 
 - 날짜: 2026-10-13
-- 상태: **초안 — 0단계 완료(계약·측정 코드·게이트 도구·실측), C-5 게이트 보고에서 멈춤(2026-10-13)**. C-1 계약은 Fable 최종 검토 SOUND를 받았다. C-2 측정 진단과 C-3 게이트 도구는 다른 모델 검토를 반영했다. C-4 실측은 §13에 있다. 1단계 이후(지시서 D)는 사용자 명시 승인 전에는 시작하지 않는다. 서비스 동작은 아직 바뀌지 않았다(예산 무한, 전체 상주).
+- 상태: **초안 — 0단계 완료(계약·측정 코드·게이트 도구·실측), C-5 게이트 보고에서 멈춤(2026-10-13)**. C-1 계약은 최종 설계 검토에서 SOUND 판정을 받았다. C-2 측정 진단과 C-3 게이트 도구는 독립 검토를 반영했다. C-4 실측은 §13에 있다. 1단계 이후는 사용자 명시 승인 전에는 시작하지 않는다. 서비스 동작은 아직 바뀌지 않았다(예산 무한, 전체 상주).
 - 관련 문서: 다음 묶음 계획 §7(질문 원문·실험 계획 — 정리되어 Git 기록 `ae3b59a3:docs/handoff/2026-10-13-next-batch.md`에만 있음), [기억 운영](../memory-operations.md) §16(저사양 보강, hot 재구축의 행 공유, 실측 피크), [임베딩 폭 측정](../rag/embedding-width-2026-10.md), [남은 일](../BACKLOG.md), [ADR-17](ADR-17-derived-room-memory.md)(형식)
-- 작성: Fable 5.1(설계 판단). 실험 수치는 코디네이터가 2026-10-13 Windows에서 잰 것이다(§5). 1차 초안을 Sol(GPT-6.1)이 코드와 대조해 검토했고(판정 REVISE), 이 판은 그 검토를 반영한 것이다(§11).
+- 검토 이력: 실험 수치는 2026-10-13 Windows에서 잰 것이다(§5). 1차 초안은 코드와 대조한 독립 검토에서 REVISE 판정을 받았고, 이 판은 그 검토를 반영한 것이다(§11).
 
 ## 1. 배경
 
@@ -67,7 +67,7 @@ A를 기각하는 결정적 이유는 메모리가 아니라 **검색 동작의 
 | 같은 선택 규칙 | 전체 빌드와 측정용 부분 빌드가 같은 leaf 적격성 선택 함수를 쓴다. 차원 선택도 전체 메타 기준으로 먼저 확정하고 부분 필터는 나중에 한다. 단순 벡터 존재 검사로 대체하지 않는다. 비상주 방은 메시지 순서·관측 ID·작성자 메타와 최종 leaf 적격성만 스트리밍한다. 본문·벡터 행은 캐시에 남기지 않는다 | `internal/memory/engine/engine.go:460`, `internal/memory/engine/engine.go:477`, `internal/memory/engine/engine.go:490`, `internal/memory/engine/engine.go:609` |
 | 키·표 | `keyForMessage`의 원래 방 플랫폼·계정 공백 제거·표시명 대체 규칙을 그대로 쓴다. 전역 `labelsByKey`·`keysByLabel`은 방별 캐시의 합집합이다. `leavesByKey`는 상주 leaf만 가지며 범위 필터는 그대로다. 전체 상주에서는 세 표와 `aliasTable`이 지금과 같다 | `internal/memory/search/person.go:218`, `internal/memory/search/person.go:240`, `internal/memory/search/person.go:297`, `internal/memory/search/person.go:457` |
 | 무효화 | 캐시 키는 방 revision·active recipe·space·차원·leaf 적격성 세대다. 편집·삭제·철회·방 삭제·recut·임베딩 저장·공간 축소 때 상주와 무관하게 무효화한다. JSON에도 키를 저장한다. 검증되지 않은 재시작 캐시는 쓰지 않는다 | `internal/memory/engine/engine.go:1171`, `internal/memory/engine/engine.go:1198`, `internal/memory/store/store.go:1398`, `internal/memory/store/store.go:1538`, `internal/memory/store/store.go:1601` |
-| 반영 시점 | 비상주 방도 다음 identity 빌드에서 갱신하고 **새 스냅샷 발행 전에** 합친다. 검색 획득 시 검증은 **identity 입력에 실제로 영향을 준 키**(계정별 표시명 집합의 변화)로 한정한다. 그 키가 오래됐을 때만 보유를 반환하고 갱신을 기다린다. 메시지 내용의 편집·삭제·철회는 현행대로 hit 방 evidence revision 재검사로 다룬다. 반환 전 전역 키가 바뀐 것은 오류가 아니라 진단 카운트로 남긴다(Fable 최종 검토 P2-2: 모든 방 편집마다 질문을 재구축 뒤로 미루는 더 엄격한 규칙은 별도 동작 변경이라 채택하지 않음). 방 재상주를 기다리지 않는다 | `internal/memory/engine/engine.go:913`, `internal/memory/engine/engine.go:923`, `internal/memory/store/room_state.go:127`. 1단계 계약이다 |
+| 반영 시점 | 비상주 방도 다음 identity 빌드에서 갱신하고 **새 스냅샷 발행 전에** 합친다. 검색 획득 시 검증은 **identity 입력에 실제로 영향을 준 키**(계정별 표시명 집합의 변화)로 한정한다. 그 키가 오래됐을 때만 보유를 반환하고 갱신을 기다린다. 메시지 내용의 편집·삭제·철회는 현행대로 hit 방 evidence revision 재검사로 다룬다. 반환 전 전역 키가 바뀐 것은 오류가 아니라 진단 카운트로 남긴다(최종 설계 검토 P2-2: 모든 방 편집마다 질문을 재구축 뒤로 미루는 더 엄격한 규칙은 별도 동작 변경이라 채택하지 않음). 방 재상주를 기다리지 않는다 | `internal/memory/engine/engine.go:913`, `internal/memory/engine/engine.go:923`, `internal/memory/store/room_state.go:127`. 1단계 계약이다 |
 | 경쟁·실패 | 캐시 계산은 저장소의 일관된 읽기에서 한다. 발행 전 키가 달라지면 결과를 버린다. 획득 후 키 검증이 검색의 기준 시점이다. 콜백 지연은 저장소 검증으로 잡는다. 갱신 실패에는 오래된 표를 새 표로 발행하지 않고 명시적 오류를 준다 | `internal/memory/engine/engine.go:913`, `internal/memory/engine/engine.go:1174`, `internal/memory/store/room_state.go:122` |
 | 메모리 비용 | 서로 다른 `(방, speakerKey, 표시명)` 조합 P와 방 수 R에 대해 캐시는 O(P+R), 전역 표도 O(P)다. 방 삭제 때 캐시를 지우고, 갱신은 교체한다. 역사별 JSON을 누적하지 않는다. 기존 규모의 **1MiB 미만은 가정**이며 C-2·C-4에서 실제 바이트와 빌드 중 두 벌의 비용을 잰다 | `internal/memory/search/person.go:234`, `internal/memory/search/person.go:252` |
 
@@ -140,7 +140,7 @@ func (e *Engine) EnsureRooms(ctx context.Context, rooms []string) (ix *search.In
 
 | 항목 | 계약 |
 |---|---|
-| 정확성의 근거 | `ix`는 `release`까지 유효하다. 같은 recipe·space의 요구 방과 검증된 전역 identity를 갖는다. `Search`는 질의 임베딩(외부 호출, `ix`를 쓰지 않음)을 **먼저** 끝낸 뒤 `EnsureRooms`로 획득하고, 즉시 `defer release()`를 걸어 검색·rerank·근거 재검사까지 같은 `ix`만 쓴다. 순서는 `EmbedQuery → EnsureRooms → Retrieve·재검사`다. 느린 임베딩 응답이 보유를 늘려 은퇴 슬롯을 막지 않게 하려는 것이다(Fable P2-1). 현재 획득/외부 호출/검색 위치는 `internal/memory/engine/engine.go:891`, `internal/memory/engine/engine.go:895`, `internal/memory/engine/engine.go:908` |
+| 정확성의 근거 | `ix`는 `release`까지 유효하다. 같은 recipe·space의 요구 방과 검증된 전역 identity를 갖는다. `Search`는 질의 임베딩(외부 호출, `ix`를 쓰지 않음)을 **먼저** 끝낸 뒤 `EnsureRooms`로 획득하고, 즉시 `defer release()`를 걸어 검색·rerank·근거 재검사까지 같은 `ix`만 쓴다. 순서는 `EmbedQuery → EnsureRooms → Retrieve·재검사`다. 느린 임베딩 응답이 보유를 늘려 은퇴 슬롯을 막지 않게 하려는 것이다(최종 설계 검토 P2-1). 현재 획득/외부 호출/검색 위치는 `internal/memory/engine/engine.go:891`, `internal/memory/engine/engine.go:895`, `internal/memory/engine/engine.go:908` |
 | 획득 순서 | 서비스 관리자 `generationMu` 아래서 엔진 활성 여부 확인 → 현재 포인터 읽기 → 요구 방·설정 확인 → **그 Index의 보유 수 증가** → 방 pin 증가를 한 번에 한다. 교체·은퇴·닫기 선정도 같은 잠금이다. 잠금 밖에서 ctx·identity 키를 확인하고 실패하면 전부 반환한다. `idx.Load` 후 따로 보유를 올리는 경로를 금지한다. 교체 지점: `internal/memory/engine/engine.go:676` |
 | pin의 역할 | 방 pin은 서비스 관리자에 있고 핑퐁을 막는다. 스냅샷 보유 수는 Index별 공유 수명 레코드에 있고 FTS 생존을 보장한다. `Inherit`로 같은 포인터를 넘겨도 둘 다 같은 레코드를 쓴다. 현재 공유 지점: `internal/memory/engine/engine.go:256`, `internal/memory/engine/engine.go:274` |
 | 반환·닫기 | `release`는 `sync.Once`로 중복 호출을 허용한다. 같은 잠금에서 pin·보유 수를 한 번만 내린다. **은퇴했고 보유 수가 0일 때만** 닫을 대상으로 바꾼다. 닫는 동안 은퇴 슬롯을 유지한다. 실제 DB 닫기는 잠금 밖에서 하고 완료 뒤 슬롯을 반환한다. 현재 닫기: `internal/memory/search/index.go:198`, `internal/memory/lexical/index.go:63` |
@@ -191,13 +191,13 @@ func (e *Engine) EnsureRooms(ctx context.Context, rooms []string) (ix *search.In
 | 설정 교체 | 서비스는 최신 설정 세대 하나만 대상으로 보관한다. `Inherit`는 호환 포인터를 복사하지 않고 같은 수명 레코드에 연결한다. 비호환이면 기존 현재 슬롯은 다음 발행까지 전임 스냅샷으로 유지하며 새 설정 검색에는 주지 않는다. 반복 설정 교체는 미입장 작업을 최신 세대로 합친다. 별도 은퇴·빌드 슬롯을 만들지 않는다. 현행 교체 지점: `internal/application/memory.go:283` |
 | 진행 중 옛 빌드 | 은퇴/설정 변경 때 서비스 소유 빌드 ctx에 취소를 요청한다. 취소 불가능한 읽기는 끝날 때까지 기다린다. 완료 후 설정 세대가 다르면 결과를 닫고 슬롯을 반환한다. 그전에는 최신 엔진 빌드도 시작하지 않는다. 현행 미발행 폐기 지점: `internal/memory/engine/engine.go:670` |
 | 질문·갱신 우선 | 질문과 revision/identity 갱신은 고정 창 뒤 FIFO 배치다. 설정 변경은 대기자의 시한을 연장하지 않는다. 정책은 대기/빌드 요구 집합과 pin 방을 빼지 않는다. 내려놓기 후보는 발행 직전 다시 확인하고 새 요구가 생겼으면 그 정책 변경을 버린다. 정책·prefetch는 슬롯 없으면 생략한다. tick당 정책 빌드 최대 1회 |
-| 종료 | `Service.Close`는 서비스 ctx 취소 → 대기자 깨우기 → 공유 빌드 완료/폐기와 검색 `release` 대기 → FTS 닫기 → 관리자 폐기 순이다. 현재 슬롯은 신규 획득만 막고 제자리에 둔다. 종료 때문에 두 번째 은퇴 슬롯을 만들지 않는다. 이 대기 중 수명·엔진·관리자 잠금을 잡지 않는다. drain에는 상한(서비스 ctx 취소 뒤 N초, 1단계에서 정한다)을 둔다. 평소에는 사용 중 FTS를 닫지 않고, **종료 때 상한을 넘은 경우에만** 닫는다. 그때 남은 검색은 `SearchChecked`의 `ErrIndexClosed`로 명시적 오류가 된다(Fable P2-3: 보유 누수가 정상 정지를 막지 않게). 현행 종료 지점: `internal/application/service.go:297`, `internal/application/service.go:314`, `internal/application/service.go:323` |
+| 종료 | `Service.Close`는 서비스 ctx 취소 → 대기자 깨우기 → 공유 빌드 완료/폐기와 검색 `release` 대기 → FTS 닫기 → 관리자 폐기 순이다. 현재 슬롯은 신규 획득만 막고 제자리에 둔다. 종료 때문에 두 번째 은퇴 슬롯을 만들지 않는다. 이 대기 중 수명·엔진·관리자 잠금을 잡지 않는다. drain에는 상한(서비스 ctx 취소 뒤 N초, 1단계에서 정한다)을 둔다. 평소에는 사용 중 FTS를 닫지 않고, **종료 때 상한을 넘은 경우에만** 닫는다. 그때 남은 검색은 `SearchChecked`의 `ErrIndexClosed`로 명시적 오류가 된다(최종 설계 검토 P2-3: 보유 누수가 정상 정지를 막지 않게). 현행 종료 지점: `internal/application/service.go:297`, `internal/application/service.go:314`, `internal/application/service.go:323` |
 
 근거: 기존 포인터 공유는 `internal/memory/engine/engine.go:272`이고 엔진별 잠금은 `internal/memory/engine/engine.go:83`이다. 서비스 관리자로 이 둘을 묶어 설정 교체 예외를 없앤다. 관리자 구현·연결은 1단계이며 0단계 측정 코드는 이 스케줄링을 켜지 않는다.
 
 **잠금 순서와 진전 조건.** 관리자의 `generationMu`가 포인터·세대 보유·방 pin·요구·슬롯을 함께 보호한다. 그 아래에서 다른 잠금, 저장소 읽기, 외부 호출, FTS 닫기, 알림 대기를 하지 않는다. 필요한 상태 사본과 알림 채널만 얻고 바로 푼다. 기존 엔진 잠금 순서 `indexMu → reloadMu`는 유지한다(`internal/memory/engine/engine.go:323`, `internal/memory/engine/indexing.go:195`). 서비스 쪽 전체 순서는 `lifeMu → memoryState.mu → generationMu`다(`MemoryEngine()`이 앞의 둘을 쥔 채 `Retire`를 부른다, `internal/application/memory.go:150`). `generationMu` 아래에서 `lifeMu`·`memoryState.mu`·엔진 잠금을 잡지 않는다.
 
-빌더는 잠금 없이 서비스 슬롯을 예약한 뒤 **`reloadMu`만** 얻어 빌드한다(현행 `Reload`와 같다, `internal/memory/engine/engine.go:420`). `indexMu`는 `IndexRooms`·`Resync`의 DB 작업(긴 임베딩 백필 포함) 전용이다. **슬롯을 예약한 채 `indexMu`를 기다리는 경로는 금지한다.** 그렇게 하면 색인 패스 내내 빌드 슬롯이 묶여 모든 `EnsureRooms` 느린 경로가 30초 만료로 실패한다(Fable 최종 검토 P1). 엔진 잠금을 푼 뒤 `generationMu`로 발행한다. `IndexRooms`·`Resync`는 DB 작업을 마치고 `indexMu`를 푼 뒤 빌드 큐에 등록한다. 현재 `IndexRooms`가 잠금 안에서 `Reload`를 부르는 곳(`internal/memory/engine/indexing.go:344`)도 이 순서로 분리한다. 정책은 TryLock 실패면 건너뛴다. 종료는 `lifeMu`·`memoryState.mu`를 놓고 drain한다. 서비스 종료/슬롯 대기를 하는 동안 엔진 잠금을 잡는 경로는 금지한다. 요청 측 저장소 정규화·검증은 요청 ctx, 빌더의 저장소 읽기는 서비스 빌드 ctx를 받는 경로로 옮긴다. ctx 없이 긴 저장소 읽기를 기다리는 요청 경로도 남기지 않는다.
+빌더는 잠금 없이 서비스 슬롯을 예약한 뒤 **`reloadMu`만** 얻어 빌드한다(현행 `Reload`와 같다, `internal/memory/engine/engine.go:420`). `indexMu`는 `IndexRooms`·`Resync`의 DB 작업(긴 임베딩 백필 포함) 전용이다. **슬롯을 예약한 채 `indexMu`를 기다리는 경로는 금지한다.** 그렇게 하면 색인 패스 내내 빌드 슬롯이 묶여 모든 `EnsureRooms` 느린 경로가 30초 만료로 실패한다(최종 설계 검토 P1). 엔진 잠금을 푼 뒤 `generationMu`로 발행한다. `IndexRooms`·`Resync`는 DB 작업을 마치고 `indexMu`를 푼 뒤 빌드 큐에 등록한다. 현재 `IndexRooms`가 잠금 안에서 `Reload`를 부르는 곳(`internal/memory/engine/indexing.go:344`)도 이 순서로 분리한다. 정책은 TryLock 실패면 건너뛴다. 종료는 `lifeMu`·`memoryState.mu`를 놓고 drain한다. 서비스 종료/슬롯 대기를 하는 동안 엔진 잠금을 잡는 경로는 금지한다. 요청 측 저장소 정규화·검증은 요청 ctx, 빌더의 저장소 읽기는 서비스 빌드 ctx를 받는 경로로 옮긴다. ctx 없이 긴 저장소 읽기를 기다리는 요청 경로도 남기지 않는다.
 
 | 상황 | 동작 | 근거·논증 |
 |---|---|---|
@@ -268,7 +268,7 @@ func (e *Engine) EnsureRooms(ctx context.Context, rooms []string) (ix *search.In
 | 사용자 설정으로 방마다 "항상 상주" 지정 | lowspec 원칙(새 설정 없음)에 어긋난다. 자동 규칙(7일·24시간·6시간)으로 같은 효과 |
 | identity 표도 상주 집합 기준 | §3.2(1). 범위 밖 방에서만 본 표시명이 사라져 인물 해석이 결정적으로 바뀐다. 전역 표는 캐시로 유지하고 실제 비용을 C-2·C-4에서 잰다 |
 
-## 5. 실험 결과 (코디네이터, 2026-10-13, Windows)
+## 5. 실험 결과 (2026-10-13, Windows)
 
 조건: 제품 Go, leaf 1024 + 메시지 벡터 1024(현재 기본), 문항 세트마다 답 있는 40 + 없는 10, 단일·흐름형. R0=재순위 없음(hybrid), R2=Voyage rerank-2.5-lite. 방 범위 검색(`Scope.Rooms`=문항의 방). 원본은 `.masamong-scratch/eval-msgdims/`(커밋하지 않음).
 
@@ -306,7 +306,7 @@ func (e *Engine) EnsureRooms(ctx context.Context, rooms []string) (ix *search.In
 | kakao-b | 1 | 102,132 | 33,801 | 111.0MB | 10.61 / 4.00s |
 | 합친 2방 | 2 | 177,571 | 74,393 | 213.0MB | 8.69 / 9.60s |
 
-한계: 첫 실행은 디스크 캐시가 비어 있고(복사 직후) 방 삭제 직후 사본은 첫 열기에 정리 작업이 섞였을 수 있다. 측정 장비는 저사양이 아니다(1코어 제한만). 다른 작업(테스트·워커)이 같은 시간에 돌았다. Go heap만 쟀고 RSS·SD cold p95는 재지 않았다. 방 수가 아니라 메시지 수가 힙·로드 시간을 정한다. discord 방 크기는 매우 치우쳐 있다(40,792 / 11,007 / 3,530 / 363 / 238 / … / 4).
+한계: 첫 실행은 디스크 캐시가 비어 있고(복사 직후) 방 삭제 직후 사본은 첫 열기에 정리 작업이 섞였을 수 있다. 측정 장비는 저사양이 아니다(1코어 제한만). 다른 작업(테스트 등)이 같은 시간에 돌았다. Go heap만 쟀고 RSS·SD cold p95는 재지 않았다. 방 수가 아니라 메시지 수가 힙·로드 시간을 정한다. discord 방 크기는 매우 치우쳐 있다(40,792 / 11,007 / 3,530 / 363 / 238 / … / 4).
 
 **C 참고(같은 날):** 메시지 벡터 1024 → 512는 R@5 네 칸 모두 3문항 이내(최대 −1), 힙 −15~19%. 권고만 했고 기본값은 그대로다.
 
@@ -345,7 +345,7 @@ func (e *Engine) EnsureRooms(ctx context.Context, rooms []string) (ix *search.In
 
 | 작업 | 허용 범위 | 산출물·통과 조건 |
 |---|---|---|
-| C-1 계약 | 이 ADR만 수정한다. 코드 구현 없음 | §12 여섯 결정. 코디네이터와 Fable 최종 검토. 작성자와 다른 모델이 검토한다 |
+| C-1 계약 | 이 ADR만 수정한다. 코드 구현 없음 | §12 여섯 결정. 최종 설계 검토. 작성자가 아닌 쪽이 검토한다 |
 | C-2 측정 전용 | **동작 변화 0·예산 무한·내려놓기 없음**. `Resident`는 항상 전체. `Index.EstimatedBytes()`·방별 비용·FTS 크기·재구축 피크·`memory_residency`·블록 예상 메모리 열만 추가한다 | 전체 상주 검색·parity·골든 바이트 그대로. 콘솔 ko/en/ja/es/zh-Hans·360px 검증. 준비됨과 상주함을 구분 |
 | C-3 게이트 도구 | runner의 독립 측정 빌드만 상주 방 필터를 받는다. 제품 config·콘솔 설정에는 노출하지 않는다. 원문·방·벡터 삭제로 흉내 내지 않는다. 측정 훅 `Settings.ResidentRoomsForMeasurement`·`search.BuildWithIdentity`는 명시적 도구 호출에서만 쓴다 | 재순위 전 후보·순위 덤프/비교, 아래 문항, 전체 identity 표 동등성, 부분 집합 parity. 기록 없는 방 요청과 빈 scope도 검증 |
 | C-4 실측 | A·B의 메시지 벡터 512 전환 뒤 Windows에서 GOMAXPROCS=1·GOMEMLIMIT로 1GB/512MB를 흉내 낸다. 실제 서비스 정책은 켜지 않는다 | 3세트+합친 루트의 상주 heap·hot 피크·working set·FTS·방 크기별 복귀 지연·빌드별 재할당 내역. 실기기 미확인을 명시 |
@@ -356,12 +356,12 @@ func (e *Engine) EnsureRooms(ctx context.Context, rooms []string) (ix *search.In
 | 단계 | 내용 | 완료 조건 |
 |---|---|---|
 | 0. 측정·품질 게이트 | (a) 상주 추정·`memory_residency` 진단·FTS 크기 측정만 넣는다(예산 무한, 내려놓지 않음). (b) 평가 도구에 **재순위 전 후보·순위 비교**를 넣는다. (c) 게이트 문항: 같은 요청/응답을 고정한 짝 비교(또는 반복한 짝 비교), 여러 방 scope 문항, 서로 다른 부분 집합과 출입 순서({A,B}→{A,B,C}→{A,B}), 범위 밖 방에서만 본 계정 별칭 문항, 시간 필터 문항, 부정 문항(기록 없음), 기본 auto 모드의 confidence·recovery 경로. (d) identity 전역 표의 전체 상주 동등성 테스트 | 전체 상주 parity·골든 통과(동등성). 부분 상주 게이트에서 재순위 전 후보 집합 변화와 R@5 문항 단위 회귀를 사용자에게 보고. **무손실 판정은 parity 통과와 별개로 사용자가 한다** |
-| 1. 계약 구현 | 사용자 승인 범위의 `EnsureRooms`·Index 보유 수·서비스 세대 관리자·호출자·오류 정책·identity 무효화·usage 표. 좁힌 `-race`·합성 경쟁 검증 | C-1 타 모델 검토 통과, C-2~C-4 검증·측정 완료, C-5 보고 후 **사용자 명시 승인**. 이후 엔진 단위 검증·Fable 최종 검토 |
+| 1. 계약 구현 | 사용자 승인 범위의 `EnsureRooms`·Index 보유 수·서비스 세대 관리자·호출자·오류 정책·identity 무효화·usage 표. 좁힌 `-race`·합성 경쟁 검증 | C-1 독립 검토 통과, C-2~C-4 검증·측정 완료, C-5 보고 후 **사용자 명시 승인**. 이후 엔진 단위 검증·최종 설계 검토 |
 | 2. 내려놓기 켬 | 예산·보호 규칙 적용. 예산 안인 설치는 동작 변화 없음 | 실기기(라즈베리파이·SD·512MB) 피크·첫 질문 지연 측정. 실기기 접근은 별도 완료 조건 |
 | 3. prefetch | capture 경로 연결. 진단의 "질문이 로드를 기다린 횟수"로 효과 확인 | 핑퐁 없음(방당 6시간에 1회 이하) |
 | 별도 A·B(결정됨) | 메시지 벡터 512 적용과 MRL 확인 | 2026-10-13 사용자 결정. C-4보다 먼저 검증하며 이 ADR 문서 작업에서는 구현하지 않음 |
 
-**기간(워커 기준, 재추정).** 계약 확정 0.5~1일(이 ADR + 타 모델 검토) → 단계 0 도구·게이트 2~3일 → 구현 3~5일 → 정적/합성 경쟁 검증 1~2일 → 실기기 피크·지연 측정(실기기 확보 뒤, 1~2일) → 사용자 활성화. 벽시계 **약 2~3주**, 실기기 접근은 별도 조건. 1차 초안의 "약 1주"는 동시성 계약·읽기 경로·부분 parity·실기기가 모두 미리 풀린 경우의 값이었다.
+**기간(재추정).** 계약 확정 0.5~1일(이 ADR + 독립 검토) → 단계 0 도구·게이트 2~3일 → 구현 3~5일 → 정적/합성 경쟁 검증 1~2일 → 실기기 피크·지연 측정(실기기 확보 뒤, 1~2일) → 사용자 활성화. 벽시계 **약 2~3주**, 실기기 접근은 별도 조건. 1차 초안의 "약 1주"는 동시성 계약·읽기 경로·부분 parity·실기기가 모두 미리 풀린 경우의 값이었다.
 
 **위험.**
 
@@ -416,7 +416,7 @@ func (e *Engine) EnsureRooms(ctx context.Context, rooms []string) (ix *search.In
 - 실기기(라즈베리파이·SD 카드·512MB) 측정은 아직 없다([남은 일](../BACKLOG.md)의 저사양 실기기 확인). 이 ADR의 로드 시간은 x86 1코어 흉내이고 Go heap만 쟀다.
 - 빌드마다 새로 만드는 메시지 배열·맵(§1)을 세대 간에 공유하면 피크 배수 2.0을 낮출 수 있다. 이 ADR의 범위 밖이며 단계 0 측정이 그 가치를 보여 줄 것이다.
 
-## 11. 검토 반영 기록 (Sol, 2026-10-13, 판정 REVISE)
+## 11. 검토 반영 기록 (독립 검토, 2026-10-13, 판정 REVISE)
 
 | 항목 | 반영 절 |
 |---|---|
@@ -431,9 +431,9 @@ func (e *Engine) EnsureRooms(ctx context.Context, rooms []string) (ix *search.In
 | P3 범위 필터 문구, mmap 기각 근거, FTS 두 DB, parity 로더, 스키마 문구 | §1, §3.2 parity, §4, §7 되돌리기 |
 | 반영하지 않은 것 | 없음. 단, 피크 모델의 FTS 크기 F와 RSS는 측정값이 없어 단계 0으로 미뤘다(§3.6·§7) |
 
-## 12. 0단계 계약 결정 (C-1, 2026-10-13, Fable 최종 검토 SOUND)
+## 12. 0단계 계약 결정 (C-1, 2026-10-13, 최종 설계 검토 SOUND)
 
-2차 검토의 여섯 쟁점을 아래 결정으로 닫았다. 1·2차 검토에서 이미 닫힌 방향·실험 해석은 다시 열지 않는다. 아래는 **설계 완료이며 구현/검증 완료 주장이 아니다**. 코디네이터와 Fable(최종)이 검토했고 판정은 SOUND다. Fable이 남긴 1단계 계약 수정(빌더는 reloadMu만, 임베딩 뒤 획득, identity 검증 범위, 종료 drain 상한, 어휘 구문 오류, 잠금 순서)은 §3.2·§3.6·§9에 반영했다.
+2차 검토의 여섯 쟁점을 아래 결정으로 닫았다. 1·2차 검토에서 이미 닫힌 방향·실험 해석은 다시 열지 않는다. 아래는 **설계 완료이며 구현/검증 완료 주장이 아니다**. 최종 설계 검토의 판정은 SOUND다. 그 검토가 남긴 1단계 계약 수정(빌더는 reloadMu만, 임베딩 뒤 획득, identity 검증 범위, 종료 drain 상한, 어휘 구문 오류, 잠금 순서)은 §3.2·§3.6·§9에 반영했다.
 
 | 쟁점 | 확정한 설계 | 본문·근거 코드 |
 |---|---|---|

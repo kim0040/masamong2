@@ -1,0 +1,51 @@
+# 패키지 층: 누가 누구를 가져오나. docs/architecture/system.md 가 쓴다.
+# 화살표는 "가져온다(import)"는 뜻이고 위에서 아래로만 간다.
+grid-columns: 1
+grid-gap: 44
+
+entry: "입구 · 입력과 출력만 바꾼다" {
+  class: group
+  grid-rows: 1
+  grid-gap: 24
+  cmd: "cmd/masamongd\ncmd/masamong" {class: entry; width: 200}
+  discord: "connectors/discord\nGateway · 명령 · 답 보내기" {class: entry; width: 200}
+  web: "transport/web · ui\n콘솔 서버와 화면" {class: entry; width: 200}
+  cli: "cli · tui · tray\nlauncher" {class: entry; width: 200}
+}
+
+action: "Action 계층 · 권한, 한도, 설정, 변경 기록" {
+  class: group
+  grid-rows: 1
+  grid-gap: 24
+  application: "application\nService.Execute · 기능 대부분" {class: core; width: 424}
+  catalog: "catalog · action\nAction 목록과 봉투" {class: core; width: 200}
+  config: "config · jobs\n설정 리비전 · 작업 상태" {class: core; width: 200}
+}
+
+domain: "대화 · 기억 · 도구" {
+  class: group
+  grid-columns: 4
+  grid-gap: 24
+  chat: "chat\n플래너 · 도구 루프 · 답변" {class: core; width: 200}
+  conversation: "conversation\n부른 사람의 대화 고르기" {class: core; width: 200}
+  tools: "tools\n도구 등록부와 한도" {class: core; width: 200}
+  features: "features\n운세 · 공지 · 리마인더 · 투표" {class: core; width: 200}
+  engine: "memory/engine\n수집 · 색인 · 검색 실행" {class: memory; width: 200}
+  search: "memory/search · lexical\nleaves · 후보와 결합" {class: memory; width: 200}
+  episodes: "memory/episodes\n방 기억 · 사람 기억 백필" {class: memory; width: 200}
+  lang: "lang · locales\n언어팩과 화면 문구" {class: core; width: 200}
+}
+
+base: "저장과 바깥" {
+  class: group
+  grid-rows: 1
+  grid-gap: 24
+  store: "memory/store · storage\nSQLite 표" {class: store; width: 200}
+  providers: "providers\n모델 · 검색 · 날씨 · 금융" {class: external; width: 200}
+  secrets: "secrets · fsutil\n키 참조 · 안전한 쓰기" {class: store; width: 200}
+  misc: "clock · crash · errclass\n시계 · 실패 격리와 분류" {class: store; width: 200}
+}
+
+entry -> action: "Service.Execute 만 부른다"
+action -> domain: "모델 · 기억 · 도구를 넣어 준다"
+domain -> base

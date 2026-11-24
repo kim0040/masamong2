@@ -9,7 +9,7 @@ Masamong에 관심을 가져 주셔서 감사합니다. Maintainer는 **김현�
 1. 이슈 또는 변경 목적을 한 문장으로 정리합니다.
 2. `git status`, 최근 commit, 현재 diff를 확인합니다.
 3. 진행 중인 파일과 추적되지 않은 파일을 보존합니다. `reset`, `restore`, `clean`, 강제 push로 다른 작업을 지우지 않습니다.
-4. 관리자 GUI와 테스트 샌드박스를 혼동하지 않도록 [저장소 지도](docs/REPO_MAP.md)를 확인합니다.
+4. 관리자 GUI와 테스트 샌드박스를 혼동하지 않도록 [저장소 지도](docs/REPO_MAP.md)를 확인합니다. 구조와 결정 이유는 [아키텍처 문서](docs/architecture/README.md)에 있습니다.
 
 ## 브랜치
 

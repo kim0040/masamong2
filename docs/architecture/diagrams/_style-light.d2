@@ -1,0 +1,52 @@
+# Shared look of every diagram in this folder, light version. scripts/diagrams.sh puts this file in
+# front of each source, so a source only names the classes below. The dark version is _style-dark.d2.
+vars: {
+  d2-config: {
+    layout-engine: elk
+    theme-id: 0
+    pad: 16
+  }
+}
+style.fill: transparent
+
+classes: {
+  actor: {
+    style: {fill: "#f4f4f2"; stroke: "#78716c"; font-color: "#1c1917"; border-radius: 8}
+  }
+  entry: {
+    style: {fill: "#dbe7ff"; stroke: "#2563eb"; font-color: "#1c1917"; border-radius: 8}
+  }
+  core: {
+    style: {fill: "#fde3cf"; stroke: "#d9661a"; font-color: "#1c1917"; border-radius: 8}
+  }
+  memory: {
+    style: {fill: "#dcf3e3"; stroke: "#15803d"; font-color: "#1c1917"; border-radius: 8}
+  }
+  external: {
+    style: {fill: "#ebe2fd"; stroke: "#7c3aed"; font-color: "#1c1917"; border-radius: 8}
+  }
+  store: {
+    style: {fill: "#e7e5e4"; stroke: "#57534e"; font-color: "#1c1917"; border-radius: 8}
+  }
+  group: {
+    style: {fill: "#fafaf9"; stroke: "#a8a29e"; font-color: "#44403c"; border-radius: 10; stroke-dash: 4; font-size: 20}
+  }
+  row: {
+    style: {fill: transparent; stroke: transparent}
+  }
+  note: {
+    style: {fill: transparent; stroke: transparent; font-color: "#57534e"}
+  }
+  flow: {
+    style: {stroke: "#57534e"; font-color: "#44403c"}
+  }
+  weak: {
+    style: {stroke: "#a8a29e"; font-color: "#57534e"; stroke-dash: 4}
+  }
+}
+
+# every connection, unless it names a class of its own
+(** -> **)[*].style.stroke: "#57534e"
+(** -> **)[*].style.font-color: "#44403c"
+(** <-> **)[*].style.stroke: "#57534e"
+(** <-> **)[*].style.font-color: "#44403c"

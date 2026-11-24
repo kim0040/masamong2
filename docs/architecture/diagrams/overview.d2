@@ -1,0 +1,73 @@
+# 큰 그림: 누가 무엇과 이야기하나. docs/architecture/README.md 가 쓴다.
+# 층을 격자로 쌓았다: 사람 → 입구 → 데몬(입구, Action 계층, 일하는 부분, 저장) → 바깥 API.
+grid-columns: 1
+grid-gap: 40
+
+who: "" {
+  class: row
+  grid-rows: 1
+  grid-gap: 24
+  operator: "운영자" {class: actor; width: 424}
+  people: "Discord 방 사람들" {class: actor; width: 424}
+}
+
+door: "" {
+  class: row
+  grid-rows: 1
+  grid-gap: 24
+  cli: "masamong\nCLI · 런처 · 트레이" {class: entry; width: 200}
+  browser: "브라우저\n관리 콘솔" {class: entry; width: 200}
+  discord: "Discord" {class: external; width: 424}
+}
+
+daemon: "masamongd · 데몬 프로세스 하나" {
+  class: group
+  label.near: bottom-center
+  grid-columns: 1
+  grid-gap: 36
+
+  in: "" {
+    class: row
+    grid-rows: 1
+    grid-gap: 24
+    web: "콘솔 서버\n127.0.0.1 전용" {class: entry; width: 424}
+    gateway: "Discord Gateway\n받기 · 답 보내기" {class: entry; width: 424}
+  }
+  app: "Action 계층 · application.Service.Execute\n어디서 오든 같은 Action · 권한 · 한도 · 변경 기록" {class: core}
+  work: "" {
+    class: row
+    grid-rows: 1
+    grid-gap: 24
+    chat: "대화 한 턴\nchat.Runtime" {class: core; width: 200}
+    memory: "기억 엔진\n수집 · 색인 · 검색" {class: memory; width: 200}
+    tools: "도구 · 공급자\n어댑터" {class: core; width: 200}
+    background: "백그라운드\n스케줄러 · 기억 워커" {class: core; width: 200}
+  }
+  db: "SQLite · masamong.db\n설정 · 원문 · 색인 · 대화 기록 · 사용량" {class: store; shape: cylinder}
+}
+
+outside: "" {
+  class: row
+  grid-rows: 1
+  grid-gap: 24
+  models: "모델 API\n플래너 · 답변 · 요약 · 임베딩 · 재순위" {class: external; width: 424}
+  apis: "도구 API\n날씨 · 금융 · 검색 · 장소" {class: external; width: 424}
+}
+
+who.operator -> door.cli
+who.operator -> door.browser
+who.people -> door.discord
+door.cli -> daemon.in.web
+door.browser -> daemon.in.web
+door.discord <-> daemon.in.gateway
+daemon.in.web -> daemon.app
+daemon.in.gateway -> daemon.app
+daemon.app -> daemon.work.chat
+daemon.app -> daemon.work.memory
+daemon.app -> daemon.work.tools
+daemon.app -> daemon.work.background
+daemon.work.chat -> daemon.work.memory
+daemon.work.memory -> daemon.db
+daemon.work.background -> daemon.db
+daemon -> outside.models
+daemon -> outside.apis

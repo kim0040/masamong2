@@ -17,6 +17,9 @@ func TestRepositoryDocs(t *testing.T) {
 	for _, p := range append(append(checkLinks(root), checkTranslations(root)...), checkCommands(root)...) {
 		t.Error(p)
 	}
+	for _, p := range checkDiagrams(root) {
+		t.Error(p)
+	}
 }
 
 func TestLinkTargets(t *testing.T) {
@@ -43,6 +46,11 @@ func TestLinkTargets(t *testing.T) {
 	}
 	if l := links("see [a](x.md) and `[b](y.md)`\n```\n[c](z.md)\n```\n<img src=\"i.png\">"); strings.Join(l, ",") != "x.md,i.png" {
 		t.Fatalf("links outside code: %v", l)
+	}
+	picture := `<picture><source media="(prefers-color-scheme: dark)" srcset="d/x-dark.svg"><img alt="x" src="d/x-light.svg"></picture>` +
+		`<img srcset="a.png 1x, b.png 2x">`
+	if l := links(picture); strings.Join(l, ",") != "d/x-light.svg,d/x-dark.svg,a.png,b.png" {
+		t.Fatalf("links of a picture: %v", l)
 	}
 }
 
