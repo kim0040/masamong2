@@ -166,7 +166,7 @@ A declaration says whether the tool is on by default in chat and as a command, t
 - **A tool without a key is still shown to the planner.** Its "not configured" result is what stops a made-up answer.
 - **Tools the operator must turn on**: `web.read` sends links from messages to an outside service, so it is off by default.
 - **After web content was read, write tools are refused.** The text of a web page cannot make the bot create something.
-- **Operator-defined HTTP tools**: the setting `tools.<id>.http` adds a tool without code. It runs as an Action outside the catalog and passes the same gate. A key written directly into a header or URL is refused (only references are accepted), and addresses on the internal network are refused.
+- **Operator-defined HTTP tools**: the setting `tools.<id>.http` adds a tool without code. It runs as an Action outside the catalog and passes the same gate. A key written directly into a header or URL is refused (only references are accepted). Any https address is accepted, and plain http only for localhost, 127.x.x.x and [::1]. Internal-network addresses are not blocked, because the operator sets the address (the page reader is the tool that refuses them).
 - **To add a tool**: one line in `Builtins()`, the description in the language packs, an Action in the catalog, and the console flow. A test checks that the generated [tool index](../code-map/tools.md) matches.
 
 How to operate tools (switching them, limits, per-channel settings, HTTP tool examples) is in [tools and languages](../tools-and-languages.md) (Korean) and the wiki's [tools and limits](../wiki/Tools-and-Limits.md).

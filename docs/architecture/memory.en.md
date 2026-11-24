@@ -243,7 +243,7 @@ Cost examples and the procedure are in [memory operations §14-1](../memory-oper
 Rough sums (the figures depend on the provider and the model):
 
 - **Indexing**: cost ≈ (message tokens × embedding price) + (leaves × the price of one summary). Summaries are most of it. The expected calls, cost and time are shown before it runs.
-- **Backfill**: requests ≈ lines ÷ 100 or so. Take one window as about 4,600 input and 550 output tokens and multiply by the model's price; a batch is half. The estimate step counts the real numbers.
+- **Backfill**: one request per window. A window holds at most 120 lines, so a bit more than lines ÷ 120. Take one window as about 4,600 input and 550 output tokens and multiply by the model's price; a batch is half. The estimate step counts the real numbers.
 - **Memory (RAM)**: proportional to the number of messages. With leaves 1024 wide and message vectors on, a large set takes a little over 1 KB per message. Width changes RAM, not speed and not the embedding price ([embedding width measurements](../rag/embedding-width-2026-10.md), Korean).
 
 **No reprocessing**: a release, a restart or a deploy never re-summarizes or re-embeds the history on its own. The recipe and the embedding space are pinned and the schema is only added to. A test pins "zero calls after a restart, existing rows unchanged" (the no-reprocess test in [`internal/memory/engine`](../../internal/memory/engine)). A release that changes a default states the effect and the cost in its notes.

@@ -49,16 +49,16 @@
       "docs/architecture/glossary.md": "44014906ca048a10"
     },
     "docs/architecture/memory": {
-      "docs/architecture/memory.en.md": "3dd57bbbf961c455",
-      "docs/architecture/memory.md": "b6adf1cb8b8447fc"
+      "docs/architecture/memory.en.md": "4acb1bd5582bce38",
+      "docs/architecture/memory.md": "d8aa66ce608d0bd1"
     },
     "docs/architecture/message-flow": {
       "docs/architecture/message-flow.en.md": "9ef582ba8bf75ab3",
       "docs/architecture/message-flow.md": "85c986119107e435"
     },
     "docs/architecture/providers-and-tools": {
-      "docs/architecture/providers-and-tools.en.md": "0885c58ab7bdac1b",
-      "docs/architecture/providers-and-tools.md": "e6c74785ce0eb32f"
+      "docs/architecture/providers-and-tools.en.md": "4ffd6972fd863335",
+      "docs/architecture/providers-and-tools.md": "0dfdb1d6dda20d95"
     },
     "docs/architecture/system": {
       "docs/architecture/system.en.md": "edeb57a4ea0800d7",
