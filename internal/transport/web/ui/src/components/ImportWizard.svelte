@@ -20,6 +20,8 @@
   import KeyValue from './KeyValue.svelte'
   import BatchChoice from './BatchChoice.svelte'
   import * as I from '../lib/icons'
+  import { useRooms } from '../lib/rooms.svelte'
+  const names = useRooms()
 
   // A KakaoTalk export becomes a memory block: file → check → import → prepare for RAG (background
   // job, estimate first) → connect to channels. Every step after the import can be skipped and done
@@ -288,7 +290,7 @@
           {#each channels as c (c.guild_id + '/' + c.channel_id)}
             {@const key = c.guild_id + '/' + c.channel_id}
             <li><label><input type="checkbox" checked={picked.includes(key)} onchange={(e) => (picked = (e.currentTarget as HTMLInputElement).checked ? [...picked, key] : picked.filter((x) => x !== key))} />
-              <span><strong>#{c.name}</strong> <span class="xs muted">{c.guild_name}</span></span></label></li>
+              <span><strong>{names.channel(c.name, c.channel_id).label}</strong> <span class="xs muted">{c.guild_name}</span></span></label></li>
           {/each}
         </ul>
       {:else}

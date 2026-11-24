@@ -5,7 +5,7 @@
   import { emptyScope, stateLabel } from '../lib/blocks'
   import { fly, fade } from 'svelte/transition'
   import { tick } from 'svelte'
-  import { t, toolName, i18n } from '../lib/i18n.svelte'
+  import { t, toolName, i18n, has } from '../lib/i18n.svelte'
   import { call, can } from '../lib/api.svelte'
   import { resource } from '../lib/resource.svelte'
   import { cfg, useConfig } from '../lib/config.svelte'
@@ -26,6 +26,11 @@
   import Status from '../components/Status.svelte'
   import EmptyState from '../components/EmptyState.svelte'
   import Confirm from '../components/Confirm.svelte'
+  import RoomPicker from '../components/RoomPicker.svelte'
+  import DiscordText from '../components/DiscordText.svelte'
+  import { splitExcerpt } from '../lib/discordtext'
+  import { readPick, writePick, keepKnown, browserStorage } from '../lib/labpick'
+  import { useRooms } from '../lib/rooms.svelte'
   import PlanSimulator from '../components/PlanSimulator.svelte'
   import { personaOptionsFor } from '../lib/persona'
   import * as I from '../lib/icons'
@@ -35,14 +40,19 @@
   // the live conversation log.
   useConfig()
   const blocks = resource<any>('memory.blocks.list')
+  const names = useRooms()
   const reviews = resource<any>('lab.reviews', () => ({ limit: 300 }), { live: ['audit'] })
   const d = $derived(motionAllowed() ? 1 : 0)
 
-  type LabTurn = { id: number; side: 'A' | 'B'; kind: 'chat' | 'search'; ranking: string; q: string; speaker: string; answer?: string; evidence: any[]; tools?: any[]; plan?: any; timing?: Record<string, number>; cost?: number; rag?: string; error?: string; verdict?: string; pending: boolean; channel?: string; rooms?: string[] }
+  type LabTurn = { id: number; side: 'A' | 'B'; kind: 'chat' | 'search'; ranking: string; q: string; speaker: string; answer?: string; evidence: any[]; tools?: any[]; plan?: any; retrieval?: any; timing?: Record<string, number>; cost?: number; rag?: string; error?: string; verdict?: string; pending: boolean; channel?: string; rooms?: string[] }
   let tab = $state(route.query.get('tab') ?? 'chat')
   let kind = $state<'chat' | 'search'>(route.query.get('persona') ? 'chat' : 'search')
   let channelKey = $state(route.query.get('guild') && route.query.get('channel') ? `${route.query.get('guild')}:${route.query.get('channel')}` : '')
-  let roomsSel = $state<string[]>((route.query.get('rooms') ?? '').split(',').map((x) => x.trim()).filter(Boolean))
+  const urlRooms = (route.query.get('rooms') ?? '').split(',').map((x) => x.trim()).filter(Boolean)
+  let roomsSel = $state<string[]>(urlRooms)
+  // the room and sources last picked in this browser; an address that names them wins
+  const store = browserStorage()
+  const saved = readPick(store)
   let rankingA = $state('auto')
   let rankingB = $state('rerank')
   let compare = $state(false)
@@ -61,29 +71,43 @@
   // configured rooms and the ones Discord shows, by name (IDs only when the name is unknown)
   const chList = resource<any>('channels.list', () => ({}), { live: ['config', 'discord'] })
   const channels = $derived.by(() => {
-    const guildName = (g: string) => (chList.data?.guilds ?? []).find((x: any) => x.id === g)?.name ?? g
-    const out: { value: string; label: string }[] = []
+    const guildName = (g: string) => names.server((chList.data?.guilds ?? []).find((x: any) => x.id === g)?.name, g)
+    const out: { value: string; label: string; group: string; hidden?: boolean }[] = []
     const seen = new Set<string>()
     for (const ch of (chList.data?.channels ?? []) as any[]) {
       const k = `${ch.guild_id}:${ch.id}`
       seen.add(k)
-      out.push({ value: k, label: `#${ch.name || ch.id} · ${guildName(ch.guild_id)}` })
+      const nm = names.channel(ch.name, ch.id)
+      out.push({ value: k, label: nm.label, group: guildName(ch.guild_id), hidden: nm.hidden })
     }
-    for (const [g, gv] of Object.entries<any>(cfg.doc?.guilds ?? {})) for (const c of Object.keys(gv?.channels ?? {})) if (!seen.has(`${g}:${c}`)) out.push({ value: `${g}:${c}`, label: `#${c} · ${guildName(g)}` })
+    for (const [g, gv] of Object.entries<any>(cfg.doc?.guilds ?? {})) for (const c of Object.keys(gv?.channels ?? {})) if (!seen.has(`${g}:${c}`)) out.push({ value: `${g}:${c}`, label: names.channel('', c).label, group: guildName(g), hidden: true })
     return out
   })
   $effect(() => {
-    if (!channelKey && channels.length) channelKey = channels[0].value
+    if (!channelKey && channels.length) channelKey = (channels.find((c) => c.value === saved.channel) ?? channels.find((c) => !c.hidden) ?? channels[0]).value
+  })
+  // the saved sources, once the rooms are known: the ones that are gone are dropped
+  let restored = $state(false)
+  $effect(() => {
+    if (restored || !names.ready) return
+    if (!urlRooms.length && saved.rooms.length) roomsSel = keepKnown(saved.rooms, names.items.map((r) => r.key))
+    restored = true
+  })
+  $effect(() => {
+    const c = channelKey
+    const r = [...roomsSel]
+    if (!restored) return
+    writePick(store, { channel: c || saved.channel, rooms: r })
   })
   const withMessages = $derived(((blocks.data?.blocks ?? []) as any[]).filter((b) => (b.message_count ?? 0) > 0))
-  const allRooms = $derived(withMessages.map((b) => b.source_room as string))
-  const roomLabel = (r: string) => withMessages.find((b) => b.source_room === r)?.label ?? r
   const selected = $derived(turns.find((x) => x.id === selectedId) ?? turns.at(-1))
   // an empty result says why when the scope knows: the room has no memory block attached
   const emptyWhy = (tr: LabTurn) => {
     const [g, c] = (tr.channel ?? '').split(':')
     return emptyScope((blocks.data?.blocks ?? []) as any[], tr.rooms?.length || !g || !c ? null : { guild_id: g, channel_id: c })
   }
+  // a planner value as words: its translation, else the value with spaces for underscores
+  const plain = (prefix: string, v: string) => (has(`${prefix}.${v}`) ? t(`${prefix}.${v}`) : String(v).replace(/_/g, ' '))
   const rankings = ['auto', 'hybrid', 'rerank', 'heuristic'].map((v) => ({ value: v, label: t(`lab.rank.${v}`) }))
   const quick = $derived([t('lab.q.1'), t('lab.q.2'), t('lab.q.3'), t('lab.q.4')])
 
@@ -108,7 +132,7 @@
           const r = await call('chat.respond', { guild_id: g, channel_id: c, message: q, speaker: x.speaker, ranking, detail: 'true', ...(persona ? { persona_ref: persona } : {}) })
           x.pending = false
           if (!r.ok) x.error = r.error?.message
-          else Object.assign(x, { answer: r.output.answer, evidence: r.output.evidence ?? [], tools: r.output.tools, plan: r.output.plan, timing: r.output.timing_ms, cost: r.output.cost_usd, rag: r.output.rag_state })
+          else Object.assign(x, { answer: r.output.answer, evidence: r.output.evidence ?? [], tools: r.output.tools, plan: r.output.plan, retrieval: r.output.retrieval, timing: r.output.timing_ms, cost: r.output.cost_usd, rag: r.output.rag_state })
         } else {
           const input: any = { query: q, ranking, top_k: 8 }
           if (roomsSel.length) input.rooms = roomsSel
@@ -120,6 +144,11 @@
         }
       }),
     )
+  }
+  // ask the same question again with the current settings (e.g. after changing the ranking)
+  function again(tr: LabTurn) {
+    msg = tr.q
+    void send()
   }
   function keydown(e: KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
@@ -219,11 +248,7 @@
             {#if kind === 'search'}
               <div>
                 <div class="lbl">{t('lab.rooms')}</div>
-                <div class="rooms">
-                  {#each allRooms as r}
-                    <button type="button" class="room" title={r} class:on={roomsSel.includes(r)} aria-pressed={roomsSel.includes(r)} onclick={() => (roomsSel = roomsSel.includes(r) ? roomsSel.filter((x) => x !== r) : [...roomsSel, r])}>{roomLabel(r)}</button>
-                  {:else}<span class="xs muted">{t('index.no_rooms')}</span>{/each}
-                </div>
+                <RoomPicker items={names.items} bind:value={roomsSel} />
                 <p class="xs muted">{roomsSel.length ? t('lab.rooms_n', { n: roomsSel.length }) : t('lab.rooms_channel')}</p>
               </div>
             {:else}
@@ -271,14 +296,15 @@
                   {:else if tr.error}
                     <p class="err">{tr.error}</p>
                   {:else if tr.kind === 'chat'}
-                    <p class="ans">{tr.answer || t('lab.silent')}</p>
+                    <p class="ans">{#if tr.answer}<DiscordText text={tr.answer} />{:else}{t('lab.silent')}{/if}</p>
                   {:else}
-                    <p class="ans muted small">{tr.evidence[0]?.excerpt ? tr.evidence[0].excerpt.slice(0, 220) : `${t('lab.no_hits')} ${t(`lab.empty.${emptyWhy(tr)}`)}`}</p>
+                    <p class="ans muted small">{#if tr.evidence[0]?.excerpt}<DiscordText text={splitExcerpt(tr.evidence[0].excerpt).body.slice(0, 220)} />{:else}{`${t('lab.no_hits')} ${t(`lab.empty.${emptyWhy(tr)}`)}`}{/if}</p>
                   {/if}
                 </div>
               </button>
               {#if !tr.pending && !tr.error}
                 <div class="judge" role="group" aria-label={t('lab.judge')}>
+                  <Button size="sm" variant="ghost" icon={I.RotateCcw} onclick={() => again(tr)}>{t('lab.again')}</Button>
                   {#each [['good', I.ThumbsUp], ['bad', I.ThumbsDown], ['unsure', I.CircleHelp]] as [v, Icon]}
                     <IconButton icon={Icon as any} label={t(`lab.verdict.${v}`)} active={tr.verdict === v} onclick={() => judge(tr, v as any)} size={16} />
                   {/each}
@@ -309,6 +335,18 @@
                     {/each}
                   </div>
                 {/if}
+                {#if selected.plan}
+                  <div>
+                    <div class="section-title">{t('lab.diag.plan')}</div>
+                    <dl class="kv xs">
+                      {#if selected.plan.question_kind}<dt>{t('lab.diag.question_kind')}</dt><dd>{plain('lab.diag.qk', selected.plan.question_kind)}</dd>{/if}
+                      {#if selected.plan.memory_requirement}<dt>{t('lab.diag.memory_req')}</dt><dd>{plain('lab.diag.mr', selected.plan.memory_requirement)}</dd>{/if}
+                      {#if selected.plan.time_scope}<dt>{t('lab.diag.time_scope')}</dt><dd>{plain('lab.diag.ts', selected.plan.time_scope)}</dd>{/if}
+                      {#if selected.plan.tool_plan?.length}<dt>{t('lab.diag.tool_plan')}</dt><dd>{selected.plan.tool_plan.map((x: any) => toolName(x.tool_name)).join(' → ')}</dd>{/if}
+                      {#if selected.retrieval?.applied}<dt>{t('lab.diag.applied')}</dt><dd>{t(`lab.rank.${selected.retrieval.applied}`)}</dd>{/if}
+                    </dl>
+                  </div>
+                {/if}
                 {#if selected.tools?.length}
                   <div><div class="section-title">{t('turns.step.tools')}</div>
                     {#each selected.tools as tl}<div class="row small" style:margin-top="6px"><Status tone={tl.ok ? 'ok' : 'danger'} label={toolName(tl.tool)} size="sm" />{#if tl.error}<span class="xs err">{tl.error}</span>{/if}</div>{/each}
@@ -317,11 +355,11 @@
                 <div class="section-title">{t('turns.step.evidence', { n: selected.evidence.length })}</div>
                 {#each selected.evidence as h, i}
                   <article class="hit" in:fly={{ y: 8, duration: 220 * d, delay: i * 40 * d }}>
-                    <div class="row xs muted"><span class="chip">#{h.rank ?? i + 1}</span><span class="ellipsis">{h.room ?? h.source_room_id}</span><span class="spacer"></span>{#if h.rerank_score !== undefined}<span class="num">R {Number(h.rerank_score).toFixed(3)}</span>{/if}<span class="num">cos {Number(h.dense_cos ?? 0).toFixed(3)}</span></div>
+                    <div class="row xs muted"><span class="chip">#{h.rank ?? i + 1}</span><span class="ellipsis" title={h.room ?? h.source_room_id}>{names.name(h.room ?? h.source_room_id).label} · {names.name(h.room ?? h.source_room_id).server}</span><span class="spacer"></span>{#if h.rerank_score !== undefined}<span class="num" title={t('lab.diag.score_rerank_hint')}>{t('lab.diag.score_rerank')} {Number(h.rerank_score).toFixed(3)}</span>{/if}<span class="num" title={t('lab.diag.score_sim_hint')}>{t('lab.diag.score_sim')} {Number(h.dense_cos ?? 0).toFixed(3)}</span></div>
                     <div class="xs muted">{h.date}{h.speakers?.length ? ` · ${h.speakers.join(', ')}` : ''}</div>
-                    {#if h.summary}<p class="xs sum">{h.summary}</p>{/if}
+                    {#if h.summary}<p class="xs sum"><DiscordText text={h.summary} /></p>{/if}
                     {#if shownIn(selected.evidence, i)}<p class="xs muted shown">{t('evidence.shown_in', { n: shownIn(selected.evidence, i) })}</p>{/if}
-                    <pre>{h.excerpt}</pre>
+                    <pre><DiscordText text={splitExcerpt(h.excerpt).body} /></pre>
                   </article>
                 {:else}
                   <p class="small muted">{t('lab.no_hits')}</p>
@@ -725,6 +763,19 @@
   }
   .sum {
     color: var(--text-muted);
+  }
+  .kv {
+    display: grid;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: 4px 12px;
+    margin: 6px 0 0;
+  }
+  .kv dt {
+    color: var(--text-muted);
+  }
+  .kv dd {
+    margin: 0;
+    overflow-wrap: anywhere;
   }
   .q2 {
     max-width: 360px;

@@ -108,6 +108,12 @@ export function priceOps(role: string, v: { in: number; out: number; cached: num
   return ops
 }
 
+/** The config change for setting only a role's reasoning level (blank = the default); other roles take none. */
+export const effortOps = (role: string, effort: string): Op[] => (effortRole(role) ? [setOrUnset(['models', role, 'effort'], effort)] : [])
+
+/** Whether the saved level is one the model takes (a model that does not think takes none but 'none'). */
+export const effortFits = (r: Reasoning | undefined, level: string): boolean => !level || effortLevels(r, '').some((l) => l.value === level && !l.disabled)
+
 // ---- fallbacks ----
 
 export const FALLBACK_ROLES = ['response', 'planner', 'summary', 'vision']

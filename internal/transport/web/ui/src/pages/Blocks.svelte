@@ -31,6 +31,8 @@
   import ConnectDialog from '../components/ConnectDialog.svelte'
   import ExtractMemory from '../components/ExtractMemory.svelte'
   import * as I from '../lib/icons'
+  import { useRooms } from '../lib/rooms.svelte'
+  const names = useRooms()
 
   useConfig()
   const data = resource<any>('memory.blocks.list', () => ({}), { live: ['config', 'job', 'memory'] })
@@ -96,12 +98,12 @@
   async function attachTo(c: any, b: any, close: () => void) {
     close()
     const r = await call('channels.view.attach', { guild_id: c.guild_id, channel_id: c.channel_id, block_id: b.block_id })
-    r.ok ? toast('ok', t('connect.attached', { block: b.label, channel: c.name })) : toast('error', t('connect.failed', { n: 1 }), r.error?.message)
+    r.ok ? toast('ok', t('connect.attached', { block: b.label, channel: names.channel(c.name, c.channel_id).label })) : toast('error', t('connect.failed', { n: 1 }), r.error?.message)
     void data.refresh()
   }
   async function detachFrom(c: any, a: any) {
     const r = await call('channels.view.detach', { guild_id: c.guild_id, channel_id: c.channel_id, block_id: a.block_id })
-    r.ok ? toast('ok', t('connect.detached', { block: a.label || t('connect.stale'), channel: c.name })) : toast('error', t('common.failed'), r.error?.message)
+    r.ok ? toast('ok', t('connect.detached', { block: a.label || t('connect.stale'), channel: names.channel(c.name, c.channel_id).label })) : toast('error', t('common.failed'), r.error?.message)
     void data.refresh()
   }
   const byGuild = $derived.by(() => {
@@ -233,7 +235,7 @@
               <header>
                 <span class="ic {b.platform}" aria-hidden="true">{#if isKakao(b)}<I.MessagesSquare size={18} />{:else}<I.Hash size={18} />{/if}</span>
                 <div class="nm">
-                  <h2><a href={blockHref(b.source_room)}>{b.label}</a></h2>
+                  <h2><a href={blockHref(b.source_room)}>{names.block(b)}</a></h2>
                   <span class="xs muted">{t(`blocks.platform.${b.platform}`)}{b.own_channel ? ` · ${b.own_channel.guild_name}` : ''}</span>
                 </div>
                 <Status tone={stateTone[st]} label={t(`blocks.state.${st}`)} size="sm" />
@@ -267,7 +269,7 @@
 
               <footer>
                 <div class="links">
-                  {#each b.channels ?? [] as c (c.guild_id + c.channel_id)}<span class="chip"><I.Hash size={12} aria-hidden="true" />{c.name}</span>{:else}<span class="xs muted">{t('blocks.no_links')}</span>{/each}
+                  {#each b.channels ?? [] as c (c.guild_id + c.channel_id)}<span class="chip"><I.Hash size={12} aria-hidden="true" />{names.channel(c.name, c.channel_id).label.replace(/^#/, '')}</span>{:else}<span class="xs muted">{t('blocks.no_links')}</span>{/each}
                 </div>
                 <Button size="sm" variant="ghost" icon={I.Link2} onclick={() => openConnect(b)} disabled={!channels.length}>{t('blocks.connect')}</Button>
               </footer>
@@ -281,7 +283,7 @@
           <summary class="small">{t('blocks.silent', { n: silent.length })}</summary>
           <ul>
             {#each silent as b (b.source_room)}
-              <li><span class="small"><I.Hash size={13} aria-hidden="true" /> {b.label} <span class="xs muted">{b.own_channel?.guild_name ?? ''}</span></span>
+              <li><span class="small"><I.Hash size={13} aria-hidden="true" /> {names.block(b)} <span class="xs muted">{b.own_channel?.guild_name ?? ''}</span></span>
                 {#if b.own_channel?.capture_on}<span class="xs muted">{t('blocks.capture_waiting')}</span>{:else}<Button size="sm" variant="ghost" icon={I.Download} onclick={() => captureOn(b)}>{t('blocks.capture_on')}</Button>{/if}</li>
             {/each}
           </ul>
@@ -301,7 +303,7 @@
               {@const own = ownBlock(c)}
               <li>
                 <div class="ch">
-                  <a href="/rooms/{c.guild_id}/{c.channel_id}" class="chn"><I.Hash size={15} aria-hidden="true" />{c.name}</a>
+                  <a href="/rooms/{c.guild_id}/{c.channel_id}" class="chn"><I.Hash size={15} aria-hidden="true" />{names.channel(c.name, c.channel_id).label.replace(/^#/, '')}</a>
                   {#if c.memory_use === 'off'}<Status tone="neutral" label={t('connect.memory_off')} size="sm" />{/if}
                 </div>
                 <div class="attached">
@@ -315,7 +317,7 @@
                       <button type="button" class="add" onclick={toggle} aria-expanded={expanded} aria-controls={id} disabled={!attachable(c).length}><I.Plus size={13} aria-hidden="true" />{t('connect.add')}</button>
                     {/snippet}
                     {#snippet children({ close })}
-                      <div class="menu-h">{t('connect.add_to', { channel: c.name })}</div>
+                      <div class="menu-h">{t('connect.add_to', { channel: names.channel(c.name, c.channel_id).label })}</div>
                       <ul class="menu">
                         {#each attachable(c) as b (b.source_room)}
                           {@const st = blockState(b)}

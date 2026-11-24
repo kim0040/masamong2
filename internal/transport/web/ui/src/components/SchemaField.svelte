@@ -47,7 +47,9 @@
 
   const shown = (v: unknown) => (typeof v === 'boolean' ? (v ? t('common.on') : t('common.off')) : String(v))
   const placeholder = $derived(schema.implied !== undefined && schema.implied !== null ? t('settings.default_is', { v: shown(schema.implied) }) : def !== undefined && def !== null && def !== '' ? t('settings.default_is', { v: shown(def) }) : '')
-  const enumLabel = (v: string) => (has(`${labelKey}.v.${v}`) ? t(`${labelKey}.v.${v}`) : v)
+  // the server's schema lists no values for the log level; these are the ones the daemon accepts
+  const enumValues = $derived(schema.enum?.length ? schema.enum : key === 'instance.log_level' ? ['debug', 'info', 'warn', 'error'] : undefined)
+  const enumLabel = (v: string) => (has(`${labelKey}.v.${v}`) ? t(`${labelKey}.v.${v}`) : v === 'on' ? t('common.on') : v === 'off' ? t('common.off') : v)
   const fmtHour = (h: number) => `${String(h).padStart(2, '0')}:00`
   // IANA zones the browser knows, for the time zone fields' suggestions
   const zones: string[] = (() => {
@@ -172,8 +174,8 @@
         <Segmented size="sm" label={label} value={value === true ? 'on' : value === false ? 'off' : 'default'} onchange={(v) => onedit(path, v === 'default' ? undefined : v === 'on')} options={[{ value: 'default', label: schema.implied !== undefined ? t('settings.default_with', { v: shown(schema.implied) }) : t('common.default') }, { value: 'on', label: t('common.on') }, { value: 'off', label: t('common.off') }]} />
       {:else if schema.t === 'bool'}
         <Switch checked={!!value} onchange={(v) => onedit(path, v)} label={value ? t('common.on') : t('common.off')} ariaLabel={label} />
-      {:else if schema.enum?.length}
-        <Select id={uid} value={value ?? ''} onchange={(e) => onedit(path, (e.currentTarget as HTMLSelectElement).value || undefined)} options={[{ value: '', label: schema.implied !== undefined ? t('settings.default_with', { v: enumLabel(String(schema.implied)) }) : t('common.default') }, ...schema.enum.map((v) => ({ value: v, label: enumLabel(v) }))]} />
+      {:else if enumValues?.length}
+        <Select id={uid} value={value ?? ''} onchange={(e) => onedit(path, (e.currentTarget as HTMLSelectElement).value || undefined)} options={[{ value: '', label: schema.implied !== undefined ? t('settings.default_with', { v: enumLabel(String(schema.implied)) }) : key === 'instance.log_level' ? t('settings.default_with', { v: enumLabel('info') }) : t('common.default') }, ...enumValues.map((v) => ({ value: v, label: enumLabel(v) }))]} />
       {:else if schema.format === 'weekday'}
         <Select id={uid} value={String(value ?? 0)} onchange={(e) => onedit(path, Number((e.currentTarget as HTMLSelectElement).value))} options={[0, 1, 2, 3, 4, 5, 6].map((d) => ({ value: String(d), label: t(`weekday.${d}`) }))} />
       {:else if schema.format === 'hour'}

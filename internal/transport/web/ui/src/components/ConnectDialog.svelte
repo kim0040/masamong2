@@ -6,6 +6,8 @@
   import Button from './Button.svelte'
   import Input from './Input.svelte'
   import * as I from '../lib/icons'
+  import { useRooms } from '../lib/rooms.svelte'
+  const names = useRooms()
 
   // Which channels search one block: tick or untick channels and save; each change is one attach or
   // detach Action (the block itself is never copied or re-embedded).
@@ -71,7 +73,7 @@
             {#each list as c (keyOf(c))}
               <label class:on={chosen.has(keyOf(c))}>
                 <input type="checkbox" checked={chosen.has(keyOf(c))} onchange={(e) => toggle(keyOf(c), (e.currentTarget as HTMLInputElement).checked)} />
-                <I.Hash size={15} aria-hidden="true" /><span class="nm">{c.name}</span>
+                <I.Hash size={15} aria-hidden="true" /><span class="nm">{names.channel(c.name, c.channel_id).label.replace(/^#/, '')}</span>
                 {#if c.memory_use === 'off'}<span class="chip xs" title={t('connect.memory_off_hint')}>{t('connect.memory_off')}</span>{/if}
               </label>
             {/each}
