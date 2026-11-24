@@ -4,12 +4,12 @@
   import { t } from '../../lib/i18n.svelte'
   import { scrollable } from '../../lib/scrollable'
   import { call } from '../../lib/api.svelte'
-  import { cfg } from '../../lib/config.svelte'
+  import { cfg, patchConfig } from '../../lib/config.svelte'
   import { navigate } from '../../lib/router.svelte'
   import { toast } from '../../lib/toast.svelte'
   import { num, usd } from '../../lib/format'
   import { embedReindexAsk, type EmbedAsk } from '../../lib/embedswitch'
-  import { chatRole, filterModels, type ModelSort } from '../../lib/connections'
+  import { chatRole, filterModels, effortRole, effortOps, effortFits, reasonKey, type ModelSort } from '../../lib/connections'
   import type { Connections } from '../../lib/connections.svelte'
   import Dialog from '../Dialog.svelte'
   import Field from '../Field.svelte'
@@ -56,15 +56,36 @@
   // the server refuses (with the estimate) until the request carries include_embed
   let embedAsk = $state<(EmbedAsk & { provider: string; model: string }) | null>(null)
   let embedOpen = $state(false)
+  // after a chat-style role gets its model, the same dialog asks for the reasoning level of that model
+  // (the level the role had stays until it is changed here: a new model may not take it)
+  let done = $state<{ role: string; provider: string; model: string; effort: string; reasoning: { reasoning?: boolean; efforts?: string[] } } | null>(null)
+  let effortPick = $state('')
+  async function saveEffort() {
+    if (!done) return
+    const r = await patchConfig(effortOps(done.role, effortPick), { success: t('conn.effort_saved') })
+    if (r.ok) closePicker()
+  }
+  async function closePicker() {
+    const role = modelsFor
+    modelsFor = ''
+    done = null
+    await tick()
+    document.querySelector<HTMLElement>(`[data-change-model="${role}"]`)?.focus()
+  }
   async function pickModel(role: string, model: string, includeEmbed = false) {
     const provider = modelProv
+    const before = cfg.doc?.models?.[role]?.effort ?? ''
+    const listed = modelList.find((m) => m.id === model)
     const r = await call('models.select', includeEmbed ? { role, provider, model, include_embed: true } : { role, provider, model })
     if (r.ok) {
       toast('ok', t('conn.model_set', { role: t(`role.${role}`), model }), includeEmbed ? t('conn.rec_reindex') : undefined, includeEmbed ? { label: t('conn.rec_reindex_go'), run: () => navigate('/blocks') } : undefined)
-      modelsFor = ''
+      if (effortRole(role)) {
+        effortPick = before
+        done = { role, provider, model, effort: before, reasoning: listed && (listed.reasoning !== undefined || listed.efforts) ? { reasoning: listed.reasoning, efforts: listed.efforts } : conn.reasoningOf(provider, model) }
+        return
+      }
       // the picker (and a confirm that was on top of it) are gone: keyboard focus goes back to the role's button
-      await tick()
-      document.querySelector<HTMLElement>(`[data-change-model="${role}"]`)?.focus()
+      await closePicker()
       return
     }
     const ask = role === 'embed' && !includeEmbed ? embedReindexAsk(r.error) : null
@@ -93,7 +114,22 @@
   const isCurrent = (m: any) => cfg.doc?.models?.[modelsFor]?.model === m.id && cfg.doc?.models?.[modelsFor]?.provider === modelProv
 </script>
 
-<Dialog open={!!modelsFor} onclose={() => (modelsFor = '')} title={t('conn.pick_model', { role: t(`role.${modelsFor}`) })} description={t('conn.pick_model_desc')} size="lg">
+{#snippet stepFooter()}
+  {#if done}
+    <Button variant="ghost" onclick={closePicker}>{effortPick === done.effort ? t('common.done') : t('conn.effort_keep')}</Button>
+    <Button variant="primary" disabled={effortPick === done.effort} onclick={saveEffort}>{t('conn.effort_save')}</Button>
+  {/if}
+{/snippet}
+
+<Dialog open={!!modelsFor} footer={done ? stepFooter : undefined} onclose={() => ((modelsFor = ''), (done = null))} title={t('conn.pick_model', { role: t(`role.${modelsFor}`) })} description={done ? t('conn.effort_step_desc') : t('conn.pick_model_desc')} size="lg">
+  {#if done}
+    {@const step = done}
+    <div class="stack">
+      <div class="callout"><span class="ic"><I.Check size={16} /></span><span class="small">{t('conn.model_set', { role: t(`role.${step.role}`), model: step.model })}</span></div>
+      <Field id="mneffort" label={t('conn.effort')} hint={`${t(step.role === 'summary' ? 'conn.effort_hint_summary' : 'conn.effort_hint')} ${t(`${reasonKey(step.reasoning)}_hint`)}`}>{#snippet children({ id, describedby })}<Select {id} aria-describedby={describedby} bind:value={effortPick} options={conn.effortOptions(step.reasoning, effortPick)} />{/snippet}</Field>
+      {#if !effortFits(step.reasoning, step.effort)}<div class="callout warn"><span class="ic"><I.TriangleAlert size={16} /></span><span class="small">{t('conn.effort_unfit', { level: t(`conn.effort.${step.effort}`) })}</span></div>{/if}
+    </div>
+  {:else}
   <div class="stack">
     {#if Object.keys(conn.modelCaps).length > 1}
       <Field id="mprov" label={t('conn.model_provider')} hint={t('conn.model_provider_hint')}>{#snippet children({ id, describedby })}<Select {id} aria-describedby={describedby} value={modelProv} onchange={(e) => browse(modelsFor, (e.currentTarget as HTMLSelectElement).value)} options={Object.keys(conn.modelCaps).map((pid) => ({ value: pid, label: conn.provName(pid) }))} />{/snippet}</Field>
@@ -130,6 +166,7 @@
       </div>
     {/if}
   </div>
+  {/if}
 </Dialog>
 
 <Confirm bind:open={embedOpen} title={t('conn.embed_switch_title')} body={embedBody(embedAsk)} confirmLabel={t('conn.embed_switch_confirm')} onconfirm={confirmEmbedSwitch} />

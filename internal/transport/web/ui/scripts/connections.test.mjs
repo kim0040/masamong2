@@ -179,3 +179,19 @@ test('the blended price weighs the input three to one over the output', () => {
   assert.equal(c.blended({ in_per_mtok: 4 }), 3)
   assert.equal(c.blended({}), null)
 })
+
+test('a role\'s reasoning level alone: set, cleared to the default, or not offered', () => {
+  assert.deepEqual(c.effortOps('planner', 'high'), [{ path: ['models', 'planner', 'effort'], value: 'high' }])
+  assert.deepEqual(c.effortOps('response', ''), [{ path: ['models', 'response', 'effort'], op: 'unset' }])
+  assert.deepEqual(c.effortOps('embed', 'high'), [])
+  assert.deepEqual(c.effortOps('rerank', 'low'), [])
+})
+
+test('a saved level fits a model when the list does not rule it out', () => {
+  assert.equal(c.effortFits({ reasoning: true, efforts: ['low', 'high'] }, 'high'), true)
+  assert.equal(c.effortFits({ reasoning: true, efforts: ['low', 'high'] }, 'max'), false)
+  assert.equal(c.effortFits({ reasoning: false }, 'low'), false)
+  assert.equal(c.effortFits({ reasoning: false }, 'none'), true)
+  assert.equal(c.effortFits({}, 'xhigh'), true)
+  assert.equal(c.effortFits({ reasoning: true, efforts: ['low'] }, ''), true)
+})
