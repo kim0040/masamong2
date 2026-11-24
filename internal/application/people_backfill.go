@@ -782,7 +782,8 @@ func pbSettle(res *openai.ChatResult, model peoplebackfill.Model, mode peoplebac
 		return 0
 	}
 	in := res.PromptTokens - res.CachedTokens + (res.CacheWriteTokens+3)/4
-	v, err := peoplebackfill.Settle(peoplebackfill.Usage{InputTokens: max(0, in), OutputTokens: res.CompletionTokens, CacheReadTokens: res.CachedTokens}, model, mode)
+	v, err := peoplebackfill.Settle(peoplebackfill.Usage{InputTokens: max(0, in), OutputTokens: res.CompletionTokens, CacheReadTokens: res.CachedTokens,
+		PromptTokens: res.PromptTokens}, model, mode)
 	if err != nil {
 		return 0
 	}

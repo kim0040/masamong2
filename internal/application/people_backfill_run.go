@@ -232,9 +232,9 @@ func pbMaxIn(bp pbPrompt) int { return len(bp.system) + len(bp.user) + pbFraming
 // allows on the wire (pbWireOut, thinking room included). The budget check reserves it; the settlement
 // uses the reported usage, which can never be higher.
 func pbMaxCost(bp pbPrompt, model peoplebackfill.Model, mode peoplebackfill.Mode) float64 {
-	in := pbMaxIn(bp)
-	in += (in + 3) / 4 // the cache-write surcharge, rounded up as pbSettle rounds it
-	v, err := peoplebackfill.Settle(peoplebackfill.Usage{InputTokens: in, OutputTokens: pbWireOut}, model, mode)
+	raw := pbMaxIn(bp)
+	in := raw + (raw+3)/4 // the cache-write surcharge, rounded up as pbSettle rounds it
+	v, err := peoplebackfill.Settle(peoplebackfill.Usage{InputTokens: in, OutputTokens: pbWireOut, PromptTokens: raw}, model, mode)
 	if err != nil {
 		return 0
 	}

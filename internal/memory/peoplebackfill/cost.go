@@ -94,6 +94,9 @@ type Usage struct {
 	InputTokens     int
 	OutputTokens    int
 	CacheReadTokens int // input read from the prompt cache: a tenth of the input price
+	// PromptTokens is the prompt's raw token count, which picks Haiku's price tier (InputTokens may carry
+	// a cache-write surcharge). 0: InputTokens+CacheReadTokens.
+	PromptTokens int
 }
 
 // Settle is the real USD cost of u on model in mode.
@@ -102,7 +105,11 @@ func Settle(u Usage, model Model, mode Mode) (float64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if model == ModelHaiku && u.InputTokens+u.CacheReadTokens > haikuLongPrompt {
+	prompt := u.PromptTokens
+	if prompt == 0 {
+		prompt = u.InputTokens + u.CacheReadTokens
+	}
+	if model == ModelHaiku && prompt > haikuLongPrompt {
 		in, out = in*haikuLongFactor, out*haikuLongFactor // a long prompt is billed at the higher tier
 	}
 	return (float64(u.InputTokens)*in + float64(u.CacheReadTokens)*in*cacheReadFactor + float64(u.OutputTokens)*out) / 1e6, nil
