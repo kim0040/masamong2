@@ -24,6 +24,8 @@
   import OperatorMarks from '../components/OperatorMarks.svelte'
   import Switch from '../components/Switch.svelte'
   import * as I from '../lib/icons'
+  import { useRooms } from '../lib/rooms.svelte'
+  const names = useRooms()
 
   // turns per request, and the list length from which only the rows in view are drawn
   const PAGE_SIZE = 50
@@ -37,6 +39,14 @@
   let outcome = $state(route.query.get('outcome') ?? '')
   let tool = $state(route.query.get('tool') ?? '')
   let channel = $state(route.query.get('channel') ?? '')
+  // the room filter lists rooms by name, grouped by server; a channel id from the address that is not listed stays selectable
+  const channelOptions = $derived.by(() => {
+    const opts = [{ value: '', label: t('turns.all_channels') }] as { value: string; label: string; group?: string }[]
+    for (const r of names.items) if (r.kind === 'discord') opts.push({ value: r.key.split(':')[2], label: r.label, group: r.server })
+    if (channel && !opts.some((o) => o.value === channel)) opts.push({ value: channel, label: names.channel('', channel).label })
+    return opts
+  })
+  const roomOf = (tr: any) => (tr.channel_name ? names.channel(tr.channel_name, tr.channel_id).label : names.name(`discord:${tr.guild_id}:${tr.channel_id}`).label)
   let lab = $state<'false' | 'only'>((route.query.get('lab') as any) ?? 'false')
   let toolsOnly = $state(route.query.get('tools') === '1')
   // a random draw of search turns to mark (turns.sample); null while the list is the plain history
@@ -180,7 +190,7 @@
   <Segmented label={t('turns.source')} bind:value={lab} options={[{ value: 'false', label: t('turns.live') }, { value: 'only', label: t('turns.lab') }]} />
   <div class="f"><Select aria-label={t('turns.outcome')} bind:value={outcome} options={[{ value: '', label: t('turns.all_outcomes') }, ...['answered', 'silent', 'not_addressed', 'reacted', 'no_vision', 'limited', 'budget', 'paused', 'disabled', 'canceled', 'error'].map((v) => ({ value: v, label: t(`outcome.${v}`) }))]} /></div>
   <div class="f"><Input aria-label={t('turns.tool')} placeholder={t('turns.tool_ph')} bind:value={tool} /></div>
-  <div class="f"><Input aria-label={t('turns.channel')} placeholder={t('turns.channel_ph')} bind:value={channel} inputmode="numeric" /></div>
+  <div class="f"><Select aria-label={t('turns.channel')} bind:value={channel} options={channelOptions} /></div>
   <Switch bind:checked={toolsOnly} label={t('turns.tools_only')} />
   <Button variant="secondary" icon={I.Shuffle} onclick={drawSample}>{t('turns.sample.draw', { n: SAMPLE })}</Button>
 </div>
@@ -213,7 +223,7 @@
             {#each rows as tr, i (tr.id)}
               <tr class="clickable" class:selected={selected?.id === tr.id} aria-rowindex={start + i + 2}>
                 <td class="nowrap num muted">{relative(tr.at)}</td>
-                <td class="msgcell"><a class="row-link ellipsis" href="/turns?id={tr.id}" onclick={(e) => { e.preventDefault(); open(tr.id) }}>{#if tr.body?.message}{tr.body.message}{:else}<span class="no-text">{t(tr.body?.body_free ? 'turns.no_text' : 'turns.no_message')}</span>{/if}</a><div class="xs subtle ellipsis" title={tr.channel_id}>{#if tr.mark}<span class="mk {tr.mark}" title={t('turns.mark.title')}>{t(`turns.mark.${tr.mark}`)}</span>{' · '}{/if}<span class="m-only"><span class="dot" style:background={outcomeColor(tr.outcome)}></span>{`${t(`outcome.${tr.outcome}`)} · ${ms(tr.latency_ms)} · `}</span>#{tr.channel_name || tr.channel_id}{#if tr.body?.speaker}{` · ${tr.body.speaker}`}{/if}{#if tr.body?.name_call?.decision}{` · ${t(`turns.name_call.${tr.body.name_call.decision}`)}`}{/if}</div></td>
+                <td class="msgcell"><a class="row-link ellipsis" href="/turns?id={tr.id}" onclick={(e) => { e.preventDefault(); open(tr.id) }}>{#if tr.body?.message}{tr.body.message}{:else}<span class="no-text">{t(tr.body?.body_free ? 'turns.no_text' : 'turns.no_message')}</span>{/if}</a><div class="xs subtle ellipsis" title={tr.channel_id}>{#if tr.mark}<span class="mk {tr.mark}" title={t('turns.mark.title')}>{t(`turns.mark.${tr.mark}`)}</span>{' · '}{/if}<span class="m-only"><span class="dot" style:background={outcomeColor(tr.outcome)}></span>{`${t(`outcome.${tr.outcome}`)} · ${ms(tr.latency_ms)} · `}</span>{roomOf(tr)}{#if tr.body?.speaker}{` · ${tr.body.speaker}`}{/if}{#if tr.body?.name_call?.decision}{` · ${t(`turns.name_call.${tr.body.name_call.decision}`)}`}{/if}</div></td>
                 <td class="w">{#each tr.tools as tl}<span class="chip">{toolName(tl)}</span> {/each}</td>
                 <td class="r num w">{tr.hits || ''}</td>
                 <td class="r num nowrap w">{ms(tr.latency_ms)}</td>

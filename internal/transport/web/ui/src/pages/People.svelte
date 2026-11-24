@@ -4,6 +4,7 @@
   import { call } from '../lib/api.svelte'
   import { resource } from '../lib/resource.svelte'
   import { toast } from '../lib/toast.svelte'
+  import { route, navigate } from '../lib/router.svelte'
   import { relative, datetime, num } from '../lib/format'
   import PageHeader from '../components/PageHeader.svelte'
   import Card from '../components/Card.svelte'
@@ -25,6 +26,7 @@
   import OperatorAlerts from '../components/OperatorAlerts.svelte'
   import DMConversation from '../components/DMConversation.svelte'
   import PersonMemory from '../components/PersonMemory.svelte'
+  import { deepPerson } from '../lib/peopledeep'
   import * as I from '../lib/icons'
 
   // One row per Discord user the instance keeps personal data for. The console records withdrawals and
@@ -98,12 +100,19 @@
   let serverPersonOpen = $state(false)
   let serverPersonKey = $state('')
   // read from the latest list, not kept from the click: a person who withdraws meanwhile leaves the dialog too
-  const serverPerson = $derived(serverPersonKey ? (serverShown.find((p: any) => `${p.guild_id}:${p.user_id}` === serverPersonKey) ?? null) : null)
+  // a person a link names exactly (maybe beyond the first page of their server's list) is kept here while the dialog is open
+  let deepRow = $state<any>(null)
+  const serverPerson = $derived(
+    serverPersonKey ? (serverShown.find((p: any) => `${p.guild_id}:${p.user_id}` === serverPersonKey) ?? (deepRow && `${deepRow.guild_id}:${deepRow.user_id}` === serverPersonKey ? deepRow : null)) : null,
+  )
   $effect(() => {
     if (serverPersonOpen && serverPeopleCurrent && !serverPerson) serverPersonOpen = false
   })
   $effect(() => {
-    if (!serverPersonOpen) serverPersonKey = ''
+    if (!serverPersonOpen) {
+      serverPersonKey = ''
+      deepRow = null
+    }
   })
   async function openServerPerson(p: any) {
     if (p.has_user && !users.data) await users.refresh()
@@ -112,6 +121,35 @@
     serverPersonKey = `${p.guild_id}:${p.user_id}`
     serverPersonOpen = true
   }
+  // /people?person=<id>&guild=<server> (from Memory → People memory) opens that person straight at their memory.
+  // The person is asked for by ID (and server) from people.servers, so the right server opens even when the person
+  // is beyond the first page of its list; nothing found says so.
+  let deepDone = ''
+  // only the latest link's answer acts, and only while this page still shows that link
+  let deepSeq = 0
+  async function openDeep(id: string, guild: string) {
+    const seq = ++deepSeq
+    const u = ((users.data?.users ?? []) as any[]).find((x) => x.user_id === id)
+    const r = await call<any>('people.servers', { user_id: id, ...(guild ? { guild_id: guild } : {}) })
+    if (seq !== deepSeq || route.path !== '/people' || route.query.get('person') !== id) return
+    const sp = r.ok ? deepPerson(r.output?.servers, id, guild) : null
+    navigate('/people', { replace: true })
+    if (u) open(u, guild || sp?.guild_id || '')
+    else if (sp) {
+      deepRow = sp
+      await openServerPerson(sp)
+    } else if (!r.ok) toast('error', t('common.failed'), r.error?.message)
+    else toast('warn', t('people.deep.not_found'))
+  }
+  $effect(() => {
+    const id = route.query.get('person') ?? ''
+    const guild = route.query.get('guild') ?? ''
+    const mark = `${id}|${guild}`
+    if (!id) deepDone = '' // the link was used: the same link works again later
+    if (route.path !== '/people' || !id || deepDone === mark || !users.data) return
+    deepDone = mark
+    void openDeep(id, guild)
+  })
   async function run(act: string, input: Record<string, unknown>, ok: string) {
     const r = await call(act, input)
     if (r.ok) toast('ok', ok)
@@ -334,6 +372,13 @@
   {#if cur}
     <div class="stack">
       <div class="row"><code class="small">{cur.user_id}</code><CopyButton text={cur.user_id} /></div>
+      <section data-person-memory>
+        <h3 class="small h">{t('pm.title')}</h3>
+        <p class="xs muted" style:margin-bottom="var(--s-3)">{t('pm.desc')}</p>
+        {#if detailOpen}
+          {#key cur.user_id}<PersonMemory userId={cur.user_id} {preferredGuild} />{/key}
+        {/if}
+      </section>
       <section>
         <h3 class="small h">{t('people.consents')}</h3>
         <ul class="rows">
@@ -387,13 +432,6 @@
         <RemindersList scope={{ user_id: cur.user_id }} empty={t('rem.person_empty')} />
       </section>
       <section>
-        <h3 class="small h">{t('pm.title')}</h3>
-        <p class="xs muted">{t('pm.desc')}</p>
-        {#if detailOpen}
-          {#key cur.user_id}<PersonMemory userId={cur.user_id} {preferredGuild} />{/key}
-        {/if}
-      </section>
-      <section>
         <h3 class="small h">{t('people.prefs.title')}</h3>
         {#if cur.prefs}
           <KeyValue items={[
@@ -420,18 +458,27 @@
   {/if}
 </Dialog>
 
-<Dialog bind:open={serverPersonOpen} size="sm" title={serverPerson?.name ?? ''} description={t('people.servers.readonly')}>
+<Dialog bind:open={serverPersonOpen} size="lg" title={serverPerson?.name ?? ''} description={t('people.servers.readonly')}>
   {#if serverPerson}
     <div class="stack">
-      <code class="small">{serverPerson.user_id}</code>
+      <div class="row"><code class="small">{serverPerson.user_id}</code><CopyButton text={serverPerson.user_id} /></div>
       {#if serverPerson.other_names?.length}<p class="small muted">{t('people.servers.other_names', { names: serverPerson.other_names.join(' · ') })}</p>{/if}
-      <KeyValue items={[
-        { k: t('people.servers.col.server'), v: serverPerson.guild_name || serverPerson.guild_id },
-        { k: t('people.servers.col.messages'), v: num(serverPerson.messages) },
-        { k: t('people.servers.first_seen'), v: datetime(serverPerson.first_seen) },
-        { k: t('people.servers.col.last_seen'), v: datetime(serverPerson.last_seen) },
-        { k: t('people.servers.col.cards'), v: num(serverPerson.card_items) },
-      ]} />
+      <section data-person-memory>
+        <h3 class="small h">{t('pm.title')}</h3>
+        <p class="xs muted" style:margin-bottom="var(--s-3)">{t('pm.desc')}</p>
+        {#if serverPersonOpen}
+          {#key serverPerson.user_id}<PersonMemory userId={serverPerson.user_id} preferredGuild={serverPerson.guild_id} />{/key}
+        {/if}
+      </section>
+      <section>
+        <h3 class="small h">{t('people.servers.seen_title')}</h3>
+        <KeyValue items={[
+          { k: t('people.servers.col.server'), v: serverPerson.guild_name || serverPerson.guild_id },
+          { k: t('people.servers.col.messages'), v: num(serverPerson.messages) },
+          { k: t('people.servers.first_seen'), v: datetime(serverPerson.first_seen) },
+          { k: t('people.servers.col.last_seen'), v: datetime(serverPerson.last_seen) },
+        ]} />
+      </section>
     </div>
   {/if}
 </Dialog>

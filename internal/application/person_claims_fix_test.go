@@ -108,6 +108,54 @@ func TestMineDoesNotExportPrivateThreadClaim(t *testing.T) {
 	}
 }
 
+// memory.mine.show names the room each statement was said in (room_id, a room key). A member sees only
+// the rooms the text itself passes the scope filter for, so a private thread's room never shows up in
+// /내기억; the console sees it next to its statement.
+func TestMineShowsClaimRoomWithinScope(t *testing.T) {
+	t.Parallel()
+	s, m, e := memorySvc(t)
+	f := reviewPerson{s, m, e, time.Now().UTC().Add(-3 * time.Hour)}
+	f.source(t, "g", "c", "room-label", "101", "민수", f.at)
+	thread := f.source(t, "g", "pthread", "room-thread-line", "202", "영희", f.at)
+	f.fact(t, "g", "pthread", "room-private-sentinel", "101", "202", thread)
+	public := f.source(t, "g", "c", "room-public-line", "202", "영희", f.at)
+	f.fact(t, "g", "c", "room-public-control", "101", "202", public)
+	pub, priv := engine.RoomKey("g", "c"), engine.RoomKey("g", "pthread")
+
+	roomOf := func(out map[string]any, word string) (string, bool) {
+		for _, c := range jsonList(out["person"]) {
+			if strings.Contains(c["text"].(string), word) {
+				id, present := c["room_id"].(string)
+				return id, present
+			}
+		}
+		return "", false
+	}
+	r := as(s, "memory.mine.show", map[string]any{}, inChannel("101"))
+	if !r.OK {
+		t.Fatalf("mine: %+v", r.Error)
+	}
+	if id, ok := roomOf(r.Output, "room-public-control"); !ok || id != pub {
+		t.Fatalf("a member's statement carries its room: %q (present %v), want %q", id, ok, pub)
+	}
+	// "items" is the member's own remembered lines (with their channel), a separate field; the statements
+	// about the person are the "person" field
+	raw, _ := json.Marshal(r.Output["person"])
+	if strings.Contains(string(raw), priv) || strings.Contains(string(raw), "pthread") || strings.Contains(string(raw), "room-private-sentinel") {
+		t.Errorf("a member's person statements name a room outside the channel scope: %s", raw)
+	}
+	op := exec(s, "memory.mine.show", map[string]any{"guild_id": "g", "user_id": "101"})
+	if !op.OK {
+		t.Fatalf("console: %+v", op.Error)
+	}
+	if id, ok := roomOf(op.Output, "room-private-sentinel"); !ok || id != priv {
+		t.Errorf("the console names the thread's room: %q (present %v), want %q", id, ok, priv)
+	}
+	if id, ok := roomOf(op.Output, "room-public-control"); !ok || id != pub {
+		t.Errorf("the console names the channel's room: %q (present %v), want %q", id, ok, pub)
+	}
+}
+
 // Sol H2, Astra 5: an item naming two people is not the speaker's own statement about themselves, and
 // an item two speakers wrote is not one speaker's own: neither travels server-wide. An item only about
 // its speaker still does.

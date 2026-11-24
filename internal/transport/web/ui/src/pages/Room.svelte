@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { outcomeTone } from '../lib/outcomes'
   import { t, toolName, i18n } from '../lib/i18n.svelte'
   import { scrollable } from '../lib/scrollable'
@@ -31,12 +32,14 @@
   import Popover from '../components/Popover.svelte'
   import Input from '../components/Input.svelte'
   import Dialog from '../components/Dialog.svelte'
+  import Confirm from '../components/Confirm.svelte'
   import Timeline from '../components/Timeline.svelte'
   import ParticipationCard from '../components/ParticipationCard.svelte'
   import RoomStyleCard from '../components/RoomStyleCard.svelte'
   import ConversationCard from '../components/ConversationCard.svelte'
   import RemindersList from '../components/RemindersList.svelte'
   import { personaOptionsFor } from '../lib/persona'
+  import { watchApplyTargets } from '../lib/watchapply'
   import * as I from '../lib/icons'
 
   let { params }: { params: { guild: string; channel: string } } = $props()
@@ -52,6 +55,15 @@
   const perms = resource<any>('channels.permissions', () => ({ guild_id: g, channel_id: c }), { live: ['discord', 'config'] })
 
   let tab = $state(route.query.get('tab') ?? 'behavior')
+  // a ?tab= link that arrives while this page is already open (same component, new params or query)
+  // selects that tab
+  // (only the query is tracked: a click on another tab is not undone by the link that opened the page)
+  $effect(() => {
+    const qt = route.query.get('tab')
+    untrack(() => {
+      if (qt && qt !== tab) tab = qt
+    })
+  })
   const ch = $derived((list.data?.channels ?? []).find((x: any) => x.id === c && x.guild_id === g))
   const guildName = $derived.by(() => {
     const n = (list.data?.guilds ?? []).find((x: any) => x.id === g)?.name
@@ -201,6 +213,37 @@
     void summary.refresh()
   }
 
+  // "per server" in the owner's words: one room's saved alert switch and area levels copied to the
+  // other rooms of this server (channels.configure on each — no new Action needed)
+  const watchCount = $derived(Object.keys(ch?.watch_level ?? {}).length)
+  // only the rooms the bot can see: hidden channels and offline configured rooms are not targets
+  const sameGuild = $derived(watchApplyTargets(list.data?.channels, g, c))
+  let applyAllOpen = $state(false)
+  async function applyAlertsToGuild() {
+    // everything the batch needs is read once at the confirm: the saved settings, the target rooms
+    // and the revision they were read at. Navigating while the writes run cannot move the write.
+    const targets = sameGuild
+    const src = savedForm
+    const input = { disaster_alerts: src.disaster_alerts, watch_level: Object.fromEntries((src.watch_level ?? []).map((w: { region: string; level: string }) => [w.region, Number(w.level)])) }
+    if (!cfg.loaded || !cfg.revision) return // the revision the batch is checked against must be known
+    let rev = cfg.revision
+    let ok = 0
+    for (const x of targets) {
+      // each write goes against the revision the previous one left: a change saved elsewhere between
+      // two writes stops the batch on a conflict instead of being overwritten silently
+      const r = await call('channels.configure', { guild_id: x.guild_id, channel_id: x.channel_id, ...input }, { base_revision: rev })
+      if (r.ok) {
+        ok++
+        if (r.revision) rev = r.revision
+      } else if (r.error?.code === 'CONFIG_CONFLICT') {
+        await Promise.all([list.refresh(), loadConfig(true)])
+        return toast('warn', t('config.conflict_title'), t('config.conflict_body'))
+      }
+    }
+    toast(ok === targets.length ? 'ok' : 'warn', t('room.watch_apply_done', { n: ok, total: targets.length }))
+    void list.refresh()
+  }
+
   // copy this room's saved settings to other rooms
   let copyOpen = $state(false)
   let copyWhat = $state<Record<string, boolean>>({ reply: true, alerts: false, memory: false, logging: false, tools: false })
@@ -264,6 +307,7 @@
       <Status tone={ch.live ? 'ok' : ch.practice ? 'info' : 'neutral'} label={ch.live ? t('rooms.live') : ch.practice ? t('rooms.practice') : t('rooms.offline')} size="sm" />
       {#if paused}<Status tone="warn" label={t('rooms.paused')} size="sm" />{/if}
       {#if !ch.configured}<span class="chip">{t('rooms.defaults')}</span>{/if}
+      {#if watchCount}<span class="chip">{t('room.watch_chip', { n: watchCount })}</span>{/if}
     {/if}
     <code class="xs subtle">{g} / {c}</code>
   </div>
@@ -291,11 +335,13 @@
           <Segmented label={t('rooms.respond')} bind:value={form.respond} options={['always', 'mention', 'command', 'off'].map((v) => ({ value: v, label: t(`rooms.respond.${v}`) }))} />
           <p class="small muted">{t(`rooms.respond_hint.${form.respond}`)}</p>
           <Switch checked={form.disaster_alerts === 'on'} disabled={form.respond === 'off'} onchange={(v) => (form.disaster_alerts = v ? 'on' : 'off')} label={t('room.disaster_alerts')} hint={form.respond === 'off' ? t('room.disaster_alerts_off_respond') : t('room.disaster_alerts_hint')} />
-          {#if form.disaster_alerts === 'on' && form.respond !== 'off'}
-            <fieldset class="watch-levels stack">
-              <legend>{t('room.watch_levels')}</legend>
-              <p class="small muted">{t('room.watch_hint')}</p>
-              {#each form.watch_level as row, i}
+          <!-- the levels stay visible while the switch is off: the fieldset is disabled then, with a
+               one-line explanation of what turns it on -->
+          <fieldset class="watch-levels stack" disabled={!watchShown}>
+            <legend>{t('room.watch_levels')}</legend>
+            {#if watchShown}<p class="small muted">{t('room.watch_hint')}</p>
+            {:else}<p class="small muted">{form.respond === 'off' ? t('room.watch_off_respond') : t('room.watch_off_alerts')}</p>{/if}
+            {#each form.watch_level as row, i}
                 <!-- a saved key shows the KMA area it matched, or a flag when KMA has reported no such area yet -->
                 {@const key = row.region.trim()}
                 {@const checked = !!ch.watch_areas?.checked && Object.hasOwn(ch.watch_level ?? {}, key)}
@@ -311,13 +357,21 @@
                   {/if}
                 </div>
               {/each}
-              {#if ch.watch_areas && !ch.watch_areas.checked}<p class="xs muted">{t('room.watch_unchecked')}</p>{/if}
+            {#if ch.watch_areas && !ch.watch_areas.checked}<p class="xs muted">{t('room.watch_unchecked')}</p>{/if}
+            {#if watchShown && !form.watch_level.length}
+              <div class="callout"><span class="ic"><I.Info size={16} /></span><span>{t('room.watch_empty')}</span></div>
+            {/if}
+            <div class="row">
               <Button size="sm" onclick={() => form.watch_level.push({ region: '', level: '2' })}>{t('room.watch_add')}</Button>
-              <details><summary class="small">{t('room.watch_guide')}</summary>
-                <ol class="small">{#each [1,2,3,4,5] as level}<li>{t(`room.watch_level.${level}`)}</li>{/each}</ol>
-              </details>
-            </fieldset>
-          {/if}
+              {#if sameGuild.length}
+                <span class="spacer"></span>
+                <Button size="sm" variant="ghost" icon={I.Copy} disabled={!cfg.loaded} onclick={() => (applyAllOpen = true)}>{t('room.watch_apply')}</Button>
+              {/if}
+            </div>
+            <details><summary class="small">{t('room.watch_guide')}</summary>
+              <ol class="small">{#each [1,2,3,4,5] as level}<li>{t(`room.watch_level.${level}`)}</li>{/each}</ol>
+            </details>
+          </fieldset>
           <Switch checked={form.update_news === 'on'} disabled={form.respond === 'off'} onchange={(v) => (form.update_news = v ? 'on' : 'off')} label={t('room.update_news')} hint={form.respond === 'off' ? t('room.update_news_off_respond') : t('room.update_news_hint')} />
           <Field id="persona" label={t('rooms.col.persona')} hint={t('room.persona_hint')}>
             {#snippet children({ id, describedby })}<Select {id} aria-describedby={describedby} bind:value={form.persona_ref} options={personaOptions} />{/snippet}
@@ -538,6 +592,8 @@
     </div>
   {/if}
 </div>
+
+<Confirm bind:open={applyAllOpen} title={t('room.watch_apply_title')} body={`${dirty ? t('room.watch_apply_unsaved') + ' ' : ''}${t('room.watch_apply_body', { n: sameGuild.length })}`} confirmLabel={t('room.watch_apply')} onconfirm={applyAlertsToGuild} />
 
 <Dialog bind:open={copyOpen} title={t('room.copy_title')} description={t('room.copy_desc')}>
   <div class="stack">

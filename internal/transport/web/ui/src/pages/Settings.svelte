@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from 'svelte'
   import { t, has, i18n } from '../lib/i18n.svelte'
   import { scrollable } from '../lib/scrollable'
   import { tp } from '../lib/platform'
@@ -31,6 +32,21 @@
   useConfig()
   let tab = $state(route.query.get('tab') ?? 'form')
   let section = $state(route.query.get('section') ?? 'instance')
+  // a ?tab= / ?section= link that arrives while this page is already open selects that tab and
+  // section (a bare ?section= deep link means the form tab, where the sections live)
+  // (only the query is tracked: a click on another tab or section is not undone by the link that opened the page)
+  $effect(() => {
+    const q = route.query
+    const tb = q.get('tab')
+    const sc = q.get('section')
+    untrack(() => {
+      if (tb && tb !== tab) tab = tb
+      if (sc && sc !== section) {
+        section = sc
+        if (!tb) tab = 'form'
+      }
+    })
+  })
   // on a narrow screen the sections are a sideways row: keep the chosen one in sight
   let secsEl = $state<HTMLElement>()
   $effect(() => {
@@ -68,6 +84,11 @@
     chat: { href: '/tools', page: 'tools' },
     web_search: { href: '/tools/search.web', page: 'tools' },
     disaster_alerts: { href: '/tools/disasters.query?tab=ops', page: 'tools' },
+    retention: { href: '/maintenance', page: 'maintenance' },
+    updates: { href: '/maintenance', page: 'maintenance' },
+    i18n: { href: '/display', page: 'display' },
+    features: { href: '/tools', page: 'tools' },
+    stats: { href: '/stats', page: 'stats' },
     guilds: { href: '/rooms', page: 'rooms' },
     personas: { href: '/persona', page: 'persona' },
     access: { href: '/people', page: 'people' },

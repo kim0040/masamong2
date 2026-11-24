@@ -11,6 +11,12 @@
   let { mobileOpen = $bindable(false) }: { mobileOpen?: boolean } = $props()
   const active = $derived(activeFor(route.path))
   const collapsed = $derived(prefs.sidebar === 'collapsed')
+  let animate = $state(false)
+  function toggleCollapse() {
+    animate = true
+    setPrefs({ sidebar: collapsed ? 'expanded' : 'collapsed' })
+    setTimeout(() => (animate = false), 450)
+  }
   let listEl: HTMLElement | undefined = $state()
   let pill = $state({ y: 0, h: 0, ready: false })
 
@@ -91,7 +97,7 @@
 </script>
 
 <svelte:window onkeydown={drawerKeys} />
-<nav class="sb" id="sidebar" bind:this={navEl} class:collapsed class:open={mobileOpen} inert={narrow && !mobileOpen} aria-label={t('nav.label')}>
+<nav class="sb" id="sidebar" bind:this={navEl} class:collapsed class:animate class:open={mobileOpen} inert={narrow && !mobileOpen} aria-label={t('nav.label')}>
   <div class="list" bind:this={listEl}>
     <span class="pill" class:ready={pill.ready} style:translate="0 {pill.y}px" style:height="{pill.h}px" aria-hidden="true"></span>
     {#each nav as g (g.key)}
@@ -116,7 +122,7 @@
     {/if}
     <a href="/display" class="lite" class:here={route.path === '/display'} aria-current={route.path === '/display' ? 'page' : undefined} title={t('nav.display')}><SlidersHorizontal size={16} aria-hidden="true" /><span class="lbl">{t('nav.display')}</span></a>
     <a href="/lite" data-native class="lite" title={t('nav.lite')}><ExternalLink size={16} aria-hidden="true" /><span class="lbl">{t('nav.lite')}</span></a>
-    <button type="button" class="collapse" onclick={() => setPrefs({ sidebar: collapsed ? 'expanded' : 'collapsed' })} aria-label={collapsed ? t('nav.expand') : t('nav.collapse')} aria-pressed={collapsed}>
+    <button type="button" class="collapse" onclick={toggleCollapse} aria-label={collapsed ? t('nav.expand') : t('nav.collapse')} aria-pressed={collapsed}>
       <PanelLeft size={18} strokeWidth={1.75} aria-hidden="true" /><span class="lbl">{collapsed ? t('nav.expand') : t('nav.collapse')}</span>
     </button>
   </div>
@@ -135,11 +141,15 @@
     padding: var(--s-3) var(--s-2);
     overflow-y: auto;
     overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+  /* the width animates only for the collapse button's own click: after a resize, a density change or a
+     page load an animated width would show the menu cut off half way */
+  .sb.animate {
     transition:
       width var(--dur) var(--ease),
       top var(--dur) var(--ease),
       height var(--dur) var(--ease);
-    scrollbar-width: thin;
   }
   .collapsed {
     width: 64px;

@@ -1,13 +1,15 @@
 <script lang="ts">
   import { outcomeTone } from '../lib/outcomes'
   import { shownIn } from '../lib/evidence'
-  import { t, toolName } from '../lib/i18n.svelte'
+  import { t, toolName, has } from '../lib/i18n.svelte'
   import { usd, ms, num, datetime } from '../lib/format'
   import Status from './Status.svelte'
   import Button from './Button.svelte'
   import JsonView from './JsonView.svelte'
   import TurnMark from './TurnMark.svelte'
   import * as I from '../lib/icons'
+  import { useRooms } from '../lib/rooms.svelte'
+  const names = useRooms()
   // One turn as a timeline: message → decision → tools → evidence → answer.
   let { turn, ledger = null, onmark }: { turn: any; ledger?: any; onmark?: (id: string, mark: string) => void } = $props()
   const b = $derived(turn.body ?? {})
@@ -21,6 +23,9 @@
   // how the room's conversation was chosen for this reply: counts and reasons only
   const attribution = $derived((b.context?.attribution ?? {}) as Record<string, any>)
   const reasons = $derived(Object.entries((attribution.reasons ?? {}) as Record<string, number>))
+  // a stored code as a plain word: its translation, else the code with spaces for underscores
+  const code = (prefix: string, v: string) => (has(`${prefix}.${v}`) ? t(`${prefix}.${v}`) : String(v).replace(/_/g, ' '))
+  const argLine = (params: Record<string, unknown>) => Object.entries(params).map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' · ')
   const cls = (c: string) => (c ? t(`turns.class.${c}`) : '')
   // what the turn did with the pictures it was called with (chat.vision): body-free mode and reasons
   function visionLine(v: { mode: string; images?: number; model?: string; skipped?: string[] }) {
@@ -50,18 +55,18 @@
   <ol class="tl">
     <li>
       <span class="dot"><I.MessageSquareText size={14} aria-hidden="true" /></span>
-      <div><h3>{t('turns.step.message')}</h3><p class="speaker small muted">{b.speaker} · <a href="/rooms/{turn.guild_id}/{turn.channel_id}">#{turn.channel_id}</a></p><p class="msg">{#if b.message}{b.message}{:else}<span class="muted">{t(b.body_free ? 'turns.no_text' : 'turns.no_message')}</span>{/if}</p>{#if b.vision}<p class="xs muted">{visionLine(b.vision)}</p>{/if}</div>
+      <div><h3>{t('turns.step.message')}</h3><p class="speaker small muted">{b.speaker} · <a href="/rooms/{turn.guild_id}/{turn.channel_id}">{names.name(`discord:${turn.guild_id}:${turn.channel_id}`).label}</a></p><p class="msg">{#if b.message}{b.message}{:else}<span class="muted">{t(b.body_free ? 'turns.no_text' : 'turns.no_message')}</span>{/if}</p>{#if b.vision}<p class="xs muted">{visionLine(b.vision)}</p>{/if}</div>
     </li>
     <li>
       <span class="dot"><I.Sparkles size={14} aria-hidden="true" /></span>
       <div>
         <h3>{t('turns.step.decision')}</h3>
-        <p class="small">{t('turns.memory_state', { state: t(`memstate.${b.memory_state ?? 'unknown'}`) })}{b.ranking ? ` · ${t('turns.ranking', { mode: b.ranking })}` : ''}</p>
+        <p class="small">{t('turns.memory_state', { state: t(`memstate.${b.memory_state ?? 'unknown'}`) })}{b.ranking ? ` · ${t('turns.ranking', { mode: has(`lab.rank.${b.ranking}`) ? t(`lab.rank.${b.ranking}`) : b.ranking })}` : ''}</p>
         {#if attribution.mode}
           <p class="small">{t('turns.ctx.mode', { mode: t(`turns.ctx.mode.${attribution.mode}`) })} · {t('turns.ctx.counts', { included: attribution.included ?? 0, excluded: attribution.excluded ?? 0, candidates: attribution.candidates ?? 0, referenced: attribution.referenced ?? 0 })}</p>
-          {#if reasons.length}<p class="xs muted">{#each reasons as [why, n]}<span class="chip mono">{why} ×{n}</span> {/each}</p>{/if}
+          {#if reasons.length}<p class="xs muted">{#each reasons as [why, n]}<span class="chip">{code('turns.ctx.why', why)} ×{n}</span> {/each}</p>{/if}
         {/if}
-        {#if plan.length}<ul class="plan">{#each plan as p}<li><code>{p.tool_name}</code>{#if p.state}<span class="chip">{p.state}</span>{/if}{#if p.parameters && Object.keys(p.parameters).length}<span class="small muted mono break"> {JSON.stringify(p.parameters)}</span>{/if}</li>{/each}</ul>{/if}
+        {#if plan.length}<ul class="plan">{#each plan as p}<li><strong>{toolName(p.tool_name)}</strong>{#if p.state}<span class="chip">{code('turns.plan_state', p.state)}</span>{/if}{#if p.parameters && Object.keys(p.parameters).length}<span class="small muted break"> {argLine(p.parameters)}</span>{/if}</li>{/each}</ul>{/if}
       </div>
     </li>
     {#if tools.length}
@@ -71,7 +76,7 @@
           <h3>{t('turns.step.tools')}</h3>
           <ul class="tools">
             {#each tools as tr}
-              <li><Status tone={tr.ok ? 'ok' : 'danger'} label={toolName(tr.tool)} size="sm" />{#if tr.error}<span class="small err break">{tr.error}</span>{:else if tr.status}<span class="small muted">{tr.status}</span>{/if}</li>
+              <li><Status tone={tr.ok ? 'ok' : 'danger'} label={toolName(tr.tool)} size="sm" />{#if tr.error}<span class="small err break">{tr.error}</span>{:else if tr.status}<span class="small muted">{code('turns.tool_status', tr.status)}</span>{/if}</li>
             {/each}
           </ul>
         </div>
@@ -123,7 +128,7 @@
           <ul class="calls">
             {#each toolCalls as c}
               <li>
-                <div class="row small"><span class="chip">{toolName(c.tool)}</span>{#if c.provider}<span class="chip mono">{c.provider}</span>{/if}<span class="muted">{c.guard === 'skipped' ? t('turns.tool.skipped') : c.status}</span>{#if c.class}<span class="chip err">{cls(c.class)}</span>{/if}<span class="spacer"></span><span class="num">{ms(c.latency_ms)}{c.cost_usd ? ` · ${usd(c.cost_usd, 4)}` : ''}</span></div>
+                <div class="row small"><span class="chip">{toolName(c.tool)}</span>{#if c.provider}<span class="chip mono">{c.provider}</span>{/if}<span class="muted">{c.guard === 'skipped' ? t('turns.tool.skipped') : code('turns.tool_status', c.status)}</span>{#if c.class}<span class="chip err">{cls(c.class)}</span>{/if}<span class="spacer"></span><span class="num">{ms(c.latency_ms)}{c.cost_usd ? ` · ${usd(c.cost_usd, 4)}` : ''}</span></div>
                 <div class="row xs muted">
                   {#if c.param_keys?.length}<span>{t('turns.tool.params')}</span>{#each c.param_keys as k}<span class="chip mono">{k}{#if c.param_sources?.[k]} · {t(`turns.tool.source.${c.param_sources[k]}`)}{/if}</span>{/each}{/if}
                   {#if c.result_chars}<span class="num">{t('turns.tool.result', { n: num(c.result_chars) })}</span>{/if}

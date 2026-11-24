@@ -26,6 +26,11 @@
   import LoadState from '../components/LoadState.svelte'
   import Timeline from '../components/Timeline.svelte'
   import RoomMemory from '../components/RoomMemory.svelte'
+  import RoomPicker from '../components/RoomPicker.svelte'
+  import DiscordText from '../components/DiscordText.svelte'
+  import { splitExcerpt } from '../lib/discordtext'
+  import { useRooms } from '../lib/rooms.svelte'
+  import PeopleMemoryList from '../components/PeopleMemoryList.svelte'
   import PersonBackfill from '../components/PersonBackfill.svelte'
   import * as I from '../lib/icons'
 
@@ -33,6 +38,7 @@
   // correction the answer model will see, and link names that belong to one person. Source messages are
   // never edited: reviews and links are separate records.
   const blocks = resource<any>('memory.blocks.list')
+  const names = useRooms()
   const d = $derived(motionAllowed() ? 1 : 0)
   let tab = $state(route.query.get('tab') ?? 'search')
   let q = $state(route.query.get('q') ?? '')
@@ -51,7 +57,7 @@
   }
   // the blocks searched are attached to no room: the bot cannot use what is found here in any chat yet
   const unattached = $derived(rooms.length > 0 && ((blocks.data?.blocks ?? []) as any[]).filter((b) => rooms.includes(b.source_room)).every((b) => !(b.channels ?? []).length))
-  const allRooms = $derived(((blocks.data?.blocks ?? []) as any[]).map((b) => ({ id: b.source_room as string, label: (b.label || b.source_room) as string, n: b.message_count ?? 0 })))
+  const allRooms = $derived(names.items.map((r) => ({ id: r.key, n: r.count })))
   $effect(() => {
     if (rooms.length || !allRooms.length) return
     // only when something is found: an empty result is a new array every run and would loop this effect
@@ -186,11 +192,7 @@
       <div style:width="100px"><Select aria-label={t('memory.top_k')} bind:value={topK} options={['5', '8', '12', '20'].map((v) => ({ value: v, label: t('memory.top_n', { n: v }) }))} /></div>
       <Button type="submit" variant="primary" loading={busy} icon={I.Search}>{t('memory.search')}</Button>
     </form>
-    <div class="rooms">
-      {#each allRooms as r (r.id)}
-        <button type="button" class="room" title={r.id} class:on={rooms.includes(r.id)} aria-pressed={rooms.includes(r.id)} onclick={() => (rooms = rooms.includes(r.id) ? rooms.filter((x) => x !== r.id) : [...rooms, r.id])}>{r.label}<span class="num">{r.n}</span></button>
-      {/each}
-    </div>
+    <div class="rooms"><RoomPicker items={names.items} bind:value={rooms} /></div>
     {#if err}<p class="err small" role="alert">{err}</p>{/if}
     {#if busy}
       <Card><Skeleton lines={8} /></Card>
@@ -208,7 +210,7 @@
           <article class="hit" in:fly={{ y: 10, duration: 260 * d, delay: i * 40 * d }}>
             <header class="row xs muted">
               <span class="chip accent">#{h.rank}</span>
-              <span class="ellipsis">{h.source_room_id}</span>
+              <span class="ellipsis" title={h.source_room_id}>{names.name(h.source_room_id).label} · {names.name(h.source_room_id).server}</span>
               <span>· {h.date}</span>
               {#if h.speakers?.length}<span>· {h.speakers.join(', ')}</span>{/if}
               <span class="spacer"></span>
@@ -217,9 +219,9 @@
               {#if h.lexical_score !== undefined}<span class="num">{t('memory.lexical_score')} {h.lexical_score}</span>{/if}
             </header>
             {#if corrected[h.doc_id]}<Status tone="info" label={t('memory.has_correction')} size="sm" />{/if}
-            {#if h.summary}<p class="sum small">{h.summary}</p>{/if}
+            {#if h.summary}<p class="sum small"><DiscordText text={h.summary} mark={(x) => mark(x, q)} /></p>{/if}
             {#if shownIn(hits, i)}<p class="xs muted">{t('evidence.shown_in', { n: shownIn(hits, i) })}</p>{/if}
-            <pre>{#each mark(h.excerpt ?? '', q) as part}{#if part.m}<mark>{part.t}</mark>{:else}{part.t}{/if}{/each}</pre>
+            <pre><DiscordText text={splitExcerpt(h.excerpt, { raw: ragState === 'raw_lexical' }).body} mark={(x) => mark(x, q)} /></pre>
             <footer class="row">
               {#if h.packing_status}<span class="xs subtle">{codeLabel('memory.packing', h.packing_status)}</span>{/if}
               <span class="spacer"></span>
@@ -236,17 +238,11 @@
     <RoomMemory />
   {:else if tab === 'person'}
     <div class="person">
-      <Card title={t('pb.intro_title')} description={t('pb.intro_desc')}>
-        <Button href="/people" icon={I.Users}>{t('pb.open_people')}</Button>
-      </Card>
+      <PeopleMemoryList />
       <PersonBackfill />
     </div>
   {:else if tab === 'timeline'}
-    <div class="rooms">
-      {#each allRooms as r (r.id)}
-        <button type="button" class="room" title={r.id} class:on={rooms.includes(r.id)} aria-pressed={rooms.includes(r.id)} onclick={() => (rooms = rooms.includes(r.id) ? rooms.filter((x) => x !== r.id) : [...rooms, r.id])}>{r.label}<span class="num">{r.n}</span></button>
-      {/each}
-    </div>
+    <div class="rooms"><RoomPicker items={names.items} bind:value={rooms} /></div>
     <Card title={t('room.timeline_title')} description={t('memory.timeline_desc')}>
       {#if rooms.length}<Timeline scope={{ rooms }} />{:else}<p class="small muted">{t('memory.rooms_required')}</p>{/if}
     </Card>
@@ -260,7 +256,7 @@
           <tbody>
             {#each reviews.data.reviews as rv (rv.leaf_id)}
               <tr><td><Status tone={rv.kind === 'exclude' ? 'warn' : 'info'} label={t(`memory.kind.${rv.kind}`)} size="sm" /></td>
-                <td class="q2"><div class="xs subtle mono">{rv.room}</div><div class="small clamp">{rv.excerpt}</div></td>
+                <td class="q2"><div class="xs subtle" title={rv.room}>{names.name(rv.room).label} · {names.name(rv.room).server}</div><div class="small clamp"><DiscordText text={splitExcerpt(rv.excerpt).body} /></div></td>
                 <td class="small break">{rv.note || '–'}</td>
                 <td class="muted nowrap">{relative(rv.at)}{#if rv.actor}<div class="xs subtle">{rv.actor}</div>{/if}</td>
                 <td class="r"><Button size="sm" variant="ghost" icon={I.Undo2} disabled={!can('memory.review')} onclick={() => clearReview(rv.leaf_id)}>{t('memory.undo_review')}</Button></td></tr>
@@ -311,7 +307,7 @@
 
 <Dialog bind:open={revOpen} title={revKind === 'exclude' ? t('memory.exclude_title') : t('memory.correct_title')} description={revKind === 'exclude' ? t('memory.exclude_desc') : t('memory.correct_desc')}>
   <div class="stack">
-    {#if revFor}<pre class="quote small">{(revFor.excerpt ?? '').slice(0, 600)}</pre>{/if}
+    {#if revFor}<pre class="quote small"><DiscordText text={splitExcerpt(revFor.excerpt).body.slice(0, 600)} /></pre>{/if}
     {#if revKind === 'correct'}
       <Field id="rv-note" label={t('memory.correct_note')} hint={t('memory.correct_note_hint')}>{#snippet children({ id, describedby })}<TextArea {id} aria-describedby={describedby} bind:value={revNote} rows={3} maxlength={1000} />{/snippet}</Field>
     {:else}
@@ -373,34 +369,7 @@
     color: var(--text);
   }
   .rooms {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
     margin: var(--s-3) 0 var(--s-4);
-  }
-  .room {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    display: inline-flex;
-    gap: 6px;
-    align-items: center;
-    height: 30px;
-    padding: 0 12px;
-    border: 0;
-    border-radius: 999px;
-    background: var(--surface-2);
-    color: var(--text-muted);
-    font-size: var(--text-sm);
-    cursor: pointer;
-  }
-  .room .num {
-    font-size: var(--text-xs);
-  }
-  .room.on {
-    background: var(--accent-soft);
-    color: var(--accent-text);
   }
   .hits {
     display: grid;
@@ -431,12 +400,6 @@
     border-radius: var(--r);
     background: var(--surface-2);
     max-height: 180px;
-  }
-  mark {
-    background: var(--accent-soft-hover);
-    color: inherit;
-    border-radius: 3px;
-    padding: 0 2px;
   }
   .sum {
     color: var(--text-muted);

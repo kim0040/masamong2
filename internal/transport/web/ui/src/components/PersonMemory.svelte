@@ -13,12 +13,14 @@
   import Confirm from './Confirm.svelte'
   import Skeleton from './Skeleton.svelte'
   import LoadState from './LoadState.svelte'
+  import { useRooms } from '../lib/rooms.svelte'
   import * as I from '../lib/icons'
 
   // What the bot keeps about one person in one server (memory.mine.show), hiding one statement
   // (memory.person.hide) and forgetting it all: a preview first, then a confirmation with the preview's
   // token (memory.mine.forget). Each server keeps its own, so the operator picks the server, among the ones
   // the person is in. The person is named by the dialog this sits in; the ID is not shown.
+  const names = useRooms()
   let { userId, preferredGuild = '' }: { userId: string; preferredGuild?: string } = $props()
 
   // Exact membership is filtered before the per-server list cap.
@@ -49,6 +51,8 @@
   const parts = $derived(splitMine(view?.data?.items))
   const claims = $derived(sortClaims((view?.data?.person ?? []) as Claim[]))
   const sum = $derived(claimSummary(claims))
+  const directClaims = $derived(claims.filter((c) => isDirect(c)))
+  const heardClaims = $derived(claims.filter((c) => !isDirect(c)))
   const episodes = $derived<number>(view?.data?.episodes ?? 0)
   const empty = $derived(!!view?.data && parts.told.length + parts.other.length + claims.length + episodes === 0)
   const itemKind = (k: string) => (has(`rm.item.${k}`) ? t(`rm.item.${k}`) : k)
@@ -125,20 +129,25 @@
           <section aria-labelledby="pm-claims">
             <h4 id="pm-claims" class="sub">{t('pm.claims')}</h4>
             <p class="small sum">{t('pm.summary', { own: num(sum.own), others: num(sum.others), told: num(sum.told) })} · {t('pm.last', { when: datetime(sum.last) })}</p>
-            <ul class="claims">
-              {#each claims as c (c.id)}
-                <li>
-                  <div class="main">
-                    <span class="chip">{claimKind(c.kind)}</span>
-                    <span class="tier" class:direct={isDirect(c)}>{isDirect(c) ? t('pm.tier.direct') : t('pm.tier.heard')}</span>
-                    {#if c.state === 'pending'}<span class="tier" title={t('pm.pending_hint')}>{t('pm.pending')}</span>{/if}
-                    <span class="break">{c.text}</span>
-                  </div>
-                  <div class="meta xs muted"><span>{source(c)}</span><span>·</span><span>{datetime(c.observed_at)}</span></div>
-                  <Button size="sm" variant="ghost" icon={I.EyeOff} aria-label={t('pm.hide_one', { text: c.text })} onclick={() => askHide(c)}>{t('pm.hide')}</Button>
-                </li>
-              {/each}
-            </ul>
+            <p class="xs muted sum">{t('pm.hidden_note')}</p>
+            {#each [{ id: 'direct', list: directClaims }, { id: 'heard', list: heardClaims }] as grp (grp.id)}
+              {#if grp.list.length}
+                <h5 class="grp">{t(`pm.group.${grp.id}`)}<span class="xs muted num"> · {num(grp.list.length)}</span></h5>
+                <ul class="claims">
+                  {#each grp.list as c (c.id)}
+                    <li>
+                      <div class="main">
+                        <span class="chip">{claimKind(c.kind)}</span>
+                        {#if c.state === 'pending'}<span class="tier" title={t('pm.pending_hint')}>{t('pm.pending')}</span>{/if}
+                        <span class="break">{c.text}</span>
+                      </div>
+                      <div class="meta xs muted"><span>{source(c)}</span>{#if c.room_id}<span>·</span><span title={names.name(c.room_id).server}>{names.name(c.room_id).label}</span>{/if}<span>·</span><span>{datetime(c.observed_at)}</span></div>
+                      <Button size="sm" variant="ghost" icon={I.EyeOff} aria-label={t('pm.hide_one', { text: c.text })} onclick={() => askHide(c)}>{t('pm.hide')}</Button>
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            {/each}
           </section>
         {/if}
         {#if parts.told.length + parts.other.length}
@@ -250,13 +259,15 @@
     grid-column: 2;
     grid-row: 1 / span 2;
   }
+  .grp {
+    margin: var(--s-3) 0 var(--s-1);
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--text-muted);
+  }
   .tier {
     font-size: var(--text-xs);
     color: var(--text-muted);
-  }
-  .tier.direct {
-    color: var(--ok);
-    font-weight: 600;
   }
   .more summary {
     cursor: pointer;

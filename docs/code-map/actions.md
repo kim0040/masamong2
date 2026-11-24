@@ -13,8 +13,8 @@ internal/catalog의 모든 Action: CLI 명령, 콘솔 경로와 internal/applica
 | admin.prefs | executable | read | `prefs show` | `/` | [admin.go · adminPrefs](../../internal/application/admin.go) |
 | admin.prefs.set | executable | internal_write | `prefs set` | `/` | [admin.go · adminPrefs](../../internal/application/admin.go) |
 | agent.simulate | executable | read | `agent simulate` | `/lab` | [agent_backup.go · agent](../../internal/application/agent_backup.go) |
-| alerts.status | executable | read | `alerts status` | `/maintenance` | [alerts.go · alertsAction](../../internal/application/alerts.go) |
-| alerts.test | executable | external_write | `alerts test` | `/maintenance` | [alerts.go · alertsAction](../../internal/application/alerts.go) |
+| alerts.status | executable | read | `alerts status` | `/people` | [alerts.go · alertsAction](../../internal/application/alerts.go) |
+| alerts.test | executable | external_write | `alerts test` | `/people` | [alerts.go · alertsAction](../../internal/application/alerts.go) |
 | audit.list | executable | read | `audit` | `/settings` | [admin.go · auditList](../../internal/application/admin.go) |
 | backup.create | executable | internal_write | `backup create` | `/maintenance` | [backup.go · backup](../../internal/application/backup.go) |
 | backup.delete | executable | internal_write | `backup delete` | `/maintenance` | [backup.go · backup](../../internal/application/backup.go) |
@@ -82,11 +82,11 @@ internal/catalog의 모든 Action: CLI 명령, 콘솔 경로와 internal/applica
 | memory.episodes.forget | executable | internal_write | `memory episodes forget` | `/memory` | [episodes_actions.go · episodesForget](../../internal/application/episodes_actions.go) |
 | memory.episodes.list | executable | read | `memory episodes list` | `/memory` | [episodes_actions.go · episodesList](../../internal/application/episodes_actions.go) |
 | memory.episodes.show | executable | read | `memory episodes show` | `/memory` | [episodes_actions.go · episodeShow](../../internal/application/episodes_actions.go) |
-| memory.mine.forget | executable | internal_write | `memory mine forget` | `/memory` | [explicit.go · mineAction](../../internal/application/explicit.go) |
-| memory.mine.show | executable | read | `memory mine show` | `/memory` | [explicit.go · mineAction](../../internal/application/explicit.go) |
+| memory.mine.forget | executable | internal_write | `memory mine forget` | `/people` | [explicit.go · mineAction](../../internal/application/explicit.go) |
+| memory.mine.show | executable | read | `memory mine show` | `/people` | [explicit.go · mineAction](../../internal/application/explicit.go) |
 | memory.people.backfill | executable | external_write | `memory people backfill` | `/memory` | [people_backfill.go · peopleBackfillAction](../../internal/application/people_backfill.go) |
 | memory.people.backfill.review | executable | read | `memory people review` | `/memory` | [people_backfill_run.go · peopleBackfillReview](../../internal/application/people_backfill_run.go) |
-| memory.person.hide | executable | internal_write | `memory person hide` | `/memory` | [person_claims_forget.go · personAction](../../internal/application/person_claims_forget.go) |
+| memory.person.hide | executable | internal_write | `memory person hide` | `/people` | [person_claims_forget.go · personAction](../../internal/application/person_claims_forget.go) |
 | memory.reindex | executable | external_write | `memory reindex` | `/blocks` | [memory.go · memoryActions](../../internal/application/memory.go) |
 | memory.review | executable | internal_write | `memory review` | `/memory` | [memory_review.go · memoryReviewAction](../../internal/application/memory_review.go) |
 | memory.reviews | executable | read | `memory reviews` | `/memory` | [memory_review.go · memoryReviewAction](../../internal/application/memory_review.go) |
@@ -119,7 +119,7 @@ internal/catalog의 모든 Action: CLI 명령, 콘솔 경로와 internal/applica
 | providers.remove | executable | internal_write | `providers remove` | `/connections` | [providers_persona.go · providers](../../internal/application/providers_persona.go) |
 | providers.test | executable | read | `providers test` | `/connections` | [providers_persona.go · providers](../../internal/application/providers_persona.go) |
 | reminders.propose | executable | internal_write | `reminders propose` | `/rooms` | [reminders.go · remindersPropose](../../internal/application/reminders.go) |
-| reminders.update | executable | internal_write | `reminders` | `/rooms` | [reminders.go · remindersUpdate](../../internal/application/reminders.go) |
+| reminders.update | executable | internal_write | `reminders` | `/people` | [reminders.go · remindersUpdate](../../internal/application/reminders.go) |
 | reports.create | executable | read | `reports create` | `/stats` | [ops_extra.go · reportCreate](../../internal/application/ops_extra.go) |
 | room.style.build | executable | external_write | `room style build` | `/rooms` | [roomstyle.go · roomStyleAction](../../internal/application/roomstyle.go) |
 | room.style.decide | executable | internal_write | `room style decide` | `/rooms` | [roomstyle.go · roomStyleAction](../../internal/application/roomstyle.go) |

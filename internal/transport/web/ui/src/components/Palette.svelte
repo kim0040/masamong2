@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Component } from 'svelte'
   import { nav, extraPages } from '../lib/nav'
-  import { t, toolName } from '../lib/i18n.svelte'
+  import { t, has, toolName } from '../lib/i18n.svelte'
   import { navigate } from '../lib/router.svelte'
   import { call, practice, setPractice, can } from '../lib/api.svelte'
   import { setPaused, allPaused, PAUSE_ALL } from '../lib/pause'
@@ -31,6 +31,27 @@
     } else if (!open && el.open) el.close()
   })
 
+  // the palette's extra settings entries: nested keys a raw section search cannot reach, each
+  // deep-linked to the friendly page that owns it (audit 4.4). kw carries the exact config keys so a
+  // key like retention.context_days finds its entry.
+  const NESTED: { key: string; href?: string; go?: () => void; page: string; kw: string }[] = [
+    { key: 'watch_level', go: () => navigate(firstRoom), page: 'rooms', kw: 'watch_level disaster_alerts 지역별 알림 레벨 구역 특보 alert area level' },
+    { key: 'retention', href: '/maintenance', page: 'maintenance', kw: 'retention 보관 기간 days 데이터 retention retention.turn_days retention.turn_detail_days retention.trace_days retention.audit_days retention.usage_days retention.query_cache_days retention.image_days retention.ledger_days retention.pending_days retention.context_days' },
+    { key: 'features', href: '/tools', page: 'tools', kw: 'features 기능 스위치 켜기 끄기 feature switch' },
+    { key: 'i18n', href: '/display', page: 'display', kw: 'i18n locale timezone 언어 시간대 bot language i18n.default_locale i18n.timezone i18n.polite_default i18n.fallback_locale' },
+    { key: 'stats_enabled', href: '/stats', page: 'stats', kw: 'stats.enabled 통계 수집 statistics collect' },
+    { key: 'updates_check', href: '/maintenance', page: 'maintenance', kw: 'updates.check 업데이트 확인 update check' },
+    { key: 'participation', href: '/settings?section=participation', page: 'settings', kw: 'participation 먼저 말 걸기 기본값 chime-in defaults participation.enabled participation.mode participation.wait_sec participation.cooldown_sec participation.per_hour participation.per_day participation.judge_per_hour participation.quiet_start participation.quiet_end participation.min_score participation.shadow_drafts' },
+    { key: 'guild_locale', href: '/rooms', page: 'rooms', kw: 'guilds locale 서버 언어 server language' },
+  ]
+  // alert levels live on a room's behaviour tab: the first room that has one, or the rooms list
+  const firstRoom = $derived.by(() => {
+    for (const [g, gv] of Object.entries<any>(cfg.doc?.guilds ?? {})) {
+      const chs = Object.keys(gv?.channels ?? {})
+      if (chs.length) return `/rooms/${g}/${chs[0]}?tab=behavior`
+    }
+    return '/rooms'
+  })
   const items = $derived.by<Item[]>(() => {
     const out: Item[] = []
     for (const g of nav) for (const it of g.items) out.push({ id: 'p' + it.href, group: t('palette.pages'), label: t(`nav.${it.key}`), hint: t(`nav.group.${g.key}`), icon: it.icon, keywords: it.key, run: () => navigate(it.href) })
@@ -49,7 +70,9 @@
     out.push({ id: 'c-newtool', group: t('palette.commands'), label: t('tools.new'), icon: I.Plus, keywords: 'http tool add', run: () => navigate('/tools/new') })
     for (const tl of tools) out.push({ id: 't' + tl.id, group: t('palette.tools'), label: toolName(tl.id), hint: tl.id, icon: I.Wrench, keywords: tl.id, run: () => navigate(`/tools/${encodeURIComponent(tl.id)}`) })
     for (const [g, gv] of Object.entries<any>(cfg.doc?.guilds ?? {})) for (const c of Object.keys(gv?.channels ?? {})) out.push({ id: `r${g}:${c}`, group: t('palette.rooms'), label: `#${c}`, hint: g, icon: I.Hash, keywords: `${g} ${c}`, run: () => navigate(`/rooms/${g}/${c}`) })
-    for (const sec of Object.keys(cfg.doc ?? {})) out.push({ id: 's' + sec, group: t('palette.settings'), label: sec, icon: I.Settings2, keywords: 'config ' + sec, run: () => navigate(`/settings?section=${encodeURIComponent(sec)}`) })
+    for (const sec of Object.keys(cfg.doc ?? {})) out.push({ id: 's' + sec, group: t('palette.settings'), label: has(`cfg.${sec}`) ? t(`cfg.${sec}`) : sec, hint: sec, icon: I.Settings2, keywords: `config ${sec}`, run: () => navigate(`/settings?section=${encodeURIComponent(sec)}`) })
+    // important nested keys, deep-linked to their friendly home (or the settings section without one)
+    for (const n of NESTED) out.push({ id: 'n' + n.key, group: t('palette.settings'), label: t(`palette.key.${n.key}`), hint: t(`nav.${n.page}`), icon: I.Settings2, keywords: n.kw, run: () => (n.go ? n.go() : navigate(n.href!)) })
     return out
   })
   const filtered = $derived.by(() => {

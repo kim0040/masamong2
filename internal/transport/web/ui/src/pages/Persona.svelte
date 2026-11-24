@@ -19,6 +19,8 @@
   import { toast } from '../lib/toast.svelte'
   import { defaultPersonaId, personaId, personaTitle } from '../lib/persona'
   import * as I from '../lib/icons'
+  import { useRooms } from '../lib/rooms.svelte'
+  const roomNames = useRooms()
 
   useConfig()
   const personas = resource<any>('personas.list', () => ({}), { live: ['config'] })
@@ -156,7 +158,7 @@
   }
 
   // try the edited style in a room before saving (a lab turn: nothing goes to Discord)
-  const rooms = $derived(((chList.data?.channels ?? []) as any[]).map((c) => ({ value: `${c.guild_id}:${c.id}`, label: `#${c.name || c.id}` })))
+  const rooms = $derived(((chList.data?.channels ?? []) as any[]).map((c) => ({ value: `${c.guild_id}:${c.id}`, label: roomNames.channel(c.name, c.id).label })))
   let tryRoom = $state('')
   let tryMsg = $state('')
   let tryOut = $state<any>(null)
@@ -213,7 +215,7 @@
     <article class="pc enter" class:hidden={p.hidden} style:--i={i}>
       <header>
         <span class="av" aria-hidden="true">{p.locale === 'ko' ? '가' : 'Aa'}</span>
-        <div class="nm"><h2>{personaTitle(p)}</h2><code class="xs subtle">{p.id}</code></div>
+        <div class="nm"><h2>{personaTitle(p)}</h2>{#if !p.builtin}<code class="xs subtle">{p.id}</code>{/if}</div>
         {#if p.builtin}<span class="chip">{t('persona.builtin')}</span>{/if}
         {#if p.id === defaultPersona}<span class="chip accent" title={t('persona.default_chip_hint')}>{t('persona.default_chip')}</span>{/if}
         {#if p.hidden}<span class="chip">{t('persona.hidden_chip')}</span>{/if}
@@ -223,7 +225,7 @@
       {#if !p.hidden}
       <div class="used">
         <span class="xs muted">{t('persona.used_by', { n: (roomsOf[p.id] ?? []).length })}</span>
-        {#each (roomsOf[p.id] ?? []).slice(0, 6) as c (rk(c))}<a class="chip" href="/rooms/{c.guild_id}/{c.id}"><I.Hash size={11} aria-hidden="true" />{c.name}</a>{/each}
+        {#each (roomsOf[p.id] ?? []).slice(0, 6) as c (rk(c))}<a class="chip" href="/rooms/{c.guild_id}/{c.id}"><I.Hash size={11} aria-hidden="true" />{roomNames.channel(c.name, c.id).label.replace(/^#/, '')}</a>{/each}
         {#if (roomsOf[p.id] ?? []).length > 6}<span class="chip">+{(roomsOf[p.id] ?? []).length - 6}</span>{/if}
       </div>
       {/if}
@@ -324,7 +326,7 @@
           {@const mine = c.persona_ref === applyFor?.id}
           <label class="room" class:mine>
             <input type="checkbox" checked={mine || applySel.has(rk(c))} disabled={mine} onchange={() => pick(c)} />
-            <span class="nm"><I.Hash size={13} aria-hidden="true" />{c.name}</span>
+            <span class="nm"><I.Hash size={13} aria-hidden="true" />{roomNames.channel(c.name, c.id).label.replace(/^#/, '')}</span>
             <span class="xs muted">{mine ? t('persona.apply_already') : personaName(c.persona_ref)}</span>
           </label>
         {/each}

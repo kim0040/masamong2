@@ -18,6 +18,8 @@
   import Skeleton from './Skeleton.svelte'
   import LoadState from './LoadState.svelte'
   import * as I from '../lib/icons'
+  import { useRooms } from '../lib/rooms.svelte'
+  const names = useRooms()
 
   // Room memory (ADR-17): the compressed state of a room (L1) and the episodes made from its
   // conversations (L2). Both are short derived sentences; each carries the messages it came from, which
@@ -28,7 +30,7 @@
   const rooms = $derived.by(() => {
     const guildName = new Map<string, string>(((channels.data?.guilds ?? []) as any[]).map((g) => [g.id as string, (g.name || g.id) as string]))
     const out: { value: string; label: string; group: string }[] = []
-    for (const c of (channels.data?.channels ?? []) as any[]) out.push({ value: roomValue('discord', c.guild_id, c.id), label: `# ${c.name || c.id}`, group: guildName.get(c.guild_id) ?? c.guild_id })
+    for (const c of (channels.data?.channels ?? []) as any[]) out.push({ value: roomValue('discord', c.guild_id, c.id), label: names.channel(c.name, c.id).label, group: guildName.get(c.guild_id) ?? c.guild_id })
     for (const b of (blocks.data?.blocks ?? []) as any[]) if (b.platform === 'kakao' && (b.message_count ?? 0) > 0) out.push({ value: roomValue('kakao', b.source_room), label: b.label || b.source_room, group: t('rm.group_kakao') })
     return out
   })

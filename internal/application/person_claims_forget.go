@@ -346,7 +346,8 @@ func (s *Service) personAction(ctx context.Context, req action.Request) action.R
 
 // personClaimsView is the person field of memory.mine.show: the statements about the person the gate
 // lets through (claimsAbout: a member sees the channel's scope, the console every active and pending
-// one), with who said each one when it was someone else.
+// one), with who said each one when it was someone else and the room it was said in (room_id, a room key;
+// it is read from the rows the same gate let through, so a member never sees a room outside that scope).
 func (s *Service) personClaimsView(ctx context.Context, db *storage.Store, guild, ref, channel string, operator bool, labelIn func(room string) func(string) string) ([]map[string]any, []claimRow) {
 	claims, err := s.claimsAbout(ctx, db, guild, ref, channel, operator)
 	if err != nil {
@@ -362,7 +363,7 @@ func (s *Service) personClaimsView(ctx context.Context, db *storage.Store, guild
 			}
 		}
 		out = append(out, map[string]any{"id": c.id, "kind": c.kind, "text": episodes.StoredText(c.text, label, "?"), "origin": c.origin(),
-			"said_by": saidBy, "observed_at": c.observed, "evidence_n": len(c.evidence), "state": c.state})
+			"said_by": saidBy, "observed_at": c.observed, "evidence_n": len(c.evidence), "state": c.state, "room_id": c.room})
 	}
 	return out, claims
 }

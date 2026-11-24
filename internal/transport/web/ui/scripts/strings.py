@@ -344,7 +344,7 @@ add("home", {
 add("turns", {
     "title": ("대화 기록", "Conversations"), "desc": ("봇이 수신한 메시지마다 어떤 판단을 내리고 어떤 도구·기억을 활용했는지 확인합니다.", "For each message: what the bot decided, and which tools and memories it used."),
     "source": ("기록 종류", "Source"), "live": ("실제 대화", "Live"), "lab": ("실험", "Lab"), "outcome": ("결과", "Outcome"), "all_outcomes": ("모든 결과", "All outcomes"),
-    "tool": ("도구", "Tool"), "tool_ph": ("도구 ID로 필터링", "Filter by tool ID"), "channel": ("채널", "Channel"), "channel_ph": ("채널 ID로 필터링", "Filter by channel ID"),
+    "tool": ("도구", "Tool"), "tool_ph": ("도구 ID로 필터링", "Filter by tool ID"), "channel": ("채널", "Channel"), "channel_ph": ("채널 ID로 필터링", "Filter by channel ID"), "all_channels": ("모든 방", "All rooms"),
     "col.time": ("시각", "Time"), "col.message": ("메시지", "Message"), "col.tools": ("도구", "Tools"), "col.evidence": ("근거", "Evidence"), "col.latency": ("응답 시간", "Latency"),
     "col.cost": ("비용", "Cost"), "col.outcome": ("결과", "Outcome"), "empty": ("해당하는 대화가 없습니다", "No conversations match"),
     "empty_body": ("필터를 변경하거나, 대화 테스트을 통해 첫 대화 기록을 만들어 보세요.", "Change the filters, or make a first record with a test chat."),
@@ -407,10 +407,6 @@ add("room", {
     "searched_rooms": ("검색 대상 자료", "Searched sources"), "no_rooms": ("검색할 자료가 없습니다.", "No sources to search."),
     
     "no_blocks": ("추가한 자료가 없습니다.", "No extra sources."), "pick_block": ("추가할 자료 선택", "Pick a source"), "attach": ("추가", "Add"), "detach": ("제거", "Remove"),
-    "attachments_title": ("가져오기 대기 파일", "Files waiting for import"), "attachments_desc": ("이 방 전용으로 파일을 보관합니다. 자료 화면에서 가져오고 색인한 뒤 검색 블록에 추가해야 기억으로 사용됩니다.", "Stores files for this room only. Import and index them from Sources, then add the resulting memory source."),
-    "attachments_empty": ("대기 중인 파일이 없습니다.", "No staged files."), "attachment_pick": ("파일 선택", "Choose a file"), "attachment_add": ("파일 보관", "Stage file"),
-    "attachment_added": ("이 방에 파일을 보관했습니다", "File staged for this room"), "attachment_removed": ("대기 파일을 삭제했습니다", "Staged file removed"),
-    "attachments_note": ("보관 상태에서는 검색되지 않습니다. 자료 가져오기와 색인을 완료해 주세요.", "Staging alone does not make it searchable. Finish import and indexing."),
     "tools_title": ("이 방의 도구", "Tools in this room"), "tools_desc": ("기본값은 도구 전체 설정을 따릅니다. 여기서 켜거나 끄면 이 방에만 개별 적용됩니다.", "Default follows the global tool setting. On or off applies to this room only."),
     "tools_global": ("전체 설정", "Global"), "tools_here": ("이 방", "This room"),
     "recent_turns": ("최근 대화", "Recent conversations"), "ops_log": ("운영 기록", "Operations log"), "no_ops": ("운영 기록이 없습니다.", "No operations logged."),
@@ -599,8 +595,8 @@ add("lab", {
     "tab.chat": ("테스트 대화", "Test chat"), "tab.reviews": ("검토 세트", "Review set"), "tab.eval": ("비교 평가", "Compare"),
     "setup": ("실험 설정", "Setup"), "kind": ("실험 모드", "Mode"), "kind.search": ("검색만", "Search only"), "kind.chat": ("답변까지", "Full reply"),
     "kind_hint.search": ("기억 검색 결과만 조회합니다. 모델 호출 비용이 발생하지 않습니다.", "Retrieval results only. Free."), "kind_hint.chat": ("의도 파악, 도구 호출, 최종 답변까지 모두 실행합니다. 모델 API 비용이 발생합니다.", "Runs planner, tools and reply. Costs model calls."),
-    "channel": ("방", "Room"), "channel_none": ("방 선택", "Choose a room"), "rooms": ("검색 대상 자료", "Sources to search"), "rooms_n": ("{n}개 자료에서 검색합니다", "Searching {n} sources"),
-    "rooms_channel": ("선택하지 않으면 채널 기본 기억 대상을 사용합니다", "No selection uses the room's memory view"),
+    "channel": ("이 방에서 묻기", "Ask in this room"), "channel_none": ("방 선택", "Choose a room"), "rooms": ("검색할 방 직접 고르기", "Pick rooms to search"), "rooms_n": ("고른 {n}개 방에서 검색합니다", "Searching the {n} rooms you picked"),
+    "rooms_channel": ("고르지 않으면 위에서 고른 방의 기억을 검색합니다", "With none picked, the room above is searched"),
     "speaker": ("화자", "Speaker"), "default_speaker": ("테스터", "tester"), "ranking": ("순위 방식", "Ranking"), "ranking_a": ("A 순위 방식", "Ranking A"), "ranking_b": ("B 순위 방식", "Ranking B"),
     "compare": ("두 방식 비교", "Compare two modes"), "compare_hint": ("동일한 질문을 A·B 두 방식으로 동시에 실행하여 결과를 비교합니다.", "Runs the same question with A and B."),
     "conversation": ("실험 대화", "Lab conversation"), "welcome": ("무엇이든 물어보세요", "Ask anything"),
@@ -1071,7 +1067,7 @@ add("lab", {
     "eval_history_empty": ("아직 수행된 평가 기록이 없습니다.", "No evaluations yet."), "eval_open": ("결과 열기", "Open"),
 })
 add("memory", {
-    "tab.search": ("검색", "Search"), "tab.timeline": ("사건 연표", "Timeline"), "tab.reviews": ("검토 완료된 기억", "Reviewed"), "tab.people": ("인물 식별자 연결", "People"),
+    "tab.search": ("검색", "Search"), "tab.timeline": ("사건 연표", "Timeline"), "tab.reviews": ("검토 완료된 기억", "Reviewed"), "tab.people": ("같은 사람 묶기", "Merge names"),
     "timeline_desc": ("선택한 데이터 소스에서 발생한 대화를 시간순으로 조회합니다. 키워드를 입력하면 관련된 대화만 필터링합니다.", "What happened when in the chosen sources. Ask a question to gather only what relates."),
     "correct": ("정정", "Correct"), "exclude": ("제외", "Exclude"), "has_correction": ("정정 등록됨", "Corrected"),
     "correct_title": ("이 기억 정정", "Correct this memory"), "correct_desc": ("원본 데이터는 유지되며 향후 답변 생성 시 이 기억과 함께 정정된 내용이 우선 반영됩니다.", "The source stays; your correction is shown next to it whenever it is used."),
@@ -1846,11 +1842,16 @@ add("conn", {
     "effort_hint": ("생각 기능을 지원하는 모델이 답변하기 전에 얼마나 생각할지 설정합니다. 낮을수록 빠르고 저렴합니다. 기본값일 때는 이름 부름·이어 말하기 같은 단순 판단은 생각 없이 요청합니다. 직접 설정하면 해당 판단에도 생각을 적용하지만 '낮음'을 넘지 않습니다. 모델이 지원하지 않는 강도는 가장 가까운 강도로 낮춰 전송합니다.", "How long a reasoning model thinks before it answers. Lower is faster and cheaper. On the default, short checks such as name calls and follow-ups run without thinking; once you pick a level they think too, at most at Low. A level the model does not take is sent as the nearest one below."),
     "effort_hint_summary": ("요약 모델이 얼마나 생각할지 설정합니다. 기본값일 때는 요약 시 생각 없이 요청합니다(짧은 출력 한도를 생각에 모두 소진하지 않도록). 직접 설정하면 지정한 강도로 생각하며, 생각을 위한 출력 여유를 더 제공합니다.", "How much the summary model thinks. On the default, summaries run without thinking, so the short output limit is not spent on it. Pick a level and they think at it, with extra output room for the thinking."),
     "effort_default": ("기본 (낮음)", "Default (low)"),
+    "effort_step_desc": ("모델을 바꿨어요. 이 모델이 답하기 전에 얼마나 생각할지 정하세요. 정하지 않으면 지금 설정이 그대로예요.", "The model is changed. Choose how much it thinks before it answers; if you do nothing, the current setting stays."),
+    "effort_unfit": ("지금 설정인 '{level}'은 이 모델이 쓰지 못하는 강도예요. 다른 강도를 고르세요. 그대로 두면 가장 가까운 강도로 낮춰 보내요.", "The current setting, '{level}', is not one this model takes. Pick another; if you leave it, it is sent as the closest level the model takes."),
+    "effort_save": ("강도 저장", "Save effort"), "effort_keep": ("그대로 두기", "Keep as is"), "effort_saved": ("생각 강도를 저장했습니다", "Thinking effort saved"),
+    "effort_change": ("생각 강도 바꾸기", "Change thinking effort"), "effort_row": ("{role} 생각 강도", "{role}: thinking effort"), "effort_none_role": ("이 역할은 생각 강도를 쓰지 않습니다", "This role takes no thinking effort"),
+    "fb_summary": ("예비 모델 {n}개", "{n} fallback models"),
     "effort_now": ("생각 강도: {level}", "Thinking: {level}"),
     "effort.xhigh": ("매우 높음", "Extra high"),
     "effort.max": ("최대", "Max"),
     "fb_effort_role": ("역할 설정 따름", "Same as the role"),
-    "reason_yes": ("생각 지원", "Thinks"), "reason_no": ("생각 미지원", "No thinking"), "reason_unknown": ("알 수 없음", "Not known"),
+    "reason_yes": ("생각 지원", "Thinks"), "reason_no": ("생각 미지원", "No thinking"), "reason_unknown": ("생각 지원 여부 모름", "Thinking support unknown"),
     "reason_yes_hint": ("모델 목록상 생각 기능을 지원하는 모델이며, 지원하지 않는 강도는 선택할 수 없도록 비활성화했습니다.", "The model list says this model thinks; levels it does not take are greyed out."),
     "reason_no_hint": ("모델 목록상 생각 기능을 지원하지 않는 모델이므로 생각 강도를 전송하지 않습니다.", "The model list says this model does not think, so no level is sent."),
     "reason_unknown_hint": ("모델 목록에서 생각 지원 여부를 확인할 수 없습니다. 지원하지 않는 강도는 첫 요청 거절 후 자동으로 조정합니다.", "The model list does not say whether it thinks. A level it refuses is adjusted after the first refusal."),
@@ -2141,6 +2142,7 @@ add("rooms.log", {
     "test_failed": ("시험 글을 올리지 못했습니다", "Could not post the test entry"),
     "saved": ("서버 로그 설정을 저장했습니다", "Server log saved"),
 })
+add("rooms", {"unseen": ("봇이 볼 수 없음", "Bot cannot see it"), "unseen_title": ("볼 수 없는 채널 {n}개", "{n} channels the bot cannot see"), "unseen_hint": ("봇에게 보기 권한이 없어 일괄 작업에서 빠집니다", "No view permission for the bot; left out of bulk actions")})
 add("rooms.channel", {"unnamed": ("Discord가 이름을 알려 주지 않은 채널", "Discord has not reported this channel's name")})
 
 # 2026-09-30 production pass: operator alerts, crash restarts
@@ -2282,10 +2284,10 @@ add("cfg", {
 # 2026-10-01 earthquake and weather-warning alerts
 add("disaster", {
     "title": ("지진·특보 알림", "Earthquake & warning alerts"),
-    "desc": ("기상청을 계속 확인해 지진은 1분마다, 기상 특보는 5분마다 새로 나온 것을 봇이 응답하는 채널에 올립니다. 기상청 키가 필요합니다. 방마다 끌 수 있습니다(서버·방 → 방 → 응답).", "The bot keeps checking KMA and posts what is new to the channels it answers in: earthquakes every minute, weather warnings every five. Needs a KMA key. Each room can turn it off (Servers & rooms → room → Replies)."),
+    "desc": ("기상청을 계속 확인해 지진은 1분마다, 기상 특보는 5분마다 새로 나온 것을 봇이 응답하는 채널에 올립니다. 기상청 키가 필요합니다. 방마다 끄고 구역별 알림 레벨을 정합니다(서버·방 → 방 → 응답·말투).", "The bot keeps checking KMA and posts what is new to the channels it answers in: earthquakes every minute, weather warnings every five. Needs a KMA key. Each room turns it off and sets alert levels by area (Servers & rooms → room → Replies & persona)."),
     "enabled": ("지진·특보 알림 켜기", "Announce earthquakes and warnings"), "enabled_hint": ("끄면 아무것도 확인하거나 올리지 않습니다.", "Off: nothing is checked or posted."),
     "warnings": ("기상 특보도 알리기", "Announce weather warnings too"), "warnings_hint": ("각 방에서 설정한 구역과 레벨에 따라 특보의 발표·격상·해제를 알립니다.", "Each room receives issues, upgrades and lifts for the areas and levels it follows."),
-    "legacy_regions": ("이전 버전의 '주의보를 받을 지역'({regions})은 더 이상 쓰지 않습니다. 방마다 서버·방 → 방 → 응답에서 지역별 알림 레벨을 정하세요.", "The old advisory regions ({regions}) are no longer used. Set each room's alert level by area under Servers & rooms → room → Replies."),
+    "legacy_regions": ("이전 버전의 '주의보를 받을 지역'({regions})은 더 이상 쓰지 않습니다. 방마다 서버·방 → 방 → 응답·말투 탭에서 지역별 알림 레벨을 정하세요.", "The old advisory regions ({regions}) are no longer used. Set each room's alert level by area under Servers & rooms → room → Replies & persona."),
     "legacy_regions_clear": ("이전 설정 지우기", "Clear old setting"),
     "marine": ("해상 특보 포함", "Include sea areas"), "marine_hint": ("먼바다·앞바다 풍랑 같은 해상 특보도 알립니다. 보통 끄는 게 조용합니다.", "Sea-area warnings (풍랑 on 먼바다 …) too. Usually quieter off."),
     "min_domestic": ("국내 지진 최소 규모", "Smallest domestic magnitude"), "min_overseas": ("국외 지진 최소 규모", "Smallest overseas magnitude"),
@@ -2304,7 +2306,7 @@ add("disaster", {
 })
 add("room", {
     "disaster_alerts": ("지진·특보 알림 받기", "Earthquake & warning alerts"),
-    "disaster_alerts_hint": ("모든 레벨에서 규모 기준을 충족하는 국내외 지진을 알립니다. 규모 기준은 도구 → 재난·특보 → 운영에서 정합니다.", "Every level includes domestic and overseas earthquakes that meet the thresholds set under Tools → Disaster alerts → Operations."),
+    "disaster_alerts_hint": ("모든 레벨에서 규모 기준을 충족하는 국내외 지진을 알립니다. 규모 기준은 도구 → 재난·특보 → 운영에서, 구역별 레벨은 아래 '지역별 알림 레벨'에서 이 방에만 정합니다.", "Every level includes domestic and overseas earthquakes that meet the thresholds set under Tools → Disaster alerts → Operations. Per-area levels are set for this room only, under 'Alert level by area' below."),
     "watch_region_invalid": ("지역을 입력하고 중복된 지역을 지워 주세요.", "Enter an area for each row and remove duplicates."),
     "watch_levels": ("지역별 알림 레벨", "Alert level by area"),
     "watch_hint": ("기상청 구역명이나 코드를 입력하세요. 세부 구역 설정이 상위 구역보다 우선하고, 어느 설정에도 해당하지 않으면 레벨 1입니다.", "Enter an exact KMA area name or code. A local area overrides its parent. Unmatched areas use level 1."),
@@ -2325,9 +2327,26 @@ add("room", {
     "watch_level.5": ("레벨 4 + 나머지 모든 주의보·경보", "Level 4 + all remaining advisories and warnings"),
     "disaster_alerts_off_respond": ("응답 안 함인 방에는 알림도 올리지 않습니다.", "A room the bot does not answer in gets no alerts either."),
 })
+
+# ---- console-gui: per-room area alert levels (audit 3.1, 4.1) ----
+add("room", {
+    "watch_off_alerts": ("알림 스위치를 켜면 구역별로 다른 알림 레벨을 정할 수 있습니다.", "Turn on the alert switch to set a level per area."),
+    "watch_off_respond": ("응답 안 함인 방에는 알림도 오지 않아 구역 설정이 쓰이지 않습니다.", "This room gets no alerts while it does not answer, so area levels do not apply."),
+    "watch_empty": ("아직 정한 구역이 없습니다. 구역이 없으면 모든 지역이 레벨 1(지진만)입니다.", "No areas yet. With none, every area stays at level 1 (earthquakes only)."),
+    "watch_chip": ("특보 {n}구역", "{n} alert areas"),
+    "watch_apply": ("이 서버의 다른 방에도 적용", "Apply to the server's other rooms"),
+    "watch_apply_title": ("다른 방에도 알림 구역을 적용할까요?", "Apply the alert areas to the other rooms?"),
+    "watch_apply_body": ("저장된 알림 스위치와 지역별 알림 레벨을 이 서버의 다른 방 {n}곳에 덮어씁니다.", "Overwrites the saved alerts switch and per-area levels on the {n} other rooms of this server."),
+    "watch_apply_done": ("전체 {total}곳 중 {n}곳에 적용했습니다", "Applied to {n} of {total} rooms"),
+    "watch_apply_unsaved": ("저장되지 않은 변경은 적용되지 않습니다.", "Unsaved changes are not applied."),
+})
+add("disaster", {
+    "rooms_hint": ("구역별 알림 레벨은 방마다 정합니다. 서버·방 → 방 → 응답·말투 탭의 '응답 조건과 말투' 카드에서 정하세요.", "Alert level by area is set per room: Servers & rooms → room → Replies & persona tab, 'Reply mode and persona' card."),
+    "rooms_link": ("방별 구역 설정 열기", "Open Servers & rooms"),
+})
 add("cfg", {
     "disaster_alerts": ("지진·특보 알림", "Earthquake & warning alerts"),
-    "disaster_alerts.desc": ("봇이 기상청을 확인해 지진과 기상 특보를 응답하는 채널에 올리는 기준입니다. 도구 → 재난·특보 → 운영 화면에서 바꾸는 편이 쉽습니다.", "What the bot announces from KMA in the channels it answers in. Easier to change under Tools → Disaster alerts → Operations."),
+    "disaster_alerts.desc": ("봇이 기상청을 확인해 지진과 기상 특보를 응답하는 채널에 올리는 기준입니다. 도구 → 재난·특보 → 운영 화면에서 바꾸는 편이 쉽습니다. 구역별 알림 레벨은 방마다 서버·방 → 방 → 응답·말투에서 정합니다.", "What the bot announces from KMA in the channels it answers in. Easier to change under Tools → Disaster alerts → Operations. Per-area alert levels are set per room under Servers & rooms → room → Replies & persona."),
     "disaster_alerts.enabled": ("알림 켜기", "Announce"), "disaster_alerts.warnings": ("기상 특보도 알리기", "Weather warnings too"),
     "disaster_alerts.earthquake_min_domestic": ("국내 지진 최소 규모", "Smallest domestic magnitude"), "disaster_alerts.earthquake_min_overseas": ("국외 지진 최소 규모", "Smallest overseas magnitude"),
     "disaster_alerts.warning_regions": ("이전 주의보 지역 설정 (채널의 watch_level로 대체됨)", "Legacy advisory regions (replaced by channel watch_level)"), "disaster_alerts.marine": ("해상 특보 포함", "Include sea areas"),
@@ -2671,6 +2690,34 @@ add("", {
         "켬: 기억이 켜진 방에서 질문을 받으면, 기억 검색이 필요한지 정하기 전에 질문을 임베딩 공급자로 먼저 보내 둡니다. 검색이 필요하면 바로 이어 쓰고, 필요 없는 턴의 질문도 한 번 보내집니다. 끔: 기억 검색이 질문을 요구할 때만 보냅니다. 그 턴의 첫 기억 검색이 더 걸릴 수 있습니다. 기본은 켬입니다.",
         "On: in a room with memory on, the message goes to the embedding provider before the bot decides whether to search memory. If it searches, the vector is ready; a turn that does not search has still sent the message once. Off: the message is sent only when a memory search needs it, and the first memory search of a turn may take longer. On by default.",
     ),
+    "turns.ctx.why.call": ("호출한 메시지", "The message that called the bot"),
+    "turns.ctx.why.reply": ("답장", "Reply"),
+    "turns.ctx.why.replied_to": ("답장 대상", "Replied to"),
+    "turns.ctx.why.bot_reply": ("봇의 답", "Bot's answer"),
+    "turns.ctx.why.to_bot": ("봇에게 한 말", "Said to the bot"),
+    "turns.ctx.why.follow": ("이어진 대화", "Follow-up"),
+    "turns.ctx.why.burst": ("연달아 쓴 글", "Same burst"),
+    "turns.ctx.why.to_caller": ("호출한 사람에게 한 말", "Said to the caller"),
+    "turns.ctx.why.own": ("호출한 사람의 글", "Caller's own message"),
+    "turns.plan_state.ran": ("실행함", "Ran"),
+    "turns.plan_state.failed": ("실패", "Failed"),
+    "turns.plan_state.not_run": ("실행 안 함", "Not run"),
+    "turns.plan_state.refused": ("거절됨", "Refused"),
+    "turns.tool_status.ok": ("성공", "OK"),
+    "turns.tool_status.error": ("오류", "Error"),
+    "turns.tool_status.unavailable": ("쓸 수 없음", "Unavailable"),
+    "turns.tool_status.needs_input": ("정보가 더 필요함", "Needs more input"),
+    "turns.tool_status.cancelled": ("취소됨", "Cancelled"),
+    "cfg.instance.log_level": ("로그 자세히 남기기", "Log detail"),
+    "cfg.instance.log_level.hint": ("데몬이 로그에 얼마나 자세히 적을지 정합니다. 문제를 찾을 때만 '자세히(debug)'로 바꾸세요. 환경 변수 MASAMONG_LOG_LEVEL이 있으면 그 값이 우선합니다.", "How much the daemon writes to its log. Use Debug only while chasing a problem. The MASAMONG_LOG_LEVEL environment variable, when set, wins."),
+    "cfg.instance.log_level.v.debug": ("자세히 (debug)", "Debug (most detail)"),
+    "cfg.instance.log_level.v.info": ("보통", "Normal"),
+    "cfg.instance.log_level.v.warn": ("경고만 (warn)", "Warnings only (warn)"),
+    "cfg.instance.log_level.v.error": ("오류만 (error)", "Errors only (error)"),
+    "cfg.memory.people": ("사람별 기억 만들기와 쓰기", "Make and use per-person memory"),
+    "cfg.memory.people.hint": ("방의 에피소드에서 서버별로 사람마다 한 말과 들은 말을 정리해 그 사람에 대한 답변에 참고합니다. 기본은 켬입니다.", "Statements about each person of a server are drawn from room episodes and used in replies about them. On by default."),
+    "cfg.memory.message_vectors": ("메시지 하나하나도 임베딩", "Embed each message on its own"),
+    "cfg.memory.message_vectors.hint": ("닫힌 대화 묶음 안의 메시지를 따로 임베딩해, 긴 대화 속 한 줄 사실도 찾습니다. 저장 공간과 메모리(메시지당 약 1KB)를 더 쓰고 임베딩 호출이 늘어납니다. 기본은 켬입니다.", "Messages inside a closed conversation are embedded one by one, so a one-line fact in a long talk is found. Costs storage, memory (about 1 KB per message) and embedding calls. On by default."),
     "cfg.memory.derived_budget_usd": ("방 기억 월 한도 (USD)", "Room memory monthly budget (USD)"),
     "cfg.memory.derived_budget_usd.hint": ("0이면 방 기억을 끕니다. 한도의 80%에서 방 상태 갱신이 먼저 멈추고, 100%에서 에피소드 추출이 멈춥니다. 비워 두면 3.00달러입니다.", "0 turns room memory off. At 80% the room state pauses first; at 100% extraction stops. Empty means 3.00 dollars."),
     "cfg.memory.day_boundary": ("하루가 바뀌는 시각", "Day boundary"),
@@ -2678,8 +2725,9 @@ add("", {
 })
 
 add("pm", {
-    "title": ("서버 안의 기억", "Memory in a server"),
-    "desc": ("이 사람이 대화한 서버별로 봇이 무엇을 기억하는지 볼 수 있습니다.", "See what the bot remembers in each server where this person has spoken."),
+    "title": ("봇이 기억하는 것", "What the bot remembers"),
+    "desc": ("서버마다 따로 기억해요. 서버를 고르면 본인이 한 말, 다른 사람이 한 말, 기억해 달라고 한 것을 나눠 보여 줘요.", "Kept separately for each server. Pick a server to see their own words, what others said, and what was asked to be remembered."),
+    "hidden_note": ("숨긴 기억은 이 목록에 나오지 않아요.", "Hidden memories are not listed here."),
     "server": ("서버", "Server"),
     "no_servers": ("이 사람의 메시지가 저장된 서버가 없습니다.", "No server has saved messages from this person."),
     "told": ("기억해 달라고 한 것", "Asked to remember"),
@@ -2694,9 +2742,9 @@ add("pm", {
     "last": ("마지막 갱신 {when}", "last updated {when}"),
     "kind.nickname": ("별명", "Nickname"), "kind.like": ("좋아함", "Likes"), "kind.dislike": ("싫어함", "Dislikes"), "kind.trait": ("성격", "Trait"),
     "kind.status": ("근황", "Status"), "kind.appearance": ("외모", "Appearance"), "kind.relation": ("관계", "Relation"), "kind.other": ("기타", "Other"),
-    "tier.direct": ("직접", "Direct"), "tier.heard": ("전해 들음", "Heard"),
+    "group.direct": ("본인이 한 말", "In their own words"), "group.heard": ("다른 사람이 한 말", "Said by others"),
     "src.self": ("본인", "Themselves"), "src.said": ("{name}님이 말함", "Said by {name}"), "src.said_unknown": ("다른 사람이 말함", "Said by someone else"),
-    "src.explicit": ("기억해", "Asked to remember"), "src.told": ("{name}님이 기억해 달라고 함", "{name} asked to remember it"), "src.told_unknown": ("다른 사람이 기억해 달라고 함", "Someone else asked to remember it"),
+    "src.explicit": ("본인이 기억해 달라고 함", "They asked to remember it"), "src.told": ("{name}님이 기억해 달라고 함", "{name} asked to remember it"), "src.told_unknown": ("다른 사람이 기억해 달라고 함", "Someone else asked to remember it"),
     "pending": ("확인 대기", "Waiting for check"), "pending_hint": ("민감한 내용인지 확인하기 전이라 아직 답변에 쓰지 않아요.", "Not used in answers yet: it is waiting to be checked for sensitive content."),
     "hide": ("숨기기", "Hide"), "hide_one": ("기억 숨기기: {text}", "Hide this memory: {text}"),
     "hide_title": ("이 기억을 숨길까요?", "Hide this memory?"),
@@ -2716,12 +2764,36 @@ add("pm", {
 add("", {
     "memory.tab.person": ("사람 기억", "People memory"),
 })
+add("dt", {
+    "spoiler": ("가려진 내용 (눌러서 보기)", "Hidden text (press to show)"),
+    "user": ("사용자 …{tail}", "user …{tail}"), "role": ("역할 …{tail}", "role …{tail}"), "channel": ("채널 …{tail}", "channel …{tail}"),
+})
+add("rp", {
+    "hidden": ("볼 수 없는 채널 …{tail}", "Channel the bot cannot see …{tail}"),
+    "server": ("서버 …{tail}", "Server …{tail}"),
+    "kakao": ("카카오톡 가져오기", "KakaoTalk imports"),
+    "filter": ("방이나 서버 이름 찾기", "Find a room or server"),
+    "show_empty": ("메시지 없는 방도 보기 ({n})", "Show rooms with no messages ({n})"),
+    "picked": ("{n}/{total}개 선택", "{n} of {total} picked"),
+    "empty_hidden": ("메시지 없는 방 {n}개 숨김", "{n} rooms with no messages hidden"),
+    "all": ("모두 선택", "Select all"), "none": ("선택 해제", "Clear"),
+    "no_match": ("찾는 방이 없습니다", "No room matches"),
+    "legend": ("방 이름 옆 숫자는 저장된 메시지 수입니다. 기울임꼴은 봇이 이름을 볼 수 없는 채널입니다.", "The number beside a room is how many messages are stored. Italic is a channel whose name the bot cannot see."),
+    "hidden_row": ("볼 수 없는 채널 {n}개", "{n} channels the bot cannot see"),
+    "hidden_note": ("봇이 권한이 없어 이름을 볼 수 없는 채널입니다. 일괄 작업에서는 빠집니다.", "The bot lacks permission to see these channels' names. They are left out of bulk actions."),
+})
+add("pml", {
+    "title": ("사람별 기억", "Memory by person"),
+    "desc": ("서버를 고르고 사람을 열면 봇이 그 사람에 대해 기억하는 것을 보고, 숨기거나 지울 수 있어요.", "Pick a server and open a person to see what the bot remembers about them, and to hide or forget it."),
+    "all": ("사람·권한에서 전체 보기", "All people"),
+    "row": ("메시지 {n}개 · 마지막 {when}", "{n} messages · last {when}"),
+    "items": ("기억 {n}개", "{n} kept"), "none": ("기억 없음", "Nothing kept"),
+    "open": ("기억 보기", "Open memory"), "open_one": ("{name}의 기억 보기", "Open {name}'s memory"),
+    "more": ("{n}명이 더 있어요. 전체는 사람·권한에서 볼 수 있어요.", "{n} more people. See them all on the People page."),
+})
 
 # paid people backfill (memory.people.backfill): the Memory page's People memory tab
 add("pb", {
-    "intro_title": ("사람 기억", "People memory"),
-    "intro_desc": ("대화에서 알게 된 사람별 기억이에요. 한 사람의 기억을 보고 숨기거나 지우려면 사람·권한 화면에서 그 사람을 열어요.", "What the bot keeps about each person from conversations. To look at one person's memory, hide or forget it, open that person on the People page."),
-    "open_people": ("사람·권한 열기", "Open People"),
     "title": ("과거 대화로 채우기", "Fill from past conversations"),
     "desc": ("저장된 지난 대화를 모델이 한 번 읽고 사람에 대한 기억을 채워요. 돈이 들어서 운영자가 직접 시작할 때만 돌아가요.", "A model reads the stored past conversations once and fills in what is kept about people. It costs money, so it runs only when an operator starts it."),
     "note": ("봇에 설정된 Anthropic 키를 써요. 이미 만들어 둔 요약과 임베딩은 다시 만들지 않아요.", "It uses the Anthropic key set up for the bot. Summaries and embeddings that already exist are not made again."),
@@ -2904,6 +2976,34 @@ add("", {
     "lab.plan.rs.401": ("인증에 실패해 제한적으로 처리했습니다", "Authentication failed, so the steps ran in a degraded way"),
     "lab.plan.rs.429": ("요청 한도에 걸려 재시도를 기다립니다", "Rate limited, so the steps wait to retry"),
     "lab.plan.code_hint": ("내부 코드", "Technical code"),
+    "lab.again": ("다시 묻기", "Ask again"),
+    "lab.diag.plan": ("봇이 이해한 내용", "How the bot read the question"),
+    "lab.diag.question_kind": ("질문 종류", "Kind of question"),
+    "lab.diag.memory_req": ("기억 사용", "Memory use"),
+    "lab.diag.time_scope": ("기간", "Time range"),
+    "lab.diag.tool_plan": ("도구 계획", "Tool plan"),
+    "lab.diag.applied": ("적용된 검색 방식", "Search mode used"),
+    "lab.diag.qk.person_intro": ("사람 소개", "Who is this person"),
+    "lab.diag.qk.person_fact": ("사람에 대한 사실", "Fact about a person"),
+    "lab.diag.qk.event": ("있었던 일", "Something that happened"),
+    "lab.diag.qk.casual": ("가벼운 대화", "Casual chat"),
+    "lab.diag.qk.other": ("기타", "Other"),
+    "lab.diag.mr.none": ("쓰지 않음", "Not needed"),
+    "lab.diag.mr.optional": ("있으면 사용", "Use if helpful"),
+    "lab.diag.mr.required": ("꼭 필요", "Required"),
+    "lab.diag.ts.any": ("전체", "Any time"),
+    "lab.diag.ts.recent": ("최근", "Recent"),
+    "lab.diag.ts.today": ("오늘", "Today"),
+    "lab.diag.ts.yesterday": ("어제", "Yesterday"),
+    "lab.diag.ts.last_week": ("지난주", "Last week"),
+    "lab.diag.ts.this_month": ("이번 달", "This month"),
+    "lab.diag.ts.before": ("이전", "Before a date"),
+    "lab.diag.ts.after": ("이후", "After a date"),
+    "lab.diag.ts.between": ("두 날짜 사이", "Between two dates"),
+    "lab.diag.score_rerank": ("재정렬 점수", "Rerank"),
+    "lab.diag.score_rerank_hint": ("재정렬 모델이 매긴 점수입니다. 높을수록 질문과 잘 맞습니다.", "Score from the rerank model. Higher means a better match."),
+    "lab.diag.score_sim": ("의미 유사도", "Similarity"),
+    "lab.diag.score_sim_hint": ("질문과 기록의 의미가 얼마나 가까운지(0~1)입니다.", "How close the meaning is to the question (0 to 1)."),
     "stats.stored.title": ("저장된 전체", "Stored in total"),
     "stats.stored.hint": ("기간과 관계없이 지금까지 저장된 메시지·작업·투표 수입니다. 기록이 많으면 세는 데 시간이 걸려 누를 때만 계산합니다.", "Messages, jobs and polls stored so far, whatever the period. Counting takes a while on a large history, so it only runs when you ask."),
     "stats.stored.count": ("전체 수 세기", "Count"),
@@ -2966,7 +3066,7 @@ add("rooms", {
 # 2026-10-14 people: per-server people
 add("people", {
     "servers.title": ("서버별 인물", "People by server"),
-    "servers.desc": ("저장된 Discord 메시지에서 본 사람입니다. 메시지 내용은 표시하지 않습니다.", "People seen in stored Discord messages. Message text is not shown."),
+    "servers.desc": ("저장된 Discord 메시지에서 본 사람입니다. 줄을 누르면 봇이 기억하는 것을 볼 수 있습니다. 메시지 내용은 표시하지 않습니다.", "People seen in stored Discord messages. Open a row to see what the bot remembers about them. Message text is not shown."),
     "servers.selector": ("서버", "Server"),
     "servers.all": ("모든 서버", "All servers"),
     "servers.count": ("검색 결과 {n}명", "{n} matching people"),
@@ -2978,15 +3078,103 @@ add("people", {
     "servers.col.last_seen": ("마지막으로 본 때", "Last seen"),
     "servers.col.cards": ("기억 항목", "Memory items"),
     "servers.users_row": ("기록 있음", "Has records"),
-    "servers.readonly": ("동의·설정 정보가 없는 Discord 인물입니다. 저장된 대화 내용은 이 화면에 표시하지 않습니다.", "This Discord person has no consent or settings record. Stored conversation text is not shown here."),
+    "servers.readonly": ("동의·설정 기록이 없는 Discord 사람입니다. 봇이 기억하는 것은 아래에서 볼 수 있고, 저장된 대화 내용은 이 화면에 표시하지 않습니다.", "This Discord person has no consent or settings record. What the bot remembers is below; stored conversation text is not shown here."),
+    "servers.seen_title": ("이 서버에서 본 기록", "Seen in this server"),
     "servers.other_names": ("이전 이름: {names}", "Other names: {names}"),
     "servers.first_seen": ("처음 본 때", "First seen"),
     "servers.group_count": ("{n}명", "{n} people"),
     "servers.more": ("{n}명 더 보기", "Show {n} more"), "servers.less": ("접기", "Show less"),
     "servers.users_row_hint": ("동의·구독·설정 기록이 있는 사람입니다. 누르면 그 기록이 열립니다.", "This person has consent, subscription or settings records. Opens them."),
     "tab.users": ("등록된 사용자", "With records"), "tab.seen": ("서버에서 본 사람", "Seen in servers"),
-    "tab.users_desc": ("동의·구독·개인 설정 기록이 있는 사람입니다. 줄을 누르면 철회·삭제할 수 있습니다.", "People with consent, subscription or settings records. Open a row to withdraw or delete."),
+    "tab.users_desc": ("동의·구독·개인 설정 기록이 있는 사람입니다. 줄을 누르면 봇이 기억하는 것과 동의·구독을 보고 철회·삭제할 수 있습니다.", "People with consent, subscription or settings records. Open a row to see what the bot remembers about them and to withdraw or delete."),
     "servers.open": ("{name} ({id}) 정보 열기", "Open details for {name} ({id})"),
+})
+
+# ---- console-gui: friendly homes for raw-only settings (audit 2.2, 4.3) ----
+add("maint", {
+    "retention.title": ("데이터 보관 기간", "Data retention"),
+    "retention.desc": ("답할 때마다 쌓이는 운영 기록을 며칠 동안 보관할지 정합니다. 기억(블록)에는 적용되지 않습니다.", "How long the operational records that grow with every reply are kept. Memory blocks are not affected."),
+    "retention.note": ("비워 두면 기본값(오른쪽)을 따릅니다. -1은 영구 보관입니다.", "Empty follows the default on the right. -1 keeps forever."),
+    "retention.def": ("기본 {n}일", "default {n}d"),
+    "retention.forever": ("기본 영구 보관", "default: forever"),
+    "retention.saved": ("보관 기간을 저장했습니다", "Retention saved"),
+    "retention.k.turn_days": ("대화 턴", "Turns"),
+    "retention.k.turn_detail_days": ("턴 본문·근거", "Turn text & evidence"),
+    "retention.k.trace_days": ("진단 추적", "Diagnostic traces"),
+    "retention.k.audit_days": ("변경·작업 로그", "Change & ops log"),
+    "retention.k.usage_days": ("사용량 집계", "Usage counters"),
+    "retention.k.query_cache_days": ("질문 임베딩 캐시", "Question embedding cache"),
+    "retention.k.image_days": ("생성 이미지", "Generated images"),
+    "retention.k.ledger_days": ("모델·도구 호출 장부", "Model & tool call ledgers"),
+    "retention.k.pending_days": ("미확정 알림 제안", "Pending reminder proposals"),
+    "retention.k.context_days": ("방 대화 맥락", "Room conversation context"),
+    "cli_only.drain": ("점검 종료(drain)는 CLI에서만 실행합니다: masamong runtime drain", "Graceful drain runs from the CLI only: masamong runtime drain"),
+    "cli_only.migrate": ("저장소 이전은 CLI에서만 실행합니다: masamong storage migrate", "Moving the store runs from the CLI only: masamong storage migrate"),
+    "update.check_daily": ("매일 새 버전 확인", "Check for a new release daily"),
+    "update.check_daily_hint": ("하루 한 번 최신 릴리스를 물어봅니다. 프로그램 이름과 버전만 보냅니다.", "Asks for the newest release once a day; only the program's name and version are sent."),
+    "update.saved": ("업데이트 설정을 저장했습니다", "Update setting saved"),
+})
+add("display_page", {
+    "bot_lang": ("봇 언어", "Bot language"),
+    "i18n.default_locale": ("기본 언어", "Default language"),
+    "i18n.locale_hint": ("서버나 방이 따로 정하지 않은 곳에서 쓰는 언어입니다.", "Used where a server or room does not set its own."),
+    "i18n.timezone": ("시간대", "Timezone"),
+    "i18n.timezone_hint": ("백업·요약 같은 예약 작업의 기준 시각입니다. 예: Asia/Seoul", "The reference clock for scheduled work like backups and summaries. Example: Asia/Seoul"),
+    "i18n.polite": ("새 방은 공손한 말투로 시작", "New rooms start polite"),
+    "i18n.polite_hint": ("말투를 정하지 않은 방이 반말 친구 대신 다정한 존댓말로 답합니다.", "Rooms without a persona answer in a warm polite voice instead of the casual friend."),
+    "i18n.saved": ("봇 언어 설정을 저장했습니다", "Bot language saved"),
+})
+add("tools", {
+    "features.title": ("기능 켜기·끄기", "Feature switches"),
+    "features.desc": ("설치 전체의 기능 스위치입니다. 끄면 그 기능의 도구가 모두 멈춥니다.", "Instance-wide feature switches. Off stops every tool of that feature."),
+    "features.saved": ("기능 스위치를 저장했습니다", "Feature switch saved"),
+})
+add("stats", {
+    "enabled.label": ("사용 통계 수집", "Collect usage statistics"),
+    "enabled.hint": ("하루 합계를 이 기기의 데이터베이스에만 저장합니다. 끄면 수집과 일일 집계가 멈추고 이미 모은 기록은 남습니다.", "Daily totals stay in this device's database. Off stops collection and the daily rollup; what was collected stays."),
+    "enabled.saved": ("통계 수집 설정을 저장했습니다", "Statistics setting saved"),
+})
+add("rooms", {
+    "locale.title": ("언어", "Language"),
+    "locale.desc": ("이 서버에서 봇이 쓰는 언어입니다. 방의 말투가 언어를 정하면 그쪽을 따릅니다.", "The language the bot uses in this server. A room persona that names a language wins."),
+    "locale.label": ("서버 언어", "Server language"),
+    "locale.hint": ("'자동'이면 봇 기본 언어(화면 및 접속)를 따릅니다.", "'Auto' follows the bot default (Display & access)."),
+    "locale.auto": ("자동 (봇 기본)", "Auto (bot default)"),
+    "locale.saved": ("서버 언어를 저장했습니다", "Server language saved"),
+})
+add("part", {
+    "global_hint": ("대기 시간·횟수 제한 같은 전체 기본값은 설정 파일에서 바꿉니다.", "Global defaults — wait time, per-hour and per-day caps — live in the settings file."),
+    "global_link": ("설정에서 열기", "Open in Settings"),
+})
+
+# ---- console fix round: refused invalid field values ----
+add("maint.retention", {
+    "invalid": ("정수 일수만 넣을 수 있습니다(-1은 영구 보관).", "Enter a whole number of days (-1 keeps forever)."),
+})
+add("display_page.i18n", {
+    "timezone_invalid": ("알 수 없는 시간대입니다. 예: Asia/Seoul", "Unknown time zone. For example: Asia/Seoul"),
+})
+
+# ---- console-gui: palette entries for important nested keys (audit 4.4) ----
+add("palette", {
+    "key.watch_level": ("지역별 알림 레벨", "Alert level by area"),
+    "key.retention": ("데이터 보관 기간", "Data retention"),
+    "key.features": ("기능 켜기·끄기", "Feature switches"),
+    "key.i18n": ("봇 언어·시간대", "Bot language & time zone"),
+    "key.stats_enabled": ("사용 통계 수집", "Usage statistics collection"),
+    "key.updates_check": ("매일 새 버전 확인", "Daily update check"),
+    "key.participation": ("먼저 말 걸기 기본값", "Chime-in defaults"),
+    "key.guild_locale": ("서버 언어", "Server language"),
+})
+
+# ---- console-fix-a: review fixes (rooms table header, ranking fallback names) ----
+add("rooms", {"col.select": ("선택", "Select")})
+add("people", {"deep.not_found": ("링크가 가리키는 사람을 찾지 못했습니다. 아직 이 서버에서 대화한 기록이 없거나, 정보 철회로 목록에서 빠졌을 수 있습니다.", "Could not find the person this link points to. They may have no messages in that server yet, or withdrew and left the list.")})
+add("lab.rank", {
+    "hybrid_fallback": ("단어·의미 검색 (재정렬을 쓸 수 없어 대신 사용)", "Lexical + vector (rerank was unavailable)"),
+    "heuristic_fallback": ("규칙 가산 (재정렬을 쓸 수 없어 대신 사용)", "Heuristic (rerank was unavailable)"),
+    "rerank_fallback": ("재정렬 (대체 순서)", "Rerank (fallback order)"),
+    "auto_fallback": ("자동 (대체 순서)", "Auto (fallback order)"),
 })
 
 # plural forms for strings that take {n}
