@@ -1034,7 +1034,7 @@ func (g *Gateway) answerPrivately(base context.Context, s *discordgo.Session, i 
 	}
 }
 
-// responseEdit is the slash command's final response: its card (with the generated picture attached), or,
+// responseEdit is the slash command's final response: its card, or a generated picture alone (no card), or,
 // for a picture that cannot be posted (over Discord's upload limit, or its file missing), the image.failed
 // text without the file.
 func (g *Gateway) responseEdit(res action.Result, cmd Command, ictx InvokeContext) *discordgo.WebhookEdit {
@@ -1050,9 +1050,6 @@ func (g *Gateway) responseEdit(res action.Result, cmd Command, ictx InvokeContex
 	edit := &discordgo.WebhookEdit{Embeds: ptrEmbeds(r.Embeds()), AllowedMentions: noMentions}
 	if r.Components != nil {
 		edit.Components = &r.Components
-	}
-	if f != nil {
-		edit.Files = []*discordgo.File{f}
 	}
 	return edit
 }
