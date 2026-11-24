@@ -2,11 +2,11 @@
   "note": "Translation record checked by tools/doccheck. When a file of a group changes, bring the other languages along, then run: go run ./tools/doccheck -write",
   "groups": {
     "README": {
-      "README.es.md": "66deed69e728c584",
-      "README.ja.md": "c678c880e4138383",
-      "README.ko.md": "1551a02cdaf80e0d",
-      "README.md": "3a743c05dc5cb4d6",
-      "README.zh-Hans.md": "4a93716756b6832d"
+      "README.es.md": "5dc1f9861bcbf93f",
+      "README.ja.md": "a71603082a784307",
+      "README.ko.md": "e9ceb3e50979e3dd",
+      "README.md": "b8c7c41b5c04ec75",
+      "README.zh-Hans.md": "2838dcc68adc846f"
     },
     "wiki/CLI-명령어": {
       "docs/wiki/CLI-Commands.md": "a6860444aae9d031",
@@ -17,8 +17,8 @@
       "docs/wiki/Discord-연결.md": "7884d20bb94a02fe"
     },
     "wiki/Home": {
-      "docs/wiki/English.md": "3b18faedb9f78110",
-      "docs/wiki/Home.md": "6a6ad07eddd6022a"
+      "docs/wiki/English.md": "53fde71f269e5cb5",
+      "docs/wiki/Home.md": "4bbe9bc83739f7ac"
     },
     "wiki/개발-가이드": {
       "docs/wiki/Development-Guide.md": "66e9cef19b3f2e01",

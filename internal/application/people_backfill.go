@@ -62,7 +62,10 @@ const (
 	pbPageLines     = 2000 // observations read per page
 	pbChunkMax      = 4 * pbPageLines
 	pbMaxBatch      = 1000 // windows per Message Batches job (contract §5)
-	pbMaxTokens     = 1400 // output limit of one window's answer (the room-memory extraction's)
+	// pbMaxTokens is the output limit of one window's answer. 1400 (the room-memory extraction's) was too
+	// short on live data: a small model's answer for a busy window was cut at it again on every ask, so the
+	// pilot could not pass. Only the tokens written are billed; the budget reserves pbWireOut per send.
+	pbMaxTokens = 4096
 	// pbThinkRoom is the output room the adapter adds on top of pbMaxTokens when the model may think at
 	// effort low (openai thinkingRoom, the thinking headroom, a manual thinking budget: all 1024), so
 	// pbWireOut is the most output tokens one request can be billed for.

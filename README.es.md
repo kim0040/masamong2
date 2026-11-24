@@ -18,7 +18,7 @@ En resumen:
 - **Controla los costes** — un presupuesto mensual y límites por herramienta y por persona
 - **Se ejecuta en tu máquina** — instalas tu propia copia y usas tus propias claves de API; la consola se enlaza a `127.0.0.1` y el modo de práctica te deja explorar gratis
 
-Versión: `1.7.0`
+Versión: `1.7.1`
 
 **Contenido**: [Capturas de pantalla](#capturas-de-pantalla) · [Qué hace](#qué-hace) · [Primeros pasos](#primeros-pasos) · [Instalar con IA](#instalar-con-un-agente-de-ia) · [Usando el bot en Discord](#4-usando-el-bot-en-discord) · [Costes y servicios externos](#costes-y-servicios-externos) · [Documentación](#documentación) · [Desarrollo](#desarrollo) · [Colaboradores](#colaboradores) · [Licencia](#licencia) · [Aviso legal](#aviso-legal)
 
