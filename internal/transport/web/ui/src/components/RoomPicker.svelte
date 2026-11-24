@@ -32,7 +32,7 @@
       {#if emptyTotal > 0}<Switch bind:checked={showEmpty} label={t('rp.show_empty', { n: emptyTotal })} />{/if}
     </div>
   {/if}
-  {#each groups as g (g.kind + g.server)}
+  {#each groups as g (g.id)}
     <details class="grp" open={openAtStart(g)}>
       <summary><span class="srv">{g.server}</span><span class="xs muted num">{t('rp.picked', { n: selectedIn(g), total: g.items.length })}{#if g.emptyHidden} · {t('rp.empty_hidden', { n: g.emptyHidden })}{/if}</span></summary>
       <div class="acts"><Button size="sm" variant="ghost" onclick={() => setGroup(g, true)}>{t('rp.all')}</Button><Button size="sm" variant="ghost" onclick={() => setGroup(g, false)}>{t('rp.none')}</Button></div>
