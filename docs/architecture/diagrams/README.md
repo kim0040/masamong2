@@ -1,24 +1,26 @@
+**한국어** | [English](README.en.md)
+
 # 그림
 
-구조 문서의 큰 그림 네 개는 [D2](https://d2lang.com)로 그린다. 원본 `.d2`와 렌더한 SVG 두 벌(밝은 판, 어두운 판)을 함께 커밋한다. 나머지 그림은 각 페이지 안의 Mermaid 블록이다.
+구조 문서의 큰 그림 네 개는 [D2](https://d2lang.com)로 그린다. 그림마다 한국어 원본 `x.d2`와 영어 원본 `x.en.d2`가 있고, 원본마다 렌더한 SVG 두 벌(밝은 판, 어두운 판)을 함께 커밋한다. 나머지 그림은 각 페이지 안의 Mermaid 블록이다.
 
-| 원본 | 쓰는 페이지 |
-|---|---|
-| [overview.d2](overview.d2) | [한눈에 보기](../README.md) |
-| [layers.d2](layers.d2) | [시스템 구성](../system.md) |
-| [memory.d2](memory.d2) | [기억](../memory.md) |
-| [data-model.d2](data-model.d2) | [데이터 모델](../data-model.md) |
+| 한국어 원본 | 영어 원본 | 쓰는 페이지 |
+|---|---|---|
+| [overview.d2](overview.d2) | [overview.en.d2](overview.en.d2) | [한눈에 보기](../README.md) |
+| [layers.d2](layers.d2) | [layers.en.d2](layers.en.d2) | [시스템 구성](../system.md) |
+| [memory.d2](memory.d2) | [memory.en.d2](memory.en.d2) | [기억](../memory.md) |
+| [data-model.d2](data-model.d2) | [data-model.en.d2](data-model.en.d2) | [데이터 모델](../data-model.md) |
 
 ## 고치는 법
 
-1. `.d2` 원본을 고친다. 모양(색, 테두리, 글자색)은 원본에 쓰지 않고 클래스 이름만 붙인다.
+1. `.d2` 원본을 고친다. 모양(색, 테두리, 글자색)은 원본에 쓰지 않고 클래스 이름만 붙인다. 한국어 원본과 영어 원본은 함께 고친다. 둘은 한 번역 묶음이라서 한쪽만 바뀌면 `make docs`가 실패한다.
 2. `make diagrams`로 다시 렌더한다. `d2`가 설치돼 있어야 한다. 눈으로 볼 PNG가 필요하면 `scripts/diagrams.sh --png <폴더>`를 쓴다. PNG는 커밋하지 않는다.
-3. `make docs`를 돌린다.
+3. 두 언어를 모두 고쳤으면 `make docs-record`로 기록하고 `make docs`를 돌린다.
 
 - 렌더한 SVG 끝에는 원본과 스타일 파일의 sha256이 주석으로 찍힌다. `make docs`가 이 값을 원본과 비교하므로, 원본을 고치고 렌더하지 않으면 검사가 실패한다. CI에는 `d2`가 필요 없다.
 - 글꼴은 Pretendard(SIL Open Font License 1.1)다. D2의 기본 글꼴에는 한글이 없어서, 그림이 쓰는 글자만 SVG에 넣는다. 글꼴 파일은 처음 렌더할 때 저장소 밖 캐시 폴더로 내려받고 해시를 확인한다.
 - SVG의 배경은 투명하다. GitHub의 밝은·어두운 화면색 위에 그대로 놓인다.
-- 페이지에는 이렇게 넣는다. 대체 글에는 그림이 말하는 내용을 적는다.
+- 페이지에는 이렇게 넣는다. 대체 글에는 그림이 말하는 내용을 적는다. 영어 페이지는 `x.en-light.svg`와 `x.en-dark.svg`를 쓴다.
 
 ```html
 <picture><source media="(prefers-color-scheme: dark)" srcset="diagrams/x-dark.svg"><img alt="…" src="diagrams/x-light.svg"></picture>
