@@ -65,3 +65,4 @@
 - 한국어 위키나 README를 고쳤으면 다른 언어도 고친 뒤 `make docs-record`를 돌린다.
 - 구조가 바뀌면 [architecture/](architecture/README.md)의 해당 페이지를, 결정이 바뀌면 [결정 기록](architecture/decisions.md)을 함께 고친다.
 - 코드 위치는 줄 번호가 아니라 파일 경로와 심볼 이름으로 가리킨다.
+- 그림 원본(`.d2`)을 고치면 `make diagrams`로 다시 렌더한다. 규칙은 [architecture/diagrams/](architecture/diagrams/README.md)에 있다.

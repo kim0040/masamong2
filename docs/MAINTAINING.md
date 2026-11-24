@@ -27,7 +27,7 @@
 - **검색 동작을 바꾸면 샌드박스(`experimental/rag-leaf-parent`)와 Go를 함께 고친다.**
   - `make parity`로 확인한다(§5). 비공개 인덱스가 있으면 실데이터 parity도 돌린다.
   - 한국어 플래너·문맥·기억·보안·색인 요약 프롬프트는 샌드박스와 **바이트 단위로 같아야** 한다.
-- **문서를 고치면 `make docs`를 돌린다.** 한국어 위키나 README를 고쳤으면 다른 언어도 고친 뒤 `make docs-record`를 돌린다.
+- **문서를 고치면 `make docs`를 돌린다.** 한국어 위키나 README를 고쳤으면 다른 언어도 고친 뒤 `make docs-record`를 돌린다. 구조 문서의 그림 원본(`.d2`)을 고쳤으면 `make diagrams`로 다시 렌더한다([그림 규칙](architecture/diagrams/README.md)).
 - **스크린샷은 `output/layout/`에만** 저장하고 커밋하지 않는다. README 화면만 예외로, 연습 모드에서 찍어 `docs/images/readme/`에 커밋한다.
 - **UX 문제는 예시로 받는다.** 한 화면의 문제를 찾으면 같은 종류의 문제를 콘솔 전체에서 찾아 함께 고친다.
 
