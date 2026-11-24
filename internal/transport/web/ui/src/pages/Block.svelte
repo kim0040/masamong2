@@ -28,6 +28,8 @@
   import BatchChoice from '../components/BatchChoice.svelte'
   import { indexHasWork, quickWork } from '../lib/quickreindex'
   import * as I from '../lib/icons'
+  import { useRooms } from '../lib/rooms.svelte'
+  const names = useRooms()
 
   let { params }: { params: { room: string } } = $props()
   useConfig()
@@ -159,7 +161,7 @@
   let connectOpen = $state(false)
   async function detach(c: any) {
     const r = await call('channels.view.detach', { guild_id: c.guild_id, channel_id: c.channel_id, block_id: c.block_id })
-    r.ok ? toast('ok', t('connect.detached', { block: b.label, channel: c.name })) : toast('error', t('common.failed'), r.error?.message)
+    r.ok ? toast('ok', t('connect.detached', { block: b.label, channel: names.channel(c.name, c.channel_id).label })) : toast('error', t('common.failed'), r.error?.message)
     void data.refresh()
   }
 
@@ -185,7 +187,7 @@
 {:else if !b}
   <Card><EmptyState pose="lost" title={t('block.not_found')} description={t('block.not_found_body')}><Button href="/blocks">{t('nav.blocks')}</Button></EmptyState></Card>
 {:else}
-  <PageHeader title={b.label} description={b.note || t(`blocks.platform.${b.platform}`)} crumbs={[{ href: '/blocks', label: t('nav.blocks') }]}>
+  <PageHeader title={names.block(b)} description={b.note || t(`blocks.platform.${b.platform}`)} crumbs={[{ href: '/blocks', label: t('nav.blocks') }]}>
     {#snippet actions()}
       <Button icon={I.FlaskConical} href="/lab?rooms={encodeURIComponent(room)}">{t('block.try_lab')}</Button>
       <Button variant="primary" icon={I.Link2} onclick={() => (connectOpen = true)} disabled={!channels.length}>{t('blocks.connect')}</Button>
@@ -289,7 +291,7 @@
       {:else}
         <ul class="links">
           {#each b.channels ?? [] as c (c.guild_id + c.channel_id)}
-            <li><a href="/rooms/{c.guild_id}/{c.channel_id}"><I.Hash size={14} aria-hidden="true" />{c.name}</a><span class="xs muted">{c.guild_name}</span>
+            <li><a href="/rooms/{c.guild_id}/{c.channel_id}"><I.Hash size={14} aria-hidden="true" />{names.channel(c.name, c.channel_id).label.replace(/^#/, '')}</a><span class="xs muted">{c.guild_name}</span>
               <Button size="sm" variant="danger-ghost" icon={I.Unlink} onclick={() => detach(c)}>{t('block.detach')}</Button></li>
           {/each}
         </ul>
@@ -298,7 +300,7 @@
     </Card>
 
     {#if b.own_channel}
-      <Card title={t('block.discord_title')} description={t('block.discord_desc', { channel: b.own_channel.name })}>
+      <Card title={t('block.discord_title')} description={t('block.discord_desc', { channel: names.channel(b.own_channel.name, b.own_channel.channel_id).label })}>
         <div class="stack">
           <Switch checked={b.own_channel.capture} onchange={setCapture} label={t('room.capture')} hint={t('block.capture_hint')} />
           {#if b.own_channel.capture && !cfg.doc?.memory?.capture}<div class="callout warn"><span class="ic"><I.TriangleAlert size={16} /></span><span>{t('block.capture_global_off')}</span><Button size="sm" variant="primary" onclick={() => patchConfig([{ path: ['memory', 'capture'], value: true }], { success: t('block.capture_global_on') })}>{t('block.capture_global_turn_on')}</Button></div>{/if}

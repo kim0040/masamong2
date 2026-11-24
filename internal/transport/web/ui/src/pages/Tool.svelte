@@ -36,6 +36,8 @@
   import IconButton from '../components/IconButton.svelte'
   import { toValues, toObject, exampleInput, inputLabel, toolState, type ToolInput, type InputValues } from '../lib/toolmeta'
   import * as I from '../lib/icons'
+  import { useRooms } from '../lib/rooms.svelte'
+  const names = useRooms()
 
   let { params }: { params: { id: string } } = $props()
   useConfig()
@@ -494,7 +496,7 @@
             <thead><tr><th>{t('rooms.col.channel')}</th><th>{t('room.tools_here')}</th></tr></thead>
             <tbody>
               {#each rooms as r (r.g + r.c)}
-                <tr><td><a href="/rooms/{r.g}/{r.c}">#{r.c}</a> <span class="xs subtle mono">{r.g}</span></td>
+                <tr><td><a href="/rooms/{r.g}/{r.c}">{names.name(`discord:${r.g}:${r.c}`).label}</a> <span class="xs subtle">{names.name(`discord:${r.g}:${r.c}`).server}</span></td>
                   <td><Segmented size="sm" label={t('room.tools_here')} value={r.v} onchange={(v) => setRoom(r.g, r.c, v)} options={[{ value: 'default', label: t('common.default') }, { value: 'on', label: t('common.on') }, { value: 'off', label: t('common.off') }]} /></td></tr>
               {/each}
             </tbody>
