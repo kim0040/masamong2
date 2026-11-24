@@ -26,6 +26,7 @@
   import OperatorAlerts from '../components/OperatorAlerts.svelte'
   import DMConversation from '../components/DMConversation.svelte'
   import PersonMemory from '../components/PersonMemory.svelte'
+  import { deepPerson } from '../lib/peopledeep'
   import * as I from '../lib/icons'
 
   // One row per Discord user the instance keeps personal data for. The console records withdrawals and
@@ -99,12 +100,19 @@
   let serverPersonOpen = $state(false)
   let serverPersonKey = $state('')
   // read from the latest list, not kept from the click: a person who withdraws meanwhile leaves the dialog too
-  const serverPerson = $derived(serverPersonKey ? (serverShown.find((p: any) => `${p.guild_id}:${p.user_id}` === serverPersonKey) ?? null) : null)
+  // a person a link names exactly (maybe beyond the first page of their server's list) is kept here while the dialog is open
+  let deepRow = $state<any>(null)
+  const serverPerson = $derived(
+    serverPersonKey ? (serverShown.find((p: any) => `${p.guild_id}:${p.user_id}` === serverPersonKey) ?? (deepRow && `${deepRow.guild_id}:${deepRow.user_id}` === serverPersonKey ? deepRow : null)) : null,
+  )
   $effect(() => {
     if (serverPersonOpen && serverPeopleCurrent && !serverPerson) serverPersonOpen = false
   })
   $effect(() => {
-    if (!serverPersonOpen) serverPersonKey = ''
+    if (!serverPersonOpen) {
+      serverPersonKey = ''
+      deepRow = null
+    }
   })
   async function openServerPerson(p: any) {
     if (p.has_user && !users.data) await users.refresh()
@@ -113,18 +121,30 @@
     serverPersonKey = `${p.guild_id}:${p.user_id}`
     serverPersonOpen = true
   }
-  // /people?person=<id>&guild=<server> (from Memory → People memory) opens that person straight at their memory
+  // /people?person=<id>&guild=<server> (from Memory → People memory) opens that person straight at their memory.
+  // The person is asked for by ID (and server) from people.servers, so the right server opens even when the person
+  // is beyond the first page of its list; nothing found says so.
   let deepDone = ''
+  async function openDeep(id: string, guild: string) {
+    const u = ((users.data?.users ?? []) as any[]).find((x) => x.user_id === id)
+    const r = await call<any>('people.servers', { user_id: id, ...(guild ? { guild_id: guild } : {}) })
+    const sp = r.ok ? deepPerson(r.output?.servers, id, guild) : null
+    navigate('/people', { replace: true })
+    if (u) open(u, guild || sp?.guild_id || '')
+    else if (sp) {
+      deepRow = sp
+      await openServerPerson(sp)
+    } else if (!r.ok) toast('error', t('common.failed'), r.error?.message)
+    else toast('warn', t('people.deep.not_found'))
+  }
   $effect(() => {
     const id = route.query.get('person') ?? ''
-    if (route.path !== '/people' || !id || deepDone === id || !users.data || !serverPeople.data || !serverPeopleCurrent) return
-    deepDone = id
     const guild = route.query.get('guild') ?? ''
-    const u = ((users.data.users ?? []) as any[]).find((x) => x.user_id === id)
-    const sp = serverShown.find((p: any) => p.user_id === id && (!guild || p.guild_id === guild)) ?? serverShown.find((p: any) => p.user_id === id)
-    if (u) open(u, guild || sp?.guild_id || '')
-    else if (sp) void openServerPerson(sp)
-    navigate('/people', { replace: true })
+    const mark = `${id}|${guild}`
+    if (!id) deepDone = '' // the link was used: the same link works again later
+    if (route.path !== '/people' || !id || deepDone === mark || !users.data) return
+    deepDone = mark
+    void openDeep(id, guild)
   })
   async function run(act: string, input: Record<string, unknown>, ok: string) {
     const r = await call(act, input)

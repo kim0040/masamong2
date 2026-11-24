@@ -2395,6 +2395,7 @@
   "people.consent.stale": "Needs renewal",
   "people.consent.withdrawn": "Withdrawn",
   "people.consents": "Consent",
+  "people.deep.not_found": "Could not find the person this link points to. They may have no messages in that server yet, or withdrew and left the list.",
   "people.desc": "Consent, personal settings, subscriptions and blocking for each Discord user the bot keeps personal data for.",
   "people.detail_desc": "Stored consent, subscriptions, and settings for this user. Birth details and notice profiles are never shown.",
   "people.empty": "No user data has been stored yet",
