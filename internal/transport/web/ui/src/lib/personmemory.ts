@@ -5,7 +5,7 @@ export type MineItem = { id: string; kind: string; text: string; created_at: str
 
 /** One statement about the person (memory.mine.show person). origin: self = their own words, explicit =
  * they asked the bot to remember it, said = someone else said it, told = someone asked the bot to remember it. */
-export type Claim = { id: string; kind: string; text: string; origin: string; said_by?: string[]; observed_at: string; evidence_n?: number; state?: string }
+export type Claim = { id: string; kind: string; text: string; origin: string; said_by?: string[]; observed_at: string; evidence_n?: number; state?: string; room_id?: string }
 
 /** The items the person asked to have remembered, apart from the ones that only name them. */
 export function splitMine(items: MineItem[] | null | undefined): { told: MineItem[]; other: MineItem[] } {

@@ -13,12 +13,14 @@
   import Confirm from './Confirm.svelte'
   import Skeleton from './Skeleton.svelte'
   import LoadState from './LoadState.svelte'
+  import { useRooms } from '../lib/rooms.svelte'
   import * as I from '../lib/icons'
 
   // What the bot keeps about one person in one server (memory.mine.show), hiding one statement
   // (memory.person.hide) and forgetting it all: a preview first, then a confirmation with the preview's
   // token (memory.mine.forget). Each server keeps its own, so the operator picks the server, among the ones
   // the person is in. The person is named by the dialog this sits in; the ID is not shown.
+  const names = useRooms()
   let { userId, preferredGuild = '' }: { userId: string; preferredGuild?: string } = $props()
 
   // Exact membership is filtered before the per-server list cap.
@@ -139,7 +141,7 @@
                         {#if c.state === 'pending'}<span class="tier" title={t('pm.pending_hint')}>{t('pm.pending')}</span>{/if}
                         <span class="break">{c.text}</span>
                       </div>
-                      <div class="meta xs muted"><span>{source(c)}</span><span>·</span><span>{datetime(c.observed_at)}</span></div>
+                      <div class="meta xs muted"><span>{source(c)}</span>{#if c.room_id}<span>·</span><span title={names.name(c.room_id).server}>{names.name(c.room_id).label}</span>{/if}<span>·</span><span>{datetime(c.observed_at)}</span></div>
                       <Button size="sm" variant="ghost" icon={I.EyeOff} aria-label={t('pm.hide_one', { text: c.text })} onclick={() => askHide(c)}>{t('pm.hide')}</Button>
                     </li>
                   {/each}
