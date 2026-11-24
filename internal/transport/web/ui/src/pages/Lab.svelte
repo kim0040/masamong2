@@ -345,7 +345,7 @@
                       {#if selected.plan.memory_requirement}<dt>{t('lab.diag.memory_req')}</dt><dd>{plain('lab.diag.mr', selected.plan.memory_requirement)}</dd>{/if}
                       {#if selected.plan.time_scope}<dt>{t('lab.diag.time_scope')}</dt><dd>{plain('lab.diag.ts', selected.plan.time_scope)}</dd>{/if}
                       {#if selected.plan.tool_plan?.length}<dt>{t('lab.diag.tool_plan')}</dt><dd>{selected.plan.tool_plan.map((x: any) => toolName(x.tool_name)).join(' → ')}</dd>{/if}
-                      {#if selected.retrieval?.applied}<dt>{t('lab.diag.applied')}</dt><dd>{t(`lab.rank.${selected.retrieval.applied}`)}</dd>{/if}
+                      {#if selected.retrieval?.applied}<dt>{t('lab.diag.applied')}</dt><dd>{plain('lab.rank', selected.retrieval.applied)}</dd>{/if}
                     </dl>
                   </div>
                 {/if}
