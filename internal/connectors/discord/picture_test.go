@@ -59,7 +59,7 @@ func pictureGateway(t *testing.T, script ...int) (*Gateway, *bodyRecorder, strin
 	return g, rec, id
 }
 
-// A finished picture goes out as a reply to the request, with the file attached, nobody mentioned, and a
+// A finished picture goes out alone (no card) as a reply to the request, nobody mentioned, and a
 // retry sends the whole file again under the same nonce (the reader is rewound, not left at its end).
 func TestPostPictureRepliesWithTheFileAndRetriesWholeUnderOneNonce(t *testing.T) {
 	fastReplyBackoff(t)
@@ -79,10 +79,13 @@ func TestPostPictureRepliesWithTheFileAndRetriesWholeUnderOneNonce(t *testing.T)
 		if !strings.Contains(body, "picture-bytes") {
 			t.Fatalf("attempt %d lost the file", i)
 		}
-		for _, want := range []string{`"message_reference"`, `"message_id":"m1"`, `"enforce_nonce":true`, `"parse":[]`, "attachment://" + id + ".png"} {
+		for _, want := range []string{`"message_reference"`, `"message_id":"m1"`, `"enforce_nonce":true`, `"parse":[]`} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("attempt %d lacks %s:\n%s", i, want, body)
 			}
+		}
+		if strings.Contains(body, `"embeds":[{`) || strings.Contains(body, "attachment://") || strings.Contains(body, "a cat") {
+			t.Fatalf("attempt %d posts a card around the picture; the picture goes alone:\n%s", i, body)
 		}
 		start := strings.Index(body, `"nonce":"`)
 		if start < 0 {

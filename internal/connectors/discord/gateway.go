@@ -1039,10 +1039,13 @@ func (g *Gateway) answerPrivately(base context.Context, s *discordgo.Session, i 
 // text without the file.
 func (g *Gateway) responseEdit(res action.Result, cmd Command, ictx InvokeContext) *discordgo.WebhookEdit {
 	r := g.renderInvoked(res, cmd, ictx)
-	f, failed := g.pictureFile(res, r.Embed)
+	f, failed := g.pictureFile(res, nil)
 	if failed {
 		failure := g.svc.Msg(ictx.Locale, "image.failed")
 		return &discordgo.WebhookEdit{Content: &failure, Embeds: ptrEmbeds([]*discordgo.MessageEmbed{}), AllowedMentions: noMentions}
+	}
+	if f != nil { // the picture alone, without its card
+		return &discordgo.WebhookEdit{Embeds: ptrEmbeds([]*discordgo.MessageEmbed{}), Files: []*discordgo.File{f}, AllowedMentions: noMentions}
 	}
 	edit := &discordgo.WebhookEdit{Embeds: ptrEmbeds(r.Embeds()), AllowedMentions: noMentions}
 	if r.Components != nil {
@@ -1168,16 +1171,16 @@ func (g *Gateway) PostChannel(ctx context.Context, channelID, replyTo, text stri
 }
 
 // PostPicture posts a generated picture into a channel on the bot's own initiative
-// (application.ImagePoster): the card with the file attached, as a reply to replyTo, retried like any
-// post of ours. Nobody is mentioned. The picture shows what a person asked for, so when the message it
-// replies to is gone nothing is posted (ErrReplyTargetGone), not even without the reference.
-func (g *Gateway) PostPicture(ctx context.Context, channelID, replyTo string, card action.Card, imageID string) (string, error) {
-	r := renderCard(card, false)
-	msg := &discordgo.MessageSend{Embeds: r.Embeds(), AllowedMentions: noMentions}
+// (application.ImagePoster): the file alone, without the card (see attachment), as a reply to replyTo,
+// retried like any post of ours. Nobody is mentioned. The picture shows what a person asked for, so
+// when the message it replies to is gone nothing is posted (ErrReplyTargetGone), not even without the
+// reference.
+func (g *Gateway) PostPicture(ctx context.Context, channelID, replyTo string, _ action.Card, imageID string) (string, error) {
+	msg := &discordgo.MessageSend{AllowedMentions: noMentions}
 	if replyTo != "" {
 		msg.Reference = &discordgo.MessageReference{MessageID: replyTo, ChannelID: channelID, FailIfNotExists: ptrBool(true)}
 	}
-	f := g.attachment(action.Result{OK: true, Output: map[string]any{"image_id": imageID}}, r.Embed)
+	f := g.attachment(action.Result{OK: true, Output: map[string]any{"image_id": imageID}}, nil)
 	if f == nil {
 		return "", errors.New("discord: generated picture is not available")
 	}
@@ -1287,7 +1290,13 @@ func dmError(err error) error {
 
 func ptrEmbeds(e []*discordgo.MessageEmbed) *[]*discordgo.MessageEmbed { return &e }
 
-// attachment is the generated picture of an images.generate result, shown in the embed.
+// attachment is the generated picture of an images.generate result. When e is not nil the picture is
+// also shown inside that embed.
+//
+// A generated picture goes out as the file alone: no card around it (no colour bar, title or model and
+// ratio line), so the channel sees just the picture (owner's call, 2026-11-24). Every path that posts
+// one (chat, the /image and !image commands, the picture queue) passes a nil embed here and sends no
+// embeds with the file. A picture that cannot go out is still the image.failed line.
 func (g *Gateway) attachment(res action.Result, e *discordgo.MessageEmbed) *discordgo.File {
 	id, _ := res.Output["image_id"].(string)
 	if !res.OK || id == "" {
@@ -2102,15 +2111,14 @@ func (g *Gateway) sendCommandCard(base context.Context, s *discordgo.Session, m 
 	msg := &discordgo.MessageSend{AllowedMentions: noMentions, Reference: m.Reference()}
 	if r.Poll != nil && res.OK {
 		msg.Poll = r.Poll
-	} else if f, failed := g.pictureFile(res, r.Embed); failed { // Discord would refuse the file, or it is gone: one line, like a queued picture
+	} else if f, failed := g.pictureFile(res, nil); failed { // Discord would refuse the file, or it is gone: one line, like a queued picture
 		msg.Content = g.svc.Msg(ictx.Locale, "image.failed")
+	} else if f != nil { // the picture alone, without its card
+		msg.Files = []*discordgo.File{f}
 	} else {
 		msg.Embeds = r.Embeds()
 		if r.Components != nil {
 			msg.Components = r.Components
-		}
-		if f != nil {
-			msg.Files = []*discordgo.File{f}
 		}
 	}
 	if ctx.Err() != nil {
@@ -2370,7 +2378,7 @@ func (g *Gateway) commandFollowUp(base context.Context, s *discordgo.Session, re
 
 // postToolArtifacts sends what a chat-called tool produced that is more than text: a poll the
 // planner created is posted as a native Discord poll, exactly as the /poll command would, and a picture
-// asked for in conversation ("고양이 그려줘") is posted like the /image command's card. It reports whether
+// asked for in conversation ("고양이 그려줘") is posted like the /image command's picture. It reports whether
 // any of it reached the channel.
 func (g *Gateway) postToolArtifacts(ctx context.Context, s *discordgo.Session, guildID, channelID string, ref *discordgo.MessageReference, results []chat.ToolResult) (posted bool) {
 	for _, t := range results {
@@ -2378,9 +2386,8 @@ func (g *Gateway) postToolArtifacts(ctx context.Context, s *discordgo.Session, g
 			return posted
 		}
 		if t.Tool == "images.generate" && t.OK && t.Status != "dry_run" {
-			if c, ok := t.Data["card"].(action.Card); ok {
-				r := renderCard(c, false)
-				msg := &discordgo.MessageSend{Embeds: r.Embeds(), AllowedMentions: noMentions}
+			if _, ok := t.Data["card"].(action.Card); ok {
+				msg := &discordgo.MessageSend{AllowedMentions: noMentions} // the picture alone, without its card
 				if ref != nil {
 					rc := *ref // strict: a picture whose request is gone is not posted (like the queue's)
 					rc.FailIfNotExists = ptrBool(true)
@@ -2392,7 +2399,7 @@ func (g *Gateway) postToolArtifacts(ctx context.Context, s *discordgo.Session, g
 				// get through), the turn was cancelled, or the outcome is unknown (the picture may be there).
 				var f *discordgo.File
 				if toolBytes(t.Data) <= application.ImageUploadLimit {
-					f = g.attachment(action.Result{OK: true, Output: t.Data}, r.Embed)
+					f = g.attachment(action.Result{OK: true, Output: t.Data}, nil)
 				}
 				if f != nil {
 					msg.Files = []*discordgo.File{f}
