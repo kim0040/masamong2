@@ -1,0 +1,60 @@
+# The memory pipeline: how it is built and read. Used by docs/architecture/memory.en.md.
+grid-columns: 1
+grid-gap: 44
+
+sources: "Raw messages coming in" {
+  class: group
+  grid-rows: 1
+  grid-gap: 24
+  kakao: "KakaoTalk CSV\nimported by the operator" {class: entry; width: 290}
+  history: "Discord while it was off\nfilled in on reconnect" {class: entry; width: 290}
+  live: "Discord live\nnew · edited · deleted" {class: entry; width: 290}
+}
+
+raw: "Raw observations · memory_observations\nThe evidence behind every memory. When one is deleted or consent is withdrawn, the layers below lose it too" {class: store}
+
+built: "" {
+  class: row
+  grid-rows: 1
+  grid-gap: 36
+
+  index: "Search index · what was actually said" {
+    class: group
+    grid-columns: 2
+    grid-gap: 24
+    leaf: "leaf\n8 messages or 30 min" {class: memory; width: 190}
+    fts: "Lexical index\nFTS5 · in memory" {class: memory; width: 190}
+    vec: "Leaf vectors\nsummaries · 1024" {class: memory; width: 190}
+    msg: "Message vectors\nhelp find candidates" {class: memory; width: 190}
+  }
+
+  derived: "Room and person memory · with evidence" {
+    class: group
+    grid-columns: 2
+    grid-gap: 24
+    episode: "L2 episodes\nplans · decisions" {class: memory; width: 190}
+    state: "L1 room state\ntopics under way" {class: memory; width: 190}
+    claim: "Person memory\none line each" {class: memory; width: 190}
+    backfill: "Paid backfill\nonly when started" {class: entry; width: 190}
+    backfill -> claim
+  }
+}
+
+answer: "At answer time" {
+  class: group
+  grid-rows: 1
+  grid-gap: 24
+  find: "Find candidates\nthis room, its blocks" {class: core; width: 212}
+  rank: "Fuse and rerank\nRRF · rules decide" {class: core; width: 212}
+  expand: "Expand to raw text\nscope · edits · deletes" {class: core; width: 212}
+  prompt: "Answer prompt\nevidence + room, people" {class: core; width: 212}
+  find -> rank
+  rank -> expand
+  expand -> prompt
+}
+
+sources -> raw
+raw -> built.index: "cut and indexed"
+raw -> built.derived: "extracted per stretch"
+built.index -> answer: "candidates"
+built.derived -> answer: "evidence checked again on read"

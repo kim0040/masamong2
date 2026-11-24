@@ -1,0 +1,73 @@
+# The big picture: who talks to what. Used by docs/architecture/README.en.md.
+# The layers are stacked as a grid: people, doors, the daemon (doors, Action layer, workers, storage), outside APIs.
+grid-columns: 1
+grid-gap: 40
+
+who: "" {
+  class: row
+  grid-rows: 1
+  grid-gap: 24
+  operator: "Operator" {class: actor; width: 424}
+  people: "People in a Discord room" {class: actor; width: 424}
+}
+
+door: "" {
+  class: row
+  grid-rows: 1
+  grid-gap: 24
+  cli: "masamong\nCLI · launcher · tray" {class: entry; width: 200}
+  browser: "Browser\nadmin console" {class: entry; width: 200}
+  discord: "Discord" {class: external; width: 424}
+}
+
+daemon: "masamongd · one daemon process" {
+  class: group
+  label.near: bottom-center
+  grid-columns: 1
+  grid-gap: 36
+
+  in: "" {
+    class: row
+    grid-rows: 1
+    grid-gap: 24
+    web: "Console server\n127.0.0.1 only" {class: entry; width: 424}
+    gateway: "Discord Gateway\nreceives and sends" {class: entry; width: 424}
+  }
+  app: "Action layer · application.Service.Execute\nthe same Action from every door · permissions · limits · change log" {class: core}
+  work: "" {
+    class: row
+    grid-rows: 1
+    grid-gap: 24
+    chat: "One turn\nchat.Runtime" {class: core; width: 200}
+    memory: "Memory engine\ncapture · search" {class: memory; width: 200}
+    tools: "Tools and\nprovider adapters" {class: core; width: 200}
+    background: "Background\nscheduler · indexer" {class: core; width: 200}
+  }
+  db: "SQLite · masamong.db\nconfiguration · raw messages · index · turn records · usage" {class: store; shape: cylinder}
+}
+
+outside: "" {
+  class: row
+  grid-rows: 1
+  grid-gap: 24
+  models: "Model APIs\nplanner · answer · summary · embedding · rerank" {class: external; width: 424}
+  apis: "Tool APIs\nweather · finance · search · places" {class: external; width: 424}
+}
+
+who.operator -> door.cli
+who.operator -> door.browser
+who.people -> door.discord
+door.cli -> daemon.in.web
+door.browser -> daemon.in.web
+door.discord <-> daemon.in.gateway
+daemon.in.web -> daemon.app
+daemon.in.gateway -> daemon.app
+daemon.app -> daemon.work.chat
+daemon.app -> daemon.work.memory
+daemon.app -> daemon.work.tools
+daemon.app -> daemon.work.background
+daemon.work.chat -> daemon.work.memory
+daemon.work.memory -> daemon.db
+daemon.work.background -> daemon.db
+daemon -> outside.models
+daemon -> outside.apis

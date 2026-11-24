@@ -8,6 +8,22 @@
       "README.md": "b8c7c41b5c04ec75",
       "README.zh-Hans.md": "2838dcc68adc846f"
     },
+    "docs/architecture/diagrams/data-model.d2": {
+      "docs/architecture/diagrams/data-model.d2": "134623bb6373cefa",
+      "docs/architecture/diagrams/data-model.en.d2": "8799339d90f2aaeb"
+    },
+    "docs/architecture/diagrams/layers.d2": {
+      "docs/architecture/diagrams/layers.d2": "afe28e532e90f680",
+      "docs/architecture/diagrams/layers.en.d2": "95328fe429d1e846"
+    },
+    "docs/architecture/diagrams/memory.d2": {
+      "docs/architecture/diagrams/memory.d2": "c1faeeafd92b71fe",
+      "docs/architecture/diagrams/memory.en.d2": "a8f47cbf641ba368"
+    },
+    "docs/architecture/diagrams/overview.d2": {
+      "docs/architecture/diagrams/overview.d2": "59ea79e1b1166d3c",
+      "docs/architecture/diagrams/overview.en.d2": "e36644e0a1f34350"
+    },
     "wiki/CLI-명령어": {
       "docs/wiki/CLI-Commands.md": "a6860444aae9d031",
       "docs/wiki/CLI-명령어.md": "2e6a6ac2bbf82afc"

@@ -1,0 +1,51 @@
+# Package layers: who imports whom. Used by docs/architecture/system.en.md.
+# An arrow means "imports", and arrows only go down.
+grid-columns: 1
+grid-gap: 44
+
+entry: "Doors · they only translate input and output" {
+  class: group
+  grid-rows: 1
+  grid-gap: 24
+  cmd: "cmd/masamongd\ncmd/masamong" {class: entry; width: 200}
+  discord: "connectors/discord\nGateway · commands" {class: entry; width: 200}
+  web: "transport/web · ui\nserver and pages" {class: entry; width: 200}
+  cli: "cli · tui · tray\nlauncher" {class: entry; width: 200}
+}
+
+action: "Action layer · permissions, limits, configuration, change log" {
+  class: group
+  grid-rows: 1
+  grid-gap: 24
+  application: "application\nService.Execute · most features" {class: core; width: 424}
+  catalog: "catalog · action\nthe Action list" {class: core; width: 200}
+  config: "config · jobs\nrevisions · job states" {class: core; width: 200}
+}
+
+domain: "Conversation · memory · tools" {
+  class: group
+  grid-columns: 4
+  grid-gap: 24
+  chat: "chat\nplan · tools · answer" {class: core; width: 200}
+  conversation: "conversation\nthe caller's own lines" {class: core; width: 200}
+  tools: "tools\nregistry and limits" {class: core; width: 200}
+  features: "features\nfortune · reminders" {class: core; width: 200}
+  engine: "memory/engine\ncapture · index · search" {class: memory; width: 200}
+  search: "memory/search · lexical\nleaves · fusion" {class: memory; width: 200}
+  episodes: "memory/episodes\nroom · person memory" {class: memory; width: 200}
+  lang: "lang · locales\npacks and strings" {class: core; width: 200}
+}
+
+base: "Storage and the outside" {
+  class: group
+  grid-rows: 1
+  grid-gap: 24
+  store: "memory/store · storage\nSQLite tables" {class: store; width: 200}
+  providers: "providers\nmodel and tool APIs" {class: external; width: 200}
+  secrets: "secrets · fsutil\nkeys · safe writes" {class: store; width: 200}
+  misc: "clock · crash · errclass\ntime · failures" {class: store; width: 200}
+}
+
+entry -> action: "calls Service.Execute only"
+action -> domain: "hands in the model, memory and tools"
+domain -> base
