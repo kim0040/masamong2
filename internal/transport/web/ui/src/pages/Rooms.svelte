@@ -320,7 +320,7 @@
               {#each g.channels as c (c.id)}
                 <tr class:selected={selected.has(key(c))}>
                   <td class="cb"><input type="checkbox" checked={selected.has(key(c))} onchange={() => toggle(c)} aria-label={t('rooms.select_one', { name: c.name })} /></td>
-                  <td><a class="chname" href="/rooms/{c.guild_id}/{c.id}"><I.Hash size={14} aria-hidden="true" />{#if c.name && c.name !== c.id}{c.name}{:else}<span class="mono unnamed" title={t('rooms.channel.unnamed')}>{c.id}</span>{/if}</a>{#if !c.configured}<span class="chip">{t('rooms.defaults')}</span>{/if}</td>
+                  <td><a class="chname" href="/rooms/{c.guild_id}/{c.id}"><I.Hash size={14} aria-hidden="true" />{#if c.name && c.name !== c.id}{c.name}{:else}<span class="mono unnamed" title={t('rooms.channel.unnamed')}>{c.id}</span>{/if}</a>{#if !c.configured}<span class="chip">{t('rooms.defaults')}</span>{/if}{@render watchChip(c)}</td>
                   <td>
                     <div class="rsp">
                       {#key rev}<Switch checked={chats(c.respond)} disabled={busy || rowBusy.has(key(c))} ariaLabel={t('rooms.respond_of', { name: c.name })} onchange={(v) => setRespond(c, v)} />{/key}
@@ -369,6 +369,12 @@
     {#if heldBack}<p class="xs muted note">{t('rooms.bulk_pending_note', { n: heldBack })}</p>{/if}
   </div>
 {/if}
+
+<!-- a room's saved alert areas, as a chip that opens its page: console-gui item 1 -->
+{#snippet watchChip(c: any)}
+  {@const n = Object.keys(c.watch_level ?? {}).length}
+  {#if n}<a class="chip" href="/rooms/{c.guild_id}/{c.id}" title={t('room.watch_levels')}>{t('room.watch_chip', { n })}</a>{/if}
+{/snippet}
 
 <Confirm bind:open={leaveOpen} danger title={t('rooms.server.leave_title', { name: leaveFor?.name ?? '' })} body={t('rooms.server.leave_body')} confirmLabel={leaveFor?.allowed ? t('rooms.server.leave') : t('rooms.server.decline')} onconfirm={leave} />
 

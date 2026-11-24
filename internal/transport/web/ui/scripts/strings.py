@@ -2282,10 +2282,10 @@ add("cfg", {
 # 2026-10-01 earthquake and weather-warning alerts
 add("disaster", {
     "title": ("지진·특보 알림", "Earthquake & warning alerts"),
-    "desc": ("기상청을 계속 확인해 지진은 1분마다, 기상 특보는 5분마다 새로 나온 것을 봇이 응답하는 채널에 올립니다. 기상청 키가 필요합니다. 방마다 끌 수 있습니다(서버·방 → 방 → 응답).", "The bot keeps checking KMA and posts what is new to the channels it answers in: earthquakes every minute, weather warnings every five. Needs a KMA key. Each room can turn it off (Servers & rooms → room → Replies)."),
+    "desc": ("기상청을 계속 확인해 지진은 1분마다, 기상 특보는 5분마다 새로 나온 것을 봇이 응답하는 채널에 올립니다. 기상청 키가 필요합니다. 방마다 끄고 구역별 알림 레벨을 정합니다(서버·방 → 방 → 응답·말투).", "The bot keeps checking KMA and posts what is new to the channels it answers in: earthquakes every minute, weather warnings every five. Needs a KMA key. Each room turns it off and sets alert levels by area (Servers & rooms → room → Replies & persona)."),
     "enabled": ("지진·특보 알림 켜기", "Announce earthquakes and warnings"), "enabled_hint": ("끄면 아무것도 확인하거나 올리지 않습니다.", "Off: nothing is checked or posted."),
     "warnings": ("기상 특보도 알리기", "Announce weather warnings too"), "warnings_hint": ("각 방에서 설정한 구역과 레벨에 따라 특보의 발표·격상·해제를 알립니다.", "Each room receives issues, upgrades and lifts for the areas and levels it follows."),
-    "legacy_regions": ("이전 버전의 '주의보를 받을 지역'({regions})은 더 이상 쓰지 않습니다. 방마다 서버·방 → 방 → 응답에서 지역별 알림 레벨을 정하세요.", "The old advisory regions ({regions}) are no longer used. Set each room's alert level by area under Servers & rooms → room → Replies."),
+    "legacy_regions": ("이전 버전의 '주의보를 받을 지역'({regions})은 더 이상 쓰지 않습니다. 방마다 서버·방 → 방 → 응답·말투 탭에서 지역별 알림 레벨을 정하세요.", "The old advisory regions ({regions}) are no longer used. Set each room's alert level by area under Servers & rooms → room → Replies & persona."),
     "legacy_regions_clear": ("이전 설정 지우기", "Clear old setting"),
     "marine": ("해상 특보 포함", "Include sea areas"), "marine_hint": ("먼바다·앞바다 풍랑 같은 해상 특보도 알립니다. 보통 끄는 게 조용합니다.", "Sea-area warnings (풍랑 on 먼바다 …) too. Usually quieter off."),
     "min_domestic": ("국내 지진 최소 규모", "Smallest domestic magnitude"), "min_overseas": ("국외 지진 최소 규모", "Smallest overseas magnitude"),
@@ -2304,7 +2304,7 @@ add("disaster", {
 })
 add("room", {
     "disaster_alerts": ("지진·특보 알림 받기", "Earthquake & warning alerts"),
-    "disaster_alerts_hint": ("모든 레벨에서 규모 기준을 충족하는 국내외 지진을 알립니다. 규모 기준은 도구 → 재난·특보 → 운영에서 정합니다.", "Every level includes domestic and overseas earthquakes that meet the thresholds set under Tools → Disaster alerts → Operations."),
+    "disaster_alerts_hint": ("모든 레벨에서 규모 기준을 충족하는 국내외 지진을 알립니다. 규모 기준은 도구 → 재난·특보 → 운영에서, 구역별 레벨은 아래 '지역별 알림 레벨'에서 이 방에만 정합니다.", "Every level includes domestic and overseas earthquakes that meet the thresholds set under Tools → Disaster alerts → Operations. Per-area levels are set for this room only, under 'Alert level by area' below."),
     "watch_region_invalid": ("지역을 입력하고 중복된 지역을 지워 주세요.", "Enter an area for each row and remove duplicates."),
     "watch_levels": ("지역별 알림 레벨", "Alert level by area"),
     "watch_hint": ("기상청 구역명이나 코드를 입력하세요. 세부 구역 설정이 상위 구역보다 우선하고, 어느 설정에도 해당하지 않으면 레벨 1입니다.", "Enter an exact KMA area name or code. A local area overrides its parent. Unmatched areas use level 1."),
@@ -2325,9 +2325,26 @@ add("room", {
     "watch_level.5": ("레벨 4 + 나머지 모든 주의보·경보", "Level 4 + all remaining advisories and warnings"),
     "disaster_alerts_off_respond": ("응답 안 함인 방에는 알림도 올리지 않습니다.", "A room the bot does not answer in gets no alerts either."),
 })
+
+# ---- console-gui: per-room area alert levels (audit 3.1, 4.1) ----
+add("room", {
+    "watch_off_alerts": ("알림 스위치를 켜면 구역별로 다른 알림 레벨을 정할 수 있습니다.", "Turn on the alert switch to set a level per area."),
+    "watch_off_respond": ("응답 안 함인 방에는 알림도 오지 않아 구역 설정이 쓰이지 않습니다.", "This room gets no alerts while it does not answer, so area levels do not apply."),
+    "watch_empty": ("아직 정한 구역이 없습니다. 구역이 없으면 모든 지역이 레벨 1(지진만)입니다.", "No areas yet. With none, every area stays at level 1 (earthquakes only)."),
+    "watch_chip": ("특보 {n}구역", "{n} alert areas"),
+    "watch_apply": ("이 서버의 다른 방에도 적용", "Apply to the server's other rooms"),
+    "watch_apply_title": ("다른 방에도 알림 구역을 적용할까요?", "Apply the alert areas to the other rooms?"),
+    "watch_apply_body": ("저장된 알림 스위치와 지역별 알림 레벨을 이 서버의 다른 방 {n}곳에 덮어씁니다.", "Overwrites the saved alerts switch and per-area levels on the {n} other rooms of this server."),
+    "watch_apply_done": ("전체 {total}곳 중 {n}곳에 적용했습니다", "Applied to {n} of {total} rooms"),
+    "watch_apply_unsaved": ("저장되지 않은 변경은 적용되지 않습니다.", "Unsaved changes are not applied."),
+})
+add("disaster", {
+    "rooms_hint": ("구역별 알림 레벨은 방마다 정합니다. 서버·방 → 방 → 응답·말투 탭의 '응답 조건과 말투' 카드에서 정하세요.", "Alert level by area is set per room: Servers & rooms → room → Replies & persona tab, 'Reply mode and persona' card."),
+    "rooms_link": ("방별 구역 설정 열기", "Open Servers & rooms"),
+})
 add("cfg", {
     "disaster_alerts": ("지진·특보 알림", "Earthquake & warning alerts"),
-    "disaster_alerts.desc": ("봇이 기상청을 확인해 지진과 기상 특보를 응답하는 채널에 올리는 기준입니다. 도구 → 재난·특보 → 운영 화면에서 바꾸는 편이 쉽습니다.", "What the bot announces from KMA in the channels it answers in. Easier to change under Tools → Disaster alerts → Operations."),
+    "disaster_alerts.desc": ("봇이 기상청을 확인해 지진과 기상 특보를 응답하는 채널에 올리는 기준입니다. 도구 → 재난·특보 → 운영 화면에서 바꾸는 편이 쉽습니다. 구역별 알림 레벨은 방마다 서버·방 → 방 → 응답·말투에서 정합니다.", "What the bot announces from KMA in the channels it answers in. Easier to change under Tools → Disaster alerts → Operations. Per-area alert levels are set per room under Servers & rooms → room → Replies & persona."),
     "disaster_alerts.enabled": ("알림 켜기", "Announce"), "disaster_alerts.warnings": ("기상 특보도 알리기", "Weather warnings too"),
     "disaster_alerts.earthquake_min_domestic": ("국내 지진 최소 규모", "Smallest domestic magnitude"), "disaster_alerts.earthquake_min_overseas": ("국외 지진 최소 규모", "Smallest overseas magnitude"),
     "disaster_alerts.warning_regions": ("이전 주의보 지역 설정 (채널의 watch_level로 대체됨)", "Legacy advisory regions (replaced by channel watch_level)"), "disaster_alerts.marine": ("해상 특보 포함", "Include sea areas"),
