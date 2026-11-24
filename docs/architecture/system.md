@@ -13,57 +13,11 @@
 
 ## 패키지 층
 
-```mermaid
-flowchart TB
-  subgraph entry["입구: 입력과 출력만 바꾼다"]
-    CMD["cmd/masamongd, cmd/masamong"]
-    DISCORD["connectors/discord"]
-    WEB["transport/web 와 ui"]
-    CLI["cli, tui, tray, launcher"]
-  end
+<picture><source media="(prefers-color-scheme: dark)" srcset="diagrams/layers-dark.svg"><img alt="패키지 층 네 개. 입구(cmd, connectors/discord, transport/web, cli)는 Action 계층(application, catalog, config)의 Service.Execute 만 부른다. Action 계층은 대화, 기억, 도구 층(chat, conversation, tools, features, memory, lang)에 모델과 기억과 도구를 넣어 준다. 맨 아래는 저장과 바깥(storage, providers, secrets, clock)이다. 화살표는 위에서 아래로만 간다." src="diagrams/layers-light.svg"></picture>
 
-  subgraph core["Action 계층"]
-    APP["application: Service.Execute"]
-    CATALOG["catalog, action"]
-  end
+그림 원본: [diagrams/layers.d2](diagrams/layers.d2)
 
-  subgraph domain["대화, 기억, 도구"]
-    CHAT["chat"]
-    CONV["conversation"]
-    MEMORY["memory: engine, search, store, episodes"]
-    TOOLS["tools"]
-    FEATURES["features: fortune, notices, reminders, poll, privacy, participation"]
-    LANG["lang 과 locales"]
-  end
-
-  subgraph base["저장과 바깥"]
-    STORAGE["storage: SQLite"]
-    PROVIDERS["providers: openai, websearch, kma, finnhub, fx, kakao, openmeteo"]
-    SECRETS["secrets, fsutil, config, jobs, clock"]
-  end
-
-  CMD --> DISCORD
-  CMD --> WEB
-  CMD --> APP
-  CLI --> APP
-  DISCORD --> APP
-  WEB --> APP
-  APP --> CATALOG
-  APP --> CHAT
-  APP --> CONV
-  APP --> MEMORY
-  APP --> TOOLS
-  APP --> FEATURES
-  CHAT --> MEMORY
-  CHAT --> LANG
-  MEMORY --> PROVIDERS
-  MEMORY --> STORAGE
-  APP --> STORAGE
-  APP --> PROVIDERS
-  APP --> SECRETS
-```
-
-화살표는 "가져온다(import)"는 뜻이다. `chat`은 `application`을 모른다. `application`이 모델 호출·기억·도구 실행을 인터페이스(`chat.LLM`, `chat.Memory`, `chat.ToolRunner`)로 넣어 준다.
+화살표는 "가져온다(import)"는 뜻이고 층 사이만 그렸다. `application`은 맨 아래 층(저장, 공급자)도 직접 쓴다. `chat`은 `application`을 모른다. `application`이 모델 호출·기억·도구 실행을 인터페이스(`chat.LLM`, `chat.Memory`, `chat.ToolRunner`)로 넣어 준다.
 
 ## 자세히
 
