@@ -46,3 +46,27 @@ func TestConfigChangeKeepsEveryServerSetting(t *testing.T) {
 		}
 	}
 }
+
+// A typed change that is refused (here a stale revision) leaves the live document as it was: the merge
+// of person names once deleted the alias from the live map before the revision check refused it, and
+// the next saved change wrote the deletion to the file.
+func TestRefusedConfigChangeLeavesTheLiveDocument(t *testing.T) {
+	t.Parallel()
+	svc := setupSvc(t)
+	if r := exec(svc, "people.merge", map[string]any{"name": "Alex", "aliases": []any{"A"}}); !r.OK {
+		t.Fatalf("merge: %+v", r.Error)
+	}
+	stale := svc.Revision() - 1
+	if r := exec(svc, "people.merge", map[string]any{"name": "Alex", "remove": true, "base_revision": stale}); r.OK {
+		t.Fatal("a stale revision must be refused")
+	}
+	if got := svc.Doc().Memory.PersonAliases["Alex"]; len(got) != 1 {
+		t.Fatalf("the refused change reached the live document: %v", svc.Doc().Memory.PersonAliases)
+	}
+	if r := exec(svc, "channels.configure", map[string]any{"guild_id": "g1", "id": "c1", "respond": "mention"}); !r.OK {
+		t.Fatalf("configure: %+v", r.Error)
+	}
+	if got := svc.Doc().Memory.PersonAliases["Alex"]; len(got) != 1 {
+		t.Fatalf("the next change saved the refused one: %v", svc.Doc().Memory.PersonAliases)
+	}
+}
