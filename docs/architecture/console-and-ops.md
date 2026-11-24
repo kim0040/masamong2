@@ -14,7 +14,8 @@
 ## 입구와 Action
 
 ```mermaid
-flowchart LR
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 36, "rankSpacing": 44}}}%%
+flowchart TB
   BR["브라우저 콘솔"] -- "POST /api/action" --> WEB["콘솔 서버"]
   CLI["masamong 명령"] -- "데몬이 돌 때" --> WEB
   CLI -- "데몬이 꺼졌을 때" --> EX
@@ -28,6 +29,15 @@ flowchart LR
   G2 --> H["처리 함수 표"]
   H --> AU["변경 기록 audit_log 와 통계"]
   H --> DB[("SQLite")]
+
+  classDef entry fill:#dbe7ff,stroke:#2563eb,color:#1c1917
+  classDef core fill:#fde3cf,stroke:#d9661a,color:#1c1917
+  classDef memory fill:#dcf3e3,stroke:#15803d,color:#1c1917
+  classDef external fill:#ebe2fd,stroke:#7c3aed,color:#1c1917
+  classDef store fill:#e7e5e4,stroke:#57534e,color:#1c1917
+  class BR,CLI,DC,TL,SCH,WEB entry
+  class EX,G1,G2,H core
+  class AU,DB store
 ```
 
 ## 자세히
@@ -134,7 +144,8 @@ flowchart LR
 코드: [`internal/application/updates.go`](../../internal/application/updates.go)(확인), [`selfupdate.go`](../../internal/application/selfupdate.go)(교체), [`backup.go`](../../internal/application/backup.go), [`reset.go`](../../internal/application/reset.go), [`maintenance.go`](../../internal/application/maintenance.go), [`update_recovery.go`](../../internal/application/update_recovery.go).
 
 ```mermaid
-flowchart LR
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 36, "rankSpacing": 44}}}%%
+flowchart TB
   CK["하루 한 번 새 릴리스 확인"] --> NT["콘솔에 새 버전과 릴리스 노트 표시"]
   NT --> AP["지금 업데이트"]
   AP --> DL["아카이브와 체크섬 내려받기, 검증"]
@@ -143,6 +154,16 @@ flowchart LR
   SW --> RS["재시작"]
   RS --> OK["새 버전의 첫 시작: 저널 정리, 업그레이드 백업"]
   SW -. "중간에 죽음" .-> RC["다음 시작이 이어 가거나 되돌림"]
+
+  classDef entry fill:#dbe7ff,stroke:#2563eb,color:#1c1917
+  classDef core fill:#fde3cf,stroke:#d9661a,color:#1c1917
+  classDef memory fill:#dcf3e3,stroke:#15803d,color:#1c1917
+  classDef external fill:#ebe2fd,stroke:#7c3aed,color:#1c1917
+  classDef store fill:#e7e5e4,stroke:#57534e,color:#1c1917
+  class NT,AP entry
+  class CK,SW,RS,OK,RC core
+  class DL external
+  class BK store
 ```
 
 - **확인**: 공개 GitHub Release를 본다. `-dev` 빌드는 확인하지 않는다.
@@ -172,7 +193,8 @@ flowchart LR
 <summary><b>브랜치, 버전, 릴리스</b></summary>
 
 ```mermaid
-flowchart LR
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 36, "rankSpacing": 44}}}%%
+flowchart TB
   W["작업 브랜치, 풀 리퀘스트"] --> DEV["dev: 개발판"]
   DEV -- "CI 통과" --> FF["main 으로 빨리감기 병합"]
   FF --> TAG["main 에 버전 태그"]
@@ -180,6 +202,15 @@ flowchart LR
   REL --> INST["설치 스크립트와 앱 안 업데이트가 내려받음"]
   HOT["급한 수정"] --> MAIN["main"]
   MAIN --> DEV
+
+  classDef entry fill:#dbe7ff,stroke:#2563eb,color:#1c1917
+  classDef core fill:#fde3cf,stroke:#d9661a,color:#1c1917
+  classDef memory fill:#dcf3e3,stroke:#15803d,color:#1c1917
+  classDef external fill:#ebe2fd,stroke:#7c3aed,color:#1c1917
+  classDef store fill:#e7e5e4,stroke:#57534e,color:#1c1917
+  class W,HOT entry
+  class DEV,FF,TAG,MAIN core
+  class REL,INST external
 ```
 
 | 브랜치 | 역할 |
@@ -205,7 +236,7 @@ flowchart LR
 
 | 검사 | 무엇을 보나 | 실행 |
 |---|---|---|
-| `tools/doccheck` | 링크가 실제 파일을 가리키는가, 번역된 페이지가 함께 바뀌었는가(`docs/translations.json`), 명령 이름이 페이지 언어와 맞는가, README와 위키의 버전이 최신 릴리스 노트와 같은가 | `make docs`, 번역을 맞춘 뒤 `make docs-record` |
+| `tools/doccheck` | 링크가 실제 파일을 가리키는가, 번역된 페이지가 함께 바뀌었는가(`docs/translations.json`), 명령 이름이 페이지 언어와 맞는가, README와 위키의 버전이 최신 릴리스 노트와 같은가, 렌더한 그림이 원본과 같은 판인가 | `make docs`, 번역을 맞춘 뒤 `make docs-record`, 그림 원본을 고친 뒤 `make diagrams` |
 | `tools/codemap` | 생성된 코드 지도가 소스와 같은가 | `make codemap`, `go test ./tools/codemap` |
 | `tools/movecheck`와 골든 파일 | 코드를 옮기는 커밋이 옮기기만 했는가, 테스트 이름이 사라지지 않았는가, 패키지 경계·공개 표면·스키마가 그대로인가 | [유지보수 가이드 §5](../MAINTAINING.md) |
 | `make parity` | 샌드박스와 Go의 검색 결과가 같은가 | 검색·leaf·색인·플래너 의도를 바꿨을 때 |

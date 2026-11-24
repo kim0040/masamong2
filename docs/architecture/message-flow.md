@@ -14,6 +14,7 @@
 ## 한 턴의 순서
 
 ```mermaid
+%%{init: {"sequence": {"mirrorActors": false, "width": 104, "actorMargin": 18, "messageMargin": 30, "wrap": true}}}%%
 sequenceDiagram
   autonumber
   participant U as 사람
@@ -30,13 +31,13 @@ sequenceDiagram
   GW->>DB: 원문 저장
   GW->>APP: Observe 로 방의 흐름 알림
   alt 봇을 부른 말
-    GW->>GW: 이어진 메시지를 한 턴으로 묶기
+    GW->>GW: 한 턴으로 묶기
     GW->>APP: ChatTurn
   else 부르지 않은 말
-    APP->>APP: 끼어들기 후보 판단, 기본 꺼짐
-    Note over APP: 켜져 있고 통과하면 같은 ChatTurn 으로 간다
+    APP->>APP: 끼어들기 판단
+    Note over GW,APP: 기본 꺼짐. 통과하면 같은 ChatTurn 으로 간다
   end
-  APP->>APP: 방 차례, 이름 부름 판정, 한도와 예산
+  APP->>APP: 차례와 한도
   APP->>DB: 부른 사람의 대화 읽기
   APP->>RT: Answer
   par 동시에 시작

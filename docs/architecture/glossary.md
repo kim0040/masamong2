@@ -14,7 +14,8 @@
 ## 기억 낱말의 관계
 
 ```mermaid
-flowchart LR
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 36, "rankSpacing": 44}}}%%
+flowchart TB
   OBS["원문 관찰: observation"] --> LEAF["leaf: 검색 조각"]
   LEAF --> SPACE["임베딩 공간: 모델과 폭이 같은 벡터"]
   OBS --> SEG["구간: segment"]
@@ -26,6 +27,16 @@ flowchart LR
   WIN --> CLAIM
   BLOCK["기억 블록: 한 방의 원문과 산출물"] --> OBS
   CH["Discord 채널"] -- "연결: 검색 범위만" --> BLOCK
+
+  classDef entry fill:#dbe7ff,stroke:#2563eb,color:#1c1917
+  classDef core fill:#fde3cf,stroke:#d9661a,color:#1c1917
+  classDef memory fill:#dcf3e3,stroke:#15803d,color:#1c1917
+  classDef external fill:#ebe2fd,stroke:#7c3aed,color:#1c1917
+  classDef store fill:#e7e5e4,stroke:#57534e,color:#1c1917
+  class SEG,WIN core
+  class LEAF,SPACE,EP,STATE,ITEM,CLAIM memory
+  class CH external
+  class OBS,BLOCK store
 ```
 
 ## 낱말

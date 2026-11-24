@@ -25,6 +25,7 @@
 ## 공통 처리 흐름
 
 ```mermaid
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 36, "rankSpacing": 44}}}%%
 flowchart TD
     KC[카카오 CSV] --> KA[CSV adapter]
     DH[Discord history] --> DA[history adapter]
@@ -36,6 +37,16 @@ flowchart TD
     J --> W[문맥 분할과 lexical index]
     W --> E[embedding space]
     E --> Q[scope 기반 검색]
+
+    classDef entry fill:#dbe7ff,stroke:#2563eb,color:#1c1917
+    classDef core fill:#fde3cf,stroke:#d9661a,color:#1c1917
+    classDef memory fill:#dcf3e3,stroke:#15803d,color:#1c1917
+    classDef external fill:#ebe2fd,stroke:#7c3aed,color:#1c1917
+    classDef store fill:#e7e5e4,stroke:#57534e,color:#1c1917
+    class KC,DH,DE entry
+    class KA,DA,EA,J,Q core
+    class W,E memory
+    class R store
 ```
 
 adapter 뒤에서는 같은 원문, 문맥, 임베딩, 검색 계약을 쓴다. Discord의 안정 ID, bot flag, UTC offset을 카카오 형식에 맞추기 위해 버리지 않는다. 카카오에 없는 reply와 계정 ID는 `unknown`으로 둔다.

@@ -14,9 +14,11 @@
 ## 모델 호출과 도구 호출의 길
 
 ```mermaid
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 36, "rankSpacing": 44}}}%%
 flowchart TB
   subgraph model["모델 호출"]
-    R["역할: response, planner, summary, embed, rerank, image, vision"]
+    direction TB
+    R["역할: 답변, 플래너, 요약, 임베딩, 재순위, 그림, 사진 이해"]
     RT["경로: 공급자, 모델, 추론 정도"]
     AD["어댑터: 호스트 계열별 요청 모양"]
     SH["거절된 선택 필드는 빼고 한 번 더"]
@@ -28,6 +30,7 @@ flowchart TB
   end
 
   subgraph tool["도구 호출"]
+    direction TB
     C["부르는 쪽: 도구 루프, 명령, 콘솔, CLI"]
     EX["Service.Execute"]
     G["관문: 켜짐, 기능 스위치, 채널, 경로, 한도"]
@@ -37,6 +40,16 @@ flowchart TB
     C --> EX --> G --> H --> P
     H --> TU
   end
+
+  classDef entry fill:#dbe7ff,stroke:#2563eb,color:#1c1917
+  classDef core fill:#fde3cf,stroke:#d9661a,color:#1c1917
+  classDef memory fill:#dcf3e3,stroke:#15803d,color:#1c1917
+  classDef external fill:#ebe2fd,stroke:#7c3aed,color:#1c1917
+  classDef store fill:#e7e5e4,stroke:#57534e,color:#1c1917
+  class C entry
+  class R,RT,AD,SH,FO,EX,G,H core
+  class P external
+  class LG,TU store
 ```
 
 ## 자세히

@@ -16,6 +16,7 @@
 ## 큰 결정의 흐름
 
 ```mermaid
+%%{init: {"flowchart": {"curve": "basis", "nodeSpacing": 36, "rankSpacing": 44}}}%%
 flowchart TB
   A["2026-09-14: 원문만 입력"]
   B["09-23: 검색을 Go 로 이식, GUI 가 기본"]
@@ -27,6 +28,13 @@ flowchart TB
   H["11-20: main 안정과 dev 개발, 답변 프롬프트 캐시"]
   I["11-24: 사람 기억과 유료 백필 v1.7"]
   A --> B --> C --> D --> E --> F --> G --> H --> I
+
+  classDef entry fill:#dbe7ff,stroke:#2563eb,color:#1c1917
+  classDef core fill:#fde3cf,stroke:#d9661a,color:#1c1917
+  classDef memory fill:#dcf3e3,stroke:#15803d,color:#1c1917
+  classDef external fill:#ebe2fd,stroke:#7c3aed,color:#1c1917
+  classDef store fill:#e7e5e4,stroke:#57534e,color:#1c1917
+  class A,B,C,D,E,F,G,H,I store
 ```
 
 ## 요약 표
