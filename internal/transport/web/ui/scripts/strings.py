@@ -3118,8 +3118,6 @@ add("display_page", {
     "bot_lang": ("봇 언어", "Bot language"),
     "i18n.default_locale": ("기본 언어", "Default language"),
     "i18n.locale_hint": ("서버나 방이 따로 정하지 않은 곳에서 쓰는 언어입니다.", "Used where a server or room does not set its own."),
-    "i18n.fallback_locale": ("대체 언어", "Fallback language"),
-    "i18n.fallback_hint": ("기본 언어에 없는 표현을 이 언어로 채웁니다.", "Covers phrasing the default language lacks."),
     "i18n.timezone": ("시간대", "Timezone"),
     "i18n.timezone_hint": ("백업·요약 같은 예약 작업의 기준 시각입니다. 예: Asia/Seoul", "The reference clock for scheduled work like backups and summaries. Example: Asia/Seoul"),
     "i18n.polite": ("새 방은 공손한 말투로 시작", "New rooms start polite"),

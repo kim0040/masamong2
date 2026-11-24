@@ -3,6 +3,7 @@
   import { session, can, loadSession, postJSON } from '../lib/api.svelte'
   import { resource } from '../lib/resource.svelte'
   import { cfg, patchConfig, useConfig } from '../lib/config.svelte'
+  import { validTimeZone } from '../lib/validate'
   import { prefs, setPrefs, densities } from '../lib/prefs.svelte'
   import { navigate } from '../lib/router.svelte'
   import { toast } from '../lib/toast.svelte'
@@ -64,12 +65,22 @@
   }
 
   // the bot's own language (config i18n.*), beside the console language above: what the bot answers
-  // in where a server or room sets nothing, the fallback for missing phrasing, the schedule clock and
-  // whether rooms without a persona start polite
+  // in where a server or room sets nothing, the schedule clock and whether rooms without a persona
+  // start polite. (i18n.fallback_locale exists in the file but nothing in the service reads it, so
+  // it has no control here.)
   useConfig()
   const locales = resource<any>('locales.list')
   const botLangs = $derived((locales.data?.bundled ?? locales.data?.loaded ?? session.value?.locales ?? ['ko', 'en']).map((l: string) => ({ value: l, label: languageLabel(l) })))
+  let tzErr = $state('')
   async function setI18n(key: string, value: unknown) {
+    if (key === 'timezone') {
+      // a name the clock cannot load would silently schedule on UTC: refuse it before it is saved
+      if (value !== '' && !validTimeZone(String(value))) {
+        tzErr = t('display_page.i18n.timezone_invalid')
+        return
+      }
+      tzErr = ''
+    }
     await patchConfig([value === '' ? { path: ['i18n', key], op: 'unset' } : { path: ['i18n', key], value }], { success: t('display_page.i18n.saved') })
   }
 </script>
@@ -107,8 +118,7 @@
           <div class="section-title">{t('display_page.bot_lang')}</div>
           <div class="stack mt">
             <Field id="i18n-def" label={t('display_page.i18n.default_locale')} hint={t('display_page.i18n.locale_hint')}>{#snippet children(f)}<Select id={f.id} aria-describedby={f.describedby} disabled={!can('config.patch')} value={cfg.doc?.i18n?.default_locale ?? ''} options={botLangs} onchange={(e) => setI18n('default_locale', e.currentTarget.value)} />{/snippet}</Field>
-            <Field id="i18n-fb" label={t('display_page.i18n.fallback_locale')} hint={t('display_page.i18n.fallback_hint')}>{#snippet children(f)}<Select id={f.id} aria-describedby={f.describedby} disabled={!can('config.patch')} value={cfg.doc?.i18n?.fallback_locale ?? ''} options={botLangs} onchange={(e) => setI18n('fallback_locale', e.currentTarget.value)} />{/snippet}</Field>
-            <Field id="i18n-tz" label={t('display_page.i18n.timezone')} hint={t('display_page.i18n.timezone_hint')}>{#snippet children(f)}<Input id={f.id} aria-describedby={f.describedby} disabled={!can('config.patch')} mono value={cfg.doc?.i18n?.timezone ?? ''} placeholder="Asia/Seoul" onchange={(e) => setI18n('timezone', e.currentTarget.value.trim())} />{/snippet}</Field>
+            <Field id="i18n-tz" label={t('display_page.i18n.timezone')} hint={t('display_page.i18n.timezone_hint')} error={tzErr || undefined}>{#snippet children(f)}<Input id={f.id} aria-describedby={f.describedby} invalid={f.invalid} disabled={!can('config.patch')} mono value={cfg.doc?.i18n?.timezone ?? ''} placeholder="Asia/Seoul" onchange={(e) => setI18n('timezone', e.currentTarget.value.trim())} />{/snippet}</Field>
             <Switch checked={!!cfg.doc?.i18n?.polite_default} disabled={!can('config.patch')} onchange={(v) => setI18n('polite_default', v)} label={t('display_page.i18n.polite')} hint={t('display_page.i18n.polite_hint')} />
           </div>
         </div>

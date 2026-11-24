@@ -1135,8 +1135,6 @@
   "display_page.bot_lang": "봇 언어",
   "display_page.desc": "관리 콘솔의 화면 표시 설정과 콘솔 접속 안내입니다.",
   "display_page.i18n.default_locale": "기본 언어",
-  "display_page.i18n.fallback_hint": "기본 언어에 없는 표현을 이 언어로 채웁니다.",
-  "display_page.i18n.fallback_locale": "대체 언어",
   "display_page.i18n.locale_hint": "서버나 방이 따로 정하지 않은 곳에서 쓰는 언어입니다.",
   "display_page.i18n.polite": "새 방은 공손한 말투로 시작",
   "display_page.i18n.polite_hint": "말투를 정하지 않은 방이 반말 친구 대신 다정한 존댓말로 답합니다.",

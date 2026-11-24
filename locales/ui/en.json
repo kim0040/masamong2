@@ -1135,8 +1135,6 @@
   "display_page.bot_lang": "Bot language",
   "display_page.desc": "How the console looks, and how you reach it.",
   "display_page.i18n.default_locale": "Default language",
-  "display_page.i18n.fallback_hint": "Covers phrasing the default language lacks.",
-  "display_page.i18n.fallback_locale": "Fallback language",
   "display_page.i18n.locale_hint": "Used where a server or room does not set its own.",
   "display_page.i18n.polite": "New rooms start polite",
   "display_page.i18n.polite_hint": "Rooms without a persona answer in a warm polite voice instead of the casual friend.",
