@@ -1,4 +1,4 @@
-// doccheck keeps the documentation honest, in four ways:
+// doccheck keeps the documentation honest, in five ways:
 //
 //   - links: every relative link, and every link to this repository's files or wiki pages, points at a
 //     file that exists (wiki links had broken before; nothing caught them);
@@ -16,6 +16,10 @@
 //     it is the version of the newest release-notes/vX.Y.Z.json. The version is bumped at release, so a
 //     README that was not brought along fails here, not in a user's browser. (The tree itself carries
 //     an unreleased "-dev" version, so the pages are compared with each other and the notes, not a tag.)
+//
+//   - diagrams: every D2 source has its light and dark SVG, and each SVG was rendered from the source
+//     and the style file as they are now (diagrams.go; the stamps are written by make diagrams, so the
+//     check needs no d2).
 //
 //     go run ./tools/doccheck          check (go test ./tools/doccheck runs the same)
 //     go run ./tools/doccheck -write   after updating every language of a changed page, record them
@@ -80,6 +84,7 @@ func main() {
 	problems := append(checkLinks(root), checkTranslations(root)...)
 	problems = append(problems, checkCommands(root)...)
 	problems = append(problems, checkVersions(root)...)
+	problems = append(problems, checkDiagrams(root)...)
 	for _, p := range problems {
 		fmt.Println(p)
 	}
@@ -87,7 +92,7 @@ func main() {
 		fmt.Printf("\n%d problem(s)\n", len(problems))
 		os.Exit(1)
 	}
-	fmt.Println("doccheck: links, translations, command names and versions ok")
+	fmt.Println("doccheck: links, translations, command names, versions and diagrams ok")
 }
 
 func repoRoot() (string, error) {
@@ -136,6 +141,7 @@ var (
 	mdLink     = regexp.MustCompile(`\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)`)
 	refLink    = regexp.MustCompile(`(?m)^\s*\[[^\]]+\]:\s*(\S+)`)
 	htmlSrc    = regexp.MustCompile(`(?:src|href)="([^"]+)"`)
+	htmlSrcset = regexp.MustCompile(`srcset="([^"]+)"`)
 )
 
 // links returns the link targets of a Markdown text, outside code.
@@ -146,6 +152,14 @@ func links(text string) []string {
 	for _, re := range []*regexp.Regexp{mdLink, refLink, htmlSrc} {
 		for _, m := range re.FindAllStringSubmatch(text, -1) {
 			out = append(out, m[1])
+		}
+	}
+	// srcset="a.svg, b.svg 2x": each candidate is an address, then an optional width or density
+	for _, m := range htmlSrcset.FindAllStringSubmatch(text, -1) {
+		for _, candidate := range strings.Split(m[1], ",") {
+			if f := strings.Fields(candidate); len(f) > 0 {
+				out = append(out, f[0])
+			}
 		}
 	}
 	return out
