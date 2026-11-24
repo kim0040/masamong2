@@ -54,6 +54,12 @@
   const perms = resource<any>('channels.permissions', () => ({ guild_id: g, channel_id: c }), { live: ['discord', 'config'] })
 
   let tab = $state(route.query.get('tab') ?? 'behavior')
+  // a ?tab= link that arrives while this page is already open (same component, new params or query)
+  // selects that tab
+  $effect(() => {
+    const qt = route.query.get('tab')
+    if (qt && qt !== tab) tab = qt
+  })
   const ch = $derived((list.data?.channels ?? []).find((x: any) => x.id === c && x.guild_id === g))
   const guildName = $derived.by(() => {
     const n = (list.data?.guilds ?? []).find((x: any) => x.id === g)?.name
